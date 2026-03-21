@@ -1,0 +1,94 @@
+﻿# AGENTS.md — RoslynMcp
+
+Working rules for GitHub Copilot and any other AI agent in this repo.
+
+> **Coding style rules** (braces, naming, modern C#) live in
+> [`.github/copilot-instructions.md`](.github/copilot-instructions.md). Don't duplicate them here.
+
+---
+
+## Project
+
+| | |
+|---|---|
+| **Type** | Model Context Protocol (MCP) server — stdio transport |
+| **Runtime** | .NET 10 |
+| **Language** | C# 14 (`<LangVersion>preview</LangVersion>`, `<EnablePreviewFeatures>true</EnablePreviewFeatures>`) |
+| **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — `AdhocWorkspace` not `MSBuildWorkspace` |
+
+Two projects:
+- `RoslynMcp/RoslynMcp.csproj` — MCP server
+- `TestHarness/TestHarness.csproj` — local testing client
+
+```
+dotnet build RoslynMcp/RoslynMcp.csproj
+```
+
+---
+
+## Architecture
+
+| Component | Responsibility |
+|-----------|----------------|
+| `WorkspaceManager` | `AdhocWorkspace` + `FileSystemWatcher` — lazy compilation rebuild on `.cs` changes |
+| `TypeMembersTool` | `get_type_members` — enumerate members of a type (fields, properties, methods, enums, events) |
+| `DiagnosticsTool` | `get_diagnostics` — compiler errors and warnings for project or single file |
+| `FindReferencesTool` | `find_references` — all references to a symbol across the project |
+| `SymbolInfoTool` | `get_symbol_info` — resolve what a name at a location actually is |
+| `PreviewRenameTool` | `preview_rename` — compute rename edits, return unified diff + token |
+| `ApplyRenameTool` | `apply_rename` — approve/reject a pending rename by token |
+| `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
+| `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
+
+**Data flow:** stdio MCP request → tool → `WorkspaceManager.GetCompilation()` (may rebuild) → Roslyn API → JSON response.
+
+**Key limitation:** `AdhocWorkspace` only resolves source-defined types. NuGet types (`List<T>`, `string` members, etc.) are not available.
+
+---
+
+## Git Rules
+
+| Operation | Rule |
+|-----------|------|
+| Create / switch branch | ✅ Free |
+| Stage files | ✅ Free |
+| Commit | ❌ Ask first |
+| Push | ❌ Ask first |
+
+**Shorthand:** `c/p` = commit and push now.
+
+**Branch naming:** `feature/<short-description>` for multi-file or non-trivial changes.
+
+---
+
+## Terminal
+
+PowerShell session with known issues. Rules:
+- **Single line only** — no here-strings, no multi-line expressions
+- **`rg.exe`** is in `Cmd\` — use **backslash paths**:
+  ```powershell
+  cd J:\Projects\RoslynMcp && rg -n "pattern" Program.cs
+  ```
+- Fallback: `Select-String -Path "*.cs" -Pattern "pattern"`
+- **`git --no-pager`** — always pass to avoid pagination hangs
+
+---
+
+## Testing
+
+**Local testing:** use `TestHarness/TestHarness.csproj` — runs a single tool call and prints the JSON response.
+
+**Live testing:** configure in `.mcp.json` and test via GitHub Copilot or any MCP client.
+
+Example `.mcp.json`:
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--project", "J:/Projects/RoslynMcp/RoslynMcp/RoslynMcp.csproj", "--", "path/to/src"]
+    }
+  }
+}
+```
