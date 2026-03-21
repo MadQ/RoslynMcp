@@ -1,0 +1,29 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <AssemblyName>RoslynMcp</AssemblyName>
+    <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
+    <PublishSingleFile>true</PublishSingleFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Exclude the TestHarness sub-project from the SDK glob — it has its own csproj. -->
+    <Compile Remove="TestHarness/**" />
+    <None Remove="TestHarness/**" />
+    <EmbeddedResource Remove="TestHarness/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol"                        Version="1.1.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces"   Version="5.3.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Features"            Version="5.3.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting"               Version="10.0.0-preview.3.25171.5" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console"       Version="10.0.0-preview.3.25171.5" />
+  </ItemGroup>
+
+</Project>

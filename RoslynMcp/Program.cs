@@ -1,0 +1,48 @@
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Server;
+using RoslynMcp;
+using RoslynMcp.Tools;
+
+// The target project directory is passed as the first argument.
+// Default: current working directory (convenient when running from the repo root).
+var targetPath = args.Length > 0 ? args[0] : Directory.GetCurrentDirectory();
+
+if(!Directory.Exists(targetPath)) {
+    Console.Error.WriteLine($"RoslynMcp: directory not found: {targetPath}");
+    return 1;
+}
+
+var builder = Host.CreateApplicationBuilder(args);
+
+builder.Logging
+    .ClearProviders()
+    // Only log errors — MCP uses stdio; any stray output breaks the protocol.
+    .AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Error)
+    .SetMinimumLevel(LogLevel.Error)
+;
+
+builder.Services
+    .AddSingleton(_ => new WorkspaceManager(targetPath))
+    .AddSingleton<ApprovalStore>()
+    .AddMcpServer()
+    .WithStdioServerTransport()
+    .WithToolsFromAssembly()
+;
+
+// Register tool types so DI can inject WorkspaceManager and ApprovalStore.
+builder.Services
+    .AddTransient<TypeMembersTool>()
+    .AddTransient<DiagnosticsTool>()
+    .AddTransient<FindReferencesTool>()
+    .AddTransient<SymbolInfoTool>()
+    .AddTransient<PreviewRenameTool>()
+    .AddTransient<ApplyRenameTool>()
+;
+
+var host = builder.Build();
+
+await host.RunAsync();
+
+return 0;
