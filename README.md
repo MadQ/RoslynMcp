@@ -2,13 +2,15 @@
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes Roslyn-powered code intelligence tools to AI coding agents. Gives agents resolved type information, live diagnostics, cross-file references, and symbol resolution — without spawning a build or leaving the process.
 
+**Works with any MCP-compatible client:** GitHub Copilot, Claude Desktop, Cline, Roo Code, Continue, and more.
+
 ---
 
 ## Why
 
 AI coding agents that work on C# via text-based tools (file reads, regex search, `edit_file`) have a structural problem: they pattern-match names rather than resolve them. This causes real bugs:
 
-- Enum member names get truncated (`ShowWindowCommand.ShowNoActivate` → `ShowNoActive`)
+- Enum member names get truncated or misspelled
 - `get_errors` requires a full `dotnet build` — slow and process-spawning
 - Finding every call site of a method requires grep, which misses renames and overloads
 - There's no way to ask "what type does this expression actually resolve to?"
@@ -25,14 +27,19 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 | `get_diagnostics` | Returns compiler errors and warnings for the whole project or a single file. No build process. |
 | `find_references` | Finds every reference to a named symbol (type, method, field, property) across the project. |
 | `get_symbol_info` | Resolves what a name at a given file/line/column actually is: kind, containing type, return type. |
+| `preview_rename` | Computes a rename across all files, returns unified diff + confirmation token. |
+| `apply_rename` | Applies or rejects a pending rename by token. |
 
 ---
 
 ## Design
 
-**`AdhocWorkspace` not `MSBuildWorkspace`** — loads `.cs` files directly without requiring MSBuild assemblies on PATH. Starts in under 100 ms. The tradeoff is that NuGet types (from referenced packages) are not resolved; only types defined in the loaded source files are available. For most agent use-cases — verifying member names, finding in-project references, checking syntax errors — this is sufficient.
+**Automatic workspace selection** — RoslynMcp detects `.csproj` files in the target directory and automatically chooses the best workspace mode:
 
-**Live compilation** — `FileSystemWatcher` monitors the target directory for `.cs` changes, additions, deletions, and renames. The `Compilation` is invalidated and rebuilt lazily on the next tool call. A `ReaderWriterLockSlim` keeps concurrent tool calls safe.
+- **MSBuildWorkspace** (if `.csproj` found) — full project resolution including NuGet packages, multi-project support, and .NET Framework compatibility. Requires MSBuild on PATH. Startup: 1-2 seconds.
+- **AdhocWorkspace** (fallback) — loads `.cs` files directly without MSBuild. Fast startup (<100 ms), but only resolves types defined in loaded source files.
+
+**Live compilation** — MSBuildWorkspace monitors files via Roslyn's internal mechanisms. AdhocWorkspace uses `FileSystemWatcher` to detect `.cs` changes and invalidates the compilation lazily on the next tool call. Thread-safe via `ReaderWriterLockSlim`.
 
 **stdio transport** — the MCP protocol runs over stdin/stdout. All logging is suppressed or redirected to stderr so it never corrupts the protocol stream.
 
@@ -40,15 +47,15 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 
 ## Requirements
 
-- .NET 10 SDK
+- .NET 8, .NET 10, or .NET 11 SDK (multi-targeted — use whichever you have installed)
 
 ---
 
 ## Usage
 
-### With `.mcp.json` (recommended for VS / GitHub Copilot)
+### GitHub Copilot / Visual Studio
 
-Add to `.mcp.json` at your repo root:
+Add to `.mcp.json` at your workspace root:
 
 ```json
 {
@@ -56,28 +63,86 @@ Add to `.mcp.json` at your repo root:
     "roslyn": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "path/to/your/src"]
+      "args": ["run", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
     }
   }
 }
 ```
 
-The last argument is the root directory containing `.cs` files to load. Defaults to the current working directory if omitted.
+The last argument (`.`) is the root directory containing `.cs` files to load. Defaults to the current working directory if omitted.
 
-### Direct
+### Claude Desktop
 
-```powershell
+Add to your Claude Desktop MCP settings file:
+
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`  
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
+**Linux:** `~/.config/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": ["run", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "/absolute/path/to/your/project/src"]
+    }
+  }
+}
+```
+
+Replace both paths with absolute paths to the RoslynMcp project and your C# project's source directory.
+
+### Cline (VS Code)
+
+Add to Cline's MCP settings (Settings → Extensions → Cline → MCP Servers):
+
+```json
+{
+  "roslyn": {
+    "command": "dotnet",
+    "args": ["run", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+  }
+}
+```
+
+Cline supports `${workspaceFolder}` for the current workspace directory.
+
+### Direct (any platform)
+
+```bash
 dotnet run --project RoslynMcp/RoslynMcp.csproj -- path/to/your/src
 ```
 
 ---
 
-## Known limitations
+## Workspace modes
 
-- **No NuGet type resolution** — types from referenced packages are not available. Members on `string`, `List<T>`, etc. will not resolve. Only source-defined types are indexed.
-- **No multi-project support** — loads a single directory tree. Cross-project references are not followed.
-- **`AdhocWorkspace` parse options are fixed** — currently configured for C# preview with `DEBUG` defined. Projects with significantly different compile-time symbols may see false diagnostics.
-- **`find_references` requires the symbol to be source-defined** — cannot find references to types that originate in packages.
+### MSBuildWorkspace (full resolution)
+
+**When:** Target directory contains a `.csproj` file.
+
+**Capabilities:**
+- ✅ NuGet package type resolution (`List<T>`, `HttpClient`, etc.)
+- ✅ Multi-project support (follows `<ProjectReference>`)
+- ✅ .NET Framework projects (4.6.1+)
+- ✅ Correct preprocessor symbols from project file
+
+**Requirements:**
+- MSBuild must be on PATH (installed with .NET SDK or Visual Studio)
+
+### AdhocWorkspace (fast, source-only)
+
+**When:** No `.csproj` file found in target directory.
+
+**Capabilities:**
+- ✅ Fast startup (<100 ms)
+- ✅ Source-defined type resolution
+- ✅ Syntax and semantic analysis
+
+**Limitations:**
+- ❌ No NuGet type resolution
+- ❌ Fixed parse options (C# preview, `DEBUG` defined)
+- ❌ Single directory tree only
 
 ---
 

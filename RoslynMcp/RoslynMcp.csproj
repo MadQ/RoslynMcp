@@ -2,11 +2,25 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net10.0;net11.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <AssemblyName>RoslynMcp</AssemblyName>
+    <LangVersion>preview</LangVersion>
+
+    <!-- Package metadata -->
+    <Version>0.2.0-alpha</Version>
+    <AssemblyVersion>0.2.0.0</AssemblyVersion>
+    <FileVersion>0.2.0.0</FileVersion>
+    <Authors>Quinten Martens</Authors>
+    <Description>Model Context Protocol server exposing Roslyn-powered code intelligence tools to AI coding agents</Description>
+    <PackageProjectUrl>https://github.com/MadQ/RoslynMcp</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/MadQ/RoslynMcp</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>roslyn;mcp;model-context-protocol;ai;code-intelligence</PackageTags>
+
     <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
     <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
@@ -22,6 +36,8 @@
     <PackageReference Include="ModelContextProtocol"                        Version="1.1.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces"   Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Features"            Version="5.3.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild"  Version="5.3.0" />
+    <PackageReference Include="Microsoft.Build.Locator"                    Version="1.7.8" />
     <PackageReference Include="Microsoft.Extensions.Hosting"               Version="10.0.0-preview.3.25171.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console"       Version="10.0.0-preview.3.25171.5" />
   </ItemGroup>

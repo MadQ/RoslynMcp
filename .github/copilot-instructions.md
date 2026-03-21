@@ -18,9 +18,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 | | |
 |---|---|
 | **Type** | Model Context Protocol (MCP) server — stdio transport |
-| **Runtime** | .NET 10 |
-| **Language** | C# 14 (`<LangVersion>preview</LangVersion>`, `<EnablePreviewFeatures>true</EnablePreviewFeatures>`) |
-| **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — `AdhocWorkspace` not `MSBuildWorkspace` |
+| **Runtime** | .NET 8 / .NET 10 / .NET 11 (multi-targeted) |
+| **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
+| **Version** | 0.2.0-alpha (pre-1.0) |
+| **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 
 Two projects:
@@ -39,7 +40,7 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 
 | Component | Responsibility |
 |-----------|----------------|
-| `WorkspaceManager` | `AdhocWorkspace` + `FileSystemWatcher` — lazy compilation rebuild on `.cs` changes |
+| `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
 | `TypeMembersTool` | `get_type_members` — enumerate members of a type (fields, properties, methods, enums, events) |
 | `DiagnosticsTool` | `get_diagnostics` — compiler errors and warnings for project or single file |
 | `FindReferencesTool` | `find_references` — all references to a symbol across the project |
@@ -53,7 +54,9 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 
 **Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (compilation management), `Tools/*.cs` (tool implementations).
 
-**Key limitation:** `AdhocWorkspace` only resolves source-defined types. NuGet types (`List<T>`, `string` members, etc.) are not available.
+**Workspace modes:**
+- **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
+- **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms)
 
 ---
 
@@ -169,7 +172,7 @@ Example `.mcp.json` in a client workspace:
     "roslyn": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "J:/Projects/RoslynMcp/RoslynMcp/RoslynMcp.csproj", "--", "path/to/src"]
+      "args": ["run", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
     }
   }
 }

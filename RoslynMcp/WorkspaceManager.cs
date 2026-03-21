@@ -1,64 +1,68 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using Microsoft.Build.Locator;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynMcp;
 
 /// <summary>
-///     Loads all .cs files under a directory into an AdhocWorkspace and keeps the
-///     Compilation warm via a FileSystemWatcher. Thread-safe via a reader-writer lock.
-///     AdhocWorkspace rather than MSBuildWorkspace: single-project, no NuGet type
-///     resolution needed, starts in &lt;100 ms, no MSBuild assembly fragility.
+///     Loads a C# project into Roslyn and keeps the Compilation warm.
+///     Detects .csproj files and uses MSBuildWorkspace (full type resolution)
+///     when available, falling back to AdhocWorkspace (.cs files only) otherwise.
+///     Thread-safe via a reader-writer lock.
 /// </summary>
 internal sealed class WorkspaceManager : IDisposable
 {
-    private readonly AdhocWorkspace   workspace;
-    private readonly ProjectId        projectId;
-    private readonly string           rootPath;
+    private readonly Workspace            workspace;
+    private readonly ProjectId            projectId;
+    private readonly string               rootPath;
+    private readonly bool                 isMSBuild;
     private readonly ReaderWriterLockSlim rwLock = new();
-    private readonly FileSystemWatcher    watcher;
+    private readonly FileSystemWatcher?   watcher;
 
     // The current compilation — replaced atomically on each file change.
     private Compilation? compilation;
+
+    static WorkspaceManager()
+    {
+        // Register MSBuild instance once per process — required for MSBuildWorkspace.
+        if(MSBuildLocator.CanRegister)
+            MSBuildLocator.RegisterDefaults();
+    }
 
     public WorkspaceManager(string rootPath)
     {
         this.rootPath = Path.GetFullPath(rootPath);
 
-        workspace = new AdhocWorkspace();
+        // Detect .csproj file: if found, use MSBuildWorkspace; otherwise AdhocWorkspace.
+        var csprojFiles = Directory.GetFiles(this.rootPath, "*.csproj", SearchOption.AllDirectories);
 
-        var projectInfo = ProjectInfo.Create(
-            id:             ProjectId.CreateNewId(),
-            version:        VersionStamp.Create(),
-            name:           "Target",
-            assemblyName:   "Target",
-            language:       LanguageNames.CSharp,
-            compilationOptions: new CSharpCompilationOptions(OutputKind.WindowsApplication)
-                .WithNullableContextOptions(NullableContextOptions.Enable),
-            parseOptions: new CSharpParseOptions(
-                languageVersion: LanguageVersion.Preview,
-                preprocessorSymbols: ["DEBUG"]
-            )
-        );
+        if(csprojFiles.Length > 0) {
+            (workspace, projectId) = LoadMSBuildWorkspace(csprojFiles[0]);
+            isMSBuild = true;
+            // MSBuildWorkspace watches files via Roslyn's internal mechanisms — no manual watcher needed.
+        }
+        else {
+            (workspace, projectId) = LoadAdhocWorkspace();
+            isMSBuild = false;
 
-        workspace.AddProject(projectInfo);
-        projectId = projectInfo.Id;
+            // AdhocWorkspace requires manual file watching.
+            watcher = new FileSystemWatcher(this.rootPath, "*.cs") {
+                IncludeSubdirectories = true,
+                NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.FileName
+            };
 
-        LoadAllFiles();
-
-        watcher = new FileSystemWatcher(this.rootPath, "*.cs") {
-            IncludeSubdirectories = true,
-            NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.FileName
-        };
-
-        watcher.Changed += OnFileChanged;
-        watcher.Created += OnFileChanged;
-        watcher.Deleted += OnFileDeleted;
-        watcher.Renamed += OnFileRenamed;
-        watcher.EnableRaisingEvents = true;
+            watcher.Changed += OnFileChanged;
+            watcher.Created += OnFileChanged;
+            watcher.Deleted += OnFileDeleted;
+            watcher.Renamed += OnFileRenamed;
+            watcher.EnableRaisingEvents = true;
+        }
     }
 
     public string RootPath => rootPath;
+    public bool IsMSBuild => isMSBuild;
 
     public Solution GetSolution() => workspace.CurrentSolution;
 
@@ -83,50 +87,83 @@ internal sealed class WorkspaceManager : IDisposable
 
     public void Dispose()
     {
-        watcher.Dispose();
+        watcher?.Dispose();
         rwLock.Dispose();
         workspace.Dispose();
     }
 
     // ── Private ───────────────────────────────────────────────────────────────
 
-    private void LoadAllFiles()
+    private (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath)
     {
-        foreach(var path in Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories))
-            AddOrUpdateDocument(path);
+        var msbuildWorkspace = MSBuildWorkspace.Create();
+        var project = msbuildWorkspace.OpenProjectAsync(csprojPath).GetAwaiter().GetResult();
+
+        return (msbuildWorkspace, project.Id);
     }
 
-    private void AddOrUpdateDocument(string path)
+    private (Workspace workspace, ProjectId projectId) LoadAdhocWorkspace()
+    {
+        var adhocWorkspace = new AdhocWorkspace();
+
+        var projectInfo = ProjectInfo.Create(
+            id:             ProjectId.CreateNewId(),
+            version:        VersionStamp.Create(),
+            name:           "Target",
+            assemblyName:   "Target",
+            language:       LanguageNames.CSharp,
+            compilationOptions: new CSharpCompilationOptions(OutputKind.ConsoleApplication)
+                .WithNullableContextOptions(NullableContextOptions.Enable),
+            parseOptions: new CSharpParseOptions(
+                languageVersion: LanguageVersion.Preview,
+                preprocessorSymbols: ["DEBUG"]
+            )
+        );
+
+        adhocWorkspace.AddProject(projectInfo);
+
+        LoadAllFiles(adhocWorkspace, projectInfo.Id);
+
+        return (adhocWorkspace, projectInfo.Id);
+    }
+
+    private void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId pid)
+    {
+        foreach(var path in Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories))
+            AddOrUpdateDocument(adhocWorkspace, pid, path);
+    }
+
+    private void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
     {
         var text = SourceText.From(File.ReadAllText(path));
         var name = Path.GetRelativePath(rootPath, path);
 
-        var project  = workspace.CurrentSolution.GetProject(projectId)!;
+        var project  = adhocWorkspace.CurrentSolution.GetProject(pid)!;
         var existing = project.Documents.FirstOrDefault(d => d.Name == name);
 
         Solution newSolution;
 
         if(existing is not null)
-            newSolution = workspace.CurrentSolution.WithDocumentText(existing.Id, text);
+            newSolution = adhocWorkspace.CurrentSolution.WithDocumentText(existing.Id, text);
         else
-            newSolution = workspace.CurrentSolution.AddDocument(
-                DocumentId.CreateNewId(projectId), name, text, filePath: path
+            newSolution = adhocWorkspace.CurrentSolution.AddDocument(
+                DocumentId.CreateNewId(pid), name, text, filePath: path
             );
 
-        workspace.TryApplyChanges(newSolution);
+        adhocWorkspace.TryApplyChanges(newSolution);
         InvalidateCompilation();
     }
 
-    private void RemoveDocument(string path)
+    private void RemoveDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
     {
         var name     = Path.GetRelativePath(rootPath, path);
-        var project  = workspace.CurrentSolution.GetProject(projectId)!;
+        var project  = adhocWorkspace.CurrentSolution.GetProject(pid)!;
         var existing = project.Documents.FirstOrDefault(d => d.Name == name);
 
         if(existing is null)
             return;
 
-        workspace.TryApplyChanges(workspace.CurrentSolution.RemoveDocument(existing.Id));
+        adhocWorkspace.TryApplyChanges(adhocWorkspace.CurrentSolution.RemoveDocument(existing.Id));
         InvalidateCompilation();
     }
 
@@ -167,8 +204,11 @@ internal sealed class WorkspaceManager : IDisposable
 
     private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
+        if(isMSBuild || workspace is not AdhocWorkspace adhoc)
+            return;
+
         try {
-            AddOrUpdateDocument(e.FullPath);
+            AddOrUpdateDocument(adhoc, projectId, e.FullPath);
         }
         catch {
             // File may be locked mid-write; the next change event will catch it.
@@ -176,14 +216,22 @@ internal sealed class WorkspaceManager : IDisposable
     }
 
     private void OnFileDeleted(object sender, FileSystemEventArgs e)
-        => RemoveDocument(e.FullPath);
+    {
+        if(isMSBuild || workspace is not AdhocWorkspace adhoc)
+            return;
+
+        RemoveDocument(adhoc, projectId, e.FullPath);
+    }
 
     private void OnFileRenamed(object sender, RenamedEventArgs e)
     {
-        RemoveDocument(e.OldFullPath);
+        if(isMSBuild || workspace is not AdhocWorkspace adhoc)
+            return;
+
+        RemoveDocument(adhoc, projectId, e.OldFullPath);
 
         try {
-            AddOrUpdateDocument(e.FullPath);
+            AddOrUpdateDocument(adhoc, projectId, e.FullPath);
         }
         catch {
         }
