@@ -1,4 +1,11 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿//
+// Note: While I am generally not a fan of (IMHO) overly opinionated frameworks... admittedly, the Microsoft.Extensions.Hosting pattern
+//       is a good fit for this kind of long-running server application. It provides a clean way to set up dependency injection,
+//       logging, and graceful shutdown.
+//         but... I'm still not a fan! 😤
+//
+
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
@@ -39,6 +46,10 @@ builder.Services
     .AddTransient<SymbolInfoTool>()
     .AddTransient<PreviewRenameTool>()
     .AddTransient<ApplyRenameTool>()
+    .AddTransient<SearchFilesTool>()
+#if DEBUG
+    .AddTransient<RespawnTool>()
+#endif
 ;
 
 var host = builder.Build();
