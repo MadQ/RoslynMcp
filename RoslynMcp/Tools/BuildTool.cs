@@ -9,6 +9,11 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class BuildTool(WorkspaceManager workspace)
 {
+    // Diagnostic codes to ignore (non-actionable SDK/tooling warnings).
+    private static readonly HashSet<string> IgnoredDiagnostics = new(StringComparer.OrdinalIgnoreCase) {
+        "NETSDK1209", // "The current Visual Studio version does not support targeting .NET X"
+    };
+
     // Matches MSBuild diagnostic lines:
     //   path(line,col): error CS0103: message [proj::TargetFramework=net10.0]
     //   path(line,col): warning CS8600: message [proj]
@@ -117,6 +122,7 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         var compilation = workspace.GetCompilation();
         var diagnostics = compilation.GetDiagnostics()
             .Where(d => d.Severity >= DiagnosticSeverity.Warning)
+            .Where(d => !IgnoredDiagnostics.Contains(d.Id))
             .Select(d => ConvertRoslynDiagnostic(d, workspace.RootPath))
             .ToArray();
 
@@ -155,12 +161,17 @@ internal sealed class BuildTool(WorkspaceManager workspace)
             if(!m.Success)
                 continue;
 
+            var code     = m.Groups["code"].Value;
             var filePath = m.Groups["file"].Value.Trim();
             var relative = TryMakeRelative(filePath, rootPath);
 
+            // Skip non-actionable SDK/tooling diagnostics.
+            if(IgnoredDiagnostics.Contains(code))
+                continue;
+
             results.Add(new BuildDiagnostic(
                 Severity: m.Groups["severity"].Value.ToLowerInvariant(),
-                Code:     m.Groups["code"].Value,
+                Code:     code,
                 Message:  m.Groups["message"].Value.Trim(),
                 File:     relative,
                 Line:     int.Parse(m.Groups["line"].Value),
