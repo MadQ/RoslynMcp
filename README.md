@@ -24,7 +24,7 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 | Tool | Description |
 |------|-------------|
 | `search_files` | Searches workspace files for lines matching a regex pattern. Returns file paths, line numbers, and matching text with paging support. Use this to discover code locations before applying Roslyn tools. |
-| `get_type_members` | Returns all member names of a type — class, struct, enum, or interface. Filter by kind: `field`, `property`, `method`, `enum`, `event`. |
+| `get_type_members` | Returns detailed information about all members of a type with full signatures (parameter types, return types, modifiers) and XML doc summaries. Use this to understand a type's API surface. |
 | `get_diagnostics` | Returns compiler errors and warnings for the whole project or a single file. No build process. |
 | `find_references` | Finds every reference to a named symbol (type, method, field, property) across the project. |
 | `get_symbol_info` | Resolves what a name at a given file/line/column actually is: kind, containing type, return type. |
@@ -37,6 +37,7 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 | `find_implementations` | Finds all types that implement an interface/abstract class, or all methods that override a virtual/abstract member. |
 | `list_types` | Lists all types in the project with optional namespace or kind filters (class, interface, enum, struct). |
 | `get_usings` | Returns all `using` directives in a file plus implicit global usings from the project. |
+| `get_symbol_documentation` | Returns XML documentation comments for a symbol: summary, parameter descriptions, return value description, remarks. Use to understand API contracts without reading source. |
 | `respawn` | **DEBUG ONLY:** Terminates the server process, forcing the MCP client to respawn it. Use this to reload code changes after rebuilding without restarting your IDE. |
 
 ---

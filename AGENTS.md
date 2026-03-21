@@ -33,7 +33,7 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 |-----------|----------------|
 | `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
 | `SearchFilesTool` | `search_files` — regex search across workspace files with paging |
-| `TypeMembersTool` | `get_type_members` — enumerate members of a type (fields, properties, methods, enums, events) |
+| `TypeMembersTool` | `get_type_members` — enumerate members with full signatures + doc summaries |
 | `DiagnosticsTool` | `get_diagnostics` — compiler errors and warnings for project or single file |
 | `FindReferencesTool` | `find_references` — all references to a symbol across the project |
 | `SymbolInfoTool` | `get_symbol_info` — resolve what a name at a location actually is |
@@ -46,6 +46,7 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 | `FindImplementationsTool` | `find_implementations` — concrete implementations of interfaces/abstract members |
 | `ListTypesTool` | `list_types` — enumerate types with optional filters |
 | `GetUsingsTool` | `get_usings` — using directives + global usings |
+| `GetSymbolDocumentationTool` | `get_symbol_documentation` — XML doc comments for symbols |
 | `RespawnTool` | `respawn` (DEBUG only) — hot-reload mechanism |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |

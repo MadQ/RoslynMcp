@@ -54,6 +54,7 @@ builder.Services
     .AddTransient<FindImplementationsTool>()
     .AddTransient<ListTypesTool>()
     .AddTransient<GetUsingsTool>()
+    .AddTransient<GetSymbolDocumentationTool>()
 #if DEBUG
     .AddTransient<RespawnTool>()
 #endif
