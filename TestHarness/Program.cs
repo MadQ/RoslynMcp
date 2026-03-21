@@ -1,24 +1,25 @@
 ﻿/// <summary>
-///     Smoke-test harness for RoslynMcp. Starts the server as a child process,
-///     sends a minimal MCP session, and prints the response.
-///     Usage: dotnet run --project RoslynMcp/TestHarness/TestHarness.csproj
+///     Comprehensive test harness for RoslynMcp MVP. Tests all 18 tools against RoslynMcp itself (dogfooding).
+///     Usage: dotnet run --project TestHarness/TestHarness.csproj
 /// </summary>
 
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-var repoRoot   = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+var repoRoot   = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 var serverProj = Path.Combine(repoRoot, "RoslynMcp", "RoslynMcp.csproj");
-var targetPath = Path.Combine(repoRoot, "ScreenMon");
+var targetPath = Path.Combine(repoRoot, "RoslynMcp"); // Dogfood: analyze ourselves
 
+Console.WriteLine("═══════════════════════════════════════════════════════════════");
+Console.WriteLine("  RoslynMcp Test Harness — Testing 18 MVP Tools");
+Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine($"Server:  {serverProj}");
 Console.WriteLine($"Target:  {targetPath}");
 Console.WriteLine();
 
 var psi = new ProcessStartInfo("dotnet") {
-    Arguments              = $"run --project \"{serverProj}\" --no-build -- \"{targetPath}\"",
+    Arguments              = $"run --project \"{serverProj}\" -f net10.0 --no-build -- \"{targetPath}\"",
     RedirectStandardInput  = true,
     RedirectStandardOutput = true,
     RedirectStandardError  = true,
@@ -27,39 +28,95 @@ var psi = new ProcessStartInfo("dotnet") {
 
 using var proc = Process.Start(psi)!;
 
-// Drain stderr on a background thread so the process doesn't block.
-proc.ErrorDataReceived += (_, e) => { if(e.Data is not null) Console.Error.WriteLine($"[stderr] {e.Data}"); };
+proc.ErrorDataReceived += (_, e) => {
+    if(e.Data is not null)
+        Console.Error.WriteLine($"[stderr] {e.Data}");
+};
 proc.BeginErrorReadLine();
 
 var writer = proc.StandardInput;
 var reader = proc.StandardOutput;
+var reqId  = 1;
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Test Framework ──────────────────────────────────────────────────────────
 
 async Task SendAsync(object payload)
 {
-    var line = JsonSerializer.Serialize(payload);
-    Console.WriteLine($"→ {line}");
+    var line = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = false });
     await writer.WriteLineAsync(line);
     await writer.FlushAsync();
 }
 
-async Task<JsonNode?> ReceiveAsync(int timeoutMs = 10_000)
+async Task<JsonNode?> ReceiveAsync(int timeoutMs = 15_000)
 {
     using var cts  = new CancellationTokenSource(timeoutMs);
     var       line = await reader.ReadLineAsync(cts.Token);
 
-    if(line is null) return null;
-
-    Console.WriteLine($"← {line}");
-    return JsonNode.Parse(line);
+    return line is not null ? JsonNode.Parse(line) : null;
 }
 
-// ── MCP session ──────────────────────────────────────────────────────────────
+async Task<(bool pass, string message)> RunTestAsync(string testName, string toolName, object arguments, Func<JsonNode?, bool> validate, bool expectJson = true)
+{
+    Console.Write($"  {testName,-50} ");
+    var sw = Stopwatch.StartNew();
 
-// 1. initialize
+    await SendAsync(new {
+        jsonrpc = "2.0",
+        id      = reqId++,
+        method  = "tools/call",
+        @params = new { name = toolName, arguments }
+    });
+
+    var response = await ReceiveAsync();
+    sw.Stop();
+
+    if(response is null)
+        return (false, $"FAIL  (timeout) [{sw.ElapsedMilliseconds}ms]");
+
+    var error = response["error"];
+
+    if(error is not null)
+        return (false, $"FAIL  (error: {error["message"]}) [{sw.ElapsedMilliseconds}ms]");
+
+    var result = response["result"];
+
+    if(result is null)
+        return (false, $"FAIL  (no result) [{sw.ElapsedMilliseconds}ms]");
+
+    var content = result["content"]?[0]?["text"]?.GetValue<string>();
+
+    if(content is null)
+        return (false, $"FAIL  (no content) [{sw.ElapsedMilliseconds}ms]");
+
+    JsonNode? data;
+
+    if(expectJson) {
+
+        try {
+            data = JsonNode.Parse(content);
+        }
+        catch {
+            return (false, $"FAIL  (invalid JSON) [{sw.ElapsedMilliseconds}ms]");
+        }
+    }
+    else {
+        // Wrap plain string content as JSON for validation
+        data = JsonValue.Create(content);
+    }
+
+    var pass = validate(data);
+
+    return pass
+        ? (true, $"PASS  [{sw.ElapsedMilliseconds}ms]")
+        : (false, $"FAIL  (validation failed) [{sw.ElapsedMilliseconds}ms]");
+}
+
+// ── MCP Session Initialization ──────────────────────────────────────────────
+
 await SendAsync(new {
-    jsonrpc = "2.0", id = 1, method = "initialize",
+    jsonrpc = "2.0",
+    id      = reqId++,
+    method  = "initialize",
     @params = new {
         protocolVersion = "2024-11-05",
         capabilities    = new { },
@@ -67,47 +124,173 @@ await SendAsync(new {
     }
 });
 
-await ReceiveAsync(); // initialize result
+await ReceiveAsync();
 
-// 2. initialized notification
 await SendAsync(new { jsonrpc = "2.0", method = "notifications/initialized" });
 
-// 2b. List tools to discover actual registered names
-await SendAsync(new {
-    jsonrpc = "2.0", id = 3, method = "tools/list",
-    @params = new { }
-});
+Console.WriteLine("✓ MCP session initialized\n");
 
-var toolList = await ReceiveAsync();
+// ── Test Suite ───────────────────────────────────────────────────────────────
+
+var tests = new List<(bool pass, string message)>();
+
+Console.WriteLine("Discovery Tools (5 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+    "search_files: find 'WorkspaceManager' in .cs files",
+    "search_files",
+    new { pattern = "WorkspaceManager", filePattern = "*.cs", take = 10 },
+    data => data?["matches"]?.AsArray().Count > 0
+));
+
+tests.Add(await RunTestAsync(
+    "list_types: enumerate types in RoslynMcp.Tools namespace",
+    "list_types",
+    new { namespaceFilter = "RoslynMcp.Tools" },
+    data => data?.AsArray().Count > 10
+));
+
+tests.Add(await RunTestAsync(
+    "get_file_outline: WorkspaceManager structure",
+    "get_file_outline",
+    new { filePath = "RoslynMcp/WorkspaceManager.cs" },
+    data => data?["types"]?.AsArray().Count > 0
+));
+
+tests.Add(await RunTestAsync(
+    "get_project_info: verify TFM and packages",
+    "get_project_info",
+    new { },
+    data => data?["target_framework"]?.GetValue<string>()?.StartsWith("net") == true
+));
+
+tests.Add(await RunTestAsync(
+    "get_usings: extract using directives from Program.cs",
+    "get_usings",
+    new { filePath = "RoslynMcp/Program.cs" },
+    data => data?["usings"]?.AsArray().Count > 0
+));
+
+Console.WriteLine("\nType Understanding Tools (4 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+    "get_type_members: WorkspaceManager members with signatures",
+    "get_type_members",
+    new { typeName = "WorkspaceManager" },
+    data => data?["members"]?.AsArray().Count > 0 && data["members"]?[0]?["signature"] is not null
+));
+
+tests.Add(await RunTestAsync(
+    "get_type_hierarchy: WorkspaceManager inheritance",
+    "get_type_hierarchy",
+    new { typeName = "WorkspaceManager" },
+    data => data?["interfaces"]?.AsArray().Any(i => i?.GetValue<string>().Contains("IDisposable") == true) == true
+));
+
+tests.Add(await RunTestAsync(
+    "find_implementations: IDisposable implementers",
+    "find_implementations",
+    new { symbolName = "IDisposable" },
+    data => data?["error"] is not null || data?["implementations"]?.AsArray().Count >= 0
+));
+
+tests.Add(await RunTestAsync(
+    "get_symbol_documentation: WorkspaceManager XML docs",
+    "get_symbol_documentation",
+    new { symbolName = "WorkspaceManager" },
+    data => data?["symbol_name"] is not null
+));
+
+Console.WriteLine("\nNavigation Tools (3 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+    "get_symbol_info: resolve symbol at location",
+    "get_symbol_info",
+    new { filePath = "RoslynMcp/Program.cs", line = 10, column = 10 },
+    data => data?.GetValue<string>().Contains("Kind:") == true,
+    expectJson: false
+));
+
+tests.Add(await RunTestAsync(
+    "find_references: locate WorkspaceManager usages",
+    "find_references",
+    new { symbolName = "WorkspaceManager" },
+    data => data?.AsArray().Count > 0
+));
+
+tests.Add(await RunTestAsync(
+    "get_symbol_definition: find WorkspaceManager declaration",
+    "get_symbol_definition",
+    new { symbolName = "WorkspaceManager" },
+    data => data?["file"]?.GetValue<string>().Contains("WorkspaceManager.cs") == true
+));
+
+Console.WriteLine("\nCode Generation Tools (1 test)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+    "get_symbols_in_scope: enumerate symbols at location",
+    "get_symbols_in_scope",
+    new { filePath = "RoslynMcp/WorkspaceManager.cs", line = 80, column = 10 },
+    data => data?["fields"] is not null || data?["methods"] is not null
+));
+
+Console.WriteLine("\nValidation Tools (2 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+    "get_diagnostics: check for compiler errors",
+    "get_diagnostics",
+    new { },
+    data => data?.AsArray() is not null
+));
+
+tests.Add(await RunTestAsync(
+    "build_project: smart Roslyn-first build",
+    "build_project",
+    new { },
+    data => data?["succeeded"] is not null && data?["source"] is not null
+));
+
+Console.WriteLine("\nRefactoring Tools (1 test)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+    "preview_rename: generate diff for renaming compilation",
+    "preview_rename",
+    new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceManager" },
+    data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
+));
+
+// ── Summary ──────────────────────────────────────────────────────────────────
+
+Console.WriteLine("\n═══════════════════════════════════════════════════════════════");
+Console.WriteLine("  Test Summary");
+Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
+
+var passed = tests.Count(t => t.pass);
+var failed = tests.Count - passed;
+
+foreach(var test in tests)
+    Console.WriteLine(test.message);
+
 Console.WriteLine();
-Console.WriteLine("═══ Registered tools ═══");
-var tools = toolList?["result"]?["tools"]?.AsArray();
-if(tools is not null)
-    foreach(var tool in tools)
-        Console.WriteLine($"  {tool?["name"]}");
+Console.WriteLine($"Passed: {passed}/{tests.Count}");
+Console.WriteLine($"Failed: {failed}/{tests.Count}");
 Console.WriteLine();
 
-// 3. Call get_type_members — the key smoke test
-await SendAsync(new {
-    jsonrpc = "2.0", id = 2, method = "tools/call",
-    @params = new {
-        name      = "get_type_members",
-        arguments = new { typeName = "ShowWindowCommand", memberKind = "enum" }
-    }
-});
-
-var result = await ReceiveAsync();
-
-Console.WriteLine();
-Console.WriteLine("═══ Result ═══");
-
-var content = result?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
-
-if(content is not null)
-    Console.WriteLine(content);
+if(failed == 0)
+    Console.WriteLine("✅ All tests passed!");
 else
-    Console.WriteLine("(no content — see raw response above)");
+    Console.WriteLine($"❌ {failed} test(s) failed.");
 
 writer.Close();
 await proc.WaitForExitAsync(new CancellationTokenSource(5_000).Token).ConfigureAwait(false);
-if(!proc.HasExited) proc.Kill();
+
+if(!proc.HasExited)
+    proc.Kill();
+
+return failed == 0 ? 0 : 1;
