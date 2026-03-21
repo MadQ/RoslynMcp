@@ -55,6 +55,8 @@ builder.Services
     .AddTransient<ListTypesTool>()
     .AddTransient<GetUsingsTool>()
     .AddTransient<GetSymbolDocumentationTool>()
+    .AddTransient<GetSymbolDefinitionTool>()
+    .AddTransient<GetSymbolsInScopeTool>()
 #if DEBUG
     .AddTransient<RespawnTool>()
 #endif

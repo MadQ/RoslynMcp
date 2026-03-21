@@ -38,6 +38,8 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 | `list_types` | Lists all types in the project with optional namespace or kind filters (class, interface, enum, struct). |
 | `get_usings` | Returns all `using` directives in a file plus implicit global usings from the project. |
 | `get_symbol_documentation` | Returns XML documentation comments for a symbol: summary, parameter descriptions, return value description, remarks. Use to understand API contracts without reading source. |
+| `get_symbol_definition` | Returns the definition location and signature of a symbol. Shows where the symbol is declared (file/line/column), its full signature, and doc summary. |
+| `get_symbols_in_scope` | Returns all symbols accessible at a specific file location: locals, parameters, fields, properties, methods, types. Use when generating code to understand what's available in scope. |
 | `respawn` | **DEBUG ONLY:** Terminates the server process, forcing the MCP client to respawn it. Use this to reload code changes after rebuilding without restarting your IDE. |
 
 ---

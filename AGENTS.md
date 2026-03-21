@@ -47,6 +47,8 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 | `ListTypesTool` | `list_types` — enumerate types with optional filters |
 | `GetUsingsTool` | `get_usings` — using directives + global usings |
 | `GetSymbolDocumentationTool` | `get_symbol_documentation` — XML doc comments for symbols |
+| `GetSymbolDefinitionTool` | `get_symbol_definition` — find declaration location with signature |
+| `GetSymbolsInScopeTool` | `get_symbols_in_scope` — enumerate accessible symbols at a location |
 | `RespawnTool` | `respawn` (DEBUG only) — hot-reload mechanism |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
