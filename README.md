@@ -23,12 +23,14 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 
 | Tool | Description |
 |------|-------------|
+| `search_files` | Searches workspace files for lines matching a regex pattern. Returns file paths, line numbers, and matching text with paging support. Use this to discover code locations before applying Roslyn tools. |
 | `get_type_members` | Returns all member names of a type — class, struct, enum, or interface. Filter by kind: `field`, `property`, `method`, `enum`, `event`. |
 | `get_diagnostics` | Returns compiler errors and warnings for the whole project or a single file. No build process. |
 | `find_references` | Finds every reference to a named symbol (type, method, field, property) across the project. |
 | `get_symbol_info` | Resolves what a name at a given file/line/column actually is: kind, containing type, return type. |
 | `preview_rename` | Computes a rename across all files, returns unified diff + confirmation token. |
 | `apply_rename` | Applies or rejects a pending rename by token. |
+| `respawn` | **DEBUG ONLY:** Terminates the server process, forcing the MCP client to respawn it. Use this to reload code changes after rebuilding without restarting your IDE. |
 
 ---
 
@@ -51,9 +53,21 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 
 ---
 
-## Usage
+## Installation
 
-### GitHub Copilot / Visual Studio
+See **[INSTALLATION.md](INSTALLATION.md)** for complete setup instructions for:
+
+- **GitHub Copilot** (Visual Studio / VS Code)
+- **Claude Desktop** (Windows / macOS / Linux)
+- **Cursor** (workspace or global config)
+- **Windsurf** (workspace or global config)
+- **Cline** (VS Code extension)
+- **Continue** (VS Code / JetBrains)
+- **Roo Code** (VS Code extension)
+- **Zed** (text editor)
+- **Direct CLI** (any platform)
+
+**Quick start** (GitHub Copilot / Visual Studio):
 
 Add to `.mcp.json` at your workspace root:
 
@@ -63,55 +77,13 @@ Add to `.mcp.json` at your workspace root:
     "roslyn": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
+      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
     }
   }
 }
 ```
 
-The last argument (`.`) is the root directory containing `.cs` files to load. Defaults to the current working directory if omitted.
-
-### Claude Desktop
-
-Add to your Claude Desktop MCP settings file:
-
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`  
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`  
-**Linux:** `~/.config/Claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "roslyn": {
-      "command": "dotnet",
-      "args": ["run", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "/absolute/path/to/your/project/src"]
-    }
-  }
-}
-```
-
-Replace both paths with absolute paths to the RoslynMcp project and your C# project's source directory.
-
-### Cline (VS Code)
-
-Add to Cline's MCP settings (Settings → Extensions → Cline → MCP Servers):
-
-```json
-{
-  "roslyn": {
-    "command": "dotnet",
-    "args": ["run", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
-  }
-}
-```
-
-Cline supports `${workspaceFolder}` for the current workspace directory.
-
-### Direct (any platform)
-
-```bash
-dotnet run --project RoslynMcp/RoslynMcp.csproj -- path/to/your/src
-```
+> Build once first: `dotnet build RoslynMcp/RoslynMcp.csproj`
 
 ---
 

@@ -1,0 +1,363 @@
+﻿# Installation Guide
+
+Complete setup instructions for all major MCP-compatible AI coding assistants.
+
+> **⚠️ Not all configurations have been verified in production.**  
+> GitHub Copilot and Claude Desktop are tested and confirmed working. Other clients follow documented MCP patterns but may require adjustments. Contributions and corrections welcome!
+
+> **Quick start:** Most clients use one of two patterns:
+> - **Workspace config**: `.mcp.json` or similar file in your project root
+> - **Global config**: Client-specific settings file in your home directory
+
+---
+
+## Installation Methods
+
+### For End Users (Recommended)
+
+**Coming soon:** Install via NuGet tool or download published release.
+
+Once published, you'll use:
+```bash
+dotnet tool install --global RoslynMcp
+```
+
+Then reference it in your MCP config as:
+```json
+"command": "roslyn-mcp",
+"args": ["path/to/your/project"]
+```
+
+### For Contributors / Dogfooding (Current)
+
+The examples below use `dotnet run --no-build` which is ideal for:
+- Contributing to RoslynMcp development
+- Testing local changes
+- Dogfooding RoslynMcp on itself
+
+**Prerequisites:**
+- Clone this repository
+- Build once: `dotnet build RoslynMcp/RoslynMcp.csproj`
+- Use the `dotnet run --no-build` pattern shown below
+
+---
+
+## Requirements
+
+- .NET 8, .NET 10, or .NET 11 SDK (multi-targeted — use whichever you have installed)
+- MSBuild on PATH (installed with .NET SDK or Visual Studio) for full project resolution
+
+---
+
+## GitHub Copilot (Visual Studio / VS Code)
+
+Add to `.mcp.json` at your workspace root:
+
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
+    }
+  }
+}
+```
+
+**Path notes:**
+- Build once first: `dotnet build path/to/RoslynMcp/RoslynMcp.csproj`
+- Use relative path from workspace root to `RoslynMcp.csproj`
+- Last argument (`.`) is the directory containing `.cs` files to analyze
+- Defaults to current working directory if omitted
+
+**Restart:** Reload window or restart GitHub Copilot extension after editing `.mcp.json`.
+
+---
+
+## Claude Desktop
+
+Add to your Claude Desktop MCP settings file:
+
+| Platform | Path |
+|----------|------|
+| **Windows** | `%APPDATA%\Claude\claude_desktop_config.json` |
+| **macOS** | `~/Library/Application Support/Claude/claude_desktop_config.json` |
+| **Linux** | `~/.config/Claude/claude_desktop_config.json` |
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "/absolute/path/to/your/project/src"]
+    }
+  }
+}
+```
+
+**Path notes:**
+- Use **absolute paths** for both RoslynMcp project and target source directory
+- Replace `/absolute/path/to/RoslynMcp/RoslynMcp.csproj` with the full path to the `.csproj` file
+- Replace `/absolute/path/to/your/project/src` with the directory you want to analyze
+
+**Restart:** Quit and relaunch Claude Desktop.
+
+---
+
+## Cursor
+
+**Option 1: Workspace config** (recommended)
+
+Add to `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+**Option 2: Global config**
+
+1. Open Cursor Settings: **File → Preferences → Cursor Settings**
+2. Navigate to **Tools & Integrations**
+3. In **MCP Tools** section, select **New MCP Server**
+4. Add the configuration to the `mcp.json` file that opens
+
+**Path notes:**
+- `${workspaceFolder}` auto-resolves to current workspace directory
+- Use absolute path to `RoslynMcp.csproj`
+
+**Restart:** Reload window (Cmd/Ctrl+Shift+P → "Developer: Reload Window").
+
+---
+
+## Windsurf
+
+**Option 1: Workspace config** (recommended)
+
+Add to `.windsurf/mcp_config.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+**Option 2: Global config**
+
+1. Open Windsurf Settings: **File → Preferences → Windsurf Settings**
+2. Select **Manage MCPs**
+3. Select **View raw config** to edit `mcp_config.json`
+4. Add the configuration
+
+**Global config path:**
+- **Windows**: `%USERPROFILE%\.codeium\windsurf\mcp_config.json`
+- **macOS/Linux**: `~/.codeium/windsurf/mcp_config.json`
+
+**Restart:** Reload window or restart Windsurf.
+
+---
+
+## Cline (VS Code)
+
+**Option 1: Extension settings** (recommended)
+
+1. Open VS Code Settings: **Settings → Extensions → Cline → MCP Servers**
+2. Edit the JSON configuration directly
+3. Add:
+
+```json
+{
+  "roslyn": {
+    "command": "dotnet",
+    "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+  }
+}
+```
+
+**Option 2: Workspace config**
+
+Add to `.vscode/mcp.json` or `.cline/mcp_settings.json` in your project root (exact filename depends on Cline version):
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+**Restart:** Reload VS Code window.
+
+---
+
+## Continue (VS Code / JetBrains)
+
+Add to `.continue/config.json` in your project root:
+
+```json
+{
+  "experimental": {
+    "modelContextProtocolServers": [
+      {
+        "name": "roslyn",
+        "transport": {
+          "type": "stdio",
+          "command": "dotnet",
+          "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+        }
+      }
+    ]
+  }
+}
+```
+
+**Path notes:**
+- Continue supports `${workspaceFolder}` variable
+- Use absolute path to `RoslynMcp.csproj`
+
+**Restart:** Reload window or restart Continue extension.
+
+---
+
+## Roo Code (VS Code)
+
+Roo Code uses VS Code's standard MCP configuration.
+
+Add to `.vscode/mcp.json` in your project root:
+
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+    }
+  }
+}
+```
+
+**Restart:** Reload VS Code window.
+
+---
+
+## Zed
+
+Add to `~/.config/zed/settings.json`:
+
+```json
+{
+  "context_servers": {
+    "roslyn": {
+      "settings": {
+        "command": "dotnet",
+        "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "/absolute/path/to/your/project/src"]
+      }
+    }
+  }
+}
+```
+
+**Path notes:**
+- Zed uses absolute paths (no variable expansion)
+- Config file location:
+  - **macOS/Linux**: `~/.config/zed/settings.json`
+  - **Windows**: `%APPDATA%\Zed\settings.json`
+
+**Restart:** Quit and relaunch Zed.
+
+---
+
+## Direct (any platform)
+
+Run RoslynMcp directly from the command line:
+
+```bash
+dotnet run --project RoslynMcp/RoslynMcp.csproj -- path/to/your/src
+```
+
+This starts the MCP server on stdio — useful for testing or custom integrations.
+
+---
+
+## Troubleshooting
+
+### "Command not found: dotnet"
+
+**Cause:** .NET SDK not installed or not on PATH.
+
+**Fix:** Install .NET SDK from [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download) and ensure it's on your PATH.
+
+### "MSBuild not found"
+
+**Cause:** MSBuildWorkspace mode requires MSBuild on PATH.
+
+**Fix:**
+- Install Visual Studio (includes MSBuild)
+- Or install .NET SDK (includes MSBuild)
+- Or set `MSBUILD_EXE_PATH` environment variable
+
+RoslynMcp automatically falls back to AdhocWorkspace (source-only mode) if MSBuild isn't available.
+
+### "Could not find project file"
+
+**Cause:** Path to `RoslynMcp.csproj` is incorrect.
+
+**Fix:** Use absolute paths in global configs, verify relative paths from workspace root in workspace configs.
+
+### MCP server not appearing in client
+
+**Cause:** Configuration file not in the correct location or invalid JSON.
+
+**Fix:**
+- Verify config file path matches client documentation above
+- Validate JSON syntax (no trailing commas, proper quotes)
+- Restart client application completely (not just reload window)
+
+### Changes not detected
+
+**Cause:** File watcher disabled or not monitoring the correct directory.
+
+**Fix:** RoslynMcp auto-detects file changes. If diagnostics aren't updating, verify the last argument points to your source directory.
+
+---
+
+## Advanced Configuration
+
+### Multi-project workspaces
+
+RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point the last argument at the solution directory or the primary project directory.
+
+### Custom compilation options
+
+RoslynMcp uses project-defined compilation options (language version, preprocessor symbols) when using MSBuildWorkspace. In AdhocWorkspace mode, it defaults to C# preview with `DEBUG` defined.
+
+### Performance tuning
+
+For large codebases (>100K LOC), consider:
+- Using MSBuildWorkspace (incremental compilation)
+- Excluding test projects if not needed
+- Pointing to a specific subdirectory instead of solution root
+
+---
+
+## Next Steps
+
+- Try the [tools reference](README.md#tools) to see what RoslynMcp can do
+- Read about [workspace modes](README.md#workspace-modes) to understand MSBuildWorkspace vs AdhocWorkspace
+- Check out the [write operations](README.md#write-operations) for rename previewing and applying

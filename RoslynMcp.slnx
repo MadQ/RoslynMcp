@@ -1,0 +1,4 @@
+﻿<Solution>
+  <Project Path="RoslynMcp/RoslynMcp.csproj" />
+  <Project Path="TestHarness/TestHarness.csproj" />
+</Solution>
