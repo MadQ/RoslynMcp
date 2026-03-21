@@ -26,18 +26,18 @@ internal sealed class ApprovalStore
         var token = Guid.NewGuid().ToString("N")[..12];
 
         lock(gate) {
-            var preConfirmed = sessionApproved.Contains(symbolKey);
+			var preConfirmed = sessionApproved.Contains(symbolKey);
             pending[token]   = new PendingOperation(newSolution, diff, symbolKey, preConfirmed);
-        }
+		}
 
-        return token;
-    }
+		return token;
+	}
 
-    /// <summary>
-    ///     Retrieves a pending operation by token without consuming it.
-    ///     Returns null if the token is unknown or already consumed.
-    /// </summary>
-    public PendingOperation? Peek(string token)
+	/// <summary>
+	///     Retrieves a pending operation by token without consuming it.
+	///     Returns null if the token is unknown or already consumed.
+	/// </summary>
+	public PendingOperation? Peek(string token)
     {
         lock(gate)
             return pending.GetValueOrDefault(token);
@@ -50,18 +50,18 @@ internal sealed class ApprovalStore
     public PendingOperation? Consume(string token, bool approveForSession)
     {
         lock(gate) {
-            if(!pending.Remove(token, out var op))
+			if(!pending.Remove(token, out var op))
                 return null;
 
             if(approveForSession)
                 sessionApproved.Add(op.SymbolKey);
 
             return op;
-        }
-    }
+		}
+	}
 
-    /// <summary>Discards a token without applying anything.</summary>
-    public bool Reject(string token)
+	/// <summary>Discards a token without applying anything.</summary>
+	public bool Reject(string token)
     {
         lock(gate)
             return pending.Remove(token);

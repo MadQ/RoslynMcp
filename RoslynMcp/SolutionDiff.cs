@@ -16,9 +16,9 @@ internal static class SolutionDiff
         var sb = new System.Text.StringBuilder();
 
         foreach(var projectChange in after.GetChanges(before).GetProjectChanges()) {
-            foreach(var docId in projectChange.GetChangedDocuments()) {
+			foreach(var docId in projectChange.GetChangedDocuments()) {
 
-                var oldDoc = before.GetDocument(docId)!;
+				var oldDoc = before.GetDocument(docId)!;
                 var newDoc = after.GetDocument(docId)!;
 
                 var oldText = (await oldDoc.GetTextAsync()).ToString();
@@ -32,21 +32,21 @@ internal static class SolutionDiff
                 sb.AppendLine($"+++ {path}");
                 sb.Append(BuildHunks(oldText, newText));
             }
-        }
+		}
 
-        return sb.Length > 0 ? sb.ToString() : "(no changes)";
-    }
+		return sb.Length > 0 ? sb.ToString() : "(no changes)";
+	}
 
-    /// <summary>
-    ///     Writes all changed documents from <paramref name="newSolution"/> to disk.
-    ///     Only files with a non-null <see cref="Document.FilePath"/> are written.
-    /// </summary>
-    public static async Task ApplyToDiskAsync(Solution oldSolution, Solution newSolution)
+	/// <summary>
+	///     Writes all changed documents from <paramref name="newSolution"/> to disk.
+	///     Only files with a non-null <see cref="Document.FilePath"/> are written.
+	/// </summary>
+	public static async Task ApplyToDiskAsync(Solution oldSolution, Solution newSolution)
     {
         foreach(var projectChange in newSolution.GetChanges(oldSolution).GetProjectChanges()) {
-            foreach(var docId in projectChange.GetChangedDocuments()) {
+			foreach(var docId in projectChange.GetChangedDocuments()) {
 
-                var newDoc = newSolution.GetDocument(docId)!;
+				var newDoc = newSolution.GetDocument(docId)!;
 
                 if(newDoc.FilePath is null)
                     continue;
@@ -54,12 +54,12 @@ internal static class SolutionDiff
                 var text = (await newDoc.GetTextAsync()).ToString();
                 await File.WriteAllTextAsync(newDoc.FilePath, text);
             }
-        }
-    }
+		}
+	}
 
-    // ── Minimal line-level unified diff ──────────────────────────────────────
+	// ── Minimal line-level unified diff ──────────────────────────────────────
 
-    private static string BuildHunks(string oldText, string newText)
+	private static string BuildHunks(string oldText, string newText)
     {
         var oldLines = oldText.Split('\n');
         var newLines = newText.Split('\n');
@@ -71,16 +71,16 @@ internal static class SolutionDiff
         var hunks  = BuildHunkList(oldLines, newLines, lcs, context: 3);
 
         foreach(var hunk in hunks) {
-            sb.AppendLine($"@@ -{hunk.OldStart + 1},{hunk.OldLines} +{hunk.NewStart + 1},{hunk.NewLines} @@");
+			sb.AppendLine($"@@ -{hunk.OldStart + 1},{hunk.OldLines} +{hunk.NewStart + 1},{hunk.NewLines} @@");
 
             foreach(var line in hunk.Lines)
                 sb.AppendLine(line);
-        }
+		}
 
-        return sb.ToString();
-    }
+		return sb.ToString();
+	}
 
-    private static bool[] LongestCommonSubsequence(string[] a, string[] b)
+	private static bool[] LongestCommonSubsequence(string[] a, string[] b)
     {
         // Returns a bool[] of length a.Length: true = line is in LCS (unchanged).
         var m   = a.Length;
@@ -95,23 +95,24 @@ internal static class SolutionDiff
                 ;
 
         var inLcs = new bool[m];
-        var x = 0; var y = 0;
+        var x = 0;
+		var y = 0;
 
         while(x < m && y < n) {
-            if(a[x] == b[y]) {
-                inLcs[x++] = true;
+			if(a[x] == b[y]) {
+				inLcs[x++] = true;
                 y++;
             }
             else if(dp[x + 1, y] >= dp[x, y + 1])
                 x++;
             else
                 y++;
-        }
+		}
 
-        return inLcs;
-    }
+		return inLcs;
+	}
 
-    private sealed record Hunk(int OldStart, int OldLines, int NewStart, int NewLines, List<string> Lines);
+	private sealed record Hunk(int OldStart, int OldLines, int NewStart, int NewLines, List<string> Lines);
 
     private static List<Hunk> BuildHunkList(string[] oldLines, string[] newLines, bool[] inLcs, int context)
     {
@@ -122,9 +123,11 @@ internal static class SolutionDiff
         var lcsIdx  = 0;
 
         while(oi < oldLines.Length || ni < newLines.Length) {
-            // Skip unchanged context lines.
-            if(lcsIdx < inLcs.Length && inLcs[lcsIdx] && oi < oldLines.Length && ni < newLines.Length && oldLines[oi] == newLines[ni]) {
-                oi++; ni++; lcsIdx++;
+			// Skip unchanged context lines.
+			if(lcsIdx < inLcs.Length && inLcs[lcsIdx] && oi < oldLines.Length && ni < newLines.Length && oldLines[oi] == newLines[ni]) {
+				oi++;
+				ni++;
+				lcsIdx++;
                 continue;
             }
 
@@ -142,7 +145,7 @@ internal static class SolutionDiff
             var hunkNi = ni;
 
             while(oi < oldLines.Length || ni < newLines.Length) {
-                var atLcs = lcsIdx < inLcs.Length && inLcs[lcsIdx]
+				var atLcs = lcsIdx < inLcs.Length && inLcs[lcsIdx]
                     && oi < oldLines.Length && ni < newLines.Length
                     && oldLines[oi] == newLines[ni];
 
@@ -150,11 +153,11 @@ internal static class SolutionDiff
                     break;
 
                 if(oi < oldLines.Length && (lcsIdx >= inLcs.Length || !inLcs[lcsIdx])) {
-                    lines.Add("-" + oldLines[oi++]);
+					lines.Add("-" + oldLines[oi++]);
                     lcsIdx++;
                 }
                 else if(ni < newLines.Length) {
-                    lines.Add("+" + newLines[ni++]);
+					lines.Add("+" + newLines[ni++]);
                 }
             }
 
@@ -163,8 +166,8 @@ internal static class SolutionDiff
                 lines.Add(" " + oldLines[oi]);
 
             hunks.Add(new Hunk(hunkOldStart, oi - hunkOldStart, hunkNewStart, ni - hunkNewStart, lines));
-        }
+		}
 
-        return hunks;
-    }
+		return hunks;
+	}
 }

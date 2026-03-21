@@ -18,14 +18,14 @@ internal sealed class DiagnosticsTool(WorkspaceManager workspace)
         IEnumerable<Diagnostic> diagnostics = compilation.GetDiagnostics();
 
         if(filePath is not null) {
-            var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
+			var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
             diagnostics = diagnostics
                 .Where(d => d.Location.SourceTree?.FilePath
                     .EndsWith(normalized, StringComparison.OrdinalIgnoreCase) == true)
             ;
-        }
+		}
 
-        var results = diagnostics
+		var results = diagnostics
             .Where(d => d.Severity >= DiagnosticSeverity.Warning)
             .OrderBy(d => d.Severity)
             .ThenBy(d => d.Location.SourceTree?.FilePath)
@@ -35,9 +35,9 @@ internal sealed class DiagnosticsTool(WorkspaceManager workspace)
         ;
 
         return results.Length > 0 ? results : ["No diagnostics."];
-    }
+	}
 
-    private static string Format(Diagnostic d)
+	private static string Format(Diagnostic d)
     {
         var span = d.Location.GetLineSpan();
         var file = span.Path is { Length: > 0 } p ? Path.GetFileName(p) : "?";

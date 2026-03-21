@@ -42,19 +42,19 @@ internal sealed class SymbolInfoTool(WorkspaceManager workspace)
         var symbol = info.Symbol ?? info.CandidateSymbols.FirstOrDefault();
 
         if(symbol is null) {
-            // Try type info — might be a type expression rather than a symbol reference.
-            var typeInfo = model.GetTypeInfo(node);
+			// Try type info — might be a type expression rather than a symbol reference.
+			var typeInfo = model.GetTypeInfo(node);
 
             if(typeInfo.Type is not null)
                 return $"Type: {typeInfo.Type.ToDisplayString()}";
 
             return "No symbol resolved at that position.";
-        }
+		}
 
-        return FormatSymbol(symbol);
-    }
+		return FormatSymbol(symbol);
+	}
 
-    private static int GetPosition(SourceText text, int line, int column)
+	private static int GetPosition(SourceText text, int line, int column)
     {
         if(line < 1 || line > text.Lines.Count)
             return -1;
@@ -79,9 +79,11 @@ internal sealed class SymbolInfoTool(WorkspaceManager workspace)
 
         var parts = new List<string> { $"Kind: {kind}", $"Name: {name}" };
 
-        if(containing is not null) parts.Add($"ContainingType: {containing}");
-        if(returnType  is not null) parts.Add($"Type/ReturnType: {returnType}");
+        if(containing is not null)
+			parts.Add($"ContainingType: {containing}");
+        if(returnType  is not null)
+			parts.Add($"Type/ReturnType: {returnType}");
 
         return string.Join("  |  ", parts);
-    }
+	}
 }

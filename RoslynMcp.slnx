@@ -1,4 +1,15 @@
-﻿<Solution>
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".github/copilot-instructions.md" />
+    <File Path=".gitignore" />
+    <File Path=".mcp.json" />
+    <File Path="AGENTS.md" />
+    <File Path="HANDOFF.md" />
+    <File Path="ideas.txt" />
+    <File Path="INSTALLATION.md" />
+    <File Path="README.md" />
+    <File Path="TEST_RESULTS.md" />
+  </Folder>
   <Project Path="RoslynMcp/RoslynMcp.csproj" />
   <Project Path="TestHarness/TestHarness.csproj" />
 </Solution>

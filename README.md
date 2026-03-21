@@ -30,6 +30,13 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 | `get_symbol_info` | Resolves what a name at a given file/line/column actually is: kind, containing type, return type. |
 | `preview_rename` | Computes a rename across all files, returns unified diff + confirmation token. |
 | `apply_rename` | Applies or rejects a pending rename by token. |
+| `get_project_info` | Returns project metadata: target framework, language version, output kind, nullable setting, NuGet packages, additional files. |
+| `build_project` | Builds the project and returns structured diagnostics. **Smart behavior:** checks Roslyn diagnostics first and skips the build if errors exist (fast path). If Roslyn reports no errors, runs `dotnet build` to validate MSBuild configuration. Set `forceBuild=true` to bypass Roslyn — use sparingly. |
+| `get_file_outline` | Returns a structured outline of a file: types and their members (signatures only, no bodies). Saves tokens by avoiding full file reads. |
+| `get_type_hierarchy` | Returns the inheritance hierarchy for a type: base types, interfaces, and derived types found in the project. |
+| `find_implementations` | Finds all types that implement an interface/abstract class, or all methods that override a virtual/abstract member. |
+| `list_types` | Lists all types in the project with optional namespace or kind filters (class, interface, enum, struct). |
+| `get_usings` | Returns all `using` directives in a file plus implicit global usings from the project. |
 | `respawn` | **DEBUG ONLY:** Terminates the server process, forcing the MCP client to respawn it. Use this to reload code changes after rebuilding without restarting your IDE. |
 
 ---

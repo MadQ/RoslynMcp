@@ -31,14 +31,14 @@ internal sealed class SearchFilesTool(WorkspaceManager workspace)
 
         try {
 
-            var options = RegexOptions.Compiled;
+			var options = RegexOptions.Compiled;
 
             if(!caseSensitive)
                 options |= RegexOptions.IgnoreCase;
 
             regex = new Regex(pattern, options);
-        }
-        catch(ArgumentException ex) {
+		}
+		catch(ArgumentException ex) {
 
             return new {
                 error = "Invalid regex pattern",
@@ -52,7 +52,7 @@ internal sealed class SearchFilesTool(WorkspaceManager workspace)
         foreach(var project in solution.Projects)
             foreach(var document in project.Documents) {
 
-                if(document.FilePath is null)
+				if(document.FilePath is null)
                     continue;
 
                 var fileName = Path.GetFileName(document.FilePath);
@@ -65,21 +65,21 @@ internal sealed class SearchFilesTool(WorkspaceManager workspace)
 
                 for(int i = 0; i < lines.Count; i++) {
 
-                    var lineText = lines[i].ToString();
+					var lineText = lines[i].ToString();
 
                     if(regex.IsMatch(lineText)) {
 
-                        allMatches.Add(new MatchResult {
+						allMatches.Add(new MatchResult {
                             File = Path.GetRelativePath(workspace.RootPath, document.FilePath),
                             Line = i + 1,
                             Text = lineText.Trim()
                         });
                     }
                 }
-            }
-        
+			}
 
-        var totalMatches = allMatches.Count;
+
+		var totalMatches = allMatches.Count;
         var pagedMatches = allMatches.Skip(skip).Take(take).ToArray();
 
         return new {
@@ -88,32 +88,32 @@ internal sealed class SearchFilesTool(WorkspaceManager workspace)
             returned	  = pagedMatches.Length,
             has_more	  = skip + pagedMatches.Length < totalMatches
         };
-    }
+	}
 
-    // TODO: Future enhancement — add syntax-tree-based semantic filtering.
-    // Allow searching only within specific syntax contexts:
-    // - Comments only
-    // - String literals only
-    // - Identifiers only (class/method/variable names)
-    // - Exclude generated code
-    // This would use SyntaxTree.GetRoot() and filter by SyntaxKind before applying regex.
+	// TODO: Future enhancement — add syntax-tree-based semantic filtering.
+	// Allow searching only within specific syntax contexts:
+	// - Comments only
+	// - String literals only
+	// - Identifiers only (class/method/variable names)
+	// - Exclude generated code
+	// This would use SyntaxTree.GetRoot() and filter by SyntaxKind before applying regex.
 
-    private static bool MatchesGlob(string fileName, string pattern)
+	private static bool MatchesGlob(string fileName, string pattern)
     {
         if(pattern == "*" || pattern == "*.*")
             return true;
 
         if(pattern.StartsWith("*.")) {
 
-            var extension = pattern.Substring(1);
+			var extension = pattern.Substring(1);
 
             return fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase);
-        }
+		}
 
-        return fileName.Equals(pattern, StringComparison.OrdinalIgnoreCase);
-    }
+		return fileName.Equals(pattern, StringComparison.OrdinalIgnoreCase);
+	}
 
-    private sealed class MatchResult
+	private sealed class MatchResult
     {
         public required string File { get; init; }
         public required int Line { get; init; }

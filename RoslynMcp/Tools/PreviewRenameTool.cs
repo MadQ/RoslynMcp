@@ -45,16 +45,16 @@ internal sealed class PreviewRenameTool(WorkspaceManager workspace, ApprovalStor
     private static ISymbol? FindSymbol(Compilation compilation, string name, string? inType)
     {
         if(inType is not null) {
-            var type = compilation.GetTypeByMetadataName(inType)
+			var type = compilation.GetTypeByMetadataName(inType)
                 ?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(inType));
 
             return type?.GetMembers(name).FirstOrDefault();
-        }
+		}
 
-        return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
-    }
+		return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
+	}
 
-    private static string SymbolKey(ISymbol symbol)
+	private static string SymbolKey(ISymbol symbol)
         => $"{symbol.ContainingType?.ToDisplayString() ?? symbol.ContainingNamespace?.ToDisplayString()}::{symbol.Name}";
 }
 

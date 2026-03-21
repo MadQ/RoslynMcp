@@ -17,7 +17,7 @@ using RoslynMcp.Tools;
 var targetPath = args.Length > 0 ? args[0] : Directory.GetCurrentDirectory();
 
 if(!Directory.Exists(targetPath)) {
-    Console.Error.WriteLine($"RoslynMcp: directory not found: {targetPath}");
+	Console.Error.WriteLine($"RoslynMcp: directory not found: {targetPath}");
     return 1;
 }
 
@@ -47,6 +47,13 @@ builder.Services
     .AddTransient<PreviewRenameTool>()
     .AddTransient<ApplyRenameTool>()
     .AddTransient<SearchFilesTool>()
+    .AddTransient<ProjectInfoTool>()
+    .AddTransient<BuildTool>()
+    .AddTransient<FileOutlineTool>()
+    .AddTransient<TypeHierarchyTool>()
+    .AddTransient<FindImplementationsTool>()
+    .AddTransient<ListTypesTool>()
+    .AddTransient<GetUsingsTool>()
 #if DEBUG
     .AddTransient<RespawnTool>()
 #endif

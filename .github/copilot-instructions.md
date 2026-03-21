@@ -42,13 +42,20 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 |-----------|----------------|
 | `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
 | `SearchFilesTool` | `search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
-| `RespawnTool` | `respawn` (DEBUG only) — terminates server process for hot-reload during development |
+| `RespawnTool` | `respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `TypeMembersTool` | `get_type_members` — enumerate members of a type (fields, properties, methods, enums, events) |
 | `DiagnosticsTool` | `get_diagnostics` — compiler errors and warnings for project or single file |
 | `FindReferencesTool` | `find_references` — all references to a symbol across the project |
 | `SymbolInfoTool` | `get_symbol_info` — resolve what a name at a location actually is |
 | `PreviewRenameTool` | `preview_rename` — compute rename edits, return unified diff + token |
 | `ApplyRenameTool` | `apply_rename` — approve/reject a pending rename by token |
+| `ProjectInfoTool` | `get_project_info` — project metadata (TFM, language version, packages, etc.) |
+| `BuildTool` | `build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true` |
+| `FileOutlineTool` | `get_file_outline` — type/member structure without bodies (token saver) |
+| `TypeHierarchyTool` | `get_type_hierarchy` — base types, interfaces, derived types |
+| `FindImplementationsTool` | `find_implementations` — concrete implementations of interfaces/abstract members |
+| `ListTypesTool` | `list_types` — enumerate types with optional filters |
+| `GetUsingsTool` | `get_usings` — using directives + global usings |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 

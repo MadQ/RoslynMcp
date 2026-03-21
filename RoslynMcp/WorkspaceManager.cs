@@ -17,6 +17,7 @@ internal sealed class WorkspaceManager : IDisposable
     private readonly Workspace            workspace;
     private readonly ProjectId            projectId;
     private readonly string               rootPath;
+    private readonly string?              csprojPath;
     private readonly bool                 isMSBuild;
     private readonly ReaderWriterLockSlim rwLock = new();
     private readonly FileSystemWatcher?   watcher;
@@ -38,13 +39,14 @@ internal sealed class WorkspaceManager : IDisposable
         // Detect .csproj file: if found, use MSBuildWorkspace; otherwise AdhocWorkspace.
         var csprojFiles = Directory.GetFiles(this.rootPath, "*.csproj", SearchOption.AllDirectories);
 
-        if(csprojFiles.Length > 0) {
-            (workspace, projectId) = LoadMSBuildWorkspace(csprojFiles[0]);
-            isMSBuild = true;
-            // MSBuildWorkspace watches files via Roslyn's internal mechanisms — no manual watcher needed.
-        }
-        else {
-            (workspace, projectId) = LoadAdhocWorkspace();
+		if(csprojFiles.Length > 0) {
+			(workspace, projectId) = LoadMSBuildWorkspace(csprojFiles[0]);
+			csprojPath = csprojFiles[0];
+			isMSBuild  = true;
+			// MSBuildWorkspace watches files via Roslyn's internal mechanisms — no manual watcher needed.
+		}
+		else {
+			(workspace, projectId) = LoadAdhocWorkspace();
             isMSBuild = false;
 
             // AdhocWorkspace requires manual file watching.
@@ -58,13 +60,17 @@ internal sealed class WorkspaceManager : IDisposable
             watcher.Deleted += OnFileDeleted;
             watcher.Renamed += OnFileRenamed;
             watcher.EnableRaisingEvents = true;
-        }
-    }
+		}
+	}
 
-    public string RootPath => rootPath;
-    public bool IsMSBuild => isMSBuild;
+	public string  RootPath   => rootPath;
+	public bool    IsMSBuild  => isMSBuild;
+	public string? CsprojPath => csprojPath;
 
-    public Solution GetSolution() => workspace.CurrentSolution;
+	public Solution GetSolution() => workspace.CurrentSolution;
+
+	/// <summary>Returns the primary project loaded by this manager.</summary>
+	public Project GetProject() => workspace.CurrentSolution.GetProject(projectId)!;
 
     /// <summary>
     ///     Returns the current Compilation, building it if not yet warm.
@@ -75,17 +81,17 @@ internal sealed class WorkspaceManager : IDisposable
         rwLock.EnterReadLock();
 
         try {
-            if(compilation is not null)
+			if(compilation is not null)
                 return compilation;
-        }
-        finally {
+		}
+		finally {
             rwLock.ExitReadLock();
         }
 
         return RebuildCompilation();
-    }
+	}
 
-    public void Dispose()
+	public void Dispose()
     {
         watcher?.Dispose();
         rwLock.Dispose();
@@ -172,8 +178,8 @@ internal sealed class WorkspaceManager : IDisposable
         rwLock.EnterWriteLock();
 
         try {
-            // Double-checked: another thread may have rebuilt while we waited.
-            if(compilation is not null)
+			// Double-checked: another thread may have rebuilt while we waited.
+			if(compilation is not null)
                 return compilation;
 
             var project = workspace.CurrentSolution.GetProject(projectId)!;
@@ -184,38 +190,38 @@ internal sealed class WorkspaceManager : IDisposable
                 ?? CSharpCompilation.Create("empty");
 
             return compilation;
-        }
-        finally {
+		}
+		finally {
             rwLock.ExitWriteLock();
         }
-    }
+	}
 
-    private void InvalidateCompilation()
+	private void InvalidateCompilation()
     {
         rwLock.EnterWriteLock();
 
         try {
-            compilation = null;
-        }
-        finally {
+			compilation = null;
+		}
+		finally {
             rwLock.ExitWriteLock();
         }
-    }
+	}
 
-    private void OnFileChanged(object sender, FileSystemEventArgs e)
+	private void OnFileChanged(object sender, FileSystemEventArgs e)
     {
         if(isMSBuild || workspace is not AdhocWorkspace adhoc)
             return;
 
         try {
-            AddOrUpdateDocument(adhoc, projectId, e.FullPath);
-        }
-        catch {
+			AddOrUpdateDocument(adhoc, projectId, e.FullPath);
+		}
+		catch {
             // File may be locked mid-write; the next change event will catch it.
         }
-    }
+	}
 
-    private void OnFileDeleted(object sender, FileSystemEventArgs e)
+	private void OnFileDeleted(object sender, FileSystemEventArgs e)
     {
         if(isMSBuild || workspace is not AdhocWorkspace adhoc)
             return;
@@ -231,9 +237,9 @@ internal sealed class WorkspaceManager : IDisposable
         RemoveDocument(adhoc, projectId, e.OldFullPath);
 
         try {
-            AddOrUpdateDocument(adhoc, projectId, e.FullPath);
+			AddOrUpdateDocument(adhoc, projectId, e.FullPath);
+		}
+		catch {
         }
-        catch {
-        }
-    }
+	}
 }

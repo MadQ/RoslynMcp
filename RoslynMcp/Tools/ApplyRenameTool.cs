@@ -14,11 +14,11 @@ internal sealed class ApplyRenameTool(WorkspaceManager workspace, ApprovalStore 
         [Description("'y' to apply, 'session' to apply and remember for this session, 'n' to reject.")] string approval)
     {
         if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
-            approvals.Reject(token);
+			approvals.Reject(token);
             return "Rename rejected. No files were changed.";
-        }
+		}
 
-        if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase)
+		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase)
             && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
             return "Invalid approval value. Use 'y', 'session', or 'n'.";
 
@@ -35,5 +35,5 @@ internal sealed class ApplyRenameTool(WorkspaceManager workspace, ApprovalStore 
         var sessionNote = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
 
         return $"Rename applied.{sessionNote} Files written to disk. Compilation will refresh automatically.";
-    }
+	}
 }
