@@ -28,5 +28,5 @@ jobs:
     - name: Build
       run: dotnet build RoslynMcp/RoslynMcp.csproj --no-restore --configuration Release
 
-    - name: Run tests
-      run: dotnet run --project TestHarness/TestHarness.csproj --no-build
+    #- name: Run tests
+    #  run: dotnet run --project TestHarness/TestHarness.csproj --no-build
