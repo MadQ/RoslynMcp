@@ -69,6 +69,8 @@ dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net
 - `net10.0` — .NET 10 (STS, recommended for latest features)
 - `net11.0` — .NET 11 (preview, if available)
 
+> **Why published executable?** Early experiments with `dotnet run` in `.mcp.json` produced interesting recursive behavior when dogfooding RoslynMcp on itself. Abandoned in favor of the simpler, more reliable executable approach.
+
 ### Command Line Arguments
 
 | Argument | Required | Description |
