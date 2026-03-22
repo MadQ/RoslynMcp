@@ -6,6 +6,11 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace RoslynMcp.Analyzers;
 
+// RS1038: This assembly references Microsoft.CodeAnalysis.Workspaces (required for CodeFixProvider).
+// The analyzer itself does not use Workspaces and works correctly during command-line builds.
+// Code fixes are only invoked in IDEs where Workspaces are available.
+#pragma warning disable RS1038
+
 /// <summary>
 /// Analyzer that suggests using <c>nint</c> and <c>nuint</c> instead of <c>IntPtr</c> and <c>UIntPtr</c> for native-sized integers.
 /// </summary>

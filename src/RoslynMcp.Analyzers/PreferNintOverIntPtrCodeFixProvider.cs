@@ -8,6 +8,12 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace RoslynMcp.Analyzers;
 
+// RS1038: CodeFixProviders require Microsoft.CodeAnalysis.Workspaces, which is not available during
+// command-line compilation. This is expected and acceptable — code fixes are only invoked in IDEs
+// (Visual Studio, VS Code, Rider) where Workspaces are available. The analyzer itself (PreferNintOverIntPtrAnalyzer)
+// does not reference Workspaces and works correctly during command-line builds.
+#pragma warning disable RS1038
+
 /// <summary>
 /// Code fix provider that replaces <c>IntPtr</c> with <c>nint</c> and <c>UIntPtr</c> with <c>nuint</c>.
 /// </summary>
