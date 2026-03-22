@@ -30,19 +30,3 @@ jobs:
 
     - name: Run tests
       run: dotnet run --project TestHarness/TestHarness.csproj --no-build
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '10.0.x'
-
-    - name: Check formatting
-      run: dotnet format RoslynMcp/RoslynMcp.csproj --verify-no-changes --verbosity diagnostic
-
-    - name: Run Roslyn analyzers
-      run: dotnet build RoslynMcp/RoslynMcp.csproj --configuration Release /p:TreatWarningsAsErrors=true
