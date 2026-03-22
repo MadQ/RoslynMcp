@@ -20,6 +20,7 @@ Working rules for GitHub Copilot and any other AI agent in this repo.
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.2.0-alpha (pre-1.0) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
+| **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
 
 Two projects:
 - `src/RoslynMcp/RoslynMcp.csproj` — MCP server
@@ -79,10 +80,9 @@ When discovering code:
 - `list_files` enumerates by name/path (glob patterns, fast)
 - `find_references` finds symbol usage (Roslyn-based, semantic)
 
-**Deferred enhancements:**
-- **Semantic search filtering** (SearchFilesTool) — use SyntaxTree to filter by syntax context (comments only, strings only, identifiers only, exclude generated code)
 
-**ALWAYS use RoslynMcp tool when possible** This is very important! It helps to test the tools, dogfood the API, and ensures your agent gets accurate semantic understanding of the codebase. Avoid workarounds like grepping files or spawning builds unless absolutely necessary.
+# ALWAYS use a RoslynMcp tool when possible!
+This is very important! It helps to test the tools, dogfood the API, and ensures your agent gets accurate semantic understanding of the codebase. Avoid workarounds like grepping files or spawning builds unless absolutely necessary. I'm serious: get this through your thick pirate skull: DOGFOOD the living daylights out of all this!
 
 ---
 
@@ -131,7 +131,9 @@ I trust you and I have git.
 | Commit | ❌ Ask first |
 | Push | ❌ Ask first |
 
+###### Note: Move this to some local-only instruction file? This shouldn't be pushed onto unsuspecting devs.
 **Shorthand:** `c/p` = commit and push now.
+
 
 **Branch naming:** `feature/<short-description>` for multi-file or non-trivial changes.
 
@@ -139,6 +141,7 @@ I trust you and I have git.
 
 ## Terminal
 
+###### Note: Nix this section. Should be dogfooding this now. Also kind of a local problem anyway.
 PowerShell session with known issues. Rules:
 - **Single line only** — no here-strings, no multi-line expressions
 - **`rg.exe`** may be available — use **backslash paths**:

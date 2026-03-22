@@ -34,6 +34,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 | **Runtime** | .NET 8 / .NET 10 / .NET 11 (multi-targeted) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.2.0-alpha (pre-1.0) |
+| **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn), MSBuildWorkspace/AdhocWorkspace |
+| **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 

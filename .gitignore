@@ -198,6 +198,7 @@ DocProject/Help/html/
 
 # Click-Once directory
 publish/
+publish[0-9]*/
 
 # Publish Web Output
 *.Publish.xml
@@ -389,5 +390,3 @@ FodyWeavers.xsd
 .idea/
 *.sln.iml
 
-# JIT disassembly scratch project — not part of the main solution
-BobHashDisasm/
