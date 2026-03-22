@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
 
@@ -15,6 +15,10 @@ internal sealed class ApprovalStore
     // future previews of the same symbol are auto-confirmed without a new token exchange.
     private readonly HashSet<string> sessionApproved = new(StringComparer.Ordinal);
 
+    // Lock object for thread-safe access to pending and sessionApproved.
+    // Note: System.Threading.Lock (introduced .NET 9) would be preferable for performance and safety,
+    // but we target .NET 8/10/11 and need compatibility with .NET 8. Once .NET 8 support is dropped,
+    // consider upgrading to Lock for better lock semantics and reduced allocations.
     private readonly object syncRoot = new();
 
     /// <summary>
