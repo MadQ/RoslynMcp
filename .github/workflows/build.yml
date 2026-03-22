@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [ main, dev ]
 
-env:
-  CI: true  # Exclude .NET 11 from CI builds (not available on GitHub runners yet)
-
 jobs:
   build:
     runs-on: ${{ matrix.os }}

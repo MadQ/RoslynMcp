@@ -2,9 +2,8 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <!-- Base targets always available -->
     <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
-    <!-- Add net11.0 for local dev, but excluded from CI via condition below -->
-    <TargetFrameworks Condition="'$(CI)' != 'true'">net8.0;net10.0;net11.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -26,6 +25,16 @@
     <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
     <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
+
+  <!-- Detect if .NET 11 SDK is available and add it to TargetFrameworks -->
+  <Target Name="DetectNet11SDK" BeforeTargets="BeforeBuild;BeforeRebuild;Restore">
+    <PropertyGroup>
+      <!-- Try to resolve if net11.0 is supported by checking NETCoreSdkVersion -->
+      <_Net11Available Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '11.0'))">true</_Net11Available>
+      <TargetFrameworks Condition="'$(_Net11Available)' == 'true'">net8.0;net10.0;net11.0</TargetFrameworks>
+    </PropertyGroup>
+    <Message Importance="high" Text="Building for: $(TargetFrameworks)" />
+  </Target>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
