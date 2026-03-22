@@ -16,7 +16,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 # Clone and publish
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
 **Add to your MCP client config** (e.g., `.mcp.json`):
@@ -61,7 +61,7 @@ Publish a Release build for your platform:
 
 ```bash
 cd /path/to/RoslynMcp
-dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
 **Choose your target framework:**
@@ -220,13 +220,13 @@ Add to `.mcp.json` at your workspace root:
     "roslyn": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
+      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/src/RoslynMcp/RoslynMcp.csproj", "--", "."]
     }
   }
 }
 ```
 
-> Build once first: `dotnet build RoslynMcp/RoslynMcp.csproj`
+> Build once first: `dotnet build src/RoslynMcp/RoslynMcp.csproj`
 
 ---
 

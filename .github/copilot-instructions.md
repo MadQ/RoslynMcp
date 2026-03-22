@@ -25,18 +25,18 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 
 Two projects:
-- `RoslynMcp/RoslynMcp.csproj` — MCP server
-- `TestHarness/TestHarness.csproj` — local testing client
+- `src/RoslynMcp/RoslynMcp.csproj` — MCP server
+- `src/TestHarness/TestHarness.csproj` — local testing client
 
 ```
-dotnet build RoslynMcp/RoslynMcp.csproj
+dotnet build src/RoslynMcp/RoslynMcp.csproj
 ```
 
 ---
 
 ## Architecture
 
-> Working rules (git, terminal) live in **`AGENTS.md`**. Don't duplicate them here.
+> Working rules (git, terminal) live in **`.meta/AGENTS.md`**. Don't duplicate them here.
 
 | Component | Responsibility |
 |-----------|----------------|
@@ -172,7 +172,7 @@ var newSolution = await Renamer.RenameSymbolAsync(
 
 ## Git rules
 
-See **`AGENTS.md`** for all git and terminal rules. Shorthand: `c/p` = commit and push now.
+See **`.meta/AGENTS.md`** for all git and terminal rules. Shorthand: `c/p` = commit and push now.
 
 ---
 

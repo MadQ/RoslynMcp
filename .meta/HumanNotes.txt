@@ -1,4 +1,6 @@
-﻿this: `"args": ["/path/to/your/project"]` needs to go.
+﻿project restructure: it's little messy atm. i think we should move most of the .md files to a new folder, not `docs`, as that should be for actual documentation. maybe `notes` or something? idk. suggestion something. also, maybe create a `src` folder for the actual code, and move most of the files there. keep the root for github specific files, etc.
+
+this: `"args": ["/path/to/your/project"]` needs to go.
  MCP should be configurable globally, not project specific.
  maybe have project parameter on the tools instead? maybe both/hybrid? idk.
 

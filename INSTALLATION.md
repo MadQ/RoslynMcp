@@ -22,7 +22,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
 **Choose your framework:**
