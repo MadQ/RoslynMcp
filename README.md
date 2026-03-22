@@ -13,10 +13,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 ## Quick Start
 
 ```bash
-# Clone and build
+# Clone and publish
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet build RoslynMcp/RoslynMcp.csproj
+dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
 **Add to your MCP client config** (e.g., `.mcp.json`):
@@ -25,8 +25,8 @@ dotnet build RoslynMcp/RoslynMcp.csproj
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "."]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["."]
     }
   }
 }
@@ -40,7 +40,7 @@ See [Configuration](#configuration) below for argument details and [INSTALLATION
 
 ### MCP Client Configuration
 
-RoslynMcp is invoked as a stdio MCP server. Configuration goes in your MCP client's config file (e.g., `.mcp.json` for GitHub Copilot).
+RoslynMcp runs as a standalone executable. Configuration goes in your MCP client's config file (e.g., `.mcp.json` for GitHub Copilot).
 
 **Basic pattern:**
 ```json
@@ -48,41 +48,64 @@ RoslynMcp is invoked as a stdio MCP server. Configuration goes in your MCP clien
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "/path/to/your/project"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["/path/to/your/project"]
     }
   }
 }
 ```
+
+### Building the Executable
+
+Publish a Release build for your platform:
+
+```bash
+cd /path/to/RoslynMcp
+dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+```
+
+**Choose your target framework:**
+- `net8.0` — .NET 8 (LTS)
+- `net10.0` — .NET 10 (STS, recommended for latest features)
+- `net11.0` — .NET 11 (preview, if available)
 
 ### Command Line Arguments
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `--project` | Yes | Absolute path to `RoslynMcp.csproj` |
-| `-f` / `--framework` | **Yes** | Target framework: `net8.0`, `net10.0`, or `net11.0` (required for multi-targeted projects) |
-| `--` | Yes | Separator between dotnet args and RoslynMcp args |
-| `<target-path>` | Yes | Path to the project/directory to analyze (`.` for workspace root, or absolute path) |
-| `--no-build` | Recommended | Skips rebuild (assumes you've already built once with `dotnet build`) |
+| `<target-path>` | Yes | Path to the project/directory to analyze (`.` for current directory, or absolute path) |
 
-**Why `-f` is required:** RoslynMcp targets .NET 8/10/11. Without specifying the framework, `dotnet run` will fail with "Your project targets multiple frameworks."
+**That's it!** Just point RoslynMcp.exe at your C# project directory.
 
 ### Configuration Examples
 
-**Development (local builds):**
+**Analyze current workspace:**
 ```json
 {
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "C:/dev/RoslynMcp/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "."]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["."]
     }
   }
 }
 ```
 
-**Using published executable (future):**
+**Analyze specific project:**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["C:/my-workspace/MyApp.Web"]
+    }
+  }
+}
+```
+
+**Using published NuGet tool (future):**
 ```json
 {
   "servers": {
@@ -96,69 +119,15 @@ RoslynMcp is invoked as a stdio MCP server. Configuration goes in your MCP clien
 ```
 *Requires: `dotnet tool install --global RoslynMcp` (coming soon)*
 
-**Using published executable (local):**
-```json
-{
-  "servers": {
-    "roslyn": {
-      "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["."]
-    }
-  }
-}
-```
-*Faster startup than `dotnet run`. See [Building a Local Executable](#building-a-local-executable) below.*
-
-**Multi-project workspace:**
-```json
-{
-  "servers": {
-    "roslyn": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "C:/dev/RoslynMcp/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "C:/my-workspace/MyApp.Web"]
-    }
-  }
-}
-```
-*Points RoslynMcp at a specific project directory within a larger workspace*
-
-### Building a Local Executable
-
-To use RoslynMcp without `dotnet run` (or to test RoslynMcp against itself), publish a Release build:
-
-```bash
-cd /path/to/RoslynMcp
-dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
-```
-
-Then update your MCP config to point to the executable:
-```json
-"command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-"args": ["."]
-```
-
-**Benefits:**
-- ✅ Faster startup (no `dotnet run` overhead)
-- ✅ No build step required
-- ✅ True production mode
-
-**Note:** Avoid using Visual Studio's "Publish" UI — it may incorrectly treat the console app as a web app (`WebToolsException`). Use `dotnet publish` command line instead.
-
 ### Troubleshooting
-
-**Error: "Your project targets multiple frameworks"**
-- **Cause:** Missing `-f` argument
-- **Fix:** Add `-f net10.0` (or `net8.0`/`net11.0`) to args
-
-**Error: "Could not find project file"**
-- **Cause:** Relative paths in `--project` don't work reliably across MCP clients
-- **Fix:** Use absolute paths
 
 **Server doesn't load target project:**
 - Check that the target path contains a `.csproj` file (or `.cs` files for AdhocWorkspace fallback)
 - Check server stderr logs for "Target: ..." to see what path was detected
+
+**VS Publish UI errors (`WebToolsException`):**
+- Visual Studio's "Publish" UI may incorrectly treat the console app as a web app
+- Use `dotnet publish` command line instead
 
 See **[INSTALLATION.md](INSTALLATION.md)** for client-specific examples and full troubleshooting guide.
 

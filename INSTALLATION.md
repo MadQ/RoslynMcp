@@ -7,51 +7,44 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 > **⚠️ Not all configurations have been verified in production.**  
 > GitHub Copilot and Claude Desktop are tested and confirmed working. Other clients follow documented MCP patterns but may require adjustments. Contributions and corrections welcome!
 
-> **Configuration reference:** See [Configuration section in README.md](README.md#configuration) for detailed argument explanations, troubleshooting, and examples.
+> **Configuration reference:** See [Configuration section in README.md](README.md#configuration) for detailed examples and troubleshooting.
 
 > **Quick start:** Most clients use one of two patterns:
 > - **Workspace config**: `.mcp.json` or similar file in your project root
 > - **Global config**: Client-specific settings file in your home directory
 
-> **⚠️ Important:** RoslynMcp targets multiple .NET versions. You **must** specify `-f net10.0` (or `net8.0`/`net11.0`) in the `args` array, or `dotnet run` will fail with "Your project targets multiple frameworks."
-
 ---
 
-## Installation Methods
+## Installation
 
-### For End Users (Recommended)
+### Step 1: Build RoslynMcp
 
-**Coming soon:** Install via NuGet tool or download published release.
+```bash
+git clone https://github.com/MadQ/RoslynMcp.git
+cd RoslynMcp
+dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+```
 
-Once published, you'll use:
+**Choose your framework:**
+- `net8.0` — .NET 8 (LTS)
+- `net10.0` — .NET 10 (recommended)
+- `net11.0` — .NET 11 (preview, if available)
+
+### Step 2: Configure Your MCP Client
+
+Point your MCP client to the published executable. Examples for each client below.
+
+**Published NuGet tool (coming soon):**
 ```bash
 dotnet tool install --global RoslynMcp
+# Then use: "command": "roslyn-mcp"
 ```
-
-Then reference it in your MCP config as:
-```json
-"command": "roslyn-mcp",
-"args": ["path/to/your/project"]
-```
-
-### For Contributors / Development (Current)
-
-The examples below use `dotnet run --no-build` for testing RoslynMcp against **other projects**:
-- Contributing to RoslynMcp development
-- Testing local changes on external codebases
-
-**For dogfooding RoslynMcp on itself:** Use a published executable (see [README Configuration](README.md#building-a-local-executable)) — `dotnet run` creates a process conflict when analyzing itself.
-
-**Prerequisites:**
-- Clone this repository
-- Build once: `dotnet build RoslynMcp/RoslynMcp.csproj`
-- Use the `dotnet run --no-build` pattern shown below
 
 ---
 
 ## Requirements
 
-- .NET 8, .NET 10, or .NET 11 SDK (multi-targeted — use whichever you have installed)
+- .NET 8, 10, or 11 SDK
 - MSBuild on PATH (installed with .NET SDK or Visual Studio) for full project resolution
 
 ---
@@ -65,18 +58,17 @@ Add to `.mcp.json` at your workspace root:
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "."]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["."]
     }
   }
 }
 ```
 
-**Path notes:**
-- Build once first: `dotnet build path/to/RoslynMcp/RoslynMcp.csproj`
-- Use absolute or relative path to `RoslynMcp.csproj`
-- `-f net10.0` is **required** (or `net8.0`/`net11.0`)
-- Last argument (`.`) is the directory containing `.cs` files to analyze
+**Notes:**
+- Use absolute path to `RoslynMcp.exe`
+- `.` means analyze the current workspace root
+- Or specify absolute path to a different project
 
 **Restart:** Reload window or restart GitHub Copilot extension after editing `.mcp.json`.
 
@@ -290,12 +282,12 @@ Add to `~/.config/zed/settings.json`:
 
 ---
 
-## Direct (any platform)
+
 
 Run RoslynMcp directly from the command line:
 
 ```bash
-dotnet run --project RoslynMcp/RoslynMcp.csproj -- path/to/your/src
+/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe path/to/your/src
 ```
 
 This starts the MCP server on stdio — useful for testing or custom integrations.

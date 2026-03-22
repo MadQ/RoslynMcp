@@ -78,21 +78,21 @@ Tests run RoslynMcp against itself (dogfooding). All tests should pass before su
 
 ### Testing Locally with MCP Client
 
-**Option 1: Use Debug/Release build (testing against other projects)**
+Publish a Release build and configure your MCP client to use it:
 
-1. Build RoslynMcp:
+1. Publish RoslynMcp:
    ```bash
-   dotnet build RoslynMcp/RoslynMcp.csproj
+   dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
    ```
 
-2. Configure your MCP client to use `dotnet run`:
+2. Configure your MCP client:
    ```json
    {
      "servers": {
        "roslyn": {
          "type": "stdio",
-         "command": "dotnet",
-         "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "/path/to/other/project"]
+         "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+         "args": ["/path/to/test/project"]
        }
      }
    }
@@ -100,29 +100,7 @@ Tests run RoslynMcp against itself (dogfooding). All tests should pass before su
 
 3. Test tool calls interactively
 
-**Option 2: Use published executable (production-like, or for dogfooding RoslynMcp on itself)**
-
-1. Publish RoslynMcp:
-   ```bash
-   dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
-   ```
-
-2. Configure your MCP client to use the executable:
-   ```json
-   {
-     "servers": {
-       "roslyn": {
-         "type": "stdio",
-         "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-         "args": ["/absolute/path/to/RoslynMcp"]
-       }
-     }
-   }
-   ```
-
-**Note:** 
-- Use the published executable when testing RoslynMcp against itself — `dotnet run` creates a process conflict
-- Avoid Visual Studio's "Publish" UI (may trigger `WebToolsException`). Use `dotnet publish` command line
+**Note:** Avoid Visual Studio's "Publish" UI (may trigger `WebToolsException`). Use `dotnet publish` command line.
 
 ---
 
