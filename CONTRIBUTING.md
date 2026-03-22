@@ -136,7 +136,11 @@ That said, some patterns make collaboration easier:
 
 **PRs that add `.editorconfig` files will not be approved.** These files are just as opinionated as linters and create the same conflicts with the project's intentional style choices.
 
-If automated checks become necessary, focus on narrow, high-value rules that align with existing style — things like enforcing `nint` over `IntPtr`, catching personal pronouns in comments, or flagging stale `TODO` comments without context.
+**Custom analyzers are acceptable** if they enforce narrow, high-value rules aligned with the project style. Example: `RoslynMcp.Analyzers` contains analyzers that gently suggest modern C# alternatives:
+- **RMCP001**: Prefer `nint` over `IntPtr` (with code fix)
+- **RMCP002**: Prefer `nuint` over `UIntPtr` (with code fix)
+
+All analyzer diagnostics are warnings only, never errors. Code fixes are provided for one-click replacements.
 
 ---
 

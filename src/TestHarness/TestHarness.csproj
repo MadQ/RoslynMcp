@@ -6,4 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Excluded from the main solution — test harness only, run directly. -->
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\RoslynMcp.Analyzers\RoslynMcp.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
 </Project>
