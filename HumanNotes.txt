@@ -1,23 +1,22 @@
-﻿
-AGENTS.md still has a `dotnet run` reference for an MCP config example. that need to be corrected. also, some of code examples in the meta docs are out of sync/stale. for example the `### Publish Executable` section in HANDOFF.md. this kind of verification should be part of our documentation review process. maybe we should have a checklist for that? like, every time we make a change to the codebase, we should also review the docs and make sure they're still accurate. we could even automate some of that with tests that check for certain strings in the docs, or something like that. maybe creat a skill for you? let's discuss.
+﻿we should consider implementing the other [C# MCP Server Features](https://csharp.sdk.modelcontextprotocol.io/concepts/index.html#server-features).
+same for the [Base Protocol Features](https://csharp.sdk.modelcontextprotocol.io/concepts/index.html#base-protocol).
+and the [Client Features](]https://csharp.sdk.modelcontextprotocol.io/concepts/index.html#client-features)
+thoughts? this will be a feat branch, and i'll want to approve the plan before we start coding.
 
 
-this: `"args": ["/path/to/your/project"]` needs to go, or be optional.
+the `"args": ["/path/to/your/project"]` needs to go, or be optional.
  MCP should be configurable globally, not project specific.
  maybe have a project parameter on the tools instead? maybe both/hybrid? idk.
  this might require caching Roslyn Compilation objects: we'd need to figure the cache ejection strategy (LRU? TTL?) and invalidation triggers (file changes, explicit command, etc.). let's discuss.
 
 
+
+AGENTS.md still has a `dotnet run` reference for an MCP config example. that need to be corrected. also, some of code examples in the meta docs are out of sync/stale. for example the `### Publish Executable` section in HANDOFF.md. this kind of verification should be part of our documentation review process. maybe we should have a checklist for that? like, every time we make a change to the codebase, we should also review the docs and make sure they're still accurate. we could even automate some of that with tests that check for certain strings in the docs, or something like that. maybe creat a skill for you? let's discuss.
+DONE.
+
 do this first: search_tool: enhance with syntax-tree-based semantic filtering.
   or maybe have a separate tool for that? like "semantic_search" or something. thoughs?
 DONE.
-
-
-we should consider implementing the other [C# MCP Server Features](https://csharp.sdk.modelcontextprotocol.io/concepts/index.html#server-features).
-same for the [Base Protocol Features](https://csharp.sdk.modelcontextprotocol.io/concepts/index.html#base-protocol).
-and the [Client Features](]https://csharp.sdk.modelcontextprotocol.io/concepts/index.html#client-features)
-please make a plan for this.
-
 
 ---
 
