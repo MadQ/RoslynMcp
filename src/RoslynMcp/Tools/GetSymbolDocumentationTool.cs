@@ -1,7 +1,6 @@
 ﻿using System.Xml.Linq;
 using System.ComponentModel;
 using System.Xml;
-using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
