@@ -1,10 +1,10 @@
 ﻿# Session Handoff — March 22, 2026
 
 **Date:** 2026-03-22  
-**Branch:** `feature/restructure-folders` (pushed, ready to merge)  
-**Last Commit:** `c82db98` — Restructure: move code to src/, metadata to .meta/  
-**Repository:** https://github.com/MadQ/RoslynMcp.git (private, ready for public)  
-**Tool Count:** 20 tools
+**Branch:** `dev` (active development)  
+**Last Commit:** `db1aea3` — feat: add replace_in_code tool for semantic C# editing with Roslyn  
+**Repository:** https://github.com/MadQ/RoslynMcp.git  
+**Tool Count:** 23 tools
 
 ---
 
@@ -133,12 +133,15 @@ Feature branches: None (clean)
 
 ---
 
-## Current Tool Count: 20
+## Current Tool Count: 23
 
 ### Tools by Category
 
-**Discovery (5):**
-- search_files, list_types, get_file_outline, get_project_info, get_usings
+**Discovery (6):**
+- search_files, list_files, list_types, get_file_outline, get_project_info, get_usings
+
+**File Editing (2):**
+- replace_in_file, replace_in_code
 
 **Type Understanding (4):**
 - get_type_members, get_type_hierarchy, find_implementations, get_symbol_documentation

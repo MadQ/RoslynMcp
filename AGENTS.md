@@ -82,6 +82,8 @@ When discovering code:
 **Deferred enhancements:**
 - **Semantic search filtering** (SearchFilesTool) — use SyntaxTree to filter by syntax context (comments only, strings only, identifiers only, exclude generated code)
 
+**ALWAYS use RoslynMcp tool when possible** This is very important! It helps to test the tools, dogfood the API, and ensures your agent gets accurate semantic understanding of the codebase. Avoid workarounds like grepping files or spawning builds unless absolutely necessary.
+
 ---
 
 ## Rename Workflow (User-Configurable)

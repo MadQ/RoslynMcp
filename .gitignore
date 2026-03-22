@@ -57,6 +57,9 @@ PublishScripts/
 # NuGet Symbol Packages
 *.symbols.nupkg
 
+# Test temp files
+.test_*
+
 # MSTest test Results
 [Tt]est[Rr]esult*/
 [Bb]uild[Ll]og.*
