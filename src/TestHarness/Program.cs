@@ -1,5 +1,5 @@
 ﻿/// <summary>
-///     Comprehensive test harness for RoslynMcp MVP. Tests all 22 tools against RoslynMcp itself (dogfooding).
+///     Comprehensive test harness for RoslynMcp MVP. Tests all 23 tools against RoslynMcp itself (dogfooding).
 ///     Usage: dotnet run --project TestHarness/TestHarness.csproj
 /// </summary>
 
@@ -12,7 +12,7 @@ var serverProj = Path.Combine(repoRoot, "RoslynMcp", "RoslynMcp.csproj");
 var targetPath = Path.Combine(repoRoot, "RoslynMcp"); // Dogfood: analyze ourselves
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine("  RoslynMcp Test Harness — Testing 22 MVP Tools");
+Console.WriteLine("  RoslynMcp Test Harness — Testing 23 MVP Tools");
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine($"Server:  {serverProj}");
 Console.WriteLine($"Target:  {targetPath}");
@@ -272,12 +272,15 @@ tests.Add(await RunTestAsync(
     data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
 ));
 
-Console.WriteLine("\nFile Editing Tools (3 tests)");
+Console.WriteLine("\nFile Editing Tools (5 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
-// Create a temp file for replace_in_file testing
-var tempTestFile = Path.Combine(targetPath, ".test_replace_temp.cs");
-await File.WriteAllTextAsync(tempTestFile, "// Test line 1\nvar handle = IntPtr.Zero;\n// Test line 3\n");
+// Create temp files for editing tool tests
+var tempTextFile = Path.Combine(targetPath, ".test_replace_temp.cs");
+await File.WriteAllTextAsync(tempTextFile, "// Test line 1\nvar handle = IntPtr.Zero;\n// Test line 3\n");
+
+var tempCodeFile = Path.Combine(targetPath, ".test_code_temp.cs");
+await File.WriteAllTextAsync(tempCodeFile, "class TestClass { private int oldField = 42; }");
 
 tests.Add(await RunTestAsync(
     "replace_in_file: dry run literal replacement",
@@ -300,8 +303,24 @@ tests.Add(await RunTestAsync(
     data => data?["matchCount"]?.GetValue<int>() == 1 && data?["changedLines"]?.AsArray()[0]?.GetValue<int>() == 2
 ));
 
-// Clean up temp file
-try { File.Delete(tempTestFile); } catch { }
+tests.Add(await RunTestAsync(
+    "replace_in_code: dry run identifier replacement",
+    "replace_in_code",
+    new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true },
+    data => data?["error"] is null && data?["changeCount"] is not null
+));
+
+tests.Add(await RunTestAsync(
+    "replace_in_code: apply identifier replacement",
+    "replace_in_code",
+    new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "newField", replacement = "finalField", dryRun = false },
+    data => data?["error"] is null && data?["applied"] is not null
+));
+
+// Clean up temp files
+try { File.Delete(tempTextFile); } catch { }
+try { File.Delete(tempCodeFile); } catch { }
+try { File.Delete(Path.Combine(targetPath, ".test_code_debug.cs")); } catch { }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 

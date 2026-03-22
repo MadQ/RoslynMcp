@@ -1,11 +1,20 @@
 ﻿
 add a better replace_string_in_file tool to replace the copilot built-in one? maybe have it take a regex pattern instead of just a string? that way we can do more complex replacements. also, maybe have it return the number of replacements made, or the lines that were changed, or something like that. could be useful for debugging. possibly also make it a 2-step. thoughts?
+  DONE: `replace_in_file` tool with regex support, dry-run, changed line tracking. (commit ae4bc0c)
 
-i'de prefer actually using Roslyn to do the replacements. keep tool, but hav it use Roslyn to parse the file, find the matching nodes, and replace them with the new string. this would be more robust than just doing a string replace on the file contents. also, it's in-line with the idea of using Roslyn for code analysis and manipulation. let's discuss.
+i'de prefer using Roslyn to do the work in our editing tools. i.e., have it use Roslyn to parse a file, find the matching nodes, and replace them with the new string. this would be more robust than just doing a string replace on the file contents. also, it's in-line with the idea of using Roslyn for code analysis and manipulation. let's discuss.
+  DECISION: Keep both approaches. `replace_in_file` = text-level (any file), `replace_in_code` (future) = Roslyn syntax-level (C# only).
+  ROADMAP: Add `replace_in_code` tool for semantic C# manipulation:
+    - Match by node kind (MethodDeclaration, FieldDeclaration, etc.)
+    - Optional text pattern within nodes
+    - Preserve formatting/trivia automatically
+    - Validate syntax after edit
+    - Start simple (node kind + text), expand to query DSL if needed
 
 we need to be better about exceptions in our tools. this happened: Unhandled exception. System.IO.DirectoryNotFoundException: Could not find a part of the path 'J:\Projects\RoslynMcp\src\RoslynMcp\RoslynMcp\.test_replace_temp.cs'.
    at Microsoft.Win32.SafeHandles.SafeFileHandle.CreateFile(String fullPath, FileMode mode, FileAccess access, FileShare share, FileOptions options)
 let's make sure to catch explicit exception typesm though.
+  DONE: All tools hardened with specific exception types. Guidelines in CONTRIBUTING.md. (commit 40172f6)
 
 document this?: yeah, there are a lot of tools! Roslyn is pretty awesome.
 

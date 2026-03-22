@@ -152,9 +152,33 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 
 ## Tools
 
+RoslynMcp provides 23 tools for code analysis and manipulation. **All tools work on the in-memory Roslyn compilation** — no external processes or file system dependencies beyond the initial load.
+
+### Guiding Your AI Agent
+
+**Add these instructions to your agent's context** (e.g., in your project's `.github/copilot-instructions.md`, `AGENTS.md`, or custom instructions) to help it choose the right tools:
+
+```markdown
+When working with C# code:
+- **Prefer `replace_in_code`** for editing C# files — it validates syntax, preserves formatting, and understands code structure
+- Use `replace_in_file` only for non-C# files (JSON, markdown, etc.) or when literal text replacement is needed
+
+When discovering code:
+- `search_files` — finds content (regex patterns across file contents)
+- `list_files` — enumerates by name (glob patterns, fast)
+- `find_references` — finds usage (semantic, Roslyn-based)
+```
+
+**Why this matters:** RoslynMcp provides both text-level (`replace_in_file`) and semantic (`replace_in_code`) editing tools. Without explicit guidance, agents may default to the simpler text-based tool even when the semantic tool is more appropriate. The guidance above ensures your agent uses the most robust tool for C# code changes.
+
+### Available Tools
+
 | Tool | Description |
 |------|-------------|
 | `search_files` | Searches workspace files for lines matching a regex pattern. Returns file paths, line numbers, and matching text with paging support. Use this to discover code locations before applying Roslyn tools. |
+| `list_files` | Lists files matching a glob pattern (e.g., `*.cs`, `**/*.json`). Returns relative paths without content. Fast enumeration for file discovery. |
+| `replace_in_file` | Text-level find-and-replace with regex support. Works on any file type. Returns changed line numbers and match count. Supports dry-run preview. |
+| `replace_in_code` | **Semantic C# editing** — replaces syntax nodes by kind (MethodDeclaration, FieldDeclaration, IdentifierName, etc.). Validates syntax, preserves formatting. C# files only. |
 | `get_type_members` | Returns detailed information about all members of a type with full signatures (parameter types, return types, modifiers) and XML doc summaries. Use this to understand a type's API surface. |
 | `get_diagnostics` | Returns compiler errors and warnings for the whole project or a single file. No build process. |
 | `find_references` | Finds every reference to a named symbol (type, method, field, property) across the project. |

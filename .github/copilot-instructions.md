@@ -56,6 +56,8 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 | `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
 | `SearchFilesTool` | `search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
 | `ListFilesTool` | `list_files` — enumerate files matching glob pattern (fast file listing, no content) |
+| `ReplaceInFileTool` | `replace_in_file` — text-level find/replace with regex support (any file type) |
+| `ReplaceInCodeTool` | `replace_in_code` — semantic C# node replacement using Roslyn (validates syntax, preserves formatting) |
 | `RespawnTool` | `respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `TypeMembersTool` | `get_type_members` — enumerate members with full signatures + doc summaries |
 | `DiagnosticsTool` | `get_diagnostics` — compiler errors and warnings for project or single file |
@@ -85,6 +87,17 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
 - **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms)
+
+**Tool Selection Guidance:**
+
+When editing C# code, **actively prefer `replace_in_code`** over `replace_in_file`:
+- `replace_in_code` is semantically aware, validates syntax, preserves formatting/trivia
+- `replace_in_file` is for text/config files or when you need literal text replacement
+
+When discovering files/content:
+- `list_files` — fast glob enumeration (find files by name/path)
+- `search_files` — content search (find lines matching regex pattern)
+- `find_references` — semantic symbol search (Roslyn-based, finds usage across project)
 
 **Deferred enhancements:**
 - **Semantic search filtering** (SearchFilesTool) — use SyntaxTree to filter by syntax context (comments only, strings only, identifiers only, exclude generated code)
