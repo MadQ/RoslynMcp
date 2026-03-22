@@ -564,13 +564,13 @@ All builds pass, tests pass, documentation is clean. No known bugs or blocking i
 
 ### Build & Test
 ```sh
-dotnet build RoslynMcp/RoslynMcp.csproj
-dotnet run --project TestHarness/TestHarness.csproj
+dotnet build src/RoslynMcp/RoslynMcp.csproj
+dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
 ### Publish Executable
 ```sh
-dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
 ### MCP Config (Current Recommended Approach)

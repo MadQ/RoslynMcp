@@ -281,9 +281,11 @@ Example `.mcp.json`:
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--project", "path/to/RoslynMcp/src/RoslynMcp/RoslynMcp.csproj", "--", "."]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["."]
     }
   }
 }
 ```
+
+> **Note:** Use the published executable (see README.md "Building the Executable" section). The `dotnet run` approach was abandoned due to multi-target confusion and recursive behavior when dogfooding.
