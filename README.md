@@ -163,6 +163,8 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 | `apply_rename` | Applies or rejects a pending rename by token. |
 | `get_project_info` | Returns project metadata: target framework, language version, output kind, nullable setting, NuGet packages, additional files. |
 | `build_project` | Builds the project and returns structured diagnostics. **Smart behavior:** checks Roslyn diagnostics first and skips the build if errors exist (fast path). If Roslyn reports no errors, runs `dotnet build` to validate MSBuild configuration. Set `forceBuild=true` to bypass Roslyn — use sparingly. |
+| `clean_solution` | Cleans the solution by removing all build artifacts (bin/ and obj/ directories). Use when the build is in a bad state or before a fresh rebuild. |
+| `restore_packages` | Restores NuGet packages for the solution. Use after adding package references or when packages are missing. |
 | `get_file_outline` | Returns a structured outline of a file: types and their members (signatures only, no bodies). Saves tokens by avoiding full file reads. |
 | `get_type_hierarchy` | Returns the inheritance hierarchy for a type: base types, interfaces, and derived types found in the project. |
 | `find_implementations` | Finds all types that implement an interface/abstract class, or all methods that override a virtual/abstract member. |

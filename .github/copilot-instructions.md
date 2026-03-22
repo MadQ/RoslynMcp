@@ -51,6 +51,8 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 | `ApplyRenameTool` | `apply_rename` — approve/reject a pending rename by token |
 | `ProjectInfoTool` | `get_project_info` — project metadata (TFM, language version, packages, etc.) |
 | `BuildTool` | `build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true` |
+| `CleanSolutionTool` | `clean_solution` — remove all build artifacts (bin/obj directories) |
+| `RestorePackagesTool` | `restore_packages` — restore NuGet packages |
 | `FileOutlineTool` | `get_file_outline` — type/member structure without bodies (token saver) |
 | `TypeHierarchyTool` | `get_type_hierarchy` — base types, interfaces, derived types |
 | `FindImplementationsTool` | `find_implementations` — concrete implementations of interfaces/abstract members |
