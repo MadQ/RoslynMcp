@@ -22,11 +22,11 @@ Working rules for GitHub Copilot and any other AI agent in this repo.
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 
 Two projects:
-- `RoslynMcp/RoslynMcp.csproj` — MCP server
-- `TestHarness/TestHarness.csproj` — local testing client
+- `src/RoslynMcp/RoslynMcp.csproj` — MCP server
+- `src/TestHarness/TestHarness.csproj` — local testing client
 
 ```
-dotnet build RoslynMcp/RoslynMcp.csproj
+dotnet build src/RoslynMcp/RoslynMcp.csproj
 ```
 
 ---
@@ -133,7 +133,7 @@ PowerShell session with known issues. Rules:
 
 ## Testing
 
-**Local testing:** use `TestHarness/TestHarness.csproj` — runs a single tool call and prints the JSON response.
+**Local testing:** use `src/TestHarness/TestHarness.csproj` — runs a single tool call and prints the JSON response.
 
 **Live testing:** configure in `.mcp.json` and test via GitHub Copilot or any MCP client.
 
@@ -144,7 +144,7 @@ Example `.mcp.json`:
     "roslyn": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
+      "args": ["run", "--project", "path/to/RoslynMcp/src/RoslynMcp/RoslynMcp.csproj", "--", "."]
     }
   }
 }

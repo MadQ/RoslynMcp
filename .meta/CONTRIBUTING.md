@@ -34,11 +34,11 @@ By contributing, you're helping AI agents work better with C# code. That's worth
 1. **Fork the repository** and create a feature branch from `dev`
 2. **Follow the code style** (see `.github/copilot-instructions.md`)
 3. **Add tests** for new tools or significant changes
-4. **Update documentation** (README.md, AGENTS.md, etc.)
+4. **Update documentation** (README.md, .meta/AGENTS.md, etc.)
 5. **Run the test suite** and ensure all tests pass:
    ```bash
-   dotnet build RoslynMcp/RoslynMcp.csproj
-   dotnet run --project TestHarness/TestHarness.csproj
+   dotnet build src/RoslynMcp/RoslynMcp.csproj
+   dotnet run --project src/TestHarness/TestHarness.csproj
    ```
 6. **Commit with clear messages** — describe *what* and *why*, not *how*
 7. **Submit PR against `dev` branch** (not `main`)
@@ -64,14 +64,14 @@ cd RoslynMcp
 dotnet build RoslynMcp.slnx
 
 # Or build a specific target
-dotnet build RoslynMcp/RoslynMcp.csproj -f net10.0
+dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ```
 
 ### Running Tests
 
 ```bash
 # Run the comprehensive test suite (16 tests covering all 18 tools)
-dotnet run --project TestHarness/TestHarness.csproj
+dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
 Tests run RoslynMcp against itself (dogfooding). All tests should pass before submitting a PR.
@@ -82,7 +82,7 @@ Publish a Release build and configure your MCP client to use it:
 
 1. Publish RoslynMcp:
    ```bash
-   dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+   dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
    ```
 
 2. Configure your MCP client:
@@ -134,7 +134,7 @@ That said, some patterns make collaboration easier:
 
 ## Adding a New Tool
 
-1. **Create tool class** in `RoslynMcp/Tools/`:
+1. **Create tool class** in `src/RoslynMcp/Tools/`:
    ```csharp
    [McpServerToolType]
    internal sealed class MyNewTool(WorkspaceManager workspace)
@@ -155,11 +155,11 @@ That said, some patterns make collaboration easier:
    builder.Services.AddTransient<MyNewTool>();
    ```
 
-3. **Add tests** in `TestHarness/Program.cs`
+3. **Add tests** in `src/TestHarness/Program.cs`
 
 4. **Update documentation**:
    - README.md (tools table)
-   - AGENTS.md (architecture table)
+   - .meta/AGENTS.md (architecture table)
    - `.github/copilot-instructions.md` (architecture table)
 
 ---
@@ -168,18 +168,23 @@ That said, some patterns make collaboration easier:
 
 ```
 RoslynMcp/
-├── RoslynMcp/              # Main MCP server project
-│   ├── Tools/              # Tool implementations
-│   ├── Program.cs          # MCP protocol + DI setup
-│   ├── WorkspaceManager.cs # Compilation management
-│   ├── ApprovalStore.cs    # Rename approval state
-│   └── SolutionDiff.cs     # Unified diff generation
-├── TestHarness/            # Test suite
+├── src/
+│   ├── RoslynMcp/              # Main MCP server project
+│   │   ├── Tools/              # Tool implementations
+│   │   ├── Program.cs          # MCP protocol + DI setup
+│   │   ├── WorkspaceManager.cs # Compilation management
+│   │   ├── ApprovalStore.cs    # Rename approval state
+│   │   └── SolutionDiff.cs     # Unified diff generation
+│   └── TestHarness/            # Test suite
 ├── .github/                # GitHub-specific files
+├── .meta/                  # Project metadata
+│   ├── AGENTS.md           # Agent-specific rules
+│   ├── CONTRIBUTING.md     # This file
+│   ├── HANDOFF.md          # Session handoff notes
+│   └── HumanNotes.txt      # Developer notes
 ├── README.md               # Main documentation
-├── AGENTS.md               # Agent-specific rules
 ├── INSTALLATION.md         # Setup instructions
-└── TEST_RESULTS.md         # Test results log
+└── CHANGELOG.md            # Version history
 ```
 
 ---
