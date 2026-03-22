@@ -49,6 +49,8 @@ builder.Services
     .AddTransient<SearchFilesTool>()
     .AddTransient<ProjectInfoTool>()
     .AddTransient<BuildTool>()
+    .AddTransient<CleanSolutionTool>()
+    .AddTransient<RestorePackagesTool>()
     .AddTransient<FileOutlineTool>()
     .AddTransient<TypeHierarchyTool>()
     .AddTransient<FindImplementationsTool>()

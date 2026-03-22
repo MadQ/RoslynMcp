@@ -2,6 +2,10 @@
 
 Working rules for GitHub Copilot and any other AI agent in this repo.
 
+**Ignore files called HumanNotes.txt** These are for human reference only and may contain notes that would confuse an AI assistant.
+
+---
+
 > **Coding style rules** (braces, naming, modern C#) live in
 > [`.github/copilot-instructions.md`](.github/copilot-instructions.md). Don't duplicate them here.
 
@@ -41,6 +45,8 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 | `ApplyRenameTool` | `apply_rename` — approve/reject a pending rename by token |
 | `ProjectInfoTool` | `get_project_info` — project metadata (TFM, language version, packages, etc.) |
 | `BuildTool` | `build_project` — smart build: check Roslyn diagnostics first, skip if errors; run `dotnet build` if clean |
+| `CleanSolutionTool` | `clean_solution` — remove all build artifacts (bin/obj directories) |
+| `RestorePackagesTool` | `restore_packages` — restore NuGet packages |
 | `FileOutlineTool` | `get_file_outline` — type/member structure without bodies (token saver) |
 | `TypeHierarchyTool` | `get_type_hierarchy` — base types, interfaces, derived types |
 | `FindImplementationsTool` | `find_implementations` — concrete implementations of interfaces/abstract members |

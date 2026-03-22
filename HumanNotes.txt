@@ -1,0 +1,13 @@
+﻿this: `"args": ["/path/to/your/project"]` needs to go.
+ MCP should be configurable globally, not project specific.
+ maybe have project parameter on the tools instead? maybe both/hybrid? idk.
+
+
+search_tool: enhance with syntax-tree-based semantic filtering.
+  or maybe have a separate tool for that? like "semantic_search" or something.
+  
+do we really need the DI stuff (`builder.Services.AddTransient<MyNewTool>()`? i think the C# MCP SDK docs say otherwise, but i can't find that now.
+
+is there a roslyn way to `dotnet build` (`clean`/`restore`) without `dotnet`?
+
+
