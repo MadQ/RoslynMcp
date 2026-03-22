@@ -2,7 +2,7 @@
 add a better replace_string_in_file tool to replace the copilot built-in one? maybe have it take a regex pattern instead of just a string? that way we can do more complex replacements. also, maybe have it return the number of replacements made, or the lines that were changed, or something like that. could be useful for debugging. possibly also make it a 2-step. thoughts?
   DONE: `replace_in_file` tool with regex support, dry-run, changed line tracking. (commit ae4bc0c)
 
-i'de prefer using Roslyn to do the work in our editing tools. i.e., have it use Roslyn to parse a file, find the matching nodes, and replace them with the new string. this would be more robust than just doing a string replace on the file contents. also, it's in-line with the idea of using Roslyn for code analysis and manipulation. let's discuss.
+i'd prefer using Roslyn to do the work in our editing tools. i.e., have it use Roslyn to parse a file, find the matching nodes, and replace them with the new string. this would be more robust than just doing a string replace on the file contents. also, it's in-line with the idea of using Roslyn for code analysis and manipulation. let's discuss.
   DECISION: Keep both approaches. `replace_in_file` = text-level (any file), `replace_in_code` (future) = Roslyn syntax-level (C# only).
   ROADMAP: Add `replace_in_code` tool for semantic C# manipulation:
     - Match by node kind (MethodDeclaration, FieldDeclaration, etc.)
@@ -17,6 +17,7 @@ let's make sure to catch explicit exception typesm though.
   DONE: All tools hardened with specific exception types. Guidelines in CONTRIBUTING.md. (commit 40172f6)
 
 document this?: yeah, there are a lot of tools! Roslyn is pretty awesome.
+  DONE: Added to README.md "Why" section — acknowledges tool count, explains it's Roslyn's power surface. (commit b715e2f+)
 
 --we'll want to document 
 

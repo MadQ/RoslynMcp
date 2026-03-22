@@ -148,6 +148,8 @@ AI coding agents that work on C# via text-based tools (file reads, regex search,
 
 RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm and incrementally updated via `FileSystemWatcher`.
 
+**Yes, there are a lot of tools** (23 at last count). That's not bloat — it's Roslyn's power surface. Each tool exposes a specific Roslyn capability that agents can't get any other way. Think of it as a curated API for semantic code understanding, not a grab bag of features.
+
 ---
 
 ## Tools
