@@ -3,6 +3,10 @@ add a better replace_string_in_file tool to replace the copilot built-in one? ma
 
 i'de prefer actually using Roslyn to do the replacements. keep tool, but hav it use Roslyn to parse the file, find the matching nodes, and replace them with the new string. this would be more robust than just doing a string replace on the file contents. also, it's in-line with the idea of using Roslyn for code analysis and manipulation. let's discuss.
 
+we need to be better about exceptions in our tools. this happened: Unhandled exception. System.IO.DirectoryNotFoundException: Could not find a part of the path 'J:\Projects\RoslynMcp\src\RoslynMcp\RoslynMcp\.test_replace_temp.cs'.
+   at Microsoft.Win32.SafeHandles.SafeFileHandle.CreateFile(String fullPath, FileMode mode, FileAccess access, FileShare share, FileOptions options)
+let's make sure to catch explicit exception typesm though.
+
 document this?: yeah, there are a lot of tools! Roslyn is pretty awesome.
 
 --we'll want to document 

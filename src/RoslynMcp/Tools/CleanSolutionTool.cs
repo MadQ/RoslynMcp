@@ -14,7 +14,16 @@ internal sealed class CleanSolutionTool(WorkspaceManager workspace)
     public async Task<CleanResult> CleanSolution()
     {
         var rootPath = workspace.RootPath;
-        var projectFile = FindProjectFile(rootPath);
+
+        string? projectFile;
+
+        try {
+            projectFile = FindProjectFile(rootPath);
+        }
+        catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
+
+            return new CleanResult(false, "Failed to access project directory.", ex.Message);
+        }
 
         if(projectFile is null)
             return new CleanResult(false, "No .csproj file found in target directory.", null);
@@ -30,14 +39,31 @@ internal sealed class CleanSolutionTool(WorkspaceManager workspace)
             CreateNoWindow = true
         };
 
-        var process = Process.Start(startInfo);
+        Process process;
 
-        if(process is null)
-            return new CleanResult(false, "Failed to start dotnet clean process.", null);
+        try {
+            process = Process.Start(startInfo) ?? throw new InvalidOperationException("Process.Start returned null.");
+        }
+        catch(Win32Exception ex) {
 
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+            return new CleanResult(false, "Failed to start dotnet process. Is dotnet installed and in PATH?", ex.Message);
+        }
+        catch(InvalidOperationException ex) {
+
+            return new CleanResult(false, "Failed to start dotnet clean process.", ex.Message);
+        }
+
+        string output, error;
+
+        try {
+            output = await process.StandardOutput.ReadToEndAsync();
+            error  = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+        }
+        catch(IOException ex) {
+
+            return new CleanResult(false, "Failed to read process output.", ex.Message);
+        }
 
         var success = process.ExitCode == 0;
         var message = success

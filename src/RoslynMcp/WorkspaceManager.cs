@@ -90,8 +90,15 @@ internal sealed class WorkspaceManager : IDisposable
 			try {
 				AddOrUpdateDocument(adhoc, projectId, fullPath);
 			}
-			catch {
-				// File may be locked; next access will catch it.
+			catch(IOException) {
+
+				// File may be temporarily locked by another process (editor save, build, etc.).
+				// Non-fatal: workspace remains valid, next file change event will retry.
+			}
+			catch(UnauthorizedAccessException) {
+
+				// File permissions changed or moved outside workspace.
+				// Non-fatal: workspace remains valid, subsequent operations will reflect current state.
 			}
 		}
 	}
@@ -237,12 +244,19 @@ internal sealed class WorkspaceManager : IDisposable
         if(isMSBuild || workspace is not AdhocWorkspace adhoc)
             return;
 
-        try {
+		try {
 			AddOrUpdateDocument(adhoc, projectId, e.FullPath);
 		}
-		catch {
-            // File may be locked mid-write; the next change event will catch it.
-        }
+		catch(IOException) {
+
+			// File may be locked mid-write by editor/build process.
+			// Non-fatal: FileSystemWatcher will fire another event when write completes.
+		}
+		catch(UnauthorizedAccessException) {
+
+			// File permissions changed or file moved outside workspace.
+			// Non-fatal: workspace remains valid, next successful event updates state.
+		}
 	}
 
 	private void OnFileDeleted(object sender, FileSystemEventArgs e)
@@ -260,10 +274,18 @@ internal sealed class WorkspaceManager : IDisposable
 
         RemoveDocument(adhoc, projectId, e.OldFullPath);
 
-        try {
+		try {
 			AddOrUpdateDocument(adhoc, projectId, e.FullPath);
 		}
-		catch {
-        }
+		catch(IOException) {
+
+			// File may be locked or inaccessible during rename operation.
+			// Non-fatal: workspace updated with old file removal; new file load can retry on next access.
+		}
+		catch(UnauthorizedAccessException) {
+
+			// File permissions changed during rename.
+			// Non-fatal: workspace remains valid without the renamed file.
+		}
 	}
 }

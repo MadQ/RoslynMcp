@@ -1,5 +1,7 @@
 ﻿using System.Xml.Linq;
 using System.ComponentModel;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -100,7 +102,9 @@ internal sealed class GetSymbolDocumentationTool(WorkspaceManager workspace)
 
             return new DocumentationComment(summary, parameters, returns, remarks, example);
         }
-        catch {
+        catch(XmlException) {
+
+            // Malformed XML documentation — return empty rather than failing the tool call.
             return new DocumentationComment();
         }
     }

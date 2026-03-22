@@ -61,7 +61,29 @@ internal sealed class BuildTool(WorkspaceManager workspace)
 
         // Slow path: run actual dotnet build.
         var args = BuildArgs(workspace.CsprojPath, targetFramework);
-        var (output, elapsed, exitCode) = await RunDotnetAsync(args);
+
+        string output;
+        TimeSpan elapsed;
+        int exitCode;
+
+        try {
+            (output, elapsed, exitCode) = await RunDotnetAsync(args);
+        }
+        catch(InvalidOperationException ex) {
+
+            return new {
+                succeeded     = false,
+                errors        = Array.Empty<BuildDiagnostic>(),
+                warnings      = Array.Empty<BuildDiagnostic>(),
+                source        = "msbuild",
+                build_skipped = true,
+                skip_reason   = ex.Message,
+                duration_ms   = 0,
+                exit_code     = (int?) null,
+                error_details = ex.InnerException?.Message
+            };
+        }
+
         var diagnostics = ParseMSBuildDiagnostics(output, workspace.RootPath);
         var succeeded   = exitCode == 0;
 
@@ -94,9 +116,18 @@ internal sealed class BuildTool(WorkspaceManager workspace)
             CreateNoWindow         = true,
         };
 
-        using var process = new Process { StartInfo = psi };
+        Process process;
+
+        try {
+            process = new Process { StartInfo = psi };
+            process.Start();
+        }
+        catch(Win32Exception ex) {
+
+            throw new InvalidOperationException("Failed to start dotnet process. Is dotnet installed and in PATH?", ex);
+        }
+
         var sw = Stopwatch.StartNew();
-        process.Start();
 
         // Read both streams concurrently to avoid deadlocks on large output.
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
@@ -105,8 +136,19 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         await process.WaitForExitAsync();
         sw.Stop();
 
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
+        string stdout, stderr;
+
+        try {
+            stdout = await stdoutTask;
+            stderr = await stderrTask;
+        }
+        catch(IOException ex) {
+
+            throw new InvalidOperationException("Failed to read build output.", ex);
+        }
+        finally {
+            process.Dispose();
+        }
 
         // MSBuild writes diagnostics to stdout; stderr is typically empty or SDK noise.
         var combined = string.IsNullOrWhiteSpace(stderr)
@@ -187,7 +229,9 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         try {
             return Path.GetRelativePath(rootPath, path);
         }
-        catch {
+        catch(ArgumentException) {
+
+            // Paths on different roots (e.g., different drives on Windows) — return absolute path.
             return path;
         }
     }

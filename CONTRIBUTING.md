@@ -176,6 +176,113 @@ All analyzer diagnostics are warnings only, never errors. Code fixes are provide
 
 ---
 
+## Exception Handling in Tools
+
+Tools are the user-facing API surface. Exception handling must be explicit, informative, and never silent.
+
+### Rules for User-Facing Tools
+
+**✅ Do:**
+- Catch **specific exception types** (`ArgumentException`, `IOException`, `UnauthorizedAccessException`, etc.)
+- Return structured error objects:
+  ```csharp
+  return new {
+      error = "Short description",
+      details = ex.Message
+  };
+  ```
+- Document expected exceptions in code comments
+
+**❌ Don't:**
+- Bare `catch { }` without explanation — always catch specific types or add a comment explaining why broad catch is needed
+- Swallow exceptions that indicate programming errors (`NullReferenceException`, `InvalidOperationException` from bugs)
+- Return generic "something went wrong" messages — be specific about what failed
+
+### Examples
+
+**Good** — specific exception, structured error:
+```csharp
+try {
+    var regex = new Regex(pattern);
+}
+catch(ArgumentException ex) {
+    return new {
+        error = "Invalid regex pattern",
+        details = ex.Message
+    };
+}
+```
+
+**Acceptable** — broad catch with clear justification:
+```csharp
+try {
+    AddOrUpdateDocument(adhoc, projectId, fullPath);
+}
+catch {
+    // File may be locked mid-write by another process;
+    // next FileSystemWatcher event will retry automatically.
+}
+```
+
+**Bad** — silent, broad catch with no context:
+```csharp
+try {
+    return ParseXmlDocumentation(symbol);
+}
+catch {
+    return null;  // Why? What failed? Should the user know?
+}
+```
+
+### Internal Helpers vs User-Facing Tools
+
+**User-facing tools** (methods with `[McpServerTool]`) must return explicit errors.
+
+**Internal helpers** (private methods, file watchers, background processing) may use broader catches if:
+1. Failure is non-fatal and recoverable
+2. A comment explains the failure scenario and why it's safe to ignore
+3. The outer system remains in a valid state
+
+When in doubt, catch specific types and log or return the error.
+
+### Exception Filters
+
+Exception filters (`when` clauses) have a reputation for being obscure or "too clever." That's mostly cargo-cult thinking. They're just another tool — and a good one when the alternative is copy-pasting the same `catch` block five times. Try them. You might be pleasantly surprised.
+
+**Use `when` clauses to consolidate multiple related exception types or add conditional logic:**
+
+```csharp
+// Consolidate multiple file system exceptions
+catch(Exception ex) when(ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException) {
+    return new {
+        error = "File system error",
+        details = ex.Message
+    };
+}
+
+// Conditional catch based on exception state
+catch(IOException ex) when(IsTransientError(ex)) {
+    // Retry logic or ignore
+}
+
+// Log-and-rethrow pattern (filter returns false, so catch never executes)
+catch(Exception ex) when(LogError(ex)) {
+    // Never reached — filter logs and returns false
+}
+
+static bool LogError(Exception ex) {
+    Console.Error.WriteLine($"[ERROR] {ex}");
+    return false; // Don't catch, just observe
+}
+```
+
+Exception filters are especially useful for:
+- **DRYing up multiple catch blocks** with similar handling
+- **Conditional catching** based on exception properties (error codes, inner exceptions)
+- **Logging without catching** (filter returns false after logging)
+
+---
+
 ## Project Structure
 
 ```
