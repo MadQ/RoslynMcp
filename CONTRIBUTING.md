@@ -4,6 +4,18 @@ Thank you for your interest in contributing to RoslynMcp! This document provides
 
 ---
 
+## Recognition
+
+**All contributors will be acknowledged!** Your contributions — whether code, documentation, bug reports, or ideas — help make RoslynMcp better.
+
+- **Code contributors:** Listed in release notes and CHANGELOG.md
+- **Significant contributions:** May be acknowledged in README.md or a dedicated CONTRIBUTORS file
+- **First-time contributors:** Especially welcome — we're happy to help you get started!
+
+By contributing, you're helping AI agents work better with C# code. That's worth celebrating. 🎉
+
+---
+
 ## How to Contribute
 
 ### Reporting Issues
@@ -188,3 +200,5 @@ RoslynMcp/
 ## License
 
 By contributing, you agree that your contributions will be licensed under the MIT License.
+
+**You retain copyright** to your contributions, but grant the project and users the rights specified in the MIT License. Your name will appear in the git history and (for significant contributions) in release notes and acknowledgments.
