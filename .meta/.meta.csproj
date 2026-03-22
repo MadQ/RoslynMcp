@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.Build.NoTargets/3.7.56">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <!-- This project contains documentation and metadata files only -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\AGENTS.md" Link="AGENTS.md" />
+    <None Include="..\CONTRIBUTING.md" Link="CONTRIBUTING.md" />
+    <None Include="..\HANDOFF.md" Link="HANDOFF.md" />
+    <None Include="..\HumanNotes.txt" Link="HumanNotes.txt" />
+    <None Include="..\POST_PUSH_CHECKLIST.md" Link="POST_PUSH_CHECKLIST.md" />
+    <None Include="..\RELEASE_CHECKLIST.md" Link="RELEASE_CHECKLIST.md" />
+    <None Include="..\TEST_RESULTS.md" Link="TEST_RESULTS.md" />
+  </ItemGroup>
+</Project>

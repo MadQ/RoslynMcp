@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path=".meta/.meta.csproj" />
   <Project Path="src/RoslynMcp/RoslynMcp.csproj" />
   <Project Path="src/TestHarness/TestHarness.csproj" />
 </Solution>
