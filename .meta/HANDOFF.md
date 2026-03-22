@@ -1,14 +1,61 @@
 ﻿# Session Handoff — March 22, 2026
 
 **Date:** 2026-03-22  
-**Branch:** `dev` (up to date with origin/dev)  
-**Last Commit:** `4369a4b` — Merge feature/clean-restore-tools  
+**Branch:** `feature/restructure-folders` (pushed, ready to merge)  
+**Last Commit:** `c82db98` — Restructure: move code to src/, metadata to .meta/  
 **Repository:** https://github.com/MadQ/RoslynMcp.git (private, ready for public)  
-**Tool Count:** 20 tools (was 18 at session start)
+**Tool Count:** 20 tools
 
 ---
 
-## What Was Accomplished This Session
+## Current Session (March 22, 2026 — Part 2)
+
+### **Project Restructure: src/ and .meta/** 🏗️
+
+**Goal:** Clean up root directory, separate project metadata from code, eliminate manual Solution Items management.
+
+**Changes:**
+- ✅ Created `.meta/` folder for project metadata (dot-prefix keeps VS from auto-adding to solution)
+- ✅ Created `src/` folder for code projects (industry standard layout)
+- ✅ Moved metadata files to `.meta/`:
+  - AGENTS.md, CONTRIBUTING.md, HANDOFF.md
+  - POST_PUSH_CHECKLIST.md, RELEASE_CHECKLIST.md, TEST_RESULTS.md
+  - HumanNotes.txt
+- ✅ Moved code to `src/`:
+  - RoslynMcp/ (entire project)
+  - TestHarness/ (entire project)
+- ✅ Updated all cross-references:
+  - .github/copilot-instructions.md
+  - .meta/AGENTS.md
+  - .meta/CONTRIBUTING.md
+  - README.md
+  - INSTALLATION.md
+- ✅ Updated solution file (removed Solution Items folder, updated project paths)
+- ✅ Updated CI workflow (.github/workflows/build.yml)
+- ✅ Build verified (all targets compile successfully)
+
+**Root directory now contains:**
+- README.md, LICENSE, CHANGELOG.md, INSTALLATION.md (user-facing)
+- .gitattributes, .gitignore (git config)
+- .github/ (GitHub-specific)
+- RoslynMcp.slnx (solution file)
+- .meta/ (project metadata, hidden)
+- src/ (all code)
+
+**Benefits:**
+- Clean, professional root directory
+- Standard .NET OSS layout (src/ is industry convention)
+- No manual Solution Items management in Visual Studio
+- Clear separation: product docs vs project metadata vs code
+- Scales well for future additions (docs/ remains available for user guides)
+
+**Status:** Committed and pushed to feature branch, ready to merge to dev
+
+---
+
+## Previous Session (March 22, 2026 — Part 1)
+
+### What Was Accomplished
 
 ### 1. **Public GitHub Release Preparation** ✅
 - Comprehensive housekeeping completed
