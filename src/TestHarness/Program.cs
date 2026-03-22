@@ -1,5 +1,5 @@
 ﻿/// <summary>
-///     Comprehensive test harness for RoslynMcp MVP. Tests all 21 tools against RoslynMcp itself (dogfooding).
+///     Comprehensive test harness for RoslynMcp MVP. Tests all 22 tools against RoslynMcp itself (dogfooding).
 ///     Usage: dotnet run --project TestHarness/TestHarness.csproj
 /// </summary>
 
@@ -12,7 +12,7 @@ var serverProj = Path.Combine(repoRoot, "RoslynMcp", "RoslynMcp.csproj");
 var targetPath = Path.Combine(repoRoot, "RoslynMcp"); // Dogfood: analyze ourselves
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine("  RoslynMcp Test Harness — Testing 21 MVP Tools");
+Console.WriteLine("  RoslynMcp Test Harness — Testing 22 MVP Tools");
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine($"Server:  {serverProj}");
 Console.WriteLine($"Target:  {targetPath}");
@@ -134,7 +134,7 @@ Console.WriteLine("✓ MCP session initialized\n");
 
 var tests = new List<(bool pass, string message)>();
 
-Console.WriteLine("Discovery Tools (5 tests)");
+Console.WriteLine("Discovery Tools (6 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
@@ -149,6 +149,13 @@ tests.Add(await RunTestAsync(
     "list_types",
     new { namespaceFilter = "RoslynMcp.Tools" },
     data => data?.AsArray().Count > 10
+));
+
+tests.Add(await RunTestAsync(
+    "list_files: enumerate tool files with glob pattern",
+    "list_files",
+    new { pattern = "**/*Tool.cs", take = 50 },
+    data => data?["count"]?.GetValue<int>() > 20 && data?["files"]?.AsArray().Any(f => f?.GetValue<string>().Contains("Tool.cs") == true) == true
 ));
 
 tests.Add(await RunTestAsync(

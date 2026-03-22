@@ -55,6 +55,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 |-----------|----------------|
 | `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
 | `SearchFilesTool` | `search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
+| `ListFilesTool` | `list_files` — enumerate files matching glob pattern (fast file listing, no content) |
 | `RespawnTool` | `respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `TypeMembersTool` | `get_type_members` — enumerate members with full signatures + doc summaries |
 | `DiagnosticsTool` | `get_diagnostics` — compiler errors and warnings for project or single file |

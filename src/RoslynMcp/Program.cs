@@ -55,6 +55,7 @@ builder.Services
     .AddTransient<TypeHierarchyTool>()
     .AddTransient<FindImplementationsTool>()
     .AddTransient<ListTypesTool>()
+    .AddTransient<ListFilesTool>()
     .AddTransient<GetUsingsTool>()
     .AddTransient<GetSymbolDocumentationTool>()
     .AddTransient<GetSymbolDefinitionTool>()
