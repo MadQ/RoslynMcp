@@ -1,13 +1,19 @@
 ﻿# Installation Guide
 
+# RoslynMcp Installation Guide
+
 Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 > **⚠️ Not all configurations have been verified in production.**  
 > GitHub Copilot and Claude Desktop are tested and confirmed working. Other clients follow documented MCP patterns but may require adjustments. Contributions and corrections welcome!
 
+> **Configuration reference:** See [Configuration section in README.md](README.md#configuration) for detailed argument explanations, troubleshooting, and examples.
+
 > **Quick start:** Most clients use one of two patterns:
 > - **Workspace config**: `.mcp.json` or similar file in your project root
 > - **Global config**: Client-specific settings file in your home directory
+
+> **⚠️ Important:** RoslynMcp targets multiple .NET versions. You **must** specify `-f net10.0` (or `net8.0`/`net11.0`) in the `args` array, or `dotnet run` will fail with "Your project targets multiple frameworks."
 
 ---
 
@@ -59,7 +65,7 @@ Add to `.mcp.json` at your workspace root:
     "roslyn": {
       "type": "stdio",
       "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "--", "."]
+      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "."]
     }
   }
 }
@@ -67,9 +73,9 @@ Add to `.mcp.json` at your workspace root:
 
 **Path notes:**
 - Build once first: `dotnet build path/to/RoslynMcp/RoslynMcp.csproj`
-- Use relative path from workspace root to `RoslynMcp.csproj`
+- Use absolute or relative path to `RoslynMcp.csproj`
+- `-f net10.0` is **required** (or `net8.0`/`net11.0`)
 - Last argument (`.`) is the directory containing `.cs` files to analyze
-- Defaults to current working directory if omitted
 
 **Restart:** Reload window or restart GitHub Copilot extension after editing `.mcp.json`.
 

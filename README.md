@@ -13,14 +13,14 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 ## Quick Start
 
 ```bash
-# Clone the repository
+# Clone and build
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-
-# Build the server
 dotnet build RoslynMcp/RoslynMcp.csproj
+```
 
-# Add to your MCP client config (e.g., .mcp.json)
+**Add to your MCP client config** (e.g., `.mcp.json`):
+```json
 {
   "servers": {
     "roslyn": {
@@ -32,7 +32,99 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 }
 ```
 
-See **[INSTALLATION.md](INSTALLATION.md)** for detailed setup instructions for all supported clients.
+See [Configuration](#configuration) below for argument details and [INSTALLATION.md](INSTALLATION.md) for client-specific setup.
+
+---
+
+## Configuration
+
+### MCP Client Configuration
+
+RoslynMcp is invoked as a stdio MCP server. Configuration goes in your MCP client's config file (e.g., `.mcp.json` for GitHub Copilot).
+
+**Basic pattern:**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "/path/to/your/project"]
+    }
+  }
+}
+```
+
+### Command Line Arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--project` | Yes | Absolute path to `RoslynMcp.csproj` |
+| `-f` / `--framework` | **Yes** | Target framework: `net8.0`, `net10.0`, or `net11.0` (required for multi-targeted projects) |
+| `--` | Yes | Separator between dotnet args and RoslynMcp args |
+| `<target-path>` | Yes | Path to the project/directory to analyze (`.` for workspace root, or absolute path) |
+| `--no-build` | Recommended | Skips rebuild (assumes you've already built once with `dotnet build`) |
+
+**Why `-f` is required:** RoslynMcp targets .NET 8/10/11. Without specifying the framework, `dotnet run` will fail with "Your project targets multiple frameworks."
+
+### Configuration Examples
+
+**Development (local builds):**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "C:/dev/RoslynMcp/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "."]
+    }
+  }
+}
+```
+
+**Using published executable (future):**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "roslyn-mcp",
+      "args": ["."]
+    }
+  }
+}
+```
+*Requires: `dotnet tool install --global RoslynMcp` (coming soon)*
+
+**Multi-project workspace:**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "C:/dev/RoslynMcp/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "C:/my-workspace/MyApp.Web"]
+    }
+  }
+}
+```
+*Points RoslynMcp at a specific project directory within a larger workspace*
+
+### Troubleshooting
+
+**Error: "Your project targets multiple frameworks"**
+- **Cause:** Missing `-f` argument
+- **Fix:** Add `-f net10.0` (or `net8.0`/`net11.0`) to args
+
+**Error: "Could not find project file"**
+- **Cause:** Relative paths in `--project` don't work reliably across MCP clients
+- **Fix:** Use absolute paths
+
+**Server doesn't load target project:**
+- Check that the target path contains a `.csproj` file (or `.cs` files for AdhocWorkspace fallback)
+- Check server stderr logs for "Target: ..." to see what path was detected
+
+See **[INSTALLATION.md](INSTALLATION.md)** for client-specific examples and full troubleshooting guide.
 
 ---
 
