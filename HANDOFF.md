@@ -3,14 +3,58 @@
 
 **Date:** 2026-03-22  
 **Branch:** `dev` (active development)  
-**Last Commit:** TBD — docs: consolidate agent instructions into AGENTS.md  
+**Last Commit:** TBD — feat: add semantic_search tool with Roslyn syntax filtering  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
-**Tool Count:** 23 tools  
-**Test Status:** 22/22 passing ✅
+**Tool Count:** 24 tools  
+**Test Status:** 23/23 passing ✅
 
 ---
 
-## Current Session (March 22, 2026 — Part 5)
+## Current Session (March 22, 2026 — Part 6)
+
+### **New Tool: semantic_search** 🔍
+
+**Goal:** Implement context-aware C# search using Roslyn syntax-tree filtering for precise code discovery.
+
+**Changes:**
+- ✅ Created `SemanticSearchTool.cs` with full Roslyn syntax filtering:
+  - Supports 6 contexts: `comments`, `strings`, `identifiers`, `code`, `xmldocs`, `all`
+  - Excludes generated code by default (`[GeneratedCode]` attribute, auto-generated comments)
+  - Returns structured results with syntax context metadata
+  - C#-only (skips non-C# files automatically)
+- ✅ Added test to TestHarness (Discovery tools: 6 → 7 tests)
+  - Test validates TODO comment filtering with correct context metadata
+  - All 23 tests passing (including new semantic_search test)
+- ✅ Updated documentation:
+  - Tool count: 23 → 24 across all docs
+  - Added `SemanticSearchTool` to architecture tables in AGENTS.md, README.md
+  - Removed "deferred enhancements" note about semantic search
+  - Updated tool selection guidance to include `semantic_search`
+- ✅ Build verified (all targets compile successfully)
+
+**Design Decision:**
+- Separate tool (`semantic_search`) vs extending `search_files` with flags
+- **Rationale:** Clear separation of concerns (text search vs semantic search), follows pattern of `replace_in_file` vs `replace_in_code`, allows C#-specific features without complicating text-based search
+
+**Tool capabilities:**
+- Search within comments only (find TODOs, FIXMEs)
+- Search within strings only (find hardcoded values)
+- Search within identifiers only (find variable/type names)
+- Search within XML docs only (find documentation)
+- Search within code only (exclude comments/strings)
+- Search all contexts (with context metadata per match)
+
+**Benefits:**
+- More precise than `search_files` for C# code
+- Enables targeted searches (e.g., "find all TODO comments", "find all string literals containing 'password'")
+- Automatically excludes generated code
+- Future-proof for additional C#-specific filters
+
+**Tool count now: 24** (was 23)
+
+---
+
+## Previous Session (March 22, 2026 — Part 5)
 
 ### **Documentation Consolidation: AGENTS.md** 📚
 

@@ -1,5 +1,5 @@
 ﻿/// <summary>
-///     Comprehensive test harness for RoslynMcp MVP. Tests all 23 tools against RoslynMcp itself (dogfooding).
+///     Comprehensive test harness for RoslynMcp MVP. Tests all 24 tools against RoslynMcp itself (dogfooding).
 ///     Usage: dotnet run --project TestHarness/TestHarness.csproj
 /// </summary>
 
@@ -12,7 +12,7 @@ var serverProj = Path.Combine(repoRoot, "RoslynMcp", "RoslynMcp.csproj");
 var targetPath = Path.Combine(repoRoot, "RoslynMcp"); // Dogfood: analyze ourselves
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine("  RoslynMcp Test Harness — Testing 23 MVP Tools");
+Console.WriteLine("  RoslynMcp Test Harness — Testing 24 MVP Tools");
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine($"Server:  {serverProj}");
 Console.WriteLine($"Target:  {targetPath}");
@@ -134,7 +134,7 @@ Console.WriteLine("✓ MCP session initialized\n");
 
 var tests = new List<(bool pass, string message)>();
 
-Console.WriteLine("Discovery Tools (6 tests)");
+Console.WriteLine("Discovery Tools (7 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
@@ -142,6 +142,13 @@ tests.Add(await RunTestAsync(
     "search_files",
     new { pattern = "WorkspaceManager", filePattern = "*.cs", take = 10 },
     data => data?["matches"]?.AsArray().Count > 0
+));
+
+tests.Add(await RunTestAsync(
+    "semantic_search: find TODO comments only",
+    "semantic_search",
+    new { pattern = "TODO", context = "comments", take = 10 },
+    data => data?["matches"]?.AsArray().Count > 0 && data?["matches"]?[0]?["context"]?.GetValue<string>() == "comment"
 ));
 
 tests.Add(await RunTestAsync(

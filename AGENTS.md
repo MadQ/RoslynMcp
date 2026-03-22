@@ -58,6 +58,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 |-----------|----------------|
 | `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
 | `SearchFilesTool` | `search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
+| `SemanticSearchTool` | `semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
 | `ListFilesTool` | `list_files` — enumerate files matching glob pattern (fast file listing, no content) |
 | `ReplaceInFileTool` | `replace_in_file` — text-level find/replace with regex support (any file type) |
 | `ReplaceInCodeTool` | `replace_in_code` — semantic C# node replacement using Roslyn (validates syntax, preserves formatting) |
@@ -100,10 +101,8 @@ When editing C# code, **actively prefer `replace_in_code`** over `replace_in_fil
 When discovering files/content:
 - `list_files` — fast glob enumeration (find files by name/path)
 - `search_files` — content search (find lines matching regex pattern)
+- `semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs, code)
 - `find_references` — semantic symbol search (Roslyn-based, finds usage across project)
-
-**Deferred enhancements:**
-- **Semantic search filtering** (SearchFilesTool) — use SyntaxTree to filter by syntax context (comments only, strings only, identifiers only, exclude generated code)
 
 ---
 

@@ -154,7 +154,7 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 
 ## Tools
 
-RoslynMcp provides 23 tools for code analysis and manipulation. **All tools work on the in-memory Roslyn compilation** — no external processes or file system dependencies beyond the initial load.
+RoslynMcp provides 24 tools for code analysis and manipulation. **All tools work on the in-memory Roslyn compilation** — no external processes or file system dependencies beyond the initial load.
 
 ### Guiding Your AI Agent
 
@@ -167,6 +167,7 @@ When working with C# code:
 
 When discovering code:
 - `search_files` — finds content (regex patterns across file contents)
+- `semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs)
 - `list_files` — enumerates by name (glob patterns, fast)
 - `find_references` — finds usage (semantic, Roslyn-based)
 ```
