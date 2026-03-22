@@ -3,14 +3,57 @@
 
 **Date:** 2026-03-22  
 **Branch:** `dev` (active development)  
-**Last Commit:** TBD — feat: add semantic_search tool with Roslyn syntax filtering  
+**Last Commit:** `92890cc` — docs: fix stale references and add doc review checklist  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
 **Tool Count:** 24 tools  
 **Test Status:** 23/23 passing ✅
 
 ---
 
-## Current Session (March 22, 2026 — Part 6)
+## Current Session (March 22, 2026 — Part 7)
+
+### **Documentation Audit & Checklist** 📋
+
+**Goal:** Prepare documentation for public repository release by fixing stale references and establishing systematic review process.
+
+**Changes:**
+- ✅ Created `DOC_REVIEW_CHECKLIST.md`:
+  - Quick validation commands using `rg` (ripgrep)
+  - Manual review sections (structure, tool count, code examples, installation, features)
+  - File-specific review guidance
+  - Integration with development workflow
+  - Focused on public repo readiness
+- ✅ Fixed stale documentation references:
+  - AGENTS.md: Updated `.mcp.json` example from `dotnet run` to published executable approach
+  - HANDOFF.md: Updated build/publish commands to include `src/` directory
+- ✅ Verified public-facing docs:
+  - README.md ✅ (correct paths, tool count, no placeholders)
+  - INSTALLATION.md ✅ (correct paths, no internal references)
+  - CONTRIBUTING.md ✅ (welcoming, accurate, references AGENTS.md correctly)
+  - AGENTS.md ✅ (correct MCP config, testing paths)
+
+**Design Decision:**
+- Manual checklist (no automation yet)
+- **Rationale:** Simple, flexible, sufficient for MVP; automation can come later if docs drift becomes painful
+
+**Checklist features:**
+- ✅ Quick grep/rg commands for common issues
+- ✅ Organized by concern (structure, tool count, code examples, etc.)
+- ✅ File-specific sections for key docs
+- ✅ Integration guidance (when to run full audit vs quick checks)
+- ✅ Future automation ideas documented but deferred
+
+**Benefits:**
+- Systematic approach to doc maintenance
+- Catches drift before it accumulates
+- Public repo readiness verification
+- Low overhead (manual, only run before major milestones)
+
+**Status:** Repository documentation is now audit-ready for public release! 🎉
+
+---
+
+## Previous Session (March 22, 2026 — Part 6)
 
 ### **New Tool: semantic_search** 🔍
 
