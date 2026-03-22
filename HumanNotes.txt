@@ -30,8 +30,14 @@ search_tool: enhance with syntax-tree-based semantic filtering.
   or maybe have a separate tool for that? like "semantic_search" or something.
   
 do we really need the DI stuff (`builder.Services.AddTransient<MyNewTool>()`? i think the C# MCP SDK docs say otherwise, but i can't find that now. the c# MCP SDK docs are here: https://csharp.sdk.modelcontextprotocol.io/
+  RESOLVED: NO! Manual .AddTransient<> registrations are redundant. .WithToolsFromAssembly() auto-discovers
+  and registers all [McpServerToolType] classes. Removed 25 lines of redundant code. See DI_REGISTRATION_ANALYSIS.md.
+  All 22 tests still pass. 🏴‍☠️
 
 
 is there a roslyn way to `dotnet build` (`clean`/`restore`) without `dotnet`?
-
+  RESOLVED: No, and that's the right answer. See MSBUILD_API_ANALYSIS.md for detailed rationale.
+  TL;DR: Roslyn handles diagnostics (fast, in-process). MSBuild handles build orchestration, NuGet, multi-project.
+  Hybrid approach is optimal — Roslyn for speed, MSBuild for correctness. Same logic applies to ProjectInfoTool's
+  regex-based TFM/package inference — works 99% of the time, MSBuild fallback adds complexity for marginal benefit.
 

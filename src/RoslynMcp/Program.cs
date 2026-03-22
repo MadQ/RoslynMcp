@@ -38,35 +38,6 @@ builder.Services
     .WithToolsFromAssembly()
 ;
 
-// Register tool types so DI can inject WorkspaceManager and ApprovalStore.
-builder.Services
-    .AddTransient<TypeMembersTool>()
-    .AddTransient<DiagnosticsTool>()
-    .AddTransient<FindReferencesTool>()
-    .AddTransient<SymbolInfoTool>()
-    .AddTransient<PreviewRenameTool>()
-    .AddTransient<ApplyRenameTool>()
-    .AddTransient<SearchFilesTool>()
-    .AddTransient<ProjectInfoTool>()
-    .AddTransient<BuildTool>()
-    .AddTransient<CleanSolutionTool>()
-    .AddTransient<RestorePackagesTool>()
-    .AddTransient<FileOutlineTool>()
-    .AddTransient<TypeHierarchyTool>()
-    .AddTransient<FindImplementationsTool>()
-    .AddTransient<ListTypesTool>()
-    .AddTransient<ListFilesTool>()
-    .AddTransient<GetUsingsTool>()
-    .AddTransient<GetSymbolDocumentationTool>()
-    .AddTransient<GetSymbolDefinitionTool>()
-    .AddTransient<GetSymbolsInScopeTool>()
-    .AddTransient<ReplaceInFileTool>()
-    .AddTransient<ReplaceInCodeTool>()
-#if DEBUG
-    .AddTransient<RespawnTool>()
-#endif
-;
-
 var host = builder.Build();
 
 await host.RunAsync();
