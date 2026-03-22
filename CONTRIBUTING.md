@@ -130,6 +130,12 @@ That said, some patterns make collaboration easier:
 
 **When in doubt:** match the surrounding code. If the file uses a different convention consistently, follow that instead of the guide.
 
+### Code Quality Tools
+
+**No linting or automated style enforcement.** The project's style guidelines are deliberate and don't align with standard linter rulesets. A linter that disrespects your guidelines is worse than no linter at all.
+
+If automated checks become necessary, focus on narrow, high-value rules that align with existing style — things like enforcing `nint` over `IntPtr`, catching personal pronouns in comments, or flagging stale `TODO` comments without context.
+
 ---
 
 ## Adding a New Tool
