@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -71,3 +72,4 @@ internal sealed class GetUsingsTool(WorkspaceManager workspace)
 
     private sealed record UsingDirective(string? Namespace, string? Alias);
 }
+#endif

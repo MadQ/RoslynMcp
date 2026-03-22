@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -120,3 +121,4 @@ internal sealed class SearchFilesTool(WorkspaceManager workspace)
         public required string Text { get; init; }
     }
 }
+#endif

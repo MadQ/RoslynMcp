@@ -1,4 +1,5 @@
-﻿using System.Xml.Linq;
+#if FALSE
+using System.Xml.Linq;
 using System.ComponentModel;
 using System.Xml;
 using Microsoft.CodeAnalysis;
@@ -130,3 +131,4 @@ internal sealed class GetSymbolDocumentationTool(WorkspaceManager workspace)
 
     private sealed record ParameterDoc(string Name, string Description);
 }
+#endif

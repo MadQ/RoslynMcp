@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -47,3 +48,4 @@ internal sealed class DiagnosticsTool(WorkspaceManager workspace)
         return $"{d.Severity.ToString()[0]}  {file}:{line}:{col}  {d.Id}  {d.GetMessage()}";
     }
 }
+#endif

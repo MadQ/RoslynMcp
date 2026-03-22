@@ -5,35 +5,45 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class TypeMembersTool(WorkspaceManager workspace)
+internal sealed class TypeMembersTool : RoslynMcpTool
 {
+    public TypeMembersTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns detailed information about all members of a type (class, struct, enum, interface). " +
         "Includes full signatures with parameter types, return types, modifiers, and XML doc summaries. " +
         "For enums, returns the member names. Use this to understand a type's API surface.")]
     public object GetTypeMembers(
-        [Description("The simple or fully-qualified type name, e.g. 'ShowWindowCommand' or 'ScreenMon.RuleMode'.")] string typeName,
-        [Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")] string? memberKind = null)
+        [Description("The simple or fully-qualified type name, e.g. 'ShowWindowCommand' or 'ScreenMon.RuleMode'.")]
+        string typeName,
+
+        [Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")]
+        string? memberKind = null,
+
+        [Description(ProjectPathDescription)]
+        string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
-        var type        = FindType(compilation, typeName);
+        return ExecuteWithProject(projectPath, compilation => {
 
-        if(type is null)
-            return new { error = $"Type '{typeName}' not found in the project." };
+            var type = FindType(compilation, typeName);
 
-        var members = type.GetMembers()
-            .Where(m => !m.IsImplicitlyDeclared)
-            .Where(m => memberKind is null || MatchesKind(m, memberKind))
-            .Select(FormatMember)
-            .Where(m => m is not null)
-            .ToArray()
-        ;
+            if(type is null)
+                return new { error = $"Type '{typeName}' not found in the project." };
 
-        return new {
-            type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-            type_kind = type.TypeKind.ToString().ToLowerInvariant(),
-            members   = members.Length > 0 ? members : []
-        };
+            var members = type.GetMembers()
+                .Where(m => !m.IsImplicitlyDeclared)
+                .Where(m => memberKind is null || MatchesKind(m, memberKind))
+                .Select(FormatMember)
+                .Where(m => m is not null)
+                .ToArray()
+            ;
+
+            return new {
+                type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                type_kind = type.TypeKind.ToString().ToLowerInvariant(),
+                members   = members.Length > 0 ? members : []
+            };
+        });
     }
 
     private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)

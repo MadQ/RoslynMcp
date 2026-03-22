@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -29,4 +30,5 @@ internal sealed class RespawnTool
         };
     }
 }
+#endif
 #endif

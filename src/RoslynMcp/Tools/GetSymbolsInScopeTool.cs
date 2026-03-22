@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -121,3 +122,4 @@ internal sealed class GetSymbolsInScopeTool(WorkspaceManager workspace)
 
     private sealed record SymbolInfo(string Kind, string Name, string? Type, string? ContainingType);
 }
+#endif

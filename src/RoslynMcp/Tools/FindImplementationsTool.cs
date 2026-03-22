@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -99,3 +100,4 @@ internal sealed class FindImplementationsTool(WorkspaceManager workspace)
         return $"{containingType}.{method.Name}({parameters}): {returnType}";
     }
 }
+#endif

@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -80,3 +81,4 @@ internal sealed class ListTypesTool(WorkspaceManager workspace)
         return $"{kind}: {name}";
     }
 }
+#endif

@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -391,3 +392,4 @@ internal sealed class SemanticSearchTool(WorkspaceManager workspace)
         public string Context { get; set; } = "";
     }
 }
+#endif

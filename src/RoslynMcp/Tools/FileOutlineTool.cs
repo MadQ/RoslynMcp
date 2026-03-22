@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -164,3 +165,4 @@ internal sealed class FileOutlineTool(WorkspaceManager workspace)
     private sealed record TypeOutline(string Kind, string Name, MemberOutline[] Members);
     private sealed record MemberOutline(string Kind, string Signature);
 }
+#endif

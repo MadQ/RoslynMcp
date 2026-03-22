@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -103,3 +104,4 @@ internal sealed class ProjectInfoTool(WorkspaceManager workspace)
 
     private sealed record PackageRef(string Name, string Version);
 }
+#endif

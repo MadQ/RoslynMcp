@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -207,3 +208,4 @@ internal sealed class ReplaceInCodeTool(WorkspaceManager workspace)
         return kind != SyntaxKind.None;
     }
 }
+#endif

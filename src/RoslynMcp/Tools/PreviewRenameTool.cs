@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
 using ModelContextProtocol.Server;
@@ -64,3 +65,4 @@ internal sealed record PreviewRenameResult(
     string  Message,
     bool    PreConfirmed
 );
+#endif

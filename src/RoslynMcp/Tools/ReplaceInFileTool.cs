@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 
@@ -155,3 +156,4 @@ internal sealed class ReplaceInFileTool(WorkspaceManager workspace)
         return lo + 1;
     }
 }
+#endif

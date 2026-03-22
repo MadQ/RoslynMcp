@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
@@ -88,3 +89,4 @@ internal sealed record RestoreResult(
     string Message,
     string? Details
 );
+#endif

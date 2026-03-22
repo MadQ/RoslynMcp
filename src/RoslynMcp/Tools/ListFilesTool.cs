@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.Extensions.FileSystemGlobbing;
 using ModelContextProtocol.Server;
 
@@ -68,3 +69,4 @@ internal sealed class ListFilesTool(WorkspaceManager workspace)
         };
     }
 }
+#endif

@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -245,3 +246,4 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         int    Column
     );
 }
+#endif

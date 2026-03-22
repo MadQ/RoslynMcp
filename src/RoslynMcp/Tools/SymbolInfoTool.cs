@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+#if FALSE
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -87,3 +88,4 @@ internal sealed class SymbolInfoTool(WorkspaceManager workspace)
         return string.Join("  |  ", parts);
 	}
 }
+#endif
