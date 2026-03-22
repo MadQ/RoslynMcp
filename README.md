@@ -67,6 +67,7 @@ dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net
 **Choose your target framework:**
 - `net8.0` — .NET 8 (LTS)
 - `net10.0` — .NET 10 (STS, recommended)
+- `net11.0` — .NET 11 (preview, local dev only — excluded from CI until stable)
 
 > **Why published executable?** Early experiments with `dotnet run` in `.mcp.json` produced interesting recursive behavior when dogfooding RoslynMcp on itself. Abandoned in favor of the simpler, more reliable executable approach.
 

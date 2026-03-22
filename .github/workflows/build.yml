@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main, dev ]
 
+env:
+  CI: true  # Exclude .NET 11 from CI builds (not available on GitHub runners yet)
+
 jobs:
   build:
     runs-on: ${{ matrix.os }}
@@ -13,7 +16,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         dotnet-version: ['8.0.x', '10.0.x']
-        # Note: .NET 11 preview may not be available on all runners
 
     steps:
     - uses: actions/checkout@v4
