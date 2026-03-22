@@ -96,6 +96,20 @@ RoslynMcp is invoked as a stdio MCP server. Configuration goes in your MCP clien
 ```
 *Requires: `dotnet tool install --global RoslynMcp` (coming soon)*
 
+**Using published executable (local):**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["."]
+    }
+  }
+}
+```
+*Faster startup than `dotnet run`. See [Building a Local Executable](#building-a-local-executable) below.*
+
 **Multi-project workspace:**
 ```json
 {
@@ -109,6 +123,28 @@ RoslynMcp is invoked as a stdio MCP server. Configuration goes in your MCP clien
 }
 ```
 *Points RoslynMcp at a specific project directory within a larger workspace*
+
+### Building a Local Executable
+
+If you want to use RoslynMcp without dogfooding (i.e., not using `dotnet run`), publish a Release build:
+
+```bash
+cd /path/to/RoslynMcp
+dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+```
+
+Then update your MCP config to point to the executable:
+```json
+"command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+"args": ["."]
+```
+
+**Benefits:**
+- ✅ Faster startup (no `dotnet run` overhead)
+- ✅ No build step required
+- ✅ True production mode
+
+**Note:** Avoid using Visual Studio's "Publish" UI — it may incorrectly treat the console app as a web app (`WebToolsException`). Use `dotnet publish` command line instead.
 
 ### Troubleshooting
 
