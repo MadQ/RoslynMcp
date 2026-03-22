@@ -1,8 +1,38 @@
 ﻿# RoslynMcp
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![.NET](https://img.shields.io/badge/.NET-8%20%7C%2010%20%7C%2011-512BD4)](https://dotnet.microsoft.com/)
+[![MCP](https://img.shields.io/badge/MCP-1.1.0-blue)](https://modelcontextprotocol.io/)
+
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes Roslyn-powered code intelligence tools to AI coding agents. Gives agents resolved type information, live diagnostics, cross-file references, and symbol resolution — without spawning a build or leaving the process.
 
 **Works with any MCP-compatible client:** GitHub Copilot, Claude Desktop, Cline, Roo Code, Continue, and more.
+
+---
+
+## Quick Start
+
+```bash
+# Clone the repository
+git clone https://github.com/MadQ/RoslynMcp.git
+cd RoslynMcp
+
+# Build the server
+dotnet build RoslynMcp/RoslynMcp.csproj
+
+# Add to your MCP client config (e.g., .mcp.json)
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/RoslynMcp.csproj", "-f", "net10.0", "--", "."]
+    }
+  }
+}
+```
+
+See **[INSTALLATION.md](INSTALLATION.md)** for detailed setup instructions for all supported clients.
 
 ---
 
@@ -166,3 +196,23 @@ Files are written directly to disk. `WorkspaceManager`'s `FileSystemWatcher` det
 ## License
 
 MIT
+
+---
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+**Quick contribution checklist:**
+- Fork the repository
+- Create a feature branch
+- Make your changes with tests
+- Run the test suite: `dotnet run --project TestHarness/TestHarness.csproj`
+- Submit a pull request
+
+---
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+

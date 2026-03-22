@@ -361,3 +361,52 @@ For large codebases (>100K LOC), consider:
 - Try the [tools reference](README.md#tools) to see what RoslynMcp can do
 - Read about [workspace modes](README.md#workspace-modes) to understand MSBuildWorkspace vs AdhocWorkspace
 - Check out the [write operations](README.md#write-operations) for rename previewing and applying
+
+---
+
+## Troubleshooting
+
+### Server fails to start
+
+**Error:** `Your project targets multiple frameworks. Specify which framework to run using '--framework'.`
+
+**Solution:** Add `-f net10.0` (or net8.0/net11.0) to the args:
+``json
+`args`: [`run`, `--no-build`, `--project`, `path/to/RoslynMcp.csproj`, `-f`, `net10.0`, `--`, `.]`
+````n
+### No type resolution (AdhocWorkspace fallback)
+
+**Symptom:** NuGet types (`List<T>`, `HttpClient`) not resolved.
+
+**Cause:** No `.csproj` file in target directory.
+
+**Solution:** Ensure RoslynMcp is pointed at a directory containing a `.csproj` file for full MSBuildWorkspace support.
+
+### Stale compilation after file changes
+
+**Cause:** FileSystemWatcher may miss rapid changes.
+
+**Solution:** Tools automatically rebuild on next call. For immediate refresh, call any tool again.
+
+### NETSDK1209 warnings in output
+
+**Cause:** Targeting .NET 11 with older Visual Studio version.
+
+**Impact:** None — these warnings are filtered from `build_project` output automatically.
+
+### MCP client doesn't see tools
+
+**Checklist:**
+1. Server process started successfully (check client logs)
+2. MCP session initialized (`tools/list` should return 18 tools)
+3. Target directory is correct (check server stderr for `Target: ...`)
+4. Rebuild RoslynMcp if code changed: `dotnet build RoslynMcp/RoslynMcp.csproj`
+
+---
+
+## Support
+
+- **Documentation:** [README.md](README.md), [AGENTS.md](AGENTS.md), [TEST_RESULTS.md](TEST_RESULTS.md)
+- **Issues:** [GitHub Issues](https://github.com/MadQ/RoslynMcp/issues)
+- **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
+
