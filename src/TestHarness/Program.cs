@@ -1,5 +1,5 @@
 ﻿/// <summary>
-///     Comprehensive test harness for RoslynMcp MVP. Tests all 18 tools against RoslynMcp itself (dogfooding).
+///     Comprehensive test harness for RoslynMcp MVP. Tests all 21 tools against RoslynMcp itself (dogfooding).
 ///     Usage: dotnet run --project TestHarness/TestHarness.csproj
 /// </summary>
 
@@ -12,7 +12,7 @@ var serverProj = Path.Combine(repoRoot, "RoslynMcp", "RoslynMcp.csproj");
 var targetPath = Path.Combine(repoRoot, "RoslynMcp"); // Dogfood: analyze ourselves
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine("  RoslynMcp Test Harness — Testing 18 MVP Tools");
+Console.WriteLine("  RoslynMcp Test Harness — Testing 21 MVP Tools");
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine($"Server:  {serverProj}");
 Console.WriteLine($"Target:  {targetPath}");
@@ -264,6 +264,37 @@ tests.Add(await RunTestAsync(
     new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceManager" },
     data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
 ));
+
+Console.WriteLine("\nFile Editing Tools (3 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+// Create a temp file for replace_in_file testing
+var tempTestFile = Path.Combine(targetPath, ".test_replace_temp.cs");
+await File.WriteAllTextAsync(tempTestFile, "// Test line 1\nvar handle = IntPtr.Zero;\n// Test line 3\n");
+
+tests.Add(await RunTestAsync(
+    "replace_in_file: dry run literal replacement",
+    "replace_in_file",
+    new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = true },
+    data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false
+));
+
+tests.Add(await RunTestAsync(
+    "replace_in_file: apply literal replacement",
+    "replace_in_file",
+    new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = false },
+    data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true
+));
+
+tests.Add(await RunTestAsync(
+    "replace_in_file: regex replacement with capture groups",
+    "replace_in_file",
+    new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true },
+    data => data?["matchCount"]?.GetValue<int>() == 1 && data?["changedLines"]?.AsArray()[0]?.GetValue<int>() == 2
+));
+
+// Clean up temp file
+try { File.Delete(tempTestFile); } catch { }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 

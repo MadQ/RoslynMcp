@@ -27,11 +27,11 @@ internal sealed class ApprovalStore
     /// </summary>
     public string Register(Solution newSolution, string diff, string symbolKey)
     {
-        var token = Guid.NewGuid().ToString("N")[..12];
+		var token = Guid.NewGuid().ToString("N")[..12];
 
-        lock(syncRoot) {
+		lock(syncRoot) {
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-            pending[token]   = new PendingOperation(newSolution, diff, symbolKey, preConfirmed);
+			pending[token]   = new PendingOperation(newSolution, diff, symbolKey, preConfirmed);
 		}
 
 		return token;

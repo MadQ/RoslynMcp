@@ -59,6 +59,7 @@ builder.Services
     .AddTransient<GetSymbolDocumentationTool>()
     .AddTransient<GetSymbolDefinitionTool>()
     .AddTransient<GetSymbolsInScopeTool>()
+    .AddTransient<ReplaceInFileTool>()
 #if DEBUG
     .AddTransient<RespawnTool>()
 #endif

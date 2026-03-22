@@ -1,4 +1,11 @@
-﻿project restructure: it's little messy atm. i think we should move most of the .md files to a new folder, not `docs`, as that should be for actual documentation. maybe `notes` or something? idk. suggestion something. also, maybe create a `src` folder for the actual code, and move most of the files there. keep the root for github specific files, etc.
+﻿
+add a better replace_string_in_file tool to replace the copilot built-in one? maybe have it take a regex pattern instead of just a string? that way we can do more complex replacements. also, maybe have it return the number of replacements made, or the lines that were changed, or something like that. could be useful for debugging. possibly also make it a 2-step. thoughts?
+
+i'de prefer actually using Roslyn to do the replacements. keep tool, but hav it use Roslyn to parse the file, find the matching nodes, and replace them with the new string. this would be more robust than just doing a string replace on the file contents. also, it's in-line with the idea of using Roslyn for code analysis and manipulation. let's discuss.
+
+document this?: yeah, there are a lot of tools! Roslyn is pretty awesome.
+
+--we'll want to document 
 
 this: `"args": ["/path/to/your/project"]` needs to go.
  MCP should be configurable globally, not project specific.
@@ -8,7 +15,8 @@ this: `"args": ["/path/to/your/project"]` needs to go.
 search_tool: enhance with syntax-tree-based semantic filtering.
   or maybe have a separate tool for that? like "semantic_search" or something.
   
-do we really need the DI stuff (`builder.Services.AddTransient<MyNewTool>()`? i think the C# MCP SDK docs say otherwise, but i can't find that now.
+do we really need the DI stuff (`builder.Services.AddTransient<MyNewTool>()`? i think the C# MCP SDK docs say otherwise, but i can't find that now. the c# MCP SDK docs are here: https://csharp.sdk.modelcontextprotocol.io/
+
 
 is there a roslyn way to `dotnet build` (`clean`/`restore`) without `dotnet`?
 

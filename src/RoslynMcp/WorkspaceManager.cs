@@ -72,7 +72,31 @@ internal sealed class WorkspaceManager : IDisposable
 	/// <summary>Returns the primary project loaded by this manager.</summary>
 	public Project GetProject() => workspace.CurrentSolution.GetProject(projectId)!;
 
-    /// <summary>
+	/// <summary>
+	///     Notifies the workspace that a file has been externally modified (e.g., by a tool).
+	///     For MSBuildWorkspace, invalidates the compilation cache so next GetCompilation() rebuilds.
+	///     For AdhocWorkspace, reloads the file content and invalidates the cache.
+	/// </summary>
+	public void InvalidateFile(string fullPath)
+	{
+		if(isMSBuild) {
+
+			// MSBuildWorkspace tracks files internally — just invalidate the cache.
+			InvalidateCompilation();
+		}
+		else if(workspace is AdhocWorkspace adhoc) {
+
+			// AdhocWorkspace requires manual reload.
+			try {
+				AddOrUpdateDocument(adhoc, projectId, fullPath);
+			}
+			catch {
+				// File may be locked; next access will catch it.
+			}
+		}
+	}
+
+	/// <summary>
     ///     Returns the current Compilation, building it if not yet warm.
     ///     Never returns null after construction.
     /// </summary>

@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <None Include="..\.github\copilot-instructions.md" Link="copilot-instructions.md" />
     <None Include="..\AGENTS.md" Link="AGENTS.md" />
     <None Include="..\CONTRIBUTING.md" Link="CONTRIBUTING.md" />
     <None Include="..\HANDOFF.md" Link="HANDOFF.md" />
