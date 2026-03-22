@@ -28,7 +28,6 @@ dotnet publish RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net
 **Choose your framework:**
 - `net8.0` — .NET 8 (LTS)
 - `net10.0` — .NET 10 (recommended)
-- `net11.0` — .NET 11 (preview, if available)
 
 ### Step 2: Configure Your MCP Client
 
