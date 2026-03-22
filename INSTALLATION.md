@@ -34,12 +34,13 @@ Then reference it in your MCP config as:
 "args": ["path/to/your/project"]
 ```
 
-### For Contributors / Dogfooding (Current)
+### For Contributors / Development (Current)
 
-The examples below use `dotnet run --no-build` which is ideal for:
+The examples below use `dotnet run --no-build` for testing RoslynMcp against **other projects**:
 - Contributing to RoslynMcp development
-- Testing local changes
-- Dogfooding RoslynMcp on itself
+- Testing local changes on external codebases
+
+**For dogfooding RoslynMcp on itself:** Use a published executable (see [README Configuration](README.md#building-a-local-executable)) — `dotnet run` creates a process conflict when analyzing itself.
 
 **Prerequisites:**
 - Clone this repository

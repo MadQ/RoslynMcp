@@ -126,7 +126,7 @@ RoslynMcp is invoked as a stdio MCP server. Configuration goes in your MCP clien
 
 ### Building a Local Executable
 
-If you want to use RoslynMcp without dogfooding (i.e., not using `dotnet run`), publish a Release build:
+To use RoslynMcp without `dotnet run` (or to test RoslynMcp against itself), publish a Release build:
 
 ```bash
 cd /path/to/RoslynMcp
