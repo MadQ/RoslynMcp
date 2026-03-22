@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
 
@@ -15,7 +15,7 @@ internal sealed class ApprovalStore
     // future previews of the same symbol are auto-confirmed without a new token exchange.
     private readonly HashSet<string> sessionApproved = new(StringComparer.Ordinal);
 
-    private readonly object gate = new();
+    private readonly object syncRoot = new();
 
     /// <summary>
     ///     Registers a pending operation and returns its confirmation token.
@@ -25,7 +25,7 @@ internal sealed class ApprovalStore
     {
         var token = Guid.NewGuid().ToString("N")[..12];
 
-        lock(gate) {
+        lock(syncRoot) {
 			var preConfirmed = sessionApproved.Contains(symbolKey);
             pending[token]   = new PendingOperation(newSolution, diff, symbolKey, preConfirmed);
 		}
@@ -39,7 +39,7 @@ internal sealed class ApprovalStore
 	/// </summary>
 	public PendingOperation? Peek(string token)
     {
-        lock(gate)
+        lock(syncRoot)
             return pending.GetValueOrDefault(token);
     }
 
@@ -49,7 +49,7 @@ internal sealed class ApprovalStore
     /// </summary>
     public PendingOperation? Consume(string token, bool approveForSession)
     {
-        lock(gate) {
+        lock(syncRoot) {
 			if(!pending.Remove(token, out var op))
                 return null;
 
@@ -63,13 +63,13 @@ internal sealed class ApprovalStore
 	/// <summary>Discards a token without applying anything.</summary>
 	public bool Reject(string token)
     {
-        lock(gate)
+        lock(syncRoot)
             return pending.Remove(token);
     }
 
     public bool IsSessionApproved(string symbolKey)
     {
-        lock(gate)
+        lock(syncRoot)
             return sessionApproved.Contains(symbolKey);
     }
 }
