@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
+- `undo_last_edit` — revert most recent Roslyn-generated edit (rename, refactoring) from in-memory snapshot
 - NuGet package publication
 - CI/CD pipeline (GitHub Actions)
 - Performance optimizations for large projects

@@ -160,7 +160,22 @@ Add to `.mcp.json` at your workspace root:
 
 ## Write operations
 
-Roslyn's `Renamer` API operates on the `Solution` object and produces a new `Solution` with edits applied — the same data structure already held by `WorkspaceManager`. Symbol rename is two-phase: preview computes the diff and issues a token; apply commits it.
+Roslyn's `Renamer` API operates on the `Solution` object and produces a new `Solution` with edits applied — the same data structure already held by `WorkspaceManager`. Symbol rename is **always two-phase**: preview computes the diff and issues a token; apply commits it.
+
+### Why Two-Phase?
+
+**Safety at scale.** Renames can affect dozens or hundreds of files. The two-phase flow lets agents (and users) review impact before committing:
+
+1. Agent calls `preview_rename` → sees diff affects 47 files across 3 projects
+2. Agent decides: "This is bigger than expected, let me check with the user"
+3. User reviews diff, approves or rejects
+
+**You control the workflow.** Configure your agent's behavior in `.github/copilot-instructions.md` or your MCP client settings:
+- **Conservative:** "Always show preview, never `apply_rename` without my explicit approval"
+- **Balanced:** "Preview large renames (>5 files), auto-apply small ones"
+- **Aggressive:** "Apply renames immediately unless I say otherwise"
+
+The two-phase design supports all three modes — the agent decides when to ask.
 
 ### Tools
 
@@ -175,11 +190,15 @@ Roslyn's `Renamer` API operates on the `Solution` object and produces a new `Sol
 - **`n`** — reject, no files changed
 - **`session`** — apply and auto-approve further renames of the same symbol for the lifetime of the server process
 
+**Note:** This approval is *semantic* (change-level), not *protocol-level*. MCP clients like GitHub Copilot already ask "Allow this tool to run?" at invocation time. RoslynMcp's approval is about **reviewing the diff** before committing, especially for large-scope changes.
+
 `always` is intentionally omitted — `session` already covers the use-case, and persistence would require a config file and permissions infrastructure. You have git. We done tole you once. 🏴‍☠️
 
 ### File mutation strategy
 
 Files are written directly to disk. `WorkspaceManager`'s `FileSystemWatcher` detects the writes and invalidates the compilation automatically.
+
+**Planned:** `undo_last_edit` — reverts the most recent Roslyn-generated edit (rename, refactoring, etc.) by restoring from an in-memory snapshot. Useful for "wait, let me rethink that" moments mid-task.
 
 ---
 

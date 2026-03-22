@@ -61,6 +61,42 @@ dotnet build RoslynMcp/RoslynMcp.csproj
 
 ---
 
+## Rename Workflow (User-Configurable)
+
+**All renames use two-phase flow:** `preview_rename` → review diff → `apply_rename`.
+
+**Why?** Renames can affect dozens/hundreds of files. The two-phase flow lets you review impact before committing — especially important for large/uncertain changes.
+
+### Agent Behavior (Configure Per User)
+
+Users can instruct agents to handle renames conservatively or aggressively:
+
+**Conservative (default recommendation):**
+```
+Always call preview_rename first. Show me the diff.
+Only call apply_rename after I explicitly approve.
+```
+
+**Balanced:**
+```
+For small renames (1-3 files, obvious intent like typo fixes):
+  - Call preview_rename, review diff yourself, auto-apply if safe
+For large renames (>3 files, broad scope, uncertain impact):
+  - Call preview_rename, show me the diff, wait for approval
+```
+
+**Aggressive:**
+```
+Call preview_rename → apply_rename immediately unless I say otherwise.
+I trust you and I have git.
+```
+
+**Session approval:** If user approves a rename with `approval: "session"`, further renames of the same symbol auto-apply for the remainder of the server process (until restart). Use this for bulk renaming tasks.
+
+**Planned feature:** `undo_last_edit` will revert the most recent Roslyn edit (rename, refactoring) from an in-memory snapshot. Useful for "wait, let me rethink that" moments mid-task.
+
+---
+
 ## Git Rules
 
 | Operation | Rule |

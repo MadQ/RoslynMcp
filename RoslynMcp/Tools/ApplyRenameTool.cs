@@ -8,10 +8,12 @@ internal sealed class ApplyRenameTool(WorkspaceManager workspace, ApprovalStore 
 {
     [McpServerTool, Description(
         "Applies or rejects a rename previewed by preview_rename. " +
-        "approval: 'y' = apply once, 'session' = apply and auto-approve this symbol for the session, 'n' = reject.")]
+        "approval: 'y' = apply once, 'session' = apply and auto-approve this symbol for the session, 'n' = reject."
+	)]
     public async Task<string> ApplyRename(
-        [Description("The confirmation token returned by preview_rename.")] string token,
-        [Description("'y' to apply, 'session' to apply and remember for this session, 'n' to reject.")] string approval)
+        [Description("The confirmation token returned by preview_rename."								)] string token,
+        [Description("'y' to apply, 'session' to apply and remember for this session, 'n' to reject."	)] string approval
+	)
     {
         if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			approvals.Reject(token);
