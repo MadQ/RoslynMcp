@@ -92,7 +92,11 @@ Tests run RoslynMcp against itself (dogfooding). All tests should pass before su
 
 **See [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for complete style guide.**
 
-### Quick Summary
+These are guidelines, not laws. The codebase values *clarity* and *intent* over rigid consistency. If you see a better way to express something — even if it deviates from the guide — do it, and explain why in a comment or commit message. Thoughtful departures help the style evolve.
+
+That said, some patterns make collaboration easier:
+
+### General C# Conventions
 
 - **Braces:** same line for control flow, new line for methods/classes
 - **No space** after `if`/`foreach`/`while`
@@ -107,6 +111,8 @@ Tests run RoslynMcp against itself (dogfooding). All tests should pass before su
 - Prefer `async` Roslyn APIs (`GetCompilationAsync`, `FindReferencesAsync`)
 - Return structured objects (anonymous types) from tools, not strings
 - Handle metadata symbols gracefully (e.g., external types like `System.IDisposable`)
+
+**When in doubt:** match the surrounding code. If the file uses a different convention consistently, follow that instead of the guide.
 
 ---
 
