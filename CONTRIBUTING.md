@@ -106,7 +106,7 @@ Publish a Release build and configure your MCP client to use it:
 
 ## Code Style Guidelines
 
-**See [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for complete style guide.**
+**See [`AGENTS.md`](AGENTS.md) for the complete style guide.**
 
 These are guidelines, not laws. The codebase values *clarity* and *intent* over rigid consistency. If you see a better way to express something — even if it deviates from the guide — do it, and explain why in a comment or commit message. Thoughtful departures help the style evolve.
 

@@ -3,14 +3,49 @@
 
 **Date:** 2026-03-22  
 **Branch:** `dev` (active development)  
-**Last Commit:** `957ff14` — docs: session handoff Part 4 - tool hardening and evaluation complete  
+**Last Commit:** TBD — docs: consolidate agent instructions into AGENTS.md  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
 **Tool Count:** 23 tools  
 **Test Status:** 22/22 passing ✅
 
 ---
 
-## Latest Session Summary (March 22, 2026)
+## Current Session (March 22, 2026 — Part 5)
+
+### **Documentation Consolidation: AGENTS.md** 📚
+
+**Goal:** Eliminate duplication between `.github/copilot-instructions.md` and `AGENTS.md`, establish AGENTS.md as the single source of truth for all AI agents.
+
+**Changes:**
+- ✅ Merged all unique content from copilot-instructions.md into AGENTS.md:
+  - Philosophy/tone ("pirate-grade code", "this is a discussion")
+  - "Working with Humans" section
+  - Complete Code Style rules (braces, naming, blank lines, comments, etc.)
+  - MCP Protocol patterns (with code examples)
+  - Roslyn Patterns (with code examples)
+  - ImplicitUsings note
+- ✅ Reduced copilot-instructions.md to minimal shim (28 lines vs 300+)
+  - Now just references AGENTS.md as primary source
+  - Contains only Copilot-specific integration notes
+- ✅ Removed copilot-instructions.md from `.meta/.meta.csproj` (GitHub-specific, not project metadata)
+- ✅ Updated CONTRIBUTING.md reference (copilot-instructions.md → AGENTS.md)
+- ✅ Build verified (all targets compile successfully)
+
+**Benefits:**
+- Single source of truth for all AI agents (not just GitHub Copilot)
+- No more drift between two instruction files
+- AGENTS.md at root is accessible to all agent types
+- Copilot-specific file still exists for Copilot-only overrides
+- 270+ lines of duplication eliminated
+
+**File structure now:**
+- `AGENTS.md` (root) — comprehensive instructions for all agents
+- `.github/copilot-instructions.md` — minimal Copilot-specific shim
+- `.meta/.meta.csproj` — links to AGENTS.md for VS project visibility
+
+---
+
+## Previous Session Summary (March 22, 2026 — Part 4)
 
 This session focused on **tool hardening, cleanup, and evaluation** following feature additions.
 
