@@ -175,7 +175,9 @@ internal sealed class TypeMembersTool(WorkspaceManager workspace)
 
             return string.IsNullOrWhiteSpace(summary) ? null : summary;
         }
-        catch {
+        catch(System.Xml.XmlException) {
+
+            // Malformed XML documentation — return null rather than failing the whole tool call.
             return null;
         }
     }

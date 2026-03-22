@@ -7,6 +7,19 @@
 
 ---
 
+## Working with Humans
+
+**Check for user edits before overwriting.** If you're about to modify a file and notice unexpected changes — formatting tweaks, refactors, added comments, reordered code — pause and ask about the intent before proceeding. The user probably had a reason.
+
+Examples:
+- User added a comment explaining something subtle → don't delete it because it "doesn't match style"
+- User refactored a method while you were planning → don't revert it because you "had a different approach"
+- User added whitespace or reordered declarations → probably intentional, not random
+
+When in doubt: **ask, don't assume.** A thirty-second question beats reverting someone's thoughtful edit.
+
+---
+
 ## What is RoslynMcp?
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes Roslyn-powered code intelligence tools to AI coding agents. Gives agents resolved type information, live diagnostics, cross-file references, and symbol resolution — without spawning a build or leaving the process.
