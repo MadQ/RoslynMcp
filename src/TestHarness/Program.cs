@@ -7,9 +7,9 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
-var repoRoot   = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-var serverProj = Path.Combine(repoRoot, "RoslynMcp", "RoslynMcp.csproj");
-var targetPath = Path.Combine(repoRoot, "RoslynMcp"); // Dogfood: analyze ourselves
+var repoRoot   = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+var serverProj = Path.Combine(repoRoot, "src", "RoslynMcp", "RoslynMcp.csproj");
+var targetPath = Path.Combine(repoRoot, "src", "RoslynMcp"); // Dogfood: analyze ourselves
 
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine("  RoslynMcp Test Harness — Testing 24 MVP Tools");
@@ -108,7 +108,7 @@ async Task<(bool pass, string message)> RunTestAsync(string testName, string too
 
     return pass
         ? (true, $"PASS  [{sw.ElapsedMilliseconds}ms]")
-        : (false, $"FAIL  (validation failed) [{sw.ElapsedMilliseconds}ms]");
+        : (false, $"FAIL  (validation failed: {testName}) [{sw.ElapsedMilliseconds}ms]");
 }
 
 // ── MCP Session Initialization ──────────────────────────────────────────────
@@ -168,21 +168,21 @@ tests.Add(await RunTestAsync(
 tests.Add(await RunTestAsync(
     "get_file_outline: WorkspaceManager structure",
     "get_file_outline",
-    new { filePath = "RoslynMcp/WorkspaceManager.cs" },
+    new { filePath = "WorkspaceManager.cs", projectPath = targetPath },
     data => data?["types"]?.AsArray().Count > 0
 ));
 
 tests.Add(await RunTestAsync(
     "get_project_info: verify TFM and packages",
     "get_project_info",
-    new { },
+    new { projectPath = targetPath },
     data => data?["target_framework"]?.GetValue<string>()?.StartsWith("net") == true
 ));
 
 tests.Add(await RunTestAsync(
     "get_usings: extract using directives from Program.cs",
     "get_usings",
-    new { filePath = "RoslynMcp/Program.cs" },
+    new { filePath = "Program.cs", projectPath = targetPath },
     data => data?["usings"]?.AsArray().Count > 0
 ));
 
@@ -199,7 +199,7 @@ tests.Add(await RunTestAsync(
 tests.Add(await RunTestAsync(
     "get_type_hierarchy: WorkspaceManager inheritance",
     "get_type_hierarchy",
-    new { typeName = "WorkspaceManager" },
+    new { typeName = "WorkspaceManager", projectPath = targetPath },
     data => data?["interfaces"]?.AsArray().Any(i => i?.GetValue<string>().Contains("IDisposable") == true) == true
 ));
 
@@ -223,7 +223,7 @@ Console.WriteLine("────────────────────�
 tests.Add(await RunTestAsync(
     "get_symbol_info: resolve symbol at location",
     "get_symbol_info",
-    new { filePath = "RoslynMcp/Program.cs", line = 10, column = 10 },
+    new { filePath = "Program.cs", line = 10, column = 10, projectPath = targetPath },
     data => data?.GetValue<string>().Contains("Kind:") == true,
     expectJson: false
 ));
@@ -248,7 +248,7 @@ Console.WriteLine("────────────────────�
 tests.Add(await RunTestAsync(
     "get_symbols_in_scope: enumerate symbols at location",
     "get_symbols_in_scope",
-    new { filePath = "RoslynMcp/WorkspaceManager.cs", line = 80, column = 10 },
+    new { filePath = "WorkspaceManager.cs", line = 80, column = 10, projectPath = targetPath },
     data => data?["fields"] is not null || data?["methods"] is not null
 ));
 
@@ -265,7 +265,7 @@ tests.Add(await RunTestAsync(
 tests.Add(await RunTestAsync(
     "build_project: smart Roslyn-first build",
     "build_project",
-    new { },
+    new { projectPath = targetPath },
     data => data?["succeeded"] is not null && data?["source"] is not null
 ));
 
@@ -292,35 +292,35 @@ await File.WriteAllTextAsync(tempCodeFile, "class TestClass { private int oldFie
 tests.Add(await RunTestAsync(
     "replace_in_file: dry run literal replacement",
     "replace_in_file",
-    new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = true },
+    new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = true, projectPath = targetPath },
     data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false
 ));
 
 tests.Add(await RunTestAsync(
     "replace_in_file: apply literal replacement",
     "replace_in_file",
-    new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = false },
+    new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = false, projectPath = targetPath },
     data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true
 ));
 
 tests.Add(await RunTestAsync(
     "replace_in_file: regex replacement with capture groups",
     "replace_in_file",
-    new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true },
+    new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = targetPath },
     data => data?["matchCount"]?.GetValue<int>() == 1 && data?["changedLines"]?.AsArray()[0]?.GetValue<int>() == 2
 ));
 
 tests.Add(await RunTestAsync(
     "replace_in_code: dry run identifier replacement",
     "replace_in_code",
-    new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true },
+    new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true, projectPath = targetPath },
     data => data?["error"] is null && data?["changeCount"] is not null
 ));
 
 tests.Add(await RunTestAsync(
     "replace_in_code: apply identifier replacement",
     "replace_in_code",
-    new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "newField", replacement = "finalField", dryRun = false },
+    new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "newField", replacement = "finalField", dryRun = false, projectPath = targetPath },
     data => data?["error"] is null && data?["applied"] is not null
 ));
 
