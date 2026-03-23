@@ -198,6 +198,7 @@ DocProject/Help/html/
 
 # Click-Once directory
 publish/
+RELEASE_NOTES_*.md
 publish[0-9]*/
 
 # Publish Web Output

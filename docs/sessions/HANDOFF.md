@@ -1,12 +1,86 @@
 ﻿# Session Handoff — RoslynMcp
 
 **Date:** 2026-03-22  
-**Branch:** `feature/global-project-context` (✅ MIGRATION COMPLETE)  
-**Last Commit:** `8b6b84d` — fix: TestHarness path calculation and add projectPath to all tests  
+**Branch:** `feature/global-project-context` (✅ READY FOR MERGE)  
+**Last Commit:** `98bf307` — docs: update for global project context feature completion  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
 **Tool Count:** 24 tools (ALL MIGRATED ✅)  
 **Test Status:** ✅ 23/23 tests passing  
-**Build Status:** ✅ 0 errors, 0 warnings
+**Build Status:** ✅ 0 errors, 0 warnings  
+**Release Status:** ✅ v0.2.0-alpha published from `dev` branch
+
+---
+
+## Next Session Tasks
+
+### 1. Merge Feature Branch to Dev ⏳
+```sh
+git checkout dev
+git merge feature/global-project-context
+git push origin dev
+```
+
+**Prep for v0.3.0-alpha:** After merge, the dev branch will have all 24 tools + multi-project support ready for next release.
+
+### 2. Dogfooding & Validation 🧪
+- Test multi-project scenarios in real Copilot workflows
+- Validate `projectPath` parameter works across different project structures
+- Test AdhocWorkspace fallback (directories without .csproj)
+- Verify FileSystemWatcher updates work correctly
+
+### 3. Documentation Polish 📝
+- Update CHANGELOG.md with v0.3.0-alpha features
+- Consider adding usage examples showing multi-project workflows
+- Update release notes template for v0.3.0-alpha
+
+---
+
+## Current State Summary
+
+### ✅ Completed in Part 10
+
+**Feature:** Global Project Context (Multi-Project Support)
+
+**Work Done:**
+1. **Infrastructure:**
+   - WorkspaceManager: LRU workspace cache, GetProject(), GetWorkspaceInfo(), InvalidateFile()
+   - WorkspaceResolver: facade layer with TryGetCompilation(), TryGetProject() helpers
+   - RoslynMcpTool: base class with consistent error handling pattern
+
+2. **Tool Migration (24/24):**
+   - All tools now inherit from RoslynMcpTool
+   - All tools accept optional `projectPath` parameter (defaults to CWD)
+   - Consistent error responses with structured objects
+
+3. **AdhocWorkspace Restored:**
+   - Second WorkspaceInstance constructor for directories without .csproj
+   - FileSystemWatcher monitors *.cs changes (Changed/Created/Deleted/Renamed)
+   - Incremental document updates with AddOrUpdateDocument(), RemoveDocument()
+
+4. **Testing:**
+   - TestHarness fixes: path calculation + projectPath parameters
+   - 23/23 tests passing
+   - Build clean: 0 errors, 0 warnings
+
+5. **Documentation:**
+   - README.md: added Key Features section, updated tool count
+   - AGENTS.md: updated architecture table, added Tool Implementation Pattern
+   - Release notes for v0.2.0-alpha created
+
+6. **Release:**
+   - v0.2.0-alpha tag created from `dev` branch (commit `e8b28f0`)
+   - Published on GitHub with Windows binaries (net8.0 + net10.0)
+   - First public release! 🎉
+
+**Commits on Feature Branch:**
+- `660a801` — Housekeeping (doc cleanup, repo reorganization)
+- `aadf7ef` — Complete tool migration + AdhocWorkspace restoration
+- `8b6b84d` — TestHarness fixes
+- `98bf307` — Documentation updates
+
+**Branch Status:**
+- `dev` at `e8b28f0` (v0.2.0-alpha, 23 tools, single-project)
+- `feature/global-project-context` at `98bf307` (24 tools, multi-project, ready to merge)
 
 ---
 
