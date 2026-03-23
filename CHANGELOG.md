@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added (Infrastructure)
 - Comprehensive test suite: 16 tests covering all 18 tools (100% pass rate)
 - TestHarness project for dogfooding (RoslynMcp tests itself)
-- GitHub-ready documentation: README, CONTRIBUTING, INSTALLATION, TEST_RESULTS
+- GitHub-ready documentation: README, CONTRIBUTING, INSTALLATION
 - MIT License
 - .gitattributes for consistent line endings
 

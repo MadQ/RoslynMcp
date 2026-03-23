@@ -405,7 +405,7 @@ For large codebases (>100K LOC), consider:
 
 ## Support
 
-- **Documentation:** [README.md](README.md), [AGENTS.md](AGENTS.md), [TEST_RESULTS.md](TEST_RESULTS.md)
+- **Documentation:** [README.md](README.md), [AGENTS.md](AGENTS.md)
 - **Issues:** [GitHub Issues](https://github.com/MadQ/RoslynMcp/issues)
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
 
