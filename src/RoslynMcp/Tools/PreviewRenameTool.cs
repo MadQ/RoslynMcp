@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
 using ModelContextProtocol.Server;
@@ -7,8 +6,15 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class PreviewRenameTool(WorkspaceManager workspace, ApprovalStore approvals)
+internal sealed class PreviewRenameTool : RoslynMcpTool
 {
+    readonly ApprovalStore approvals;
+
+    public PreviewRenameTool(WorkspaceResolver workspace, ApprovalStore approvals) : base(workspace)
+    {
+        this.approvals = approvals;
+    }
+
     [McpServerTool, Description(
         "Previews renaming a symbol across all files. Returns a unified diff and a confirmation token. " +
         "Pass the token to apply_rename to commit the change, or discard it to cancel. " +
@@ -16,9 +22,16 @@ internal sealed class PreviewRenameTool(WorkspaceManager workspace, ApprovalStor
     public async Task<PreviewRenameResult> PreviewRename(
         [Description("Current symbol name, e.g. 'WindowKey'.")] string symbolName,
         [Description("New name, e.g. 'WindowIdentity'.")] string newName,
-        [Description("Optional containing type to disambiguate, e.g. 'WindowTracker'.")] string? containingType = null)
+        [Description("Optional containing type to disambiguate, e.g. 'WindowTracker'.")] string? containingType = null,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return new PreviewRenameResult(
+                null, null,
+                error.ToString()!,
+                false
+            );
+
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
         if(symbol is null)
@@ -28,7 +41,7 @@ internal sealed class PreviewRenameTool(WorkspaceManager workspace, ApprovalStor
                 false
             );
 
-        var solution    = workspace.GetSolution();
+        var solution    = workspace.GetSolution(projectPath);
         var symbolKey   = SymbolKey(symbol);
         var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions(), newName);
         var diff        = await SolutionDiff.BuildAsync(solution, newSolution);
@@ -65,4 +78,3 @@ internal sealed record PreviewRenameResult(
     string  Message,
     bool    PreConfirmed
 );
-#endif

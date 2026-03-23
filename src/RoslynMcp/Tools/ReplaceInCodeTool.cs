@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -14,8 +13,10 @@ namespace RoslynMcp.Tools;
 ///     Complements <see cref="ReplaceInFileTool"/> (text-level, any file type).
 /// </summary>
 [McpServerToolType]
-internal sealed class ReplaceInCodeTool(WorkspaceManager workspace)
+internal sealed class ReplaceInCodeTool : RoslynMcpTool
 {
+    public ReplaceInCodeTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "**PREFER THIS TOOL for C# code edits** — semantically aware, validates syntax, preserves formatting. " +
         "Replaces C# syntax nodes matching a kind and optional text pattern. " +
@@ -28,12 +29,15 @@ internal sealed class ReplaceInCodeTool(WorkspaceManager workspace)
         [Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'FieldDeclaration', 'IdentifierName').")] string nodeKind,
         [Description("Optional text pattern to filter matched nodes. Only nodes containing this text are replaced.")] string? textPattern = null,
         [Description("Replacement text for the matched node. Must produce valid C# syntax.")] string replacement = "",
-        [Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false
+        [Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false,
+        [Description(ProjectPathDescription)] string? projectPath = null
     )
     {
+        var rootPath = workspace.GetRootPath(projectPath);
+
         var fullPath = Path.IsPathRooted(filePath)
             ? filePath
-            : Path.GetFullPath(Path.Combine(workspace.RootPath, filePath));
+            : Path.GetFullPath(Path.Combine(rootPath, filePath));
 
         if(!File.Exists(fullPath))
             return new { error = $"File not found: {filePath}" };
@@ -176,7 +180,7 @@ internal sealed class ReplaceInCodeTool(WorkspaceManager workspace)
         }
 
         // Invalidate workspace cache
-        workspace.InvalidateFile(fullPath);
+        workspace.InvalidateFile(projectPath, fullPath);
 
         return new {
             applied = true,
@@ -208,4 +212,3 @@ internal sealed class ReplaceInCodeTool(WorkspaceManager workspace)
         return kind != SyntaxKind.None;
     }
 }
-#endif

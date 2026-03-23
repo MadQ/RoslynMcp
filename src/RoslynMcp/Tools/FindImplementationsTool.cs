@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -8,22 +7,27 @@ using RoslynSymbolFinder = Microsoft.CodeAnalysis.FindSymbols.SymbolFinder;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class FindImplementationsTool(WorkspaceManager workspace)
+internal sealed class FindImplementationsTool : RoslynMcpTool
 {
+    public FindImplementationsTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Finds all types that implement an interface or abstract class, or all methods that override an abstract/virtual member. " +
         "Use this to discover concrete implementations of abstractions.")]
     public async Task<object> FindImplementations(
         [Description("The symbol name, e.g. 'IDisposable', 'SymbolVisitor', 'Accept'.")] string symbolName,
-        [Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null)
+        [Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
         if(symbol is null)
             return new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." };
 
-        var solution = workspace.GetSolution();
+        var solution = workspace.GetSolution(projectPath);
 
         // Handle type symbols (interface or abstract class).
         if(symbol is INamedTypeSymbol typeSymbol) {
@@ -100,4 +104,3 @@ internal sealed class FindImplementationsTool(WorkspaceManager workspace)
         return $"{containingType}.{method.Name}({parameters}): {returnType}";
     }
 }
-#endif

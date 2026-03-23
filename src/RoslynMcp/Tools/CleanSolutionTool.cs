@@ -1,20 +1,22 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class CleanSolutionTool(WorkspaceManager workspace)
+internal sealed class CleanSolutionTool : RoslynMcpTool
 {
+    public CleanSolutionTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Cleans the solution by removing all build artifacts (bin/ and obj/ directories). " +
         "Use this when the build is in a bad state or before a fresh rebuild. " +
         "Does not run dotnet build — just removes compiled output.")]
-    public async Task<CleanResult> CleanSolution()
+    public async Task<CleanResult> CleanSolution(
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var rootPath = workspace.RootPath;
+        var rootPath = workspace.GetRootPath(projectPath);
 
         string? projectFile;
 
@@ -89,4 +91,3 @@ internal sealed record CleanResult(
     string Message,
     string? Details
 );
-#endif

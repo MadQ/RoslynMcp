@@ -1,37 +1,44 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class ApplyRenameTool(WorkspaceManager workspace, ApprovalStore approvals)
+internal sealed class ApplyRenameTool : RoslynMcpTool
 {
-    [McpServerTool, Description(
-        "Applies or rejects a rename previewed by preview_rename. " +
-        "approval: 'y' = apply once, 'session' = apply and auto-approve this symbol for the session, 'n' = reject."
+	readonly ApprovalStore approvals;
+
+	public ApplyRenameTool(WorkspaceResolver workspace, ApprovalStore approvals) : base(workspace)
+	{
+		this.approvals = approvals;
+	}
+
+	[McpServerTool, Description(
+		"Applies or rejects a rename previewed by preview_rename. " +
+		"approval: 'y' = apply once, 'session' = apply and auto-approve this symbol for the session, 'n' = reject."
 	)]
-    public async Task<string> ApplyRename(
-        [Description("The confirmation token returned by preview_rename."								)] string token,
-        [Description("'y' to apply, 'session' to apply and remember for this session, 'n' to reject."	)] string approval
+	public async Task<string> ApplyRename(
+		[Description("The confirmation token returned by preview_rename."								)] string token,
+		[Description("'y' to apply, 'session' to apply and remember for this session, 'n' to reject."	)] string approval,
+		[Description(ProjectPathDescription)] string? projectPath = null
 	)
-    {
-        if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
+	{
+		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			approvals.Reject(token);
-            return "Rename rejected. No files were changed.";
+			return "Rename rejected. No files were changed.";
 		}
 
 		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase)
             && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
             return "Invalid approval value. Use 'y', 'session', or 'n'.";
 
-        var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-        var op         = approvals.Consume(token, forSession);
+		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
+		var op         = approvals.Consume(token, forSession);
 
-        if(op is null)
-            return $"Token '{token}' not found or already consumed. Run preview_rename again.";
+		if(op is null)
+			return $"Token '{token}' not found or already consumed. Run preview_rename again.";
 
-        var oldSolution = workspace.GetSolution();
+		var oldSolution = workspace.GetSolution(projectPath);
         await SolutionDiff.ApplyToDiskAsync(oldSolution, op.NewSolution);
 
         // FileSystemWatcher will detect the writes and invalidate the compilation automatically.
@@ -40,4 +47,3 @@ internal sealed class ApplyRenameTool(WorkspaceManager workspace, ApprovalStore 
         return $"Rename applied.{sessionNote} Files written to disk. Compilation will refresh automatically.";
 	}
 }
-#endif

@@ -1,22 +1,226 @@
-﻿# Session Handoff — March 22, 2026
-# Session Handoff — RoslynMcp
+﻿# Session Handoff — RoslynMcp
 
 **Date:** 2026-03-22  
 **Branch:** `feature/global-project-context` (active development)  
-**Last Commit:** `1fad0ef` — feat: migrate TypeMembersTool and comment out remaining tools  
+**Last Commit:** `c1a4338` — docs: update HANDOFF.md with Part 8 session summary  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
-**Tool Count:** 24 tools (1 migrated, 23 in progress)  
-**Test Status:** Build clean, tests pending migration ⚙️
+**Tool Count:** 24 tools (1 migrated + tested, 23 pending)  
+**Test Status:** ✅ TypeMembersTool validated, pattern refactored
 
 ---
 
-## Current Session (March 22, 2026 — Part 8)
+## Current Session (March 22, 2026 — Part 9)
 
-### **MAJOR REFACTOR: Global Project Context (v0.3.0)** 🚀
+### **PATTERN REFACTOR: TryGetCompilation → TryParse Semantics** 🚀
 
-**Goal:** Transform RoslynMcp from per-project configuration to global MCP server with smart project resolution and LRU caching.
+**Goal:** Refactor `RoslynMcpTool` base class from lambda-based pattern to clean `TryGetCompilation` with standard C# `TryParse` semantics.
 
-**Status:** Infrastructure complete, TypeMembersTool migrated as reference, 23 tools pending systematic migration.
+**Status:** ✅ Refactor complete, TypeMembersTool tested and passing, ready for systematic tool migration.
+
+---
+
+### Session Work Summary
+
+#### 1. Git Tag Created ✅
+- **Tag:** `v0.2.0`
+- **Commit:** `e8b28f0` (tip of `dev` branch)
+- **Message:** "Release v0.2.0 - MCP server with 23 Roslyn-powered tools"
+- **Status:** Local tag created, not yet pushed
+
+#### 2. Pattern Analysis & Design Discussion ✅
+- **Problem Identified:** Lambda-based `ExecuteWithProject(projectPath, Func<Compilation, object>)` felt forced and less readable
+- **Solution Proposed:** `TryGetCompilation` with `out` parameters following `TryParse` pattern
+- **Options Evaluated:**
+  - Option 1: Three-parameter `out` (compilation + error)
+  - Option 2: Hidden state with `lastError` field
+  - Option 3: Exception-to-error factory
+  - **Option 4 (SELECTED):** Hybrid with `[NotNullWhen]` attributes ⭐
+
+#### 3. Base Class Refactored ✅
+**File:** `src/RoslynMcp/Tools/RoslynMcpTool.cs`
+
+**Before (Lambda Pattern):**
+```csharp
+protected object ExecuteWithProject(string? projectPath, Func<Compilation, object> execute)
+{
+    try {
+        var compilation = workspace.GetCompilation(projectPath);
+        return execute(compilation);
+    }
+    catch(...) { return new { error = ... }; }
+}
+```
+
+**After (TryGetCompilation Pattern):**
+```csharp
+protected bool TryGetCompilation(
+    string? projectPath,
+    [NotNullWhen(true)] out Compilation? compilation,
+    [NotNullWhen(false)] out object? error)
+{
+    error = null;
+    compilation = null;
+    try {
+        compilation = workspace.GetCompilation(projectPath);
+        return true;
+    }
+    catch(ProjectNotFoundException ex) {
+        error = ProjectNotFoundError(ex);
+        return false;
+    }
+    // ... other catches with helper methods
+}
+
+// Helper methods for structured error formatting
+private static object ProjectNotFoundError(ProjectNotFoundException ex) => ...;
+private static object MultipleProjectsError(MultipleProjectsFoundException ex) => ...;
+private static object InvalidPathError(InvalidProjectPathException ex) => ...;
+private static object UnexpectedError(Exception ex) => ...;
+```
+
+**Benefits:**
+- ✅ Standard C# `TryParse` semantics — familiar, readable pattern
+- ✅ `[NotNullWhen]` attributes — compiler-enforced null safety
+- ✅ No forced lambda syntax — cleaner code flow
+- ✅ Early returns work naturally — no lambda nesting
+- ✅ No hidden state — everything explicit in signature
+- ✅ Centralized error formatting — DRY helper methods
+
+#### 4. TypeMembersTool Updated ✅
+**File:** `src/RoslynMcp/Tools/TypeMembersTool.cs`
+
+**Before (Lambda Usage):**
+```csharp
+return ExecuteWithProject(projectPath, compilation => {
+    var type = FindType(compilation, typeName);
+    if(type is null)
+        return new { error = $"Type '{typeName}' not found..." };
+    // ... rest of logic
+});
+```
+
+**After (TryGetCompilation Usage):**
+```csharp
+if(!TryGetCompilation(projectPath, out var compilation, out var error))
+    return error;
+
+var type = FindType(compilation, typeName);
+if(type is null)
+    return new { error = $"Type '{typeName}' not found..." };
+// ... rest of logic (no indentation change)
+```
+
+**Result:** Significantly cleaner, more readable, idiomatic C#
+
+#### 5. TestHarness Updated ✅
+**File:** `src/TestHarness/Program.cs`
+- Removed required `args[0]` from server launch (testing global context mode)
+- Added `projectPath` parameter to `get_type_members` test
+
+#### 6. Testing Completed ✅
+**Test Results:**
+- ✅ **TypeMembersTool:** PASSED (4892ms)
+- ✅ **Build:** Succeeded with 0 errors (4 warnings from existing code)
+- ✅ **Pattern Validation:** Confirmed working correctly
+- ❌ **22 other tools:** Expected failure ("Unknown tool") — commented out with `#if FALSE`
+
+**Test Output:**
+```
+Passed: 1/23
+Failed: 22/23
+✅ TypeMembersTool successfully validated new pattern
+```
+
+#### 7. Documentation Created ✅
+- **TEST_RESULTS_TypeMembersTool.md:** Detailed test results and pattern comparison
+- **test_type_members.ps1:** PowerShell test script (alternative test harness)
+
+---
+
+### Changes Summary
+
+**Modified Files:**
+- `src/RoslynMcp/Tools/RoslynMcpTool.cs` — Refactored to `TryGetCompilation` pattern
+- `src/RoslynMcp/Tools/TypeMembersTool.cs` — Updated to use new pattern
+- `src/TestHarness/Program.cs` — Removed required args, added projectPath to test
+
+**New Files:**
+- `TEST_RESULTS_TypeMembersTool.md` — Test results and pattern analysis
+- `test_type_members.ps1` — Alternative PowerShell test script
+
+**Git Status:**
+```
+Modified: 4 files
+Untracked: 2 files
+Tag created: v0.2.0 (not pushed)
+```
+
+---
+
+### Next Session: Tool Migration Ready! 🚀
+
+**Phase 3b: Systematic Tool Migration** ⭐ **READY TO START**
+
+All 23 remaining tools are commented out with `#if FALSE` and waiting for migration to the new pattern.
+
+**Recommended Order:**
+
+1. **Discovery Tools (6 tools)** — First batch, relatively simple
+   - SearchFilesTool
+   - SemanticSearchTool
+   - ListFilesTool
+   - FileOutlineTool
+   - ProjectInfoTool
+   - GetUsingsTool
+
+2. **Type Understanding Tools (3 tools)**
+   - TypeHierarchyTool
+   - FindImplementationsTool
+   - GetSymbolDocumentationTool
+
+3. **Navigation & Search Tools (4 tools)**
+   - GetSymbolInfoTool
+   - FindReferencesTool
+   - GetSymbolDefinitionTool
+   - GetSymbolsInScopeTool
+
+4. **Validation & Build Tools (3 tools)**
+   - DiagnosticsTool
+   - BuildTool
+   - CleanSolutionTool
+
+5. **Refactoring Tools (2 tools)**
+   - PreviewRenameTool
+   - ApplyRenameTool
+
+6. **Code Editing Tools (2 tools)**
+   - ReplaceInFileTool
+   - ReplaceInCodeTool
+
+7. **Package Management (1 tool)**
+   - RestorePackagesTool
+
+8. **Debug Tool (1 tool)**
+   - RespawnTool
+
+**Migration Pattern for Each Tool:**
+1. Remove `#if FALSE` / `#endif` wrapper
+2. Update constructor: `MyTool(WorkspaceResolver workspace) : base(workspace)`
+3. Add `projectPath` parameter (optional): `string? projectPath = null`
+4. Replace tool logic with:
+   ```csharp
+   if(!TryGetCompilation(projectPath, out var compilation, out var error))
+       return error;
+   // ... existing logic using compilation
+   ```
+5. Build and verify no errors
+6. Run TestHarness to validate (once test is updated)
+
+**Testing Strategy:**
+- Migrate 1-2 tools at a time
+- Build after each tool
+- Update corresponding TestHarness tests
+- Run full test suite before next batch
 
 ---
 

@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -10,8 +9,10 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class SemanticSearchTool(WorkspaceManager workspace)
+internal sealed class SemanticSearchTool : RoslynMcpTool
 {
+    public SemanticSearchTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [
         McpServerTool, Description(
             "Searches C# files using Roslyn syntax-tree filtering. " +
@@ -40,7 +41,10 @@ internal sealed class SemanticSearchTool(WorkspaceManager workspace)
         int skip = 0,
 
         [Description("Maximum number of results to return. Default: 50, max: 200.")]
-        int take = 50
+        int take = 50,
+
+        [Description(ProjectPathDescription)]
+        string? projectPath = null
     )
     {
         context		??= "all";
@@ -81,7 +85,8 @@ internal sealed class SemanticSearchTool(WorkspaceManager workspace)
             };
         }
 
-        var solution   = workspace.GetSolution();
+        var solution   = workspace.GetSolution(projectPath);
+        var rootPath   = workspace.GetRootPath(projectPath);
         var allMatches = new List<SemanticMatchResult>();
 
         foreach(var project in solution.Projects)
@@ -126,7 +131,7 @@ internal sealed class SemanticSearchTool(WorkspaceManager workspace)
                 };
 
                 // Add file path to each match
-                var relativePath = Path.GetRelativePath(workspace.RootPath, document.FilePath);
+                var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
 
                 foreach(var match in matches) {
 
@@ -392,4 +397,3 @@ internal sealed class SemanticSearchTool(WorkspaceManager workspace)
         public string Context { get; set; } = "";
     }
 }
-#endif

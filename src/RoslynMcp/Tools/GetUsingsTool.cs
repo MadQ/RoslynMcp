@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -7,16 +6,22 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class GetUsingsTool(WorkspaceManager workspace)
+internal sealed class GetUsingsTool : RoslynMcpTool
 {
+    public GetUsingsTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns all 'using' directives in a file (namespaces and aliases), plus implicit global usings from the project. " +
         "Use this to understand what's in scope when generating or analyzing code.")]
     public async Task<object> GetUsings(
-        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath)
+        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
-        var normalized  = filePath.Replace('/', Path.DirectorySeparatorChar);
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
+        var rootPath   = workspace.GetRootPath(projectPath);
+        var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
 
         var tree = compilation.SyntaxTrees
             .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase));
@@ -42,7 +47,7 @@ internal sealed class GetUsingsTool(WorkspaceManager workspace)
             : [];
 
         return new {
-            file            = Path.GetRelativePath(workspace.RootPath, tree.FilePath),
+            file            = Path.GetRelativePath(rootPath, tree.FilePath),
             usings          = usings,
             global_usings   = globalUsings
         };
@@ -72,4 +77,3 @@ internal sealed class GetUsingsTool(WorkspaceManager workspace)
 
     private sealed record UsingDirective(string? Namespace, string? Alias);
 }
-#endif

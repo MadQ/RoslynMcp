@@ -19,7 +19,7 @@ Console.WriteLine($"Target:  {targetPath}");
 Console.WriteLine();
 
 var psi = new ProcessStartInfo("dotnet") {
-    Arguments              = $"run --project \"{serverProj}\" -f net10.0 --no-build -- \"{targetPath}\"",
+    Arguments              = $"run --project \"{serverProj}\" -f net10.0 --no-build",
     RedirectStandardInput  = true,
     RedirectStandardOutput = true,
     RedirectStandardError  = true,
@@ -192,7 +192,7 @@ Console.WriteLine("────────────────────�
 tests.Add(await RunTestAsync(
     "get_type_members: WorkspaceManager members with signatures",
     "get_type_members",
-    new { typeName = "WorkspaceManager" },
+    new { typeName = "WorkspaceManager", projectPath = targetPath },
     data => data?["members"]?.AsArray().Count > 0 && data["members"]?[0]?["signature"] is not null
 ));
 

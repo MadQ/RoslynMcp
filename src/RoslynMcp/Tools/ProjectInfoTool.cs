@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -8,8 +7,10 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class ProjectInfoTool(WorkspaceManager workspace)
+internal sealed class ProjectInfoTool : RoslynMcpTool
 {
+    public ProjectInfoTool(WorkspaceResolver workspace) : base(workspace) { }
+
     // Matches a TFM segment in a path like ...\net8.0\... or .../net11.0/...
     private static readonly Regex TfmPattern = new(@"[/\\](net\d+\.\d+(?:-\w+)?)[/\\]", RegexOptions.Compiled);
 
@@ -20,9 +21,14 @@ internal sealed class ProjectInfoTool(WorkspaceManager workspace)
         "Returns metadata about the loaded project: name, assembly name, target framework, language version, " +
         "output kind, nullable setting, NuGet package references, and additional files. " +
         "Use this to understand project configuration without reading the .csproj directly.")]
-    public object GetProjectInfo()
+    public object GetProjectInfo(
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var project = workspace.GetProject();
+        if(!TryGetProject(projectPath, out var project, out var error))
+            return error;
+
+        var rootPath    = workspace.GetRootPath(projectPath);
+        var (_, isMSBuild, _) = workspace.GetWorkspaceInfo(projectPath);
 
         var compOpts  = project.CompilationOptions  as CSharpCompilationOptions;
         var parseOpts = project.ParseOptions         as CSharpParseOptions;
@@ -33,7 +39,7 @@ internal sealed class ProjectInfoTool(WorkspaceManager workspace)
         var langVersion  = parseOpts?.LanguageVersion.ToDisplayString() ?? "Unknown";
         var packages     = ExtractPackages(project.MetadataReferences);
         var extraFiles   = project.AdditionalDocuments
-            .Select(d => Path.GetRelativePath(workspace.RootPath, d.FilePath ?? d.Name))
+            .Select(d => Path.GetRelativePath(rootPath, d.FilePath ?? d.Name))
             .Order()
             .ToArray()
         ;
@@ -42,13 +48,13 @@ internal sealed class ProjectInfoTool(WorkspaceManager workspace)
             name            = project.Name,
             assembly_name   = project.AssemblyName,
             file_path       = project.FilePath is not null
-                ? Path.GetRelativePath(workspace.RootPath, project.FilePath)
+                ? Path.GetRelativePath(rootPath, project.FilePath)
                 : null,
             target_framework    = tfm,
             language_version    = langVersion,
             output_kind         = outputKind,
             nullable            = nullable,
-            is_msbuild_workspace = workspace.IsMSBuild,
+            is_msbuild_workspace = isMSBuild,
             package_references  = packages,
             additional_files    = extraFiles
         };
@@ -104,4 +110,3 @@ internal sealed class ProjectInfoTool(WorkspaceManager workspace)
 
     private sealed record PackageRef(string Name, string Version);
 }
-#endif

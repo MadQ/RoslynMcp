@@ -48,4 +48,36 @@ internal sealed class WorkspaceResolver
         // Root path is the directory containing the .csproj
         return Path.GetDirectoryName(resolved)!;
     }
+
+    /// <summary>
+    ///     Resolves the project path and returns the project.
+    ///     If projectPath is null, uses current working directory.
+    /// </summary>
+    public Project GetProject(string? projectPath)
+    {
+        var resolved = manager.ResolveProjectPath(projectPath);
+
+        return manager.GetProject(resolved);
+    }
+
+    /// <summary>
+    ///     Gets workspace metadata for the resolved project (root path, MSBuild flag, .csproj path).
+    /// </summary>
+    public (string RootPath, bool IsMSBuild, string? CsprojPath) GetWorkspaceInfo(string? projectPath)
+    {
+        var resolved = manager.ResolveProjectPath(projectPath);
+
+        return manager.GetWorkspaceInfo(resolved);
+    }
+
+    /// <summary>
+    ///     Invalidates the cached compilation for a file after edits.
+    ///     Tools that modify files should call this to ensure fresh diagnostics on subsequent queries.
+    /// </summary>
+    public void InvalidateFile(string? projectPath, string fullPath)
+    {
+        var resolved = manager.ResolveProjectPath(projectPath);
+
+        manager.InvalidateFile(resolved, fullPath);
+    }
 }

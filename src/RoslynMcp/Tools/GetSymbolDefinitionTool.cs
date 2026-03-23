@@ -1,22 +1,27 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class GetSymbolDefinitionTool(WorkspaceManager workspace)
+internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 {
+    public GetSymbolDefinitionTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns the definition location and signature of a symbol (type, method, property, field, event). " +
         "Shows where the symbol is declared, its full signature, and XML doc summary. " +
         "Use this to navigate to a symbol's definition without reading multiple files.")]
     public object GetSymbolDefinition(
         [Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
-        [Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null)
+        [Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
+        var rootPath = workspace.GetRootPath(projectPath);
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
         if(symbol is null)
@@ -34,7 +39,7 @@ internal sealed class GetSymbolDefinitionTool(WorkspaceManager workspace)
 
         var span      = location.GetLineSpan();
         var filePath  = span.Path;
-        var relative  = string.IsNullOrEmpty(filePath) ? "?" : Path.GetRelativePath(workspace.RootPath, filePath);
+        var relative  = string.IsNullOrEmpty(filePath) ? "?" : Path.GetRelativePath(rootPath, filePath);
         var signature = FormatSignature(symbol);
         var docXml    = symbol.GetDocumentationCommentXml();
         var docSummary = ExtractDocSummary(docXml);
@@ -198,4 +203,3 @@ internal sealed class GetSymbolDefinitionTool(WorkspaceManager workspace)
         }
     }
 }
-#endif

@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 
@@ -11,8 +10,10 @@ namespace RoslynMcp.Tools;
 ///     consider a future `replace_in_code` tool that uses Roslyn's syntax tree rewriting.
 /// </summary>
 [McpServerToolType]
-internal sealed class ReplaceInFileTool(WorkspaceManager workspace)
+internal sealed class ReplaceInFileTool : RoslynMcpTool
 {
+    public ReplaceInFileTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Replaces occurrences of a pattern in a file. Supports literal string or regex replacement. " +
         "Returns the number of replacements made and the 1-based line numbers that were changed. " +
@@ -25,12 +26,14 @@ internal sealed class ReplaceInFileTool(WorkspaceManager workspace)
         [Description("The replacement text. Supports $1/$2 backreferences when useRegex=true.")                           ] string  replacement,
         [Description("Treat pattern as a regular expression. Default: false.")                                            ] bool    useRegex  = false,
         [Description("Preview replacements without writing the file. Returns what would change. Default: false.")         ] bool    dryRun    = false,
-        [Description("Case-sensitive matching. Default: true.")                                                           ] bool    caseSensitive = true
+        [Description("Case-sensitive matching. Default: true.")                                                           ] bool    caseSensitive = true,
+        [Description(ProjectPathDescription)] string? projectPath = null
     )
     {
+        var rootPath = workspace.GetRootPath(projectPath);
         var fullPath = Path.IsPathRooted(filePath)
             ? filePath
-            : Path.GetFullPath(Path.Combine(workspace.RootPath, filePath));
+            : Path.GetFullPath(Path.Combine(rootPath, filePath));
 
         if(!File.Exists(fullPath))
             return new { error = $"File not found: {filePath}" };
@@ -113,7 +116,7 @@ internal sealed class ReplaceInFileTool(WorkspaceManager workspace)
         }
 
         // Invalidate the workspace so subsequent Roslyn tools see the updated source.
-        workspace.InvalidateFile(fullPath);
+        workspace.InvalidateFile(projectPath, fullPath);
 
         return new {
             applied      = true,
@@ -156,4 +159,3 @@ internal sealed class ReplaceInFileTool(WorkspaceManager workspace)
         return lo + 1;
     }
 }
-#endif

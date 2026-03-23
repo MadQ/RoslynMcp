@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -7,15 +6,21 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class DiagnosticsTool(WorkspaceManager workspace)
+internal sealed class DiagnosticsTool : RoslynMcpTool
 {
+    public DiagnosticsTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns compiler diagnostics (errors and warnings) for the project or a single file. " +
         "Faster than running dotnet build — uses the in-process Roslyn compilation.")]
     public string[] GetDiagnostics(
-        [Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null)
+        [Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return [error.ToString()!];
+
+
         IEnumerable<Diagnostic> diagnostics = compilation.GetDiagnostics();
 
         if(filePath is not null) {
@@ -48,4 +53,3 @@ internal sealed class DiagnosticsTool(WorkspaceManager workspace)
         return $"{d.Severity.ToString()[0]}  {file}:{line}:{col}  {d.Id}  {d.GetMessage()}";
     }
 }
-#endif

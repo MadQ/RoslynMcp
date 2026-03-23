@@ -23,27 +23,27 @@ internal sealed class TypeMembersTool : RoslynMcpTool
         [Description(ProjectPathDescription)]
         string? projectPath = null)
     {
-        return ExecuteWithProject(projectPath, compilation => {
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
 
-            var type = FindType(compilation, typeName);
+        var type = FindType(compilation, typeName);
 
-            if(type is null)
-                return new { error = $"Type '{typeName}' not found in the project." };
+        if(type is null)
+            return new { error = $"Type '{typeName}' not found in the project." };
 
-            var members = type.GetMembers()
-                .Where(m => !m.IsImplicitlyDeclared)
-                .Where(m => memberKind is null || MatchesKind(m, memberKind))
-                .Select(FormatMember)
-                .Where(m => m is not null)
-                .ToArray()
-            ;
+        var members = type.GetMembers()
+            .Where(m => !m.IsImplicitlyDeclared)
+            .Where(m => memberKind is null || MatchesKind(m, memberKind))
+            .Select(FormatMember)
+            .Where(m => m is not null)
+            .ToArray()
+        ;
 
-            return new {
-                type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-                type_kind = type.TypeKind.ToString().ToLowerInvariant(),
-                members   = members.Length > 0 ? members : []
-            };
-        });
+        return new {
+            type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+            type_kind = type.TypeKind.ToString().ToLowerInvariant(),
+            members   = members.Length > 0 ? members : []
+        };
     }
 
     private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)

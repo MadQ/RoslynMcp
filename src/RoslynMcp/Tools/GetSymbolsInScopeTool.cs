@@ -1,5 +1,4 @@
-#if FALSE
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -7,8 +6,10 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class GetSymbolsInScopeTool(WorkspaceManager workspace)
+internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 {
+    public GetSymbolsInScopeTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns all symbols accessible at a specific file location: local variables, parameters, fields, properties, methods, types. " +
         "Use this when generating code to understand what's available in scope at that point. " +
@@ -16,9 +17,13 @@ internal sealed class GetSymbolsInScopeTool(WorkspaceManager workspace)
     public async Task<object> GetSymbolsInScope(
         [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
         [Description("1-based line number.")] int line,
-        [Description("1-based column number.")] int column)
+        [Description("1-based column number.")] int column,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
+
         var normalized  = filePath.Replace('/', Path.DirectorySeparatorChar);
 
         var tree = compilation.SyntaxTrees
@@ -77,8 +82,10 @@ internal sealed class GetSymbolsInScopeTool(WorkspaceManager workspace)
             }
         }
 
+        var rootPath = workspace.GetRootPath(projectPath);
+
         return new {
-            file       = Path.GetRelativePath(workspace.RootPath, tree.FilePath),
+            file       = Path.GetRelativePath(rootPath, tree.FilePath),
             line,
             column,
             locals     = locals.ToArray(),
@@ -122,4 +129,3 @@ internal sealed class GetSymbolsInScopeTool(WorkspaceManager workspace)
 
     private sealed record SymbolInfo(string Kind, string Name, string? Type, string? ContainingType);
 }
-#endif
