@@ -56,7 +56,9 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 
 | Component | Responsibility |
 |-----------|----------------|
-| `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
+| `WorkspaceManager` | LRU-cached workspace instances; auto-detects `.csproj` → `MSBuildWorkspace` or directory → `AdhocWorkspace`; exposes `GetCompilation()`, `GetSolution()`, `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()`; smart path resolution |
+| `WorkspaceResolver` | Per-tool facade over `WorkspaceManager`; provides `TryGetCompilation()`, `TryGetProject()`, `GetRootPath()`, `GetSolution()`, `InvalidateFile()` with structured error handling |
+| `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines `ProjectPathDescription` constant |
 | `SearchFilesTool` | `search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
 | `SemanticSearchTool` | `semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
 | `ListFilesTool` | `list_files` — enumerate files matching glob pattern (fast file listing, no content) |
@@ -84,9 +86,9 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 
-**Data flow:** stdio MCP request → tool → `WorkspaceManager.GetCompilation()` (may rebuild) → Roslyn API → JSON response.
+**Data flow:** stdio MCP request → tool → `WorkspaceResolver.TryGetCompilation(projectPath, ...)` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
-**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (compilation management), `Tools/*.cs` (tool implementations).
+**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (multi-workspace caching), `WorkspaceResolver.cs` (tool facade), `Tools/*.cs` (24 tool implementations), `RoslynMcpTool.cs` (base class).
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
@@ -207,6 +209,46 @@ var newSolution = await Renamer.RenameSymbolAsync(
 ```
 
 **Key rule:** always use `await` for Roslyn APIs that return `Task` — they may do I/O or background work.
+
+**Tool Implementation Pattern:**
+
+All tools inherit from `RoslynMcpTool` base class and follow a consistent pattern:
+
+```csharp
+[McpServerToolType]
+internal sealed class MyTool : RoslynMcpTool
+{
+    public MyTool(WorkspaceResolver workspace) : base(workspace) { }
+
+    [McpServerTool, Description("...")]
+    public object MyToolMethod(
+        [Description("...")] string requiredParam,
+        [Description(ProjectPathDescription)] string? projectPath = null)
+    {
+        // For tools that need compilation
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
+        // OR for tools that need project metadata
+        if(!TryGetProject(projectPath, out var project, out var error))
+            return error;
+
+        // Use workspace.GetSolution(projectPath), workspace.GetRootPath(projectPath) as needed
+        var rootPath = workspace.GetRootPath(projectPath);
+
+        // Tool logic using compilation/project/solution
+        // ...
+
+        return new { /* structured response */ };
+    }
+}
+```
+
+**Key points:**
+- `projectPath` is always the last parameter, optional, defaults to null (→ CWD)
+- `TryGetCompilation`/`TryGetProject` return structured error objects on failure
+- Use `ProjectPathDescription` constant for consistent parameter documentation
+- Tools that modify files must call `workspace.InvalidateFile(projectPath, fullPath)` after changes
 
 ---
 

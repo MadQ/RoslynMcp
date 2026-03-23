@@ -1,15 +1,85 @@
 ﻿# Session Handoff — RoslynMcp
 
 **Date:** 2026-03-22  
-**Branch:** `feature/global-project-context` (active development)  
-**Last Commit:** `c1a4338` — docs: update HANDOFF.md with Part 8 session summary  
+**Branch:** `feature/global-project-context` (✅ MIGRATION COMPLETE)  
+**Last Commit:** `8b6b84d` — fix: TestHarness path calculation and add projectPath to all tests  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
-**Tool Count:** 24 tools (1 migrated + tested, 23 pending)  
-**Test Status:** ✅ TypeMembersTool validated, pattern refactored
+**Tool Count:** 24 tools (ALL MIGRATED ✅)  
+**Test Status:** ✅ 23/23 tests passing  
+**Build Status:** ✅ 0 errors, 0 warnings
 
 ---
 
-## Current Session (March 22, 2026 — Part 9)
+## Current Session (March 22, 2026 — Part 10)
+
+### **FEATURE COMPLETE: Global Project Context Migration** 🎉
+
+**Goal:** Migrate all 24 tools to WorkspaceResolver pattern with optional `projectPath` parameter for multi-project support.
+
+**Status:** ✅ Complete — all 24 tools migrated, AdhocWorkspace restored with FileSystemWatcher, 23/23 tests passing, pushed to GitHub.
+
+---
+
+### Session Work Summary
+
+#### 1. Infrastructure Enhancements ✅
+- **WorkspaceManager:** Added `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` methods
+- **WorkspaceResolver:** Exposed new methods as facade for tools
+- **RoslynMcpTool:** Added `TryGetProject()` helper for Project-level metadata access
+
+#### 2. Tool Migration (24 Tools in 6 Batches) ✅
+
+**Batch 1 — Discovery (6 tools):**
+- SearchFilesTool, SemanticSearchTool, ListFilesTool, FileOutlineTool, ProjectInfoTool, GetUsingsTool
+
+**Batch 2 — Type Understanding (3 tools):**
+- TypeHierarchyTool, FindImplementationsTool, GetSymbolDocumentationTool
+
+**Batch 3 — Navigation (4 tools):**
+- SymbolInfoTool, FindReferencesTool, GetSymbolDefinitionTool, GetSymbolsInScopeTool
+
+**Batch 4 — Build/Validation (3 tools):**
+- DiagnosticsTool, BuildTool, CleanSolutionTool
+
+**Batch 5 — Refactoring (2 tools):**
+- PreviewRenameTool, ApplyRenameTool
+
+**Batch 6 — Editing (2 tools):**
+- ReplaceInFileTool, ReplaceInCodeTool
+
+**Batch 7+8 — Remaining (3 tools):**
+- ListTypesTool, RestorePackagesTool, RespawnTool
+
+**Already Migrated (Part 9):**
+- TypeMembersTool
+
+#### 3. AdhocWorkspace Support Restored ✅
+- Added second `WorkspaceInstance` constructor for directories without .csproj
+- `LoadAdhocWorkspace()` creates in-memory compilation from all .cs files
+- FileSystemWatcher monitors `*.cs` changes (Changed/Created/Deleted/Renamed)
+- `AddOrUpdateDocument()`, `RemoveDocument()` handle incremental updates
+- `InvalidateFile()` handles both MSBuildWorkspace (cache invalidation) and AdhocWorkspace (document reload)
+
+#### 4. TestHarness Fixes ✅
+- Fixed path calculation: 5 levels up from `AppContext.BaseDirectory` (was 4, causing double `src/src/`)
+- Added `projectPath = targetPath` to all 23 tests
+- Fixed file paths: removed `RoslynMcp/` prefix (targetPath already points to project root)
+- Enhanced failure messages to show test name
+
+**Result:** 23/23 tests passing ✓
+
+#### 5. Documentation Updates ✅
+- README.md: Added "Key Features" section highlighting multi-project support, updated tool count to 24
+- AGENTS.md: Updated architecture table with WorkspaceResolver and RoslynMcpTool, added "Tool Implementation Pattern" section with example
+
+#### 6. Commits Pushed ✅
+- `aadf7ef` — feat: complete tool migration + restore AdhocWorkspace with FileSystemWatcher
+- `8b6b84d` — fix: TestHarness path calculation and add projectPath to all tests
+- Documentation updates (this commit)
+
+---
+
+## Previous Session (March 22, 2026 — Part 9)
 
 ### **PATTERN REFACTOR: TryGetCompilation → TryParse Semantics** 🚀
 
