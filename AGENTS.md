@@ -7,7 +7,7 @@
 
 Working rules for GitHub Copilot and any other AI agent in this repo.
 
-**Ignore files called HumanNotes.txt** — for human reference only; may contain notes that would confuse an AI assistant.
+**Ignore `docs/ScratchPad.md`** — private working notes for the repo owner; may contain half-baked thoughts that would confuse an AI assistant. It is gitignored and will not be present in forks or CI.
 
 ---
 
@@ -131,7 +131,7 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
   - Blank line **after the opening brace** of any multi-statement control-flow block
   - Blank line between branches of an `if/else if/else` chain when any body spans multiple lines
   - Blank lines between logically distinct statement groups within a method body
-  - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block
+  - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block (Yeah, weird one, IK. 
 - **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies)
 
 > **Consistency is overrated. Embrace diversity.**
