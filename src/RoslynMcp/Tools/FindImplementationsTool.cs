@@ -11,7 +11,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 {
     public FindImplementationsTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_find_implementations", ReadOnly = true)]
+    [Description(
         "Finds all types that implement an interface or abstract class, or all methods that override an abstract/virtual member. " +
         "Use this to discover concrete implementations of abstractions.")]
     public async Task<object> FindImplementations(

@@ -17,7 +17,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 {
     public ReplaceInCodeTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_replace_in_code", Destructive = true)]
+    [Description(
         "**PREFER THIS TOOL for C# code edits** — semantically aware, validates syntax, preserves formatting. " +
         "Replaces C# syntax nodes matching a kind and optional text pattern. " +
         "Uses Roslyn for semantic understanding. Works on C# files only. " +

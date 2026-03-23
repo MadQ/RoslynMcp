@@ -138,50 +138,50 @@ Console.WriteLine("Discovery Tools (7 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
-    "search_files: find 'WorkspaceManager' in .cs files",
-    "search_files",
+    "roslyn_search_files: find 'WorkspaceManager' in .cs files",
+    "roslyn_search_files",
     new { pattern = "WorkspaceManager", filePattern = "*.cs", take = 10 },
     data => data?["matches"]?.AsArray().Count > 0
 ));
 
 tests.Add(await RunTestAsync(
-    "semantic_search: find TODO comments only",
-    "semantic_search",
+    "roslyn_semantic_search: find TODO comments only",
+    "roslyn_semantic_search",
     new { pattern = "TODO", context = "comments", take = 10 },
     data => data?["matches"]?.AsArray().Count > 0 && data?["matches"]?[0]?["context"]?.GetValue<string>() == "comment"
 ));
 
 tests.Add(await RunTestAsync(
-    "list_types: enumerate types in RoslynMcp.Tools namespace",
-    "list_types",
+    "roslyn_list_types: enumerate types in RoslynMcp.Tools namespace",
+    "roslyn_list_types",
     new { namespaceFilter = "RoslynMcp.Tools" },
     data => data?.AsArray().Count > 10
 ));
 
 tests.Add(await RunTestAsync(
-    "list_files: enumerate tool files with glob pattern",
-    "list_files",
+    "roslyn_list_files: enumerate tool files with glob pattern",
+    "roslyn_list_files",
     new { pattern = "**/*Tool.cs", take = 50 },
     data => data?["count"]?.GetValue<int>() > 20 && data?["files"]?.AsArray().Any(f => f?.GetValue<string>().Contains("Tool.cs") == true) == true
 ));
 
 tests.Add(await RunTestAsync(
-    "get_file_outline: WorkspaceManager structure",
-    "get_file_outline",
+    "roslyn_get_file_outline: WorkspaceManager structure",
+    "roslyn_get_file_outline",
     new { filePath = "WorkspaceManager.cs", projectPath = targetPath },
     data => data?["types"]?.AsArray().Count > 0
 ));
 
 tests.Add(await RunTestAsync(
-    "get_project_info: verify TFM and packages",
-    "get_project_info",
+    "roslyn_get_project_info: verify TFM and packages",
+    "roslyn_get_project_info",
     new { projectPath = targetPath },
     data => data?["target_framework"]?.GetValue<string>()?.StartsWith("net") == true
 ));
 
 tests.Add(await RunTestAsync(
-    "get_usings: extract using directives from Program.cs",
-    "get_usings",
+    "roslyn_get_usings: extract using directives from Program.cs",
+    "roslyn_get_usings",
     new { filePath = "Program.cs", projectPath = targetPath },
     data => data?["usings"]?.AsArray().Count > 0
 ));
@@ -190,29 +190,29 @@ Console.WriteLine("\nType Understanding Tools (4 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
-    "get_type_members: WorkspaceManager members with signatures",
-    "get_type_members",
+    "roslyn_get_type_members: WorkspaceManager members with signatures",
+    "roslyn_get_type_members",
     new { typeName = "WorkspaceManager", projectPath = targetPath },
     data => data?["members"]?.AsArray().Count > 0 && data["members"]?[0]?["signature"] is not null
 ));
 
 tests.Add(await RunTestAsync(
-    "get_type_hierarchy: WorkspaceManager inheritance",
-    "get_type_hierarchy",
+    "roslyn_get_type_hierarchy: WorkspaceManager inheritance",
+    "roslyn_get_type_hierarchy",
     new { typeName = "WorkspaceManager", projectPath = targetPath },
     data => data?["interfaces"]?.AsArray().Any(i => i?.GetValue<string>().Contains("IDisposable") == true) == true
 ));
 
 tests.Add(await RunTestAsync(
-    "find_implementations: IDisposable implementers",
-    "find_implementations",
+    "roslyn_find_implementations: IDisposable implementers",
+    "roslyn_find_implementations",
     new { symbolName = "IDisposable" },
     data => data?["error"] is not null || data?["implementations"]?.AsArray().Count >= 0
 ));
 
 tests.Add(await RunTestAsync(
-    "get_symbol_documentation: WorkspaceManager XML docs",
-    "get_symbol_documentation",
+    "roslyn_get_symbol_documentation: WorkspaceManager XML docs",
+    "roslyn_get_symbol_documentation",
     new { symbolName = "WorkspaceManager" },
     data => data?["symbol_name"] is not null
 ));
@@ -221,23 +221,23 @@ Console.WriteLine("\nNavigation Tools (3 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
-    "get_symbol_info: resolve symbol at location",
-    "get_symbol_info",
+    "roslyn_get_symbol_info: resolve symbol at location",
+    "roslyn_get_symbol_info",
     new { filePath = "Program.cs", line = 10, column = 10, projectPath = targetPath },
     data => data?.GetValue<string>().Contains("Kind:") == true,
     expectJson: false
 ));
 
 tests.Add(await RunTestAsync(
-    "find_references: locate WorkspaceManager usages",
-    "find_references",
+    "roslyn_find_references: locate WorkspaceManager usages",
+    "roslyn_find_references",
     new { symbolName = "WorkspaceManager" },
     data => data?.AsArray().Count > 0
 ));
 
 tests.Add(await RunTestAsync(
-    "get_symbol_definition: find WorkspaceManager declaration",
-    "get_symbol_definition",
+    "roslyn_get_symbol_definition: find WorkspaceManager declaration",
+    "roslyn_get_symbol_definition",
     new { symbolName = "WorkspaceManager" },
     data => data?["file"]?.GetValue<string>().Contains("WorkspaceManager.cs") == true
 ));
@@ -246,8 +246,8 @@ Console.WriteLine("\nCode Generation Tools (1 test)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
-    "get_symbols_in_scope: enumerate symbols at location",
-    "get_symbols_in_scope",
+    "roslyn_get_symbols_in_scope: enumerate symbols at location",
+    "roslyn_get_symbols_in_scope",
     new { filePath = "WorkspaceManager.cs", line = 80, column = 10, projectPath = targetPath },
     data => data?["fields"] is not null || data?["methods"] is not null
 ));
@@ -256,15 +256,15 @@ Console.WriteLine("\nValidation Tools (2 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
-    "get_diagnostics: check for compiler errors",
-    "get_diagnostics",
+    "roslyn_get_diagnostics: check for compiler errors",
+    "roslyn_get_diagnostics",
     new { },
     data => data?.AsArray() is not null
 ));
 
 tests.Add(await RunTestAsync(
-    "build_project: smart Roslyn-first build",
-    "build_project",
+    "roslyn_build_project: smart Roslyn-first build",
+    "roslyn_build_project",
     new { projectPath = targetPath },
     data => data?["succeeded"] is not null && data?["source"] is not null
 ));
@@ -273,8 +273,8 @@ Console.WriteLine("\nRefactoring Tools (1 test)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
-    "preview_rename: generate diff for renaming compilation",
-    "preview_rename",
+    "roslyn_preview_rename: generate diff for renaming compilation",
+    "roslyn_preview_rename",
     new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceManager" },
     data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
 ));
@@ -290,36 +290,36 @@ var tempCodeFile = Path.Combine(targetPath, ".test_code_temp.cs");
 await File.WriteAllTextAsync(tempCodeFile, "class TestClass { private int oldField = 42; }");
 
 tests.Add(await RunTestAsync(
-    "replace_in_file: dry run literal replacement",
-    "replace_in_file",
+    "roslyn_replace_in_file: dry run literal replacement",
+    "roslyn_replace_in_file",
     new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = true, projectPath = targetPath },
     data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false
 ));
 
 tests.Add(await RunTestAsync(
-    "replace_in_file: apply literal replacement",
-    "replace_in_file",
+    "roslyn_replace_in_file: apply literal replacement",
+    "roslyn_replace_in_file",
     new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = false, projectPath = targetPath },
     data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true
 ));
 
 tests.Add(await RunTestAsync(
-    "replace_in_file: regex replacement with capture groups",
-    "replace_in_file",
+    "roslyn_replace_in_file: regex replacement with capture groups",
+    "roslyn_replace_in_file",
     new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = targetPath },
     data => data?["matchCount"]?.GetValue<int>() == 1 && data?["changedLines"]?.AsArray()[0]?.GetValue<int>() == 2
 ));
 
 tests.Add(await RunTestAsync(
-    "replace_in_code: dry run identifier replacement",
-    "replace_in_code",
+    "roslyn_replace_in_code: dry run identifier replacement",
+    "roslyn_replace_in_code",
     new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true, projectPath = targetPath },
     data => data?["error"] is null && data?["changeCount"] is not null
 ));
 
 tests.Add(await RunTestAsync(
-    "replace_in_code: apply identifier replacement",
-    "replace_in_code",
+    "roslyn_replace_in_code: apply identifier replacement",
+    "roslyn_replace_in_code",
     new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "newField", replacement = "finalField", dryRun = false, projectPath = targetPath },
     data => data?["error"] is null && data?["applied"] is not null
 ));

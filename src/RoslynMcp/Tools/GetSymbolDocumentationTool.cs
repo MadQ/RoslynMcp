@@ -11,7 +11,8 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 {
     public GetSymbolDocumentationTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_symbol_documentation", ReadOnly = true)]
+    [Description(
         "Returns XML documentation comments for a symbol (type, method, property, field, event). " +
         "Includes summary, parameter descriptions, return value description, and remarks. " +
         "Use this to understand API contracts without reading source files.")]

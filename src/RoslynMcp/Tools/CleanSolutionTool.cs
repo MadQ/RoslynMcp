@@ -9,7 +9,8 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 {
     public CleanSolutionTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_clean_solution", Destructive = true)]
+    [Description(
         "Cleans the solution by removing all build artifacts (bin/ and obj/ directories). " +
         "Use this when the build is in a bad state or before a fresh rebuild. " +
         "Does not run dotnet build — just removes compiled output.")]

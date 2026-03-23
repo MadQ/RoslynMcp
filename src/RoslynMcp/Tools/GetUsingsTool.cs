@@ -10,7 +10,8 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 {
     public GetUsingsTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_usings", ReadOnly = true)]
+    [Description(
         "Returns all 'using' directives in a file (namespaces and aliases), plus implicit global usings from the project. " +
         "Use this to understand what's in scope when generating or analyzing code.")]
     public async Task<object> GetUsings(

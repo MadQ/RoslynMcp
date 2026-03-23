@@ -9,7 +9,8 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 {
     public GetSymbolDefinitionTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_symbol_definition", ReadOnly = true)]
+    [Description(
         "Returns the definition location and signature of a symbol (type, method, property, field, event). " +
         "Shows where the symbol is declared, its full signature, and XML doc summary. " +
         "Use this to navigate to a symbol's definition without reading multiple files.")]

@@ -11,7 +11,8 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 {
     public SymbolInfoTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_symbol_info", ReadOnly = true)]
+    [Description(
         "Returns resolved symbol information at a specific file location — type, kind, containing type, return type. " +
         "Use to verify what a name resolves to without reading the full file.")]
     public async Task<string> GetSymbolInfo(

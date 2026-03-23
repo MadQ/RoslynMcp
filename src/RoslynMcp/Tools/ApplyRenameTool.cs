@@ -13,7 +13,8 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		this.approvals = approvals;
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "roslyn_apply_rename", Destructive = true)]
+	[Description(
 		"Applies or rejects a rename previewed by preview_rename. " +
 		"approval: 'y' = apply once, 'session' = apply and auto-approve this symbol for the session, 'n' = reject."
 	)]

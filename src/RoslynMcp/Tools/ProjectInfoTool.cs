@@ -17,7 +17,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
     // Matches NuGet package paths: ...\.nuget\packages\<name>\<version>\...
     private static readonly Regex NuGetPattern = new(@"[/\\]packages[/\\]([^/\\]+)[/\\]([^/\\]+)[/\\]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_project_info", ReadOnly = true), Description(
         "Returns metadata about the loaded project: name, assembly name, target framework, language version, " +
         "output kind, nullable setting, NuGet package references, and additional files. " +
         "Use this to understand project configuration without reading the .csproj directly.")]

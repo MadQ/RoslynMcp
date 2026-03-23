@@ -9,7 +9,8 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 {
     public RestorePackagesTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_restore_packages", Idempotent = true)]
+    [Description(
         "Restores NuGet packages for the solution. " +
         "Use this after adding package references or when packages are missing. " +
         "Does not run dotnet build — just downloads and restores dependencies.")]

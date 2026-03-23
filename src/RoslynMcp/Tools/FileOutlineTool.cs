@@ -10,7 +10,8 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 {
     public FileOutlineTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true)]
+    [Description(
         "Returns a structured outline of a file: types and their members (method signatures, properties, fields) without bodies. " +
         "Use this to understand file structure without reading the entire content — saves tokens.")]
     public async Task<object> GetFileOutline(

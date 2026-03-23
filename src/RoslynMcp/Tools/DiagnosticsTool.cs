@@ -10,7 +10,8 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 {
     public DiagnosticsTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_diagnostics", ReadOnly = true)]
+    [Description(
         "Returns compiler diagnostics (errors and warnings) for the project or a single file. " +
         "Faster than running dotnet build — uses the in-process Roslyn compilation.")]
     public string[] GetDiagnostics(

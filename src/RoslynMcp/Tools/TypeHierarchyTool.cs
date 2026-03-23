@@ -11,7 +11,8 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 {
     public TypeHierarchyTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_type_hierarchy", ReadOnly = true)]
+    [Description(
         "Returns the inheritance hierarchy for a type: base types (chain to object/ValueType), implemented interfaces, " +
         "and derived types found in the project. Use this to understand polymorphism and type relationships.")]
     public async Task<object> GetTypeHierarchy(

@@ -9,7 +9,8 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 {
     public TypeMembersTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_get_type_members", ReadOnly = true)]
+    [Description(
         "Returns detailed information about all members of a type (class, struct, enum, interface). " +
         "Includes full signatures with parameter types, return types, modifiers, and XML doc summaries. " +
         "For enums, returns the member names. Use this to understand a type's API surface.")]

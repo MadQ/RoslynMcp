@@ -11,7 +11,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	public SearchFilesTool(WorkspaceResolver workspace) : base(workspace) { }
 
 	[
-		McpServerTool, Description(
+		McpServerTool(Name = "roslyn_search_files", ReadOnly = true), Description(
 			"Searches files in the workspace for lines matching a regex pattern. " +
 			"Returns file paths, line numbers, and matching text. " +
 			"Use this to discover code locations before applying Roslyn tools for detailed analysis."

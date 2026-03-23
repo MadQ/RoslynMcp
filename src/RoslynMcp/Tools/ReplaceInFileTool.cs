@@ -14,7 +14,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 {
     public ReplaceInFileTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_replace_in_file", Destructive = true)]
+    [Description(
         "Replaces occurrences of a pattern in a file. Supports literal string or regex replacement. " +
         "Returns the number of replacements made and the 1-based line numbers that were changed. " +
         "Use dryRun=true to preview what would change without writing the file. " +

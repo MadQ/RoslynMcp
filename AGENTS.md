@@ -42,9 +42,10 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
 
-Two projects:
+Three projects:
 - `src/RoslynMcp/RoslynMcp.csproj` — MCP server
 - `src/TestHarness/TestHarness.csproj` — local testing client
+- `src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj` — Roslyn analyzers applied to this codebase; the most direct expression of dogfooding — Roslyn-powered analysis running on the repo that wraps Roslyn
 
 ```
 dotnet build src/RoslynMcp/RoslynMcp.csproj
@@ -59,30 +60,30 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 | `WorkspaceManager` | LRU-cached workspace instances; auto-detects `.csproj` → `MSBuildWorkspace` or directory → `AdhocWorkspace`; exposes `GetCompilation()`, `GetSolution()`, `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()`; smart path resolution |
 | `WorkspaceResolver` | Per-tool facade over `WorkspaceManager`; provides `TryGetCompilation()`, `TryGetProject()`, `GetRootPath()`, `GetSolution()`, `InvalidateFile()` with structured error handling |
 | `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines `ProjectPathDescription` constant |
-| `SearchFilesTool` | `search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
-| `SemanticSearchTool` | `semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
-| `ListFilesTool` | `list_files` — enumerate files matching glob pattern (fast file listing, no content) |
-| `ReplaceInFileTool` | `replace_in_file` — text-level find/replace with regex support (any file type) |
-| `ReplaceInCodeTool` | `replace_in_code` — semantic C# node replacement using Roslyn (validates syntax, preserves formatting) |
-| `RespawnTool` | `respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
-| `TypeMembersTool` | `get_type_members` — enumerate members with full signatures + doc summaries |
-| `DiagnosticsTool` | `get_diagnostics` — compiler errors and warnings for project or single file |
-| `FindReferencesTool` | `find_references` — all references to a symbol across the project |
-| `SymbolInfoTool` | `get_symbol_info` — resolve what a name at a location actually is |
-| `PreviewRenameTool` | `preview_rename` — compute rename edits, return unified diff + token |
-| `ApplyRenameTool` | `apply_rename` — approve/reject a pending rename by token |
-| `ProjectInfoTool` | `get_project_info` — project metadata (TFM, language version, packages, etc.) |
-| `BuildTool` | `build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true` |
-| `CleanSolutionTool` | `clean_solution` — remove all build artifacts (bin/obj directories) |
-| `RestorePackagesTool` | `restore_packages` — restore NuGet packages |
-| `FileOutlineTool` | `get_file_outline` — type/member structure without bodies (token saver) |
-| `TypeHierarchyTool` | `get_type_hierarchy` — base types, interfaces, derived types |
-| `FindImplementationsTool` | `find_implementations` — concrete implementations of interfaces/abstract members |
-| `ListTypesTool` | `list_types` — enumerate types with optional filters |
-| `GetUsingsTool` | `get_usings` — using directives + global usings |
-| `GetSymbolDocumentationTool` | `get_symbol_documentation` — XML doc comments for symbols |
-| `GetSymbolDefinitionTool` | `get_symbol_definition` — find declaration location with signature |
-| `GetSymbolsInScopeTool` | `get_symbols_in_scope` — enumerate accessible symbols at a location |
+| `SearchFilesTool` | `roslyn_search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
+| `SemanticSearchTool` | `roslyn_semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
+| `ListFilesTool` | `roslyn_list_files` — enumerate files matching glob pattern (fast file listing, no content) |
+| `ReplaceInFileTool` | `roslyn_replace_in_file` — text-level find/replace with regex support (any file type) |
+| `ReplaceInCodeTool` | `roslyn_replace_in_code` — semantic C# node replacement using Roslyn (validates syntax, preserves formatting) |
+| `RespawnTool` | `roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
+| `TypeMembersTool` | `roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
+| `DiagnosticsTool` | `roslyn_get_diagnostics` — compiler errors and warnings for project or single file |
+| `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |
+| `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
+| `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token |
+| `ApplyRenameTool` | `roslyn_apply_rename` — approve/reject a pending rename by token |
+| `ProjectInfoTool` | `roslyn_get_project_info` — project metadata (TFM, language version, packages, etc.) |
+| `BuildTool` | `roslyn_build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true` |
+| `CleanSolutionTool` | `roslyn_clean_solution` — remove all build artifacts (bin/obj directories) |
+| `RestorePackagesTool` | `roslyn_restore_packages` — restore NuGet packages |
+| `FileOutlineTool` | `roslyn_get_file_outline` — type/member structure without bodies (token saver) |
+| `TypeHierarchyTool` | `roslyn_get_type_hierarchy` — base types, interfaces, derived types |
+| `FindImplementationsTool` | `roslyn_find_implementations` — concrete implementations of interfaces/abstract members |
+| `ListTypesTool` | `roslyn_list_types` — enumerate types with optional filters |
+| `GetUsingsTool` | `roslyn_get_usings` — using directives + global usings |
+| `GetSymbolDocumentationTool` | `roslyn_get_symbol_documentation` — XML doc comments for symbols |
+| `GetSymbolDefinitionTool` | `roslyn_get_symbol_definition` — find declaration location with signature |
+| `GetSymbolsInScopeTool` | `roslyn_get_symbols_in_scope` — enumerate accessible symbols at a location |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 
@@ -96,15 +97,15 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 
 **Tool Selection Guidance:**
 
-When editing C# code, **actively prefer `replace_in_code`** over `replace_in_file`:
-- `replace_in_code` is semantically aware, validates syntax, preserves formatting/trivia
-- `replace_in_file` is for text/config files or when you need literal text replacement
+When editing C# code, **actively prefer `roslyn_replace_in_code`** over `roslyn_replace_in_file`:
+- `roslyn_replace_in_code` is semantically aware, validates syntax, preserves formatting/trivia
+- `roslyn_replace_in_file` is for text/config files or when you need literal text replacement
 
 When discovering files/content:
-- `list_files` — fast glob enumeration (find files by name/path)
-- `search_files` — content search (find lines matching regex pattern)
-- `semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs, code)
-- `find_references` — semantic symbol search (Roslyn-based, finds usage across project)
+- `roslyn_list_files` — fast glob enumeration (find files by name/path)
+- `roslyn_search_files` — content search (find lines matching regex pattern)
+- `roslyn_semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs, code)
+- `roslyn_find_references` — semantic symbol search (Roslyn-based, finds usage across project)
 
 ---
 
@@ -158,7 +159,7 @@ All communication is JSON-RPC 2.0 over stdin/stdout. **Never write to stdout exc
 "tools/list" => new {
     tools = new[] {
         new {
-            name = "get_type_members",
+            name = "roslyn_get_type_members",
             description = "Returns all member names of a type...",
             inputSchema = new { ... }
         }
@@ -173,7 +174,7 @@ All communication is JSON-RPC 2.0 over stdin/stdout. **Never write to stdout exc
     var args = requestObj["params"]?["arguments"];
 
     return toolName switch {
-        "get_type_members" => TypeMembersTool.Execute(args),
+        "roslyn_get_type_members" => TypeMembersTool.Execute(args),
         _ => new { error = "Unknown tool" }
     };
 }
@@ -254,7 +255,7 @@ internal sealed class MyTool : RoslynMcpTool
 
 ## Rename Workflow (User-Configurable)
 
-**All renames use two-phase flow:** `preview_rename` → review diff → `apply_rename`.
+**All renames use two-phase flow:** `roslyn_preview_rename` → review diff → `roslyn_apply_rename`.
 
 **Why?** Renames can affect dozens/hundreds of files. The two-phase flow lets you review impact before committing — especially important for large/uncertain changes.
 
@@ -264,27 +265,27 @@ Users can instruct agents to handle renames conservatively or aggressively:
 
 **Conservative (default recommendation):**
 ```
-Always call preview_rename first. Show me the diff.
-Only call apply_rename after I explicitly approve.
+Always call roslyn_preview_rename first. Show me the diff.
+Only call roslyn_apply_rename after I explicitly approve.
 ```
 
 **Balanced:**
 ```
 For small renames (1-3 files, obvious intent like typo fixes):
-  - Call preview_rename, review diff yourself, auto-apply if safe
+  - Call roslyn_preview_rename, review diff yourself, auto-apply if safe
 For large renames (>3 files, broad scope, uncertain impact):
-  - Call preview_rename, show me the diff, wait for approval
+  - Call roslyn_preview_rename, show me the diff, wait for approval
 ```
 
 **Aggressive:**
 ```
-Call preview_rename → apply_rename immediately unless I say otherwise.
+Call roslyn_preview_rename → roslyn_apply_rename immediately unless I say otherwise.
 I trust you and I have git.
 ```
 
 **Session approval:** If user approves a rename with `approval: "session"`, further renames of the same symbol auto-apply for the remainder of the server process (until restart). Use this for bulk renaming tasks.
 
-**Planned feature:** `undo_last_edit` will revert the most recent Roslyn edit (rename, refactoring) from an in-memory snapshot. Useful for "wait, let me rethink that" moments mid-task.
+**Planned feature:** `undo_last_edit` will revert the most recent Roslyn edit (rename, refactoring) from an in-memory snapshot.
 
 ---
 

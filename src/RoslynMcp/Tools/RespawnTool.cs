@@ -7,7 +7,8 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class RespawnTool
 {
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_respawn", Destructive = true)]
+    [Description(
         "DEBUG ONLY: Terminates the MCP server process, forcing the client to respawn it. " +
         "Use this to reload code changes after rebuilding without restarting your IDE. " +
         "The server will exit gracefully after responding.")]

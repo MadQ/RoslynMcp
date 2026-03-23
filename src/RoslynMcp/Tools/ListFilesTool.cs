@@ -9,7 +9,8 @@ internal sealed class ListFilesTool : RoslynMcpTool
 {
     public ListFilesTool(WorkspaceResolver workspace) : base(workspace) { }
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_list_files", ReadOnly = true)]
+    [Description(
         "Lists files matching a glob pattern. Returns relative paths without content. " +
         "Use this to enumerate files by name/extension before analyzing them with other tools. " +
         "Complements search_files (content search) with fast file enumeration."

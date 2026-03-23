@@ -173,14 +173,14 @@ RoslynMcp provides 24 tools for code analysis and manipulation. **All tools work
 
 ```markdown
 When working with C# code:
-- **Prefer `replace_in_code`** for editing C# files — it validates syntax, preserves formatting, and understands code structure
-- Use `replace_in_file` only for non-C# files (JSON, markdown, etc.) or when literal text replacement is needed
+- **Prefer `roslyn_replace_in_code`** for editing C# files — it validates syntax, preserves formatting, and understands code structure
+- Use `roslyn_replace_in_file` only for non-C# files (JSON, markdown, etc.) or when literal text replacement is needed
 
 When discovering code:
-- `search_files` — finds content (regex patterns across file contents)
-- `semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs)
-- `list_files` — enumerates by name (glob patterns, fast)
-- `find_references` — finds usage (semantic, Roslyn-based)
+- `roslyn_search_files` — finds content (regex patterns across file contents)
+- `roslyn_semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs)
+- `roslyn_list_files` — enumerates by name (glob patterns, fast)
+- `roslyn_find_references` — finds usage (semantic, Roslyn-based)
 ```
 
 **Why this matters:** RoslynMcp provides both text-level (`replace_in_file`) and semantic (`replace_in_code`) editing tools. Without explicit guidance, agents may default to the simpler text-based tool even when the semantic tool is more appropriate. The guidance above ensures your agent uses the most robust tool for C# code changes.
@@ -189,29 +189,30 @@ When discovering code:
 
 | Tool | Description |
 |------|-------------|
-| `search_files` | Searches workspace files for lines matching a regex pattern. Returns file paths, line numbers, and matching text with paging support. Use this to discover code locations before applying Roslyn tools. |
-| `list_files` | Lists files matching a glob pattern (e.g., `*.cs`, `**/*.json`). Returns relative paths without content. Fast enumeration for file discovery. |
-| `replace_in_file` | Text-level find-and-replace with regex support. Works on any file type. Returns changed line numbers and match count. Supports dry-run preview. |
-| `replace_in_code` | **Semantic C# editing** — replaces syntax nodes by kind (MethodDeclaration, FieldDeclaration, IdentifierName, etc.). Validates syntax, preserves formatting. C# files only. |
-| `get_type_members` | Returns detailed information about all members of a type with full signatures (parameter types, return types, modifiers) and XML doc summaries. Use this to understand a type's API surface. |
-| `get_diagnostics` | Returns compiler errors and warnings for the whole project or a single file. No build process. |
-| `find_references` | Finds every reference to a named symbol (type, method, field, property) across the project. |
-| `get_symbol_info` | Resolves what a name at a given file/line/column actually is: kind, containing type, return type. |
-| `preview_rename` | Computes a rename across all files, returns unified diff + confirmation token. |
-| `apply_rename` | Applies or rejects a pending rename by token. |
-| `get_project_info` | Returns project metadata: target framework, language version, output kind, nullable setting, NuGet packages, additional files. |
-| `build_project` | Builds the project and returns structured diagnostics. **Smart behavior:** checks Roslyn diagnostics first and skips the build if errors exist (fast path). If Roslyn reports no errors, runs `dotnet build` to validate MSBuild configuration. Set `forceBuild=true` to bypass Roslyn — use sparingly. |
-| `clean_solution` | Cleans the solution by removing all build artifacts (bin/ and obj/ directories). Use when the build is in a bad state or before a fresh rebuild. |
-| `restore_packages` | Restores NuGet packages for the solution. Use after adding package references or when packages are missing. |
-| `get_file_outline` | Returns a structured outline of a file: types and their members (signatures only, no bodies). Saves tokens by avoiding full file reads. |
-| `get_type_hierarchy` | Returns the inheritance hierarchy for a type: base types, interfaces, and derived types found in the project. |
-| `find_implementations` | Finds all types that implement an interface/abstract class, or all methods that override a virtual/abstract member. |
-| `list_types` | Lists all types in the project with optional namespace or kind filters (class, interface, enum, struct). |
-| `get_usings` | Returns all `using` directives in a file plus implicit global usings from the project. |
-| `get_symbol_documentation` | Returns XML documentation comments for a symbol: summary, parameter descriptions, return value description, remarks. Use to understand API contracts without reading source. |
-| `get_symbol_definition` | Returns the definition location and signature of a symbol. Shows where the symbol is declared (file/line/column), its full signature, and doc summary. |
-| `get_symbols_in_scope` | Returns all symbols accessible at a specific file location: locals, parameters, fields, properties, methods, types. Use when generating code to understand what's available in scope. |
-| `respawn` | **DEBUG ONLY:** Terminates the server process, forcing the MCP client to respawn it. Use this to reload code changes after rebuilding without restarting your IDE. |
+| `roslyn_search_files` | Searches workspace files for lines matching a regex pattern. Returns file paths, line numbers, and matching text with paging support. Use this to discover code locations before applying Roslyn tools. |
+| `roslyn_semantic_search` | Context-aware C# search using Roslyn syntax-tree filtering. Allows searching within specific syntax contexts (comments, strings, identifiers, code, xmldocs). More precise than `roslyn_search_files` but C#-only. |
+| `roslyn_list_files` | Lists files matching a glob pattern (e.g., `*.cs`, `**/*.json`). Returns relative paths without content. Fast enumeration for file discovery. |
+| `roslyn_replace_in_file` | Text-level find-and-replace with regex support. Works on any file type. Returns changed line numbers and match count. Supports dry-run preview. |
+| `roslyn_replace_in_code` | **Semantic C# editing** — replaces syntax nodes by kind (MethodDeclaration, FieldDeclaration, IdentifierName, etc.). Validates syntax, preserves formatting. C# files only. |
+| `roslyn_get_type_members` | Returns detailed information about all members of a type with full signatures (parameter types, return types, modifiers) and XML doc summaries. Use this to understand a type's API surface. |
+| `roslyn_get_diagnostics` | Returns compiler errors and warnings for the whole project or a single file. No build process. |
+| `roslyn_find_references` | Finds every reference to a named symbol (type, method, field, property) across the project. |
+| `roslyn_get_symbol_info` | Resolves what a name at a given file/line/column actually is: kind, containing type, return type. |
+| `roslyn_preview_rename` | Computes a rename across all files, returns unified diff + confirmation token. |
+| `roslyn_apply_rename` | Applies or rejects a pending rename by token. |
+| `roslyn_get_project_info` | Returns project metadata: target framework, language version, output kind, nullable setting, NuGet packages, additional files. |
+| `roslyn_build_project` | Builds the project and returns structured diagnostics. **Smart behavior:** checks Roslyn diagnostics first and skips the build if errors exist (fast path). If Roslyn reports no errors, runs `dotnet build` to validate MSBuild configuration. Set `forceBuild=true` to bypass Roslyn — use sparingly. |
+| `roslyn_clean_solution` | Cleans the solution by removing all build artifacts (bin/ and obj/ directories). Use when the build is in a bad state or before a fresh rebuild. |
+| `roslyn_restore_packages` | Restores NuGet packages for the solution. Use after adding package references or when packages are missing. |
+| `roslyn_get_file_outline` | Returns a structured outline of a file: types and their members (signatures only, no bodies). Saves tokens by avoiding full file reads. |
+| `roslyn_get_type_hierarchy` | Returns the inheritance hierarchy for a type: base types, interfaces, and derived types found in the project. |
+| `roslyn_find_implementations` | Finds all types that implement an interface/abstract class, or all methods that override a virtual/abstract member. |
+| `roslyn_list_types` | Lists all types in the project with optional namespace or kind filters (class, interface, enum, struct). |
+| `roslyn_get_usings` | Returns all `using` directives in a file plus implicit global usings from the project. |
+| `roslyn_get_symbol_documentation` | Returns XML documentation comments for a symbol: summary, parameter descriptions, return value description, remarks. Use to understand API contracts without reading source. |
+| `roslyn_get_symbol_definition` | Returns the definition location and signature of a symbol. Shows where the symbol is declared (file/line/column), its full signature, and doc summary. |
+| `roslyn_get_symbols_in_scope` | Returns all symbols accessible at a specific file location: locals, parameters, fields, properties, methods, types. Use when generating code to understand what's available in scope. |
+| `roslyn_respawn` | **DEBUG ONLY:** Terminates the server process, forcing the MCP client to respawn it. Use this to reload code changes after rebuilding without restarting your IDE. |
 
 ---
 
@@ -312,7 +313,7 @@ Roslyn's `Renamer` API operates on the `Solution` object and produces a new `Sol
 3. User reviews diff, approves or rejects
 
 **You control the workflow.** Configure your agent's behavior in `.github/copilot-instructions.md` or your MCP client settings:
-- **Conservative:** "Always show preview, never `apply_rename` without my explicit approval"
+- **Conservative:** "Always show preview, never `roslyn_apply_rename` without my explicit approval"
 - **Balanced:** "Preview large renames (>5 files), auto-apply small ones"
 - **Aggressive:** "Apply renames immediately unless I say otherwise"
 

@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RoslynMcpTool** base class — `TryGetCompilation()` / `TryGetProject()` with `[NotNullWhen]` attributes; eliminates boilerplate from every tool
 - **AdhocWorkspace restored** — directories without `.csproj` now fully supported with FileSystemWatcher for incremental updates
 - **Exceptions.cs** — `InvalidProjectPathException`, `ProjectNotFoundException`, `MultipleProjectsFoundException` with structured messages
-- **`semantic_search`** tool — Roslyn syntax-tree filtering by context (comments, strings, identifiers, xmldocs, code)
+- **`roslyn_semantic_search`** tool — Roslyn syntax-tree filtering by context (comments, strings, identifiers, xmldocs, code)
 
 ### Changed
 - All 24 tools migrated to `RoslynMcpTool` base class pattern
+- All 24 tools renamed with `roslyn_` prefix (e.g. `get_type_members` → `roslyn_get_type_members`) for unambiguous identification in agent tool lists
+- All tools annotated with `ReadOnly`, `Destructive`, or `Idempotent` hints via `McpServerToolAttribute`
 - WorkspaceManager: LRU workspace cache; `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` added
 - TestHarness: path calculation fixed (5 levels up); `projectPath` added to all 23 tests
 
@@ -36,19 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **23 MCP tools** covering all core agent workflows:
-  - Discovery: `search_files`, `list_types`, `get_file_outline`, `get_project_info`, `get_usings`
-  - Type Understanding: `get_type_members` (enhanced), `get_type_hierarchy`, `find_implementations`, `get_symbol_documentation`
-  - Navigation: `get_symbol_info`, `find_references`, `get_symbol_definition`
-  - Code Generation: `get_symbols_in_scope`
-  - Validation: `get_diagnostics`, `build_project` (smart Roslyn-first)
-  - Editing: `replace_in_file`, `replace_in_code`, `list_files`
-  - Refactoring: `preview_rename`, `apply_rename`
-  - Maintenance: `clean_solution`, `restore_packages`
-  - Debug: `respawn` (DEBUG only)
+  - Discovery: `roslyn_search_files`, `roslyn_list_types`, `roslyn_get_file_outline`, `roslyn_get_project_info`, `roslyn_get_usings`
+  - Type Understanding: `roslyn_get_type_members` (enhanced), `roslyn_get_type_hierarchy`, `roslyn_find_implementations`, `roslyn_get_symbol_documentation`
+  - Navigation: `roslyn_get_symbol_info`, `roslyn_find_references`, `roslyn_get_symbol_definition`
+  - Code Generation: `roslyn_get_symbols_in_scope`
+  - Validation: `roslyn_get_diagnostics`, `roslyn_build_project` (smart Roslyn-first)
+  - Editing: `roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_list_files`
+  - Refactoring: `roslyn_preview_rename`, `roslyn_apply_rename`
+  - Maintenance: `roslyn_clean_solution`, `roslyn_restore_packages`
+  - Debug: `roslyn_respawn` (DEBUG only)
 
 ### Enhanced
-- **`get_type_members`**: Now returns full signatures with parameter types, return types, modifiers, and XML doc summaries (was just names)
-- **`build_project`**: Smart Roslyn-first behavior — checks diagnostics before running MSBuild, skips build if errors exist (huge performance win)
+- **`roslyn_get_type_members`**: Now returns full signatures with parameter types, return types, modifiers, and XML doc summaries (was just names)
+- **`roslyn_build_project`**: Smart Roslyn-first behavior — checks diagnostics before running MSBuild, skips build if errors exist (huge performance win)
 - **Diagnostic filtering**: NETSDK1209 and other non-actionable SDK warnings automatically filtered from output
 
 ### Added (Infrastructure)
@@ -60,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Multi-target framework builds now require explicit `-f` flag
-- Metadata symbols (external types) handled gracefully in `find_implementations`
+- Metadata symbols (external types) handled gracefully in `roslyn_find_implementations`
 - Preview rename validation handles PascalCase/camelCase property names
 
 ---
@@ -70,8 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Core MCP server infrastructure
 - WorkspaceManager with MSBuildWorkspace and AdhocWorkspace support
-- Initial tool set: `get_type_members`, `get_diagnostics`, `find_references`, `get_symbol_info`
-- Rename tools: `preview_rename`, `apply_rename` with approval flow
+- Initial tool set: `roslyn_get_type_members`, `roslyn_get_diagnostics`, `roslyn_find_references`, `roslyn_get_symbol_info`
+- Rename tools: `roslyn_preview_rename`, `roslyn_apply_rename` with approval flow
 - ApprovalStore for session-scoped rename approvals
 - SolutionDiff for unified diff generation
 - FileSystemWatcher integration for AdhocWorkspace

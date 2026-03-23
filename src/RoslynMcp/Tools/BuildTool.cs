@@ -25,7 +25,8 @@ internal sealed class BuildTool : RoslynMcpTool
         RegexOptions.Compiled | RegexOptions.IgnoreCase
     );
 
-    [McpServerTool, Description(
+    [McpServerTool(Name = "roslyn_build_project", ReadOnly = true)]
+    [Description(
         "Builds the project and returns structured diagnostics. By default, checks Roslyn diagnostics first " +
         "and skips the build if errors are found (fast path). If Roslyn reports no errors, proceeds with " +
         "'dotnet build' to validate MSBuild configuration. Set forceBuild=true to bypass Roslyn and always " +
