@@ -115,14 +115,14 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 ## Code Style
 
 - **Braces:** same line for control flow (`if(x) {`), new line for methods/classes; properties — same line as the identifier (`public int Count {`)
-- **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)`
+- **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)` (Actually, IDC so much about this one)
 - **Single-statement blocks:** no braces
 - **Naming:** PascalCase for types/methods, camelCase for fields/locals — no underscores, no Hungarian, no abbreviations
-- **Handles:** always `nint`, never `IntPtr`
+- **Handles:** always `nint`, never `IntPtr` (Not so much used here, just an example)
 - **Modern C#:** pattern matching, switch expressions, target-typed `new`, collection expressions, `nint`
-- **`var`:** use when type is obvious or long; prefer explicit type otherwise
-- **Column-aligned fields:** tab-stop alignment on field declarations and assignment blocks
-- **Cast spacing:** space between cast and operand — `(int) value`, not `(int)value`
+- **`var`:** use when type is obvious or long; prefer explicit type otherwise (rarely)
+- **Column-aligned fields:** tab-stop alignment on field declarations and assignment blocks (for Error-prone bio-processors: not so important. Use your judgement.)
+- **Cast spacing:** space between cast and operand — `(int) value`, not `(int)value` (🙄, whatevs.)
 - **Comments:** explain *why*, not *what* — after any edit, re-evaluate nearby comments and update or remove stale ones; one space after a period, never two; complete sentences, proper punctuation, no personal pronouns (`we`/`I`/`our` have no place in code comments)
 - **`TODO` comments:** must include the actual question or concern, not just "fix"
 - **Condition ordering:** simple/common path first — early return or assignment; complex path in `else`
@@ -131,8 +131,13 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
   - Blank line **after the opening brace** of any multi-statement control-flow block
   - Blank line between branches of an `if/else if/else` chain when any body spans multiple lines
   - Blank lines between logically distinct statement groups within a method body
-  - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block (Yeah, weird one, IK. 
-- **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies)
+  - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block (Yeah, weird one, IK. High-maintenance bipedals: feel free to ignore this)
+- **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies) (Just recently started test-driving this one - liking it so far.)
+  
+- If/When we start using unit tests, rule #1: No tautological tests (Did I just do the thing that I just did?). Tests must verify meaningful behavior, not just "does it compile" or "does it return the same thing as the code it's testing". All tests shall have extensive XML doc comments describing the reason for their existence, the specific behavior they verify, and the rationale for the chosen inputs and expected outputs. Tests without such documentation are not valid tests. Not everyone is a unit test SME... complicated mock setups tend to look like opaque black boxes (to some of us) that may as well be testing the test framework itself. So, all mock setups must also be documented with the same level of detail as the tests they support. Rule #2: Unit tests are a secondary concern. No non-test code shall be written with the primary goal of making it easier to test. There shall be no interface extractions for the sole purpose of testing. Not everything is inherently testable. Accept it and move on.
+  - Also... Wow! Opine much?
+
+---
 
 > **Consistency is overrated. Embrace diversity.**
 >
