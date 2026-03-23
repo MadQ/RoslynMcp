@@ -7,17 +7,23 @@ using RoslynSymbolFinder = Microsoft.CodeAnalysis.FindSymbols.SymbolFinder;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class FindReferencesTool(WorkspaceManager workspace)
+internal sealed class FindReferencesTool : RoslynMcpTool
 {
+    public FindReferencesTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Finds all references to a named symbol (type, method, field, property) across the project. " +
         "Useful before renaming or refactoring to see every call site.")]
     public async Task<string[]> FindReferences(
         [Description("The symbol name to find, e.g. 'WindowKey', 'RestoreFromPlacements', 'trackedWindows'.")] string symbolName,
-        [Description("Optional type name to narrow the search, e.g. 'WindowTracker'.")] string? containingType = null)
+        [Description("Optional type name to narrow the search, e.g. 'WindowTracker'.")] string? containingType = null,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
-        var solution    = workspace.GetSolution();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return [error.ToString()!];
+
+        var solution    = workspace.GetSolution(projectPath);
+        var rootPath    = workspace.GetRootPath(projectPath);
 
         // Find the symbol declaration.
         var symbol = FindSymbol(compilation, symbolName, containingType);
@@ -34,7 +40,7 @@ internal sealed class FindReferencesTool(WorkspaceManager workspace)
             .Select(l => {
                 var span = l.Location.GetLineSpan();
                 var file = span.Path is { Length: > 0 } p
-                    ? Path.GetRelativePath(workspace.RootPath, p)
+                    ? Path.GetRelativePath(rootPath, p)
                     : "?";
                 var line = span.StartLinePosition.Line + 1;
 

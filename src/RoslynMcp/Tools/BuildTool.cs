@@ -7,8 +7,10 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class BuildTool(WorkspaceManager workspace)
+internal sealed class BuildTool : RoslynMcpTool
 {
+    public BuildTool(WorkspaceResolver workspace) : base(workspace) { }
+
     // Diagnostic codes to ignore (non-actionable SDK/tooling warnings).
     private static readonly HashSet<string> IgnoredDiagnostics = new(StringComparer.OrdinalIgnoreCase) {
         "NETSDK1209", // "The current Visual Studio version does not support targeting .NET X"
@@ -31,15 +33,21 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         "that Roslyn cannot detect. Requires a .csproj to be present.")]
     public async Task<object> BuildProject(
         [Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
-        [Description("If true, skip Roslyn check and always run dotnet build. Use sparingly — only for MSBuild-specific validation.")] bool forceBuild = false)
+        [Description("If true, skip Roslyn check and always run dotnet build. Use sparingly — only for MSBuild-specific validation.")] bool forceBuild = false,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        if(workspace.CsprojPath is null)
+        var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
+
+        if(csprojPath is null)
             return new { error = "No .csproj found — build is only available in MSBuildWorkspace mode." };
 
         // Fast path: check Roslyn diagnostics first (unless forceBuild=true).
         if(!forceBuild) {
 
-            var roslynDiagnostics = GetRoslynDiagnostics();
+            if(!TryGetCompilation(projectPath, out var compilation, out var error))
+                return error;
+
+            var roslynDiagnostics = GetRoslynDiagnostics(compilation, rootPath);
             var roslynErrors      = roslynDiagnostics.Where(d => d.Severity == "error").ToArray();
 
             if(roslynErrors.Length > 0) {
@@ -60,14 +68,14 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         }
 
         // Slow path: run actual dotnet build.
-        var args = BuildArgs(workspace.CsprojPath, targetFramework);
+        var args = BuildArgs(csprojPath, targetFramework);
 
         string output;
         TimeSpan elapsed;
         int exitCode;
 
         try {
-            (output, elapsed, exitCode) = await RunDotnetAsync(args);
+            (output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath);
         }
         catch(InvalidOperationException ex) {
 
@@ -84,7 +92,7 @@ internal sealed class BuildTool(WorkspaceManager workspace)
             };
         }
 
-        var diagnostics = ParseMSBuildDiagnostics(output, workspace.RootPath);
+        var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
         var succeeded   = exitCode == 0;
 
         return new {
@@ -107,13 +115,14 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         return $"build \"{csprojPath}\"{tfmArg} --no-restore /nologo /v:quiet";
     }
 
-    private static async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string args)
+    private static async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string args, string workingDirectory)
     {
         var psi = new ProcessStartInfo("dotnet", args) {
             RedirectStandardOutput = true,
             RedirectStandardError  = true,
             UseShellExecute        = false,
             CreateNoWindow         = true,
+            WorkingDirectory       = workingDirectory
         };
 
         Process process;
@@ -159,13 +168,12 @@ internal sealed class BuildTool(WorkspaceManager workspace)
         return (combined, sw.Elapsed, process.ExitCode);
     }
 
-    private BuildDiagnostic[] GetRoslynDiagnostics()
+    private static BuildDiagnostic[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
     {
-        var compilation = workspace.GetCompilation();
         var diagnostics = compilation.GetDiagnostics()
             .Where(d => d.Severity >= DiagnosticSeverity.Warning)
             .Where(d => !IgnoredDiagnostics.Contains(d.Id))
-            .Select(d => ConvertRoslynDiagnostic(d, workspace.RootPath))
+            .Select(d => ConvertRoslynDiagnostic(d, rootPath))
             .ToArray();
 
         return diagnostics;

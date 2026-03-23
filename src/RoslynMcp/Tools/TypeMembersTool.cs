@@ -5,18 +5,28 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class TypeMembersTool(WorkspaceManager workspace)
+internal sealed class TypeMembersTool : RoslynMcpTool
 {
+    public TypeMembersTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns detailed information about all members of a type (class, struct, enum, interface). " +
         "Includes full signatures with parameter types, return types, modifiers, and XML doc summaries. " +
         "For enums, returns the member names. Use this to understand a type's API surface.")]
     public object GetTypeMembers(
-        [Description("The simple or fully-qualified type name, e.g. 'ShowWindowCommand' or 'ScreenMon.RuleMode'.")] string typeName,
-        [Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")] string? memberKind = null)
+        [Description("The simple or fully-qualified type name, e.g. 'ShowWindowCommand' or 'ScreenMon.RuleMode'.")]
+        string typeName,
+
+        [Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")]
+        string? memberKind = null,
+
+        [Description(ProjectPathDescription)]
+        string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
-        var type        = FindType(compilation, typeName);
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
+        var type = FindType(compilation, typeName);
 
         if(type is null)
             return new { error = $"Type '{typeName}' not found in the project." };

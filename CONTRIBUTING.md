@@ -297,10 +297,11 @@ RoslynMcp/
 │   └── TestHarness/            # Test suite
 ├── .github/                # GitHub-specific files
 ├── .meta/                  # Project metadata
-│   ├── AGENTS.md           # Agent-specific rules
-│   ├── CONTRIBUTING.md     # This file
-│   ├── HANDOFF.md          # Session handoff notes
-│   └── HumanNotes.txt      # Developer notes
+├── docs/                   # Project documentation
+│   ├── process/            # Checklists and process guides
+│   ├── sessions/           # Session handoff notes (gitignored, local only)
+│   ├── MSBUILD_API_ANALYSIS.md  # MSBuild vs Roslyn architecture rationale
+│   └── ScratchPad.md       # Owner scratchpad (gitignored, local only)
 ├── README.md               # Main documentation
 ├── INSTALLATION.md         # Setup instructions
 └── CHANGELOG.md            # Version history

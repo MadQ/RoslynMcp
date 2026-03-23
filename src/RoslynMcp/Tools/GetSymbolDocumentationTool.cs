@@ -7,17 +7,22 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class GetSymbolDocumentationTool(WorkspaceManager workspace)
+internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 {
+    public GetSymbolDocumentationTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns XML documentation comments for a symbol (type, method, property, field, event). " +
         "Includes summary, parameter descriptions, return value description, and remarks. " +
         "Use this to understand API contracts without reading source files.")]
     public object GetSymbolDocumentation(
         [Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
-        [Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null)
+        [Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
         if(symbol is null)

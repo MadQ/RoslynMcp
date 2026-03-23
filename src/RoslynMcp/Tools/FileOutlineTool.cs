@@ -6,16 +6,22 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class FileOutlineTool(WorkspaceManager workspace)
+internal sealed class FileOutlineTool : RoslynMcpTool
 {
+    public FileOutlineTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns a structured outline of a file: types and their members (method signatures, properties, fields) without bodies. " +
         "Use this to understand file structure without reading the entire content — saves tokens.")]
     public async Task<object> GetFileOutline(
-        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath)
+        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
-        var normalized  = filePath.Replace('/', Path.DirectorySeparatorChar);
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
+        var rootPath   = workspace.GetRootPath(projectPath);
+        var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
 
         var tree = compilation.SyntaxTrees
             .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase));
@@ -28,7 +34,7 @@ internal sealed class FileOutlineTool(WorkspaceManager workspace)
         var types = ExtractTypes(root, model);
 
         return new {
-            file  = Path.GetRelativePath(workspace.RootPath, tree.FilePath),
+            file  = Path.GetRelativePath(rootPath, tree.FilePath),
             types = types
         };
     }

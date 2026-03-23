@@ -7,17 +7,23 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class SymbolInfoTool(WorkspaceManager workspace)
+internal sealed class SymbolInfoTool : RoslynMcpTool
 {
+    public SymbolInfoTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Returns resolved symbol information at a specific file location — type, kind, containing type, return type. " +
         "Use to verify what a name resolves to without reading the full file.")]
     public async Task<string> GetSymbolInfo(
         [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
         [Description("1-based line number.")] int line,
-        [Description("1-based column number.")] int column)
+        [Description("1-based column number.")] int column,
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var compilation = workspace.GetCompilation();
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error.ToString()!;
+
+
         var normalized  = filePath.Replace('/', Path.DirectorySeparatorChar);
 
         var tree = compilation.SyntaxTrees

@@ -12,33 +12,49 @@ using ModelContextProtocol.Server;
 using RoslynMcp;
 using RoslynMcp.Tools;
 
-// The target project directory is passed as the first argument.
-// Default: current working directory (convenient when running from the repo root).
-var targetPath = args.Length > 0 ? args[0] : Directory.GetCurrentDirectory();
-
-if(!Directory.Exists(targetPath)) {
-	Console.Error.WriteLine($"RoslynMcp: directory not found: {targetPath}");
-    return 1;
-}
+// Optional: Pre-warm cache with specified projects (args).
+// If no args provided, projects are loaded on-demand when tools are called.
+var projectsToPreload = args;
 
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Logging
-    .ClearProviders()
-    // Only log errors — MCP uses stdio; any stray output breaks the protocol.
-    .AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Error)
-    .SetMinimumLevel(LogLevel.Error)
+	.ClearProviders()
+	// Only log errors — MCP uses stdio; any stray output breaks the protocol.
+	.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Error)
+	.SetMinimumLevel(LogLevel.Error)
 ;
 
 builder.Services
-    .AddSingleton(_ => new WorkspaceManager(targetPath))
-    .AddSingleton<ApprovalStore>()
-    .AddMcpServer()
-    .WithStdioServerTransport()
-    .WithToolsFromAssembly()
+	.AddSingleton<WorkspaceManager>()
+	.AddSingleton<WorkspaceResolver>()
+	.AddSingleton<ApprovalStore>()
+	.AddMcpServer()
+	.WithStdioServerTransport()
+	.WithToolsFromAssembly()
 ;
 
 var host = builder.Build();
+
+// Pre-warm cache if projects specified
+if(projectsToPreload.Length > 0) {
+
+	var resolver = host.Services.GetRequiredService<WorkspaceResolver>();
+
+	Console.Error.WriteLine($"Pre-loading {projectsToPreload.Length} project(s)...");
+
+	foreach(var path in projectsToPreload) {
+
+		try {
+			// Pre-load into cache
+			resolver.GetCompilation(path);
+			Console.Error.WriteLine($"✓ Loaded: {path}");
+		}
+		catch(Exception ex) {
+			Console.Error.WriteLine($"✗ Failed to load {path}: {ex.Message}");
+		}
+	}
+}
 
 await host.RunAsync();
 

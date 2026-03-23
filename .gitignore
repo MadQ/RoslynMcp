@@ -198,6 +198,7 @@ DocProject/Help/html/
 
 # Click-Once directory
 publish/
+RELEASE_NOTES_*.md
 publish[0-9]*/
 
 # Publish Web Output
@@ -389,4 +390,9 @@ FodyWeavers.xsd
 # JetBrains Rider
 .idea/
 *.sln.iml
+
+# RoslynMcp — session artefacts and private scratchpad
+# These are local-only; each fork/workstation keeps its own copies.
+docs/sessions/
+docs/ScratchPad.md
 

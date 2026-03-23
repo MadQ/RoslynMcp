@@ -7,7 +7,7 @@
 
 Working rules for GitHub Copilot and any other AI agent in this repo.
 
-**Ignore files called HumanNotes.txt** — for human reference only; may contain notes that would confuse an AI assistant.
+**Ignore `docs/ScratchPad.md`** — private working notes for the repo owner; may contain half-baked thoughts that would confuse an AI assistant. It is gitignored and will not be present in forks or CI.
 
 ---
 
@@ -56,7 +56,9 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 
 | Component | Responsibility |
 |-----------|----------------|
-| `WorkspaceManager` | Auto-detects `.csproj` → `MSBuildWorkspace` (full resolution) or `AdhocWorkspace` (source-only); lazy compilation rebuild |
+| `WorkspaceManager` | LRU-cached workspace instances; auto-detects `.csproj` → `MSBuildWorkspace` or directory → `AdhocWorkspace`; exposes `GetCompilation()`, `GetSolution()`, `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()`; smart path resolution |
+| `WorkspaceResolver` | Per-tool facade over `WorkspaceManager`; provides `TryGetCompilation()`, `TryGetProject()`, `GetRootPath()`, `GetSolution()`, `InvalidateFile()` with structured error handling |
+| `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines `ProjectPathDescription` constant |
 | `SearchFilesTool` | `search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
 | `SemanticSearchTool` | `semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
 | `ListFilesTool` | `list_files` — enumerate files matching glob pattern (fast file listing, no content) |
@@ -84,9 +86,9 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 
-**Data flow:** stdio MCP request → tool → `WorkspaceManager.GetCompilation()` (may rebuild) → Roslyn API → JSON response.
+**Data flow:** stdio MCP request → tool → `WorkspaceResolver.TryGetCompilation(projectPath, ...)` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
-**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (compilation management), `Tools/*.cs` (tool implementations).
+**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (multi-workspace caching), `WorkspaceResolver.cs` (tool facade), `Tools/*.cs` (24 tool implementations), `RoslynMcpTool.cs` (base class).
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
@@ -115,14 +117,14 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 ## Code Style
 
 - **Braces:** same line for control flow (`if(x) {`), new line for methods/classes; properties — same line as the identifier (`public int Count {`)
-- **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)`
+- **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)` (Actually, IDC so much about this one)
 - **Single-statement blocks:** no braces
 - **Naming:** PascalCase for types/methods, camelCase for fields/locals — no underscores, no Hungarian, no abbreviations
-- **Handles:** always `nint`, never `IntPtr`
+- **Handles:** always `nint`, never `IntPtr` (Not so much used here, just an example)
 - **Modern C#:** pattern matching, switch expressions, target-typed `new`, collection expressions, `nint`
-- **`var`:** use when type is obvious or long; prefer explicit type otherwise
-- **Column-aligned fields:** tab-stop alignment on field declarations and assignment blocks
-- **Cast spacing:** space between cast and operand — `(int) value`, not `(int)value`
+- **`var`:** use when type is obvious or long; prefer explicit type otherwise (rarely)
+- **Column-aligned fields:** tab-stop alignment on field declarations and assignment blocks (for Error-prone bio-processors: not so important. Use your judgement.)
+- **Cast spacing:** space between cast and operand — `(int) value`, not `(int)value` (🙄, whatevs.)
 - **Comments:** explain *why*, not *what* — after any edit, re-evaluate nearby comments and update or remove stale ones; one space after a period, never two; complete sentences, proper punctuation, no personal pronouns (`we`/`I`/`our` have no place in code comments)
 - **`TODO` comments:** must include the actual question or concern, not just "fix"
 - **Condition ordering:** simple/common path first — early return or assignment; complex path in `else`
@@ -131,8 +133,13 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
   - Blank line **after the opening brace** of any multi-statement control-flow block
   - Blank line between branches of an `if/else if/else` chain when any body spans multiple lines
   - Blank lines between logically distinct statement groups within a method body
-  - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block
-- **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies)
+  - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block (Yeah, weird one, IK. High-maintenance bipedals: feel free to ignore this)
+- **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies) (Just recently started test-driving this one - liking it so far.)
+  
+- If/When we start using unit tests, rule #1: No tautological tests (Did I just do the thing that I just did?). Tests must verify meaningful behavior, not just "does it compile" or "does it return the same thing as the code it's testing". All tests shall have extensive XML doc comments describing the reason for their existence, the specific behavior they verify, and the rationale for the chosen inputs and expected outputs. Tests without such documentation are not valid tests. Not everyone is a unit test SME... complicated mock setups tend to look like opaque black boxes (to some of us) that may as well be testing the test framework itself. So, all mock setups must also be documented with the same level of detail as the tests they support. Rule #2: Unit tests are a secondary concern. No non-test code shall be written with the primary goal of making it easier to test. There shall be no interface extractions for the sole purpose of testing. Not everything is inherently testable. Accept it and move on.
+  - Also... Wow! Opine much?
+
+---
 
 > **Consistency is overrated. Embrace diversity.**
 >
@@ -202,6 +209,46 @@ var newSolution = await Renamer.RenameSymbolAsync(
 ```
 
 **Key rule:** always use `await` for Roslyn APIs that return `Task` — they may do I/O or background work.
+
+**Tool Implementation Pattern:**
+
+All tools inherit from `RoslynMcpTool` base class and follow a consistent pattern:
+
+```csharp
+[McpServerToolType]
+internal sealed class MyTool : RoslynMcpTool
+{
+    public MyTool(WorkspaceResolver workspace) : base(workspace) { }
+
+    [McpServerTool, Description("...")]
+    public object MyToolMethod(
+        [Description("...")] string requiredParam,
+        [Description(ProjectPathDescription)] string? projectPath = null)
+    {
+        // For tools that need compilation
+        if(!TryGetCompilation(projectPath, out var compilation, out var error))
+            return error;
+
+        // OR for tools that need project metadata
+        if(!TryGetProject(projectPath, out var project, out var error))
+            return error;
+
+        // Use workspace.GetSolution(projectPath), workspace.GetRootPath(projectPath) as needed
+        var rootPath = workspace.GetRootPath(projectPath);
+
+        // Tool logic using compilation/project/solution
+        // ...
+
+        return new { /* structured response */ };
+    }
+}
+```
+
+**Key points:**
+- `projectPath` is always the last parameter, optional, defaults to null (→ CWD)
+- `TryGetCompilation`/`TryGetProject` return structured error objects on failure
+- Use `ProjectPathDescription` constant for consistent parameter documentation
+- Tools that modify files must call `workspace.InvalidateFile(projectPath, fullPath)` after changes
 
 ---
 

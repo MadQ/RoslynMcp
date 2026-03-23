@@ -43,7 +43,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] Tool count is accurate in:
   - [ ] README.md
   - [ ] AGENTS.md
-  - [ ] HANDOFF.md header
+  - [ ] `docs/sessions/HANDOFF.md` header
   - [ ] TestHarness header comment
 - [ ] Architecture tables list all 24 tools consistently
 - [ ] New tools added to all relevant docs
@@ -106,7 +106,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] Exception handling guidelines are current
 - [ ] Adding a new tool instructions work
 
-### HANDOFF.md
+### `docs/sessions/HANDOFF.md`
 - [ ] Tool count in header is current
 - [ ] Test status is current
 - [ ] Last commit message matches reality
@@ -131,7 +131,7 @@ After fixing issues found:
    git commit -m "docs: audit and fix documentation drift"
    ```
 
-2. **Update HANDOFF.md** with audit summary
+2. **Update `docs/sessions/HANDOFF.md`** with audit summary
 
 3. **Build and test:**
    ```bash

@@ -36,6 +36,17 @@ See [Configuration](#configuration) below for argument details and [INSTALLATION
 
 ---
 
+## Key Features
+
+- **24 Roslyn-powered tools** — semantic code understanding, navigation, refactoring, and validation
+- **Multi-project support** — all tools accept an optional `projectPath` parameter to work across multiple projects in a single session
+- **Live compilation** — in-memory Roslyn workspace with incremental updates via FileSystemWatcher
+- **No external processes** — all analysis happens in-process using Roslyn APIs (except `build_project` which calls `dotnet build`)
+- **Structured error handling** — tools return actionable error objects with hints when paths are invalid or symbols aren't found
+- **Smart build** — `build_project` checks Roslyn diagnostics first and skips MSBuild if errors exist (fast path)
+
+---
+
 ## Configuration
 
 ### MCP Client Configuration
@@ -148,7 +159,7 @@ AI coding agents that work on C# via text-based tools (file reads, regex search,
 
 RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm and incrementally updated via `FileSystemWatcher`.
 
-**Yes, there are a lot of tools** (23 at last count). That's not bloat — it's Roslyn's power surface. Each tool exposes a specific Roslyn capability that agents can't get any other way. Think of it as a curated API for semantic code understanding, not a grab bag of features.
+**Yes, there are a lot of tools** (24 in total). That's not bloat — it's Roslyn's power surface. Each tool exposes a specific Roslyn capability that agents can't get any other way. Think of it as a curated API for semantic code understanding, not a grab bag of features.
 
 ---
 

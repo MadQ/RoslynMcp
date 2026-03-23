@@ -5,8 +5,10 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class ListFilesTool(WorkspaceManager workspace)
+internal sealed class ListFilesTool : RoslynMcpTool
 {
+    public ListFilesTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Lists files matching a glob pattern. Returns relative paths without content. " +
         "Use this to enumerate files by name/extension before analyzing them with other tools. " +
@@ -15,11 +17,14 @@ internal sealed class ListFilesTool(WorkspaceManager workspace)
     public object ListFiles(
         [Description("Glob pattern (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json'). Default: '**/*'.")] string? pattern = null,
         [Description("Include subdirectories. Default: true.")] bool recursive = true,
-        [Description("Maximum number of results. Default: 100, max: 500.")] int take = 100
+        [Description("Maximum number of results. Default: 100, max: 500.")] int take = 100,
+        [Description(ProjectPathDescription)] string? projectPath = null
     )
     {
         pattern ??= "**/*";
         take = Math.Clamp(take, 1, 500);
+
+        var rootPath = workspace.GetRootPath(projectPath);
 
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
         matcher.AddInclude(pattern);
@@ -28,7 +33,7 @@ internal sealed class ListFilesTool(WorkspaceManager workspace)
 
         try {
             allFiles = Directory.EnumerateFiles(
-                workspace.RootPath,
+                rootPath,
                 "*",
                 recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly
             );
@@ -45,7 +50,7 @@ internal sealed class ListFilesTool(WorkspaceManager workspace)
 
         foreach(var fullPath in allFiles) {
 
-            var relativePath = Path.GetRelativePath(workspace.RootPath, fullPath);
+            var relativePath = Path.GetRelativePath(rootPath, fullPath);
 
             // Match against relative path with forward slashes (glob convention)
             var normalizedPath = relativePath.Replace('\\', '/');

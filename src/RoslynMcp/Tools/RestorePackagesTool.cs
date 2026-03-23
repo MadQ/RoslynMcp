@@ -5,15 +5,18 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class RestorePackagesTool(WorkspaceManager workspace)
+internal sealed class RestorePackagesTool : RoslynMcpTool
 {
+    public RestorePackagesTool(WorkspaceResolver workspace) : base(workspace) { }
+
     [McpServerTool, Description(
         "Restores NuGet packages for the solution. " +
         "Use this after adding package references or when packages are missing. " +
         "Does not run dotnet build — just downloads and restores dependencies.")]
-    public async Task<RestoreResult> RestorePackages()
+    public async Task<RestoreResult> RestorePackages(
+        [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        var rootPath = workspace.RootPath;
+        var rootPath = workspace.GetRootPath(projectPath);
 
         string? projectFile;
 
