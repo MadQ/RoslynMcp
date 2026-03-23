@@ -2,15 +2,219 @@
 # Session Handoff — RoslynMcp
 
 **Date:** 2026-03-22  
-**Branch:** `dev` (active development)  
-**Last Commit:** `92890cc` — docs: fix stale references and add doc review checklist  
+**Branch:** `feature/global-project-context` (active development)  
+**Last Commit:** `1fad0ef` — feat: migrate TypeMembersTool and comment out remaining tools  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
-**Tool Count:** 24 tools  
-**Test Status:** 23/23 passing ✅
+**Tool Count:** 24 tools (1 migrated, 23 in progress)  
+**Test Status:** Build clean, tests pending migration ⚙️
 
 ---
 
-## Current Session (March 22, 2026 — Part 7)
+## Current Session (March 22, 2026 — Part 8)
+
+### **MAJOR REFACTOR: Global Project Context (v0.3.0)** 🚀
+
+**Goal:** Transform RoslynMcp from per-project configuration to global MCP server with smart project resolution and LRU caching.
+
+**Status:** Infrastructure complete, TypeMembersTool migrated as reference, 23 tools pending systematic migration.
+
+---
+
+### Phase 1: Infrastructure ✅ COMPLETE
+
+**Changes:**
+- ✅ Created `Exceptions.cs` with structured exception types:
+  - `ProjectNotFoundException` — no .csproj found in/above path
+  - `MultipleProjectsFoundException` — multiple .csproj files need disambiguation
+  - `InvalidProjectPathException` — path doesn't exist or is inaccessible
+  - All include agent-friendly metadata for retry logic
+- ✅ Created `RoslynMcpTool` abstract base class:
+  - `ExecuteWithProject(projectPath, execute)` helper
+  - Automatic structured error handling
+  - Common `ProjectPathDescription` constant
+- ✅ Created `WorkspaceResolver` helper class:
+  - Encapsulates `ResolveProjectPath` + `GetCompilation` + `GetSolution`
+  - Single injection point for all tools
+  - Cleaner API than exposing resolution publicly
+- ✅ Refactored `WorkspaceManager` with LRU cache:
+  - `Dictionary<string, CacheEntry>` with LRU tracking
+  - Configurable max size via `ROSLYNMCP_MAX_CACHED_WORKSPACES` (default: 5)
+  - Thread-safe lock-based cache operations
+  - Smart project path resolution (directory, file, .csproj, CWD)
+  - Nested `WorkspaceInstance` class (per-project workspace)
+- ✅ Updated `Program.cs`:
+  - Removed required `args[0]` check
+  - DI: `WorkspaceManager` + `WorkspaceResolver` singletons
+  - Optional multi-project pre-warming from args
+  - Logs pre-warm results to stderr
+
+**Key Design Decisions:**
+- **WorkspaceResolver pattern:** Tools inject resolver, not manager directly
+- **LRU cache only:** No TTL (stateless), no file watching (agents handle staleness)
+- **Smart path resolution:** Supports directory, .csproj, source file, or null (CWD)
+- **Structured errors:** Agent-retryable with error type + metadata + hint
+
+**Commits:**
+- `597f611` — feat: add WorkspaceResolver and update infrastructure for global context
+- `1fad0ef` — feat: migrate TypeMembersTool and comment out remaining tools
+
+---
+
+### Phase 2: Reference Implementation ✅ COMPLETE
+
+**TypeMembersTool Migration:**
+- ✅ Inherits from `RoslynMcpTool` base class
+- ✅ Constructor: `TypeMembersTool(WorkspaceResolver workspace)`
+- ✅ Added `projectPath` parameter (optional, defaults to null)
+- ✅ Uses `ExecuteWithProject` helper for automatic error handling
+- ✅ Build verified clean ✅
+
+**Other Tools:**
+- ✅ 23 remaining tools commented out using `#if FALSE` preprocessor directive
+- ✅ Eliminates ~80 build errors during migration
+- ✅ Files preserved (not deleted) for systematic uncommenting
+
+**Pattern Established:**
+```csharp
+[McpServerToolType]
+internal sealed class MyTool : RoslynMcpTool
+{
+    public MyTool(WorkspaceResolver workspace) : base(workspace) { }
+
+    [McpServerTool, Description("...")]
+    public object ToolMethod(
+        // ... existing params
+        [Description(ProjectPathDescription)]
+        string? projectPath = null)
+    {
+        return ExecuteWithProject(projectPath, compilation => {
+            // ... tool logic using compilation
+        });
+    }
+}
+```
+
+---
+
+### Phase 3: Systematic Migration ⚙️ IN PROGRESS
+
+**Next Steps (Next Session):**
+
+1. **TEST TypeMembersTool first** ⭐
+   - Update TestHarness to pass `projectPath` parameter
+   - Verify tool works with CWD default
+   - Verify tool works with explicit projectPath
+   - Test structured error responses (project_not_found, multiple_projects_found)
+
+2. **Uncomment and migrate Discovery tools (6 tools)**
+   - SearchFilesTool
+   - SemanticSearchTool
+   - ListFilesTool
+   - FileOutlineTool
+   - ProjectInfoTool
+   - GetUsingsTool
+   - Apply TypeMembersTool pattern to each
+   - Build after each tool
+
+3. **Uncomment and migrate remaining tools (17 tools)**
+   - Type Understanding (3 tools)
+   - Navigation & Search (4 tools)
+   - Code Editing (2 tools)
+   - Refactoring (2 tools)
+   - Validation & Build (4 tools)
+   - Debug (1 tool)
+   - Code Generation (1 tool)
+
+4. **Update TestHarness**
+   - Add `projectPath` parameter to all 23 tests
+   - Add tests for structured errors
+   - Verify all tests pass
+
+5. **Update documentation**
+   - README.md: Remove required args, add projectPath docs
+   - AGENTS.md: Update MCP config examples, add error handling guide
+   - INSTALLATION.md: Update configuration examples
+   - CONTRIBUTING.md: Document projectPath pattern and base class
+   - CHANGELOG.md: Add v0.3.0 migration guide
+
+---
+
+### Breaking Changes (v0.3.0)
+
+**Old configuration (v0.2.0):**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "command": "/path/to/RoslynMcp.exe",
+      "args": ["/path/to/project"]  // ← Required
+    }
+  }
+}
+```
+
+**New configuration (v0.3.0):**
+```json
+{
+  "servers": {
+    "roslyn": {
+      "command": "/path/to/RoslynMcp.exe"
+      // ← No args required! Optional pre-warming only
+    }
+  }
+}
+```
+
+**Tool API changes:**
+- All tools now accept optional `projectPath` parameter
+- If omitted, uses current working directory
+- Supports smart resolution (directory, file, .csproj)
+
+**Migration path:**
+- Remove `args` from `.mcp.json` (or keep for pre-warming)
+- Tools work with CWD by default or explicit `projectPath`
+- Pre-release timing: perfect for breaking changes
+
+---
+
+### Future Investigations
+
+**Deferred to later:**
+- `.sln`/`.slnx` file support (noted in HumanNotes.txt for investigation)
+- File system watching for cache invalidation (may not be needed)
+- TTL eviction strategy (LRU sufficient for now)
+- Explicit `invalidate_workspace` tool (wait for user feedback)
+- AdhocWorkspace support (removed in favor of MSBuildWorkspace-only)
+
+---
+
+### Technical Notes
+
+**WorkspaceManager cache behavior:**
+- Normalized paths as cache keys (absolute, full paths)
+- LRU eviction when cache full (configurable size)
+- Thread-safe via `lock(cacheLock)`
+- Each cached entry contains `WorkspaceInstance` (MSBuildWorkspace + Compilation)
+
+**Smart path resolution logic:**
+1. `null` or empty → use CWD
+2. `.csproj` file → use directly
+3. Directory → search for `.csproj` (error if 0 or >1 found)
+4. Source file → walk up directory tree to find `.csproj`
+
+**Structured error format:**
+```json
+{
+  "error": "project_not_found",
+  "message": "No .csproj file found in or above: /path",
+  "search_path": "/path",
+  "hint": "Provide a valid projectPath..."
+}
+```
+
+---
+
+## Previous Session (March 22, 2026 — Part 7)
 
 ### **Documentation Audit & Checklist** 📋
 

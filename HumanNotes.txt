@@ -8,8 +8,19 @@ the `"args": ["/path/to/your/project"]` needs to go, or be optional.
  MCP should be configurable globally, not project specific.
  maybe have a project parameter on the tools instead? maybe both/hybrid? idk.
  this might require caching Roslyn Compilation objects: we'd need to figure the cache ejection strategy (LRU? TTL?) and invalidation triggers (file changes, explicit command, etc.). let's discuss.
+ ==> IN PROGRESS: feature/global-project-context branch
+     - Infrastructure complete: WorkspaceResolver, LRU cache, smart path resolution
+     - TypeMembersTool migrated as reference implementation
+     - 23 tools commented out, ready for systematic migration
+     - NEXT SESSION: Test TypeMembersTool first, then migrate remaining tools
+
+==>  let's add this to the projectPath array for local .mcp.json configs: allow file globbing patterns (e.g., `src/**/*.csproj`) to specify multiple projects. MCP can then lazily resolve and cache Compilations for all matched projects, and tools can specify which project context they need. This provides flexibility while keeping the config manageable. We can start with a simple implementation that resolves globs at startup and caches the results, then iterate on cache management as needed. big plus: provides a good estimate of required cache size upfront. for future feature, we'll want to warn users when the # of projects exceeds a certain threshold, or when cache memory usage is high. let's discuss.
 
 
+investigate: .sln/.slnx file support for multi-project solutions
+  - Currently only supports single .csproj files
+  - Could resolve solution files to list of projects
+  - Deferred to post-v0.3.0
 
 AGENTS.md still has a `dotnet run` reference for an MCP config example. that need to be corrected. also, some of code examples in the meta docs are out of sync/stale. for example the `### Publish Executable` section in HANDOFF.md. this kind of verification should be part of our documentation review process. maybe we should have a checklist for that? like, every time we make a change to the codebase, we should also review the docs and make sure they're still accurate. we could even automate some of that with tests that check for certain strings in the docs, or something like that. maybe creat a skill for you? let's discuss.
 DONE.
