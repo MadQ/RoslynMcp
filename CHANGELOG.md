@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [Unreleased] — v0.3.0-alpha
+
+### Added
+- **Multi-project support** — all 24 tools accept optional `projectPath` parameter (defaults to CWD); switch projects mid-session without restarting
+- **WorkspaceResolver** facade layer for consistent per-tool project resolution and structured error handling
+- **RoslynMcpTool** base class — `TryGetCompilation()` / `TryGetProject()` with `[NotNullWhen]` attributes; eliminates boilerplate from every tool
+- **AdhocWorkspace restored** — directories without `.csproj` now fully supported with FileSystemWatcher for incremental updates
+- **Exceptions.cs** — `InvalidProjectPathException`, `ProjectNotFoundException`, `MultipleProjectsFoundException` with structured messages
+- **`semantic_search`** tool — Roslyn syntax-tree filtering by context (comments, strings, identifiers, xmldocs, code)
+
+### Changed
+- All 24 tools migrated to `RoslynMcpTool` base class pattern
+- WorkspaceManager: LRU workspace cache; `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` added
+- TestHarness: path calculation fixed (5 levels up); `projectPath` added to all 23 tests
 
 ### Planned
 - `undo_last_edit` — revert most recent Roslyn-generated edit (rename, refactoring) from in-memory snapshot
@@ -19,16 +32,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.2.0-alpha] - 2025-01-XX
+## [0.2.0-alpha] - 2026-01-XX
 
 ### Added
-- **18 MCP tools** covering all core agent workflows:
+- **23 MCP tools** covering all core agent workflows:
   - Discovery: `search_files`, `list_types`, `get_file_outline`, `get_project_info`, `get_usings`
   - Type Understanding: `get_type_members` (enhanced), `get_type_hierarchy`, `find_implementations`, `get_symbol_documentation`
   - Navigation: `get_symbol_info`, `find_references`, `get_symbol_definition`
   - Code Generation: `get_symbols_in_scope`
   - Validation: `get_diagnostics`, `build_project` (smart Roslyn-first)
+  - Editing: `replace_in_file`, `replace_in_code`, `list_files`
   - Refactoring: `preview_rename`, `apply_rename`
+  - Maintenance: `clean_solution`, `restore_packages`
   - Debug: `respawn` (DEBUG only)
 
 ### Enhanced
@@ -50,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.1.0-alpha] - 2025-01-XX (Initial Development)
+## [0.1.0-alpha] - 2026-01-XX (Initial Development)
 
 ### Added
 - Core MCP server infrastructure
@@ -63,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ImplicitUsings enabled (.NET 8/10/11 multi-targeting)
 
 ### Technical Details
-- Multi-targeted: net8.0, net10.0, net11.0
+- Multi-targeted: net8.0, net10.0 (net11.0 auto-added when .NET 11 SDK detected)
 - C# 14 preview language version
 - Roslyn 5.3.0
 - ModelContextProtocol 1.1.0

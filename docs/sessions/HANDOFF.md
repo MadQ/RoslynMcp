@@ -1,28 +1,19 @@
 ﻿# Session Handoff — RoslynMcp
 
 **Date:** 2026-03-22  
-**Branch:** `feature/global-project-context` (✅ READY FOR MERGE)  
-**Last Commit:** `98bf307` — docs: update for global project context feature completion  
+**Branch:** `dev` (✅ MERGED — feature/global-project-context → dev)  
+**Last Commit:** `8f1b1b4` — feat: merge feature/global-project-context  
 **Repository:** https://github.com/MadQ/RoslynMcp.git  
-**Tool Count:** 24 tools (ALL MIGRATED ✅)  
+**Tool Count:** 24 tools  
 **Test Status:** ✅ 23/23 tests passing  
 **Build Status:** ✅ 0 errors, 0 warnings  
-**Release Status:** ✅ v0.2.0-alpha published from `dev` branch
+**Release Status:** ✅ v0.2.0-alpha published; dev ready for v0.3.0-alpha
 
 ---
 
 ## Next Session Tasks
 
-### 1. Merge Feature Branch to Dev ⏳
-```sh
-git checkout dev
-git merge feature/global-project-context
-git push origin dev
-```
-
-**Prep for v0.3.0-alpha:** After merge, the dev branch will have all 24 tools + multi-project support ready for next release.
-
-### 2. Dogfooding & Validation 🧪
+### 1. Dogfooding & Validation 🧪
 - Test multi-project scenarios in real Copilot workflows
 - Validate `projectPath` parameter works across different project structures
 - Test AdhocWorkspace fallback (directories without .csproj)
@@ -79,8 +70,8 @@ git push origin dev
 - `98bf307` — Documentation updates
 
 **Branch Status:**
-- `dev` at `e8b28f0` (v0.2.0-alpha, 23 tools, single-project)
-- `feature/global-project-context` at `98bf307` (24 tools, multi-project, ready to merge)
+- `dev` at `8f1b1b4` (24 tools, multi-project, post-merge)
+- `feature/global-project-context` at `07c818c` (merged ✅)
 
 ---
 

@@ -1,7 +1,7 @@
 ﻿# RoslynMcp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![.NET](https://img.shields.io/badge/.NET-8%20%7C%2010%20%7C%2011-512BD4)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4)](https://dotnet.microsoft.com/)
 [![MCP](https://img.shields.io/badge/MCP-1.1.0-blue)](https://modelcontextprotocol.io/)
 
 A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes Roslyn-powered code intelligence tools to AI coding agents. Gives agents resolved type information, live diagnostics, cross-file references, and symbol resolution — without spawning a build or leaving the process.
@@ -77,8 +77,8 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 
 **Choose your target framework:**
 - `net8.0` — .NET 8 (LTS)
-- `net10.0` — .NET 10 (STS, recommended)
-- `net11.0` — .NET 11 (preview, auto-detected if SDK installed)
+- `net10.0` — .NET 10 (recommended)
+- `net11.0` — .NET 11 (auto-added when .NET 11 SDK is detected)
 
 > **Note:** RoslynMcp automatically detects if .NET 11 SDK is installed and includes it as a target framework. No manual configuration needed!
 

@@ -35,7 +35,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | | |
 |---|---|
 | **Type** | Model Context Protocol (MCP) server — stdio transport |
-| **Runtime** | .NET 8 / .NET 10 / .NET 11 (multi-targeted) |
+| **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.2.0-alpha (pre-1.0) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |

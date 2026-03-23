@@ -28,7 +28,7 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 **Choose your framework:**
 - `net8.0` — .NET 8 (LTS)
 - `net10.0` — .NET 10 (recommended)
-- `net11.0` — .NET 11 (preview, if SDK installed locally)
+- `net11.0` — .NET 11 (auto-added when .NET 11 SDK is detected)
 
 ### Step 2: Configure Your MCP Client
 
@@ -44,7 +44,7 @@ dotnet tool install --global RoslynMcp
 
 ## Requirements
 
-- .NET 8, 10, or 11 SDK
+- .NET 8 or .NET 10 SDK (net11.0 target added automatically if .NET 11 SDK is present)
 - MSBuild on PATH (installed with .NET SDK or Visual Studio) for full project resolution
 
 ---
@@ -88,16 +88,16 @@ Add to your Claude Desktop MCP settings file:
 {
   "mcpServers": {
     "roslyn": {
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "/absolute/path/to/your/project/src"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["/absolute/path/to/your/project/src"]
     }
   }
 }
 ```
 
 **Path notes:**
-- Use **absolute paths** for both RoslynMcp project and target source directory
-- Replace `/absolute/path/to/RoslynMcp/RoslynMcp.csproj` with the full path to the `.csproj` file
+- Use **absolute paths** for both the executable and target source directory
+- Replace `/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe` with the full path to the published executable
 - Replace `/absolute/path/to/your/project/src` with the directory you want to analyze
 
 **Restart:** Quit and relaunch Claude Desktop.

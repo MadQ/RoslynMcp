@@ -70,7 +70,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (16 tests covering all 18 tools)
+# Run the comprehensive test suite (23 tests covering all 24 tools)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
@@ -149,29 +149,31 @@ All analyzer diagnostics are warnings only, never errors. Code fixes are provide
 1. **Create tool class** in `src/RoslynMcp/Tools/`:
    ```csharp
    [McpServerToolType]
-   internal sealed class MyNewTool(WorkspaceManager workspace)
+   internal sealed class MyNewTool : RoslynMcpTool
    {
+       public MyNewTool(WorkspaceResolver workspace) : base(workspace) { }
+
        [McpServerTool, Description("...")]
        public object MyToolMethod(
-           [Description("...")] string parameter)
+           [Description("...")] string parameter,
+           [Description(ProjectPathDescription)] string? projectPath = null)
        {
-           var compilation = workspace.GetCompilation();
+           if(!TryGetCompilation(projectPath, out var compilation, out var error))
+               return error;
+
            // Use Roslyn APIs here
            return new { result = "..." };
        }
    }
    ```
 
-2. **Register tool** in `Program.cs`:
-   ```csharp
-   builder.Services.AddTransient<MyNewTool>();
-   ```
+2. **No manual DI registration needed** — `WithToolsFromAssembly()` in `Program.cs` auto-discovers all `[McpServerToolType]` classes
 
 3. **Add tests** in `src/TestHarness/Program.cs`
 
 4. **Update documentation**:
    - README.md (tools table)
-   - .meta/AGENTS.md (architecture table)
+   - AGENTS.md (architecture table)
    - `.github/copilot-instructions.md` (architecture table)
 
 ---
