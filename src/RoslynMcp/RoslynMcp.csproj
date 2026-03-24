@@ -81,4 +81,21 @@
     <ProjectReference Include="..\RoslynMcp.Analyzers\RoslynMcp.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
+  <!--
+    Roslyn's MSBuildWorkspace spawns a separate BuildHost process and resolves its path on disk at
+    runtime via BuildHostProcessManager. When PublishSingleFile=true the SDK bundles all referenced
+    assemblies into the host executable — including the BuildHost DLLs — leaving the BuildHost-*
+    directories with only the .deps.json / .runtimeconfig.json files. The process launch then fails
+    with "The build host could not be found at '...BuildHost-netcore\...BuildHost.dll'".
+
+    Fix: exclude every file under BuildHost-netcore/ and BuildHost-net472/ from single-file bundling
+    so they remain as loose files on disk next to the executable.
+  -->
+  <Target Name="ExcludeBuildHostFromSingleFile" BeforeTargets="_ComputeFilesToBundle">
+    <ItemGroup>
+      <ResolvedFileToPublish Condition="$([System.String]::Copy('%(RelativePath)').StartsWith('BuildHost-'))"
+                             ExcludeFromSingleFile="true" />
+    </ItemGroup>
+  </Target>
+
 </Project>
