@@ -1,33 +1,73 @@
 ﻿# Session Handoff — RoslynMcp
 
-**Date:** 2026-03-22  
-**Branch:** `dev` (✅ MERGED — feature/global-project-context → dev)  
-**Last Commit:** `8f1b1b4` — feat: merge feature/global-project-context  
-**Repository:** https://github.com/MadQ/RoslynMcp.git  
-**Tool Count:** 24 tools  
-**Test Status:** ✅ 23/23 tests passing  
-**Build Status:** ✅ 0 errors, 0 warnings  
-**Release Status:** ✅ v0.2.0-alpha published; dev ready for v0.3.0-alpha
+**Date:** 2026-03-22 (session 2)
+**Branch:** `dev`
+**Last Commit:** `4312a32` — refactor: reorganize Tools/ into subfolders
+**Repository:** https://github.com/MadQ/RoslynMcp.git
+**Tool Count:** 24 tools
+**Test Status:** ✅ 23/23 passing
+**Build Status:** ✅ 0 errors, 0 warnings
 
 ---
 
-## Next Session Tasks
+## What Happened This Session
 
-### 1. Dogfooding & Validation 🧪
-- Test multi-project scenarios in real Copilot workflows
-- Validate `projectPath` parameter works across different project structures
-- Test AdhocWorkspace fallback (directories without .csproj)
-- Verify FileSystemWatcher updates work correctly
+### Tooling annotations
+- All 24 tools prefixed `roslyn_` and annotated `ReadOnly` / `Destructive` / `Idempotent` on `[McpServerTool]`
+- `RestorePackages` = `Idempotent = true`, `BuildProject` = `ReadOnly = true`
 
-### 3. Documentation Polish 📝
-- Update CHANGELOG.md with v0.3.0-alpha features
-- Consider adding usage examples showing multi-project workflows
-- Update release notes template for v0.3.0-alpha
+### File logging (`FileLogger.cs`)
+- New `FileLogger` singleton — rotating file, 10 MB / 3 files, thread-safe
+- Controlled by `ROSLYNMCP_LOG_PATH` env var; empty string = disabled; default = `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`
+- Log events: `[START ]` / `[STOP  ]` (host lifetime), `[TOOL  ]` (per invocation), `[ERROR ]` (workspace resolution failures)
+- Format: `[2026-03-22 14:23:01.123Z] [TOOL  ] roslyn_get_type_members(WorkspaceManager) 47ms OK — 18 member(s)`
+
+### `ToolScope` — fluent per-tool logging
+- `BeginTool(name, subject?)` → `ToolScope : IDisposable` — auto-logs on `Dispose`
+- `scope.Failed<T>(reason, returnValue)` — marks failure, returns value (braceless-`if` safe)
+- `scope.Outcome<T>(detail, returnValue)` — records success detail, returns value
+- `scope.Record(note)` — neutral mid-scope annotation, accumulates with `; ` separator
+- Extracted into `RoslynMcpTool.ToolScope.cs` via `partial class` — `RoslynMcpTool.cs` stays lean
+- All 24 tools wired: subject on `BeginTool`, `Failed` on all key error paths, `Outcome` where counts/results are meaningful (7 tools)
+
+### Tools folder reorganization
+- `Tools/` root now only: `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RespawnTool.cs`
+- Subfolders (all still `RoslynMcp.Tools` namespace — purely organisational):
+  - `Analysis/` — 13 read-only Roslyn semantic tools
+  - `Search/` — 3 file/content search tools
+  - `Editing/` — 2 file mutation tools
+  - `Rename/` — 2-step rename workflow
+  - `Build/` — 3 MSBuild/dotnet CLI tools
 
 ---
 
-## Current State Summary
+## Open Items / Next Session
 
+### Priority: HIGH
+- **`BuildTool` logging** — add `scope.Record(...)` for Roslyn fast-path decision:
+  `scope.Record("roslyn: 3 errors, skipped build")` vs `scope.Record("roslyn: clean, running dotnet build")`
+- **`scope.Outcome` coverage** — remaining tools with interesting success signals:
+  `ReplaceInFileTool` (lines changed), `ReplaceInCodeTool` (nodes replaced), `FindImplementationsTool` (count), `TypeHierarchyTool` (depth)
+
+### Priority: MEDIUM
+- **`README.md` + `CHANGELOG.md`** — need polish pass reflecting this session's additions
+- **`.sln/.slnx` support** — PRIORITY BUMPED (see ScratchPad): also fixes silent cross-project semantic gaps in `find_references`, `preview_rename`, etc. — tackle together with `Compilation` duplication fix
+- **Glob patterns in `projectPath` preload args** — `src/**/*.csproj` for multi-project startup
+
+### Priority: LOW
+- **`undo_last_edit`** — revert most recent Roslyn edit from in-memory snapshot
+- **NuGet publication** — package + push pipeline
+- **Doc review checklist / automated doc freshness checks** (see ScratchPad)
+
+---
+
+## Repo Health
+```
+Branch:     dev (up to date with origin/dev)
+Tests:      23/23 ✅
+Build:      0 errors, 0 warnings ✅
+Commits:    6 new commits this session (d5e3b29 → 4312a32)
+```
 ### ✅ Completed in Part 10
 
 **Feature:** Global Project Context (Multi-Project Support)
