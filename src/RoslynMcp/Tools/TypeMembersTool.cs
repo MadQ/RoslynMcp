@@ -10,18 +10,22 @@ internal sealed class TypeMembersTool(WorkspaceManager workspace)
     [McpServerTool, Description(
         "Returns detailed information about all members of a type (class, struct, enum, interface). " +
         "Includes full signatures with parameter types, return types, modifiers, and XML doc summaries. " +
-        "For enums, returns the member names. Use this to understand a type's API surface.")]
+        "For enums, returns the member names. Use this to understand a type's API surface. Results are paged; use skip/take for large types.")]
     public object GetTypeMembers(
         [Description("The simple or fully-qualified type name, e.g. 'ShowWindowCommand' or 'ScreenMon.RuleMode'.")] string typeName,
-        [Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")] string? memberKind = null)
+        [Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")] string? memberKind = null,
+        [Description("Number of members to skip (for paging). Default: 0.")] int skip = 0,
+        [Description("Maximum number of members to return. Default: 50, max: 200.")] int take = 50)
     {
+        take = Math.Clamp(take, 1, 200);
+
         var compilation = workspace.GetCompilation();
         var type        = FindType(compilation, typeName);
 
         if(type is null)
             return new { error = $"Type '{typeName}' not found in the project." };
 
-        var members = type.GetMembers()
+        var allMembers = type.GetMembers()
             .Where(m => !m.IsImplicitlyDeclared)
             .Where(m => memberKind is null || MatchesKind(m, memberKind))
             .Select(FormatMember)
@@ -29,10 +33,15 @@ internal sealed class TypeMembersTool(WorkspaceManager workspace)
             .ToArray()
         ;
 
+        var page = allMembers.Skip(skip).Take(take).ToArray();
+
         return new {
-            type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-            type_kind = type.TypeKind.ToString().ToLowerInvariant(),
-            members   = members.Length > 0 ? members : []
+            type_name     = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+            type_kind     = type.TypeKind.ToString().ToLowerInvariant(),
+            total_members = allMembers.Length,
+            skip,
+            take,
+            members       = page
         };
     }
 

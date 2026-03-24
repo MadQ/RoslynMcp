@@ -11,10 +11,12 @@ internal sealed class FindImplementationsTool(WorkspaceManager workspace)
 {
     [McpServerTool, Description(
         "Finds all types that implement an interface or abstract class, or all methods that override an abstract/virtual member. " +
-        "Use this to discover concrete implementations of abstractions.")]
+        "Use this to discover concrete implementations of abstractions. Results are paged; use skip/take for large result sets.")]
     public async Task<object> FindImplementations(
         [Description("The symbol name, e.g. 'IDisposable', 'SymbolVisitor', 'Accept'.")] string symbolName,
-        [Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null)
+        [Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
+        [Description("Number of implementations to skip (for paging). Default: 0.")] int skip = 0,
+        [Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50)
     {
         var compilation = workspace.GetCompilation();
         var symbol      = FindSymbol(compilation, symbolName, containingType);
@@ -29,17 +31,34 @@ internal sealed class FindImplementationsTool(WorkspaceManager workspace)
 
             if(typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class && typeSymbol.IsAbstract) {
 
+                take = Math.Clamp(take, 1, 200);
+
                 var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution);
-                var results = impls
+                var allResults = impls
                     .OfType<INamedTypeSymbol>()
                     .Select(t => t.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
                     .Order()
                     .ToArray();
 
+                if(allResults.Length == 0)
+                    return new {
+                        symbol_type = typeSymbol.TypeKind.ToString().ToLowerInvariant(),
+                        symbol_name = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+                        total_implementations = 0,
+                        skip,
+                        take,
+                        implementations = new[] { "No implementations found." }
+                    };
+
+                var page = allResults.Skip(skip).Take(take).ToArray();
+
                 return new {
                     symbol_type  = typeSymbol.TypeKind.ToString().ToLowerInvariant(),
                     symbol_name  = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-                    implementations = results.Length > 0 ? results : ["No implementations found."]
+                    total_implementations = allResults.Length,
+                    skip,
+                    take,
+                    implementations = page
                 };
             }
 
@@ -51,17 +70,34 @@ internal sealed class FindImplementationsTool(WorkspaceManager workspace)
 
             if(methodSymbol.IsAbstract || methodSymbol.IsVirtual || methodSymbol.IsOverride) {
 
+                take = Math.Clamp(take, 1, 200);
+
                 var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution);
-                var results   = overrides
+                var allResults = overrides
                     .OfType<IMethodSymbol>()
                     .Select(m => FormatMethod(m))
                     .Order()
                     .ToArray();
 
+                if(allResults.Length == 0)
+                    return new {
+                        symbol_type = "method",
+                        symbol_name = FormatMethod(methodSymbol),
+                        total_overrides = 0,
+                        skip,
+                        take,
+                        overrides = new[] { "No overrides found." }
+                    };
+
+                var page = allResults.Skip(skip).Take(take).ToArray();
+
                 return new {
                     symbol_type = "method",
                     symbol_name = FormatMethod(methodSymbol),
-                    overrides   = results.Length > 0 ? results : ["No overrides found."]
+                    total_overrides = allResults.Length,
+                    skip,
+                    take,
+                    overrides = page
                 };
             }
 

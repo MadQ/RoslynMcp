@@ -11,6 +11,8 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcp;
 using RoslynMcp.Tools;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 
 // The target project directory is passed as the first argument.
 // Default: current working directory (convenient when running from the repo root).
@@ -35,7 +37,11 @@ builder.Services
     .AddSingleton<ApprovalStore>()
     .AddMcpServer()
     .WithStdioServerTransport()
-    .WithToolsFromAssembly()
+    // UnsafeRelaxedJsonEscaping: emit printable ASCII as-is instead of \uXXXX sequences.
+    // Reduces response size significantly for symbol signatures and doc comments (issue #3).
+    .WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    })
 ;
 
 var host = builder.Build();

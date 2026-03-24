@@ -10,10 +10,15 @@ internal sealed class FileOutlineTool(WorkspaceManager workspace)
 {
     [McpServerTool, Description(
         "Returns a structured outline of a file: types and their members (method signatures, properties, fields) without bodies. " +
-        "Use this to understand file structure without reading the entire content — saves tokens.")]
+        "Use this to understand file structure without reading the entire content — saves tokens. " +
+        "Results are paged by type; use skip/take to navigate large files.")]
     public async Task<object> GetFileOutline(
-        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath)
+        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
+        [Description("Number of types to skip (for paging). Default: 0.")] int skip = 0,
+        [Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20)
     {
+        take = Math.Clamp(take, 1, 100);
+
         var compilation = workspace.GetCompilation();
         var normalized  = filePath.Replace('/', Path.DirectorySeparatorChar);
 
@@ -23,13 +28,17 @@ internal sealed class FileOutlineTool(WorkspaceManager workspace)
         if(tree is null)
             return new { error = $"File '{filePath}' not found in the compilation." };
 
-        var root  = await tree.GetRootAsync();
-        var model = compilation.GetSemanticModel(tree);
-        var types = ExtractTypes(root, model);
+        var root      = await tree.GetRootAsync();
+        var model     = compilation.GetSemanticModel(tree);
+        var allTypes  = ExtractTypes(root, model);
+        var page      = allTypes.Skip(skip).Take(take).ToArray();
 
         return new {
-            file  = Path.GetRelativePath(workspace.RootPath, tree.FilePath),
-            types = types
+            file        = Path.GetRelativePath(workspace.RootPath, tree.FilePath),
+            total_types = allTypes.Length,
+            skip,
+            take,
+            types       = page
         };
     }
 
