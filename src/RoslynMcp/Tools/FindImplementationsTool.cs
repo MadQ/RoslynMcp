@@ -20,14 +20,15 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
         [Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_find_implementations");
+        using var scope = BeginTool("roslyn_find_implementations", symbolName);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
-        if(symbol is null)
-            return new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." };
+        if(symbol is null) {
+            scope.Failed("symbol not found"); return new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." };
+        }
 
         var solution = workspace.GetSolution(projectPath);
 

@@ -19,14 +19,15 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
         [Description("The type name, e.g. 'WindowTracker' or 'RoslynMcp.WorkspaceManager'.")] string typeName,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_get_type_hierarchy");
+        using var scope = BeginTool("roslyn_get_type_hierarchy", typeName);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
         var type        = FindType(compilation, typeName);
 
-        if(type is null)
-            return new { error = $"Type '{typeName}' not found in the project." };
+        if(type is null) {
+            scope.Failed("type not found"); return new { error = $"Type '{typeName}' not found in the project." };
+        }
 
         var baseTypes   = GetBaseTypeChain(type);
         var interfaces  = type.AllInterfaces

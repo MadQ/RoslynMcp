@@ -18,7 +18,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
         [Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_get_diagnostics");
+        using var scope = BeginTool("roslyn_get_diagnostics", filePath);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return [error.ToString()!];
 

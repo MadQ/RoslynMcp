@@ -34,15 +34,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
         [Description(ProjectPathDescription)] string? projectPath = null
     )
     {
-        using var _ = BeginTool("roslyn_replace_in_code");
+        using var scope = BeginTool("roslyn_replace_in_code", filePath);
         var rootPath = workspace.GetRootPath(projectPath);
 
         var fullPath = Path.IsPathRooted(filePath)
             ? filePath
             : Path.GetFullPath(Path.Combine(rootPath, filePath));
 
-        if(!File.Exists(fullPath))
-            return new { error = $"File not found: {filePath}" };
+        if(!File.Exists(fullPath)) {
+            scope.Failed("file not found"); return new { error = $"File not found: {filePath}" };
+        }
 
         if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
             return new { error = "File must be a C# source file (.cs)" };

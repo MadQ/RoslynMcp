@@ -20,7 +20,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
         [Description("Optional type name to narrow the search, e.g. 'WindowTracker'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_find_references");
+        using var scope = BeginTool("roslyn_find_references", symbolName);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return [error.ToString()!];
 
@@ -30,8 +30,9 @@ internal sealed class FindReferencesTool : RoslynMcpTool
         // Find the symbol declaration.
         var symbol = FindSymbol(compilation, symbolName, containingType);
 
-        if(symbol is null)
-            return [$"Symbol '{symbolName}' not found."];
+        if(symbol is null) {
+            scope.Failed("symbol not found"); return [$"Symbol '{symbolName}' not found."];
+        }
 
         var refs = await RoslynSymbolFinder.FindReferencesAsync(symbol, solution);
 

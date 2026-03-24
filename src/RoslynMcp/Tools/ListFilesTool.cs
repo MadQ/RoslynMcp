@@ -22,7 +22,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
         [Description(ProjectPathDescription)] string? projectPath = null
     )
     {
-        using var _ = BeginTool("roslyn_list_files");
+        using var scope = BeginTool("roslyn_list_files", pattern);
         pattern ??= "**/*";
         take = Math.Clamp(take, 1, 500);
 

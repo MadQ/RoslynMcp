@@ -21,14 +21,15 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
         [Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_get_symbol_documentation");
+        using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
-        if(symbol is null)
-            return new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." };
+        if(symbol is null) {
+            scope.Failed("symbol not found"); return new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." };
+        }
 
         var xml = symbol.GetDocumentationCommentXml();
 

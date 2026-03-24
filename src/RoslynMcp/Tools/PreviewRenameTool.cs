@@ -26,7 +26,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
         [Description("Optional containing type to disambiguate, e.g. 'WindowTracker'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_preview_rename");
+        using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return new PreviewRenameResult(
                 null, null,
@@ -36,12 +36,13 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
-        if(symbol is null)
-            return new PreviewRenameResult(
+        if(symbol is null) {
+            scope.Failed("symbol not found"); return new PreviewRenameResult(
                 null, null,
                 $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name.",
                 false
             );
+        }
 
         var solution    = workspace.GetSolution(projectPath);
         var symbolKey   = SymbolKey(symbol);

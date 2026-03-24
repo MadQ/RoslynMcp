@@ -24,7 +24,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
     public object GetProjectInfo(
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_get_project_info");
+        using var scope = BeginTool("roslyn_get_project_info");
         if(!TryGetProject(projectPath, out var project, out var error))
             return error;
 

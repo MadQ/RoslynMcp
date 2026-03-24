@@ -18,7 +18,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
         [Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_list_types");
+        using var scope = BeginTool("roslyn_list_types", namespaceFilter);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return [error.ToString()!];
 

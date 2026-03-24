@@ -17,7 +17,7 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
     public async Task<CleanResult> CleanSolution(
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_clean_solution");
+        using var scope = BeginTool("roslyn_clean_solution");
         var rootPath = workspace.GetRootPath(projectPath);
 
         string? projectFile;

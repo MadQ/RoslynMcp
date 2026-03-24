@@ -24,7 +24,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string? projectPath = null
 	)
 	{
-		using var _ = BeginTool("roslyn_apply_rename");
+		using var scope = BeginTool("roslyn_apply_rename", token);
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			approvals.Reject(token);
 			return "Rename rejected. No files were changed.";
@@ -37,8 +37,9 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
 		var op         = approvals.Consume(token, forSession);
 
-		if(op is null)
-			return $"Token '{token}' not found or already consumed. Run preview_rename again.";
+		if(op is null) {
+			scope.Failed("token not found"); return $"Token '{token}' not found or already consumed. Run preview_rename again.";
+		}
 
 		var oldSolution = workspace.GetSolution(projectPath);
         await SolutionDiff.ApplyToDiskAsync(oldSolution, op.NewSolution);

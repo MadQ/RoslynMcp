@@ -18,7 +18,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
         [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_get_usings");
+        using var scope = BeginTool("roslyn_get_usings", filePath);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
@@ -28,8 +28,9 @@ internal sealed class GetUsingsTool : RoslynMcpTool
         var tree = compilation.SyntaxTrees
             .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase));
 
-        if(tree is null)
-            return new { error = $"File '{filePath}' not found in the compilation." };
+        if(tree is null) {
+            scope.Failed("file not found"); return new { error = $"File '{filePath}' not found in the compilation." };
+        }
 
         var root = await tree.GetRootAsync();
 

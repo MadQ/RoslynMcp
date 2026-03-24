@@ -37,7 +37,7 @@ internal sealed class BuildTool : RoslynMcpTool
         [Description("If true, skip Roslyn check and always run dotnet build. Use sparingly — only for MSBuild-specific validation.")] bool forceBuild = false,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_build_project");
+        using var scope = BeginTool("roslyn_build_project");
         var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 
         if(csprojPath is null)

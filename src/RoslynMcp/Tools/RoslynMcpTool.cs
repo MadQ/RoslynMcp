@@ -21,30 +21,46 @@ internal abstract class RoslynMcpTool
 
     /// <summary>
     ///     Starts a timed tool scope. Dispose the returned handle to log the outcome.
-    ///     Usage: <c>using var _ = BeginTool("roslyn_foo");</c>
+    ///     Usage: <c>using var scope = BeginTool("roslyn_foo", subject);</c>
+    ///     Call <c>scope.Failed("reason")</c> on error paths, <c>scope.Outcome("detail")</c> on notable
+    ///     success, or <c>scope.Record("note")</c> for neutral mid-scope annotations.
     /// </summary>
-    protected ToolScope BeginTool(string name) => new(name, logger);
+    protected ToolScope BeginTool(string name, string? subject = null) => new(name, subject, logger);
 
     /// <summary>
     ///     Disposable scope that logs a tool invocation with elapsed time on dispose.
-    ///     Mark <see cref="Failed"/> before dispose to log an ERROR outcome.
     /// </summary>
     protected sealed class ToolScope : IDisposable
     {
-        readonly string      name;
-        readonly FileLogger  log;
-        readonly Stopwatch   sw = Stopwatch.StartNew();
+        readonly string     name;
+        readonly string?    subject;
+        readonly FileLogger log;
+        readonly Stopwatch  sw = Stopwatch.StartNew();
 
-        public bool   Failed  { get; set; }
-        public string? Detail { get; set; }
+        bool    failed;
+        string? detail;
 
-        internal ToolScope(string name, FileLogger log)
+        internal ToolScope(string name, string? subject, FileLogger log)
         {
-            this.name = name;
-            this.log  = log;
+            this.name    = name;
+            this.subject = subject;
+            this.log     = log;
         }
 
-        public void Dispose() => log.LogTool(name, sw.ElapsedMilliseconds, !Failed, Detail);
+        /// <summary>Records a success detail appended to the log line on dispose.</summary>
+        public void Outcome(string detail) => this.detail = detail;
+
+        /// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
+        public void Failed(string reason) { failed = true; detail = reason; }
+
+        /// <summary>Appends a neutral annotation without changing the outcome.</summary>
+        public void Record(string note) => detail = detail is null ? note : $"{detail}; {note}";
+
+        public void Dispose()
+        {
+            var label = subject is null ? name : $"{name}({subject})";
+            log.LogTool(label, sw.ElapsedMilliseconds, !failed, detail);
+        }
     }
 
     /// <summary>

@@ -26,7 +26,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string? projectPath = null
 	)
 	{
-		using var _ = BeginTool("roslyn_search_files");
+		using var scope = BeginTool("roslyn_search_files", pattern);
 		filePattern ??= "*.cs";
 		take		  = Math.Clamp(take, 1, 200);
 		skip		  = Math.Max(0, skip);

@@ -47,7 +47,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
         string? projectPath = null
     )
     {
-        using var _ = BeginTool("roslyn_semantic_search");
+        using var scope = BeginTool("roslyn_semantic_search", pattern);
         context		??= "all";
         filePattern	??= "*.cs";
         take		  = Math.Clamp(take, 1, 200);

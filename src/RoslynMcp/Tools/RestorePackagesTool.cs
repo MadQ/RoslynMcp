@@ -17,7 +17,7 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
     public async Task<RestoreResult> RestorePackages(
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_restore_packages");
+        using var scope = BeginTool("roslyn_restore_packages");
         var rootPath = workspace.GetRootPath(projectPath);
 
         string? projectFile;

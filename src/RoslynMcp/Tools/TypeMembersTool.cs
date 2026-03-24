@@ -24,14 +24,15 @@ internal sealed class TypeMembersTool : RoslynMcpTool
         [Description(ProjectPathDescription)]
         string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_get_type_members");
+        using var scope = BeginTool("roslyn_get_type_members", typeName);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
         var type = FindType(compilation, typeName);
 
-        if(type is null)
-            return new { error = $"Type '{typeName}' not found in the project." };
+        if(type is null) {
+            scope.Failed("type not found"); return new { error = $"Type '{typeName}' not found in the project." };
+        }
 
         var members = type.GetMembers()
             .Where(m => !m.IsImplicitlyDeclared)

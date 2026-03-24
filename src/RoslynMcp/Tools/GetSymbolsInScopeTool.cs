@@ -21,7 +21,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
         [Description("1-based column number.")] int column,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
-        using var _ = BeginTool("roslyn_get_symbols_in_scope");
+        using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
@@ -30,8 +30,9 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
         var tree = compilation.SyntaxTrees
             .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase));
 
-        if(tree is null)
-            return new { error = $"File '{filePath}' not found in the compilation." };
+        if(tree is null) {
+            scope.Failed("file not found"); return new { error = $"File '{filePath}' not found in the compilation." };
+        }
 
         var text     = await tree.GetTextAsync();
         var position = GetPosition(text, line, column);
