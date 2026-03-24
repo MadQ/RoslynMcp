@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class SymbolInfoTool : RoslynMcpTool
 {
-    public SymbolInfoTool(WorkspaceResolver workspace) : base(workspace) { }
+    public SymbolInfoTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_get_symbol_info", ReadOnly = true)]
     [Description(
@@ -21,6 +21,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
         [Description("1-based column number.")] int column,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_get_symbol_info");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error.ToString()!;
 

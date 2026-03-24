@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 {
-    public GetSymbolDefinitionTool(WorkspaceResolver workspace) : base(workspace) { }
+    public GetSymbolDefinitionTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_get_symbol_definition", ReadOnly = true)]
     [Description(
@@ -19,6 +19,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
         [Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_get_symbol_definition");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 

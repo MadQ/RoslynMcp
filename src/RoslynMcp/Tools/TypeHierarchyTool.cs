@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class TypeHierarchyTool : RoslynMcpTool
 {
-    public TypeHierarchyTool(WorkspaceResolver workspace) : base(workspace) { }
+    public TypeHierarchyTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_get_type_hierarchy", ReadOnly = true)]
     [Description(
@@ -19,6 +19,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
         [Description("The type name, e.g. 'WindowTracker' or 'RoslynMcp.WorkspaceManager'.")] string typeName,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_get_type_hierarchy");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 

@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class RestorePackagesTool : RoslynMcpTool
 {
-    public RestorePackagesTool(WorkspaceResolver workspace) : base(workspace) { }
+    public RestorePackagesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_restore_packages", Idempotent = true)]
     [Description(
@@ -17,6 +17,7 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
     public async Task<RestoreResult> RestorePackages(
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_restore_packages");
         var rootPath = workspace.GetRootPath(projectPath);
 
         string? projectFile;

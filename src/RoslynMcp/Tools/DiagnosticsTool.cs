@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class DiagnosticsTool : RoslynMcpTool
 {
-    public DiagnosticsTool(WorkspaceResolver workspace) : base(workspace) { }
+    public DiagnosticsTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_get_diagnostics", ReadOnly = true)]
     [Description(
@@ -18,6 +18,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
         [Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_get_diagnostics");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return [error.ToString()!];
 
@@ -25,7 +26,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
         IEnumerable<Diagnostic> diagnostics = compilation.GetDiagnostics();
 
         if(filePath is not null) {
-			var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
+            var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
             diagnostics = diagnostics
                 .Where(d => d.Location.SourceTree?.FilePath
                     .EndsWith(normalized, StringComparison.OrdinalIgnoreCase) == true)

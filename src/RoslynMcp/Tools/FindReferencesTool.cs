@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class FindReferencesTool : RoslynMcpTool
 {
-    public FindReferencesTool(WorkspaceResolver workspace) : base(workspace) { }
+    public FindReferencesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_find_references", ReadOnly = true)]
     [Description(
@@ -20,6 +20,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
         [Description("Optional type name to narrow the search, e.g. 'WindowTracker'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_find_references");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return [error.ToString()!];
 

@@ -89,7 +89,14 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 
 **Data flow:** stdio MCP request → tool → `WorkspaceResolver.TryGetCompilation(projectPath, ...)` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
-**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (multi-workspace caching), `WorkspaceResolver.cs` (tool facade), `Tools/*.cs` (24 tool implementations), `RoslynMcpTool.cs` (base class).
+**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (multi-workspace caching), `WorkspaceResolver.cs` (tool facade), `Tools/*.cs` (24 tool implementations), `RoslynMcpTool.cs` (base class), `FileLogger.cs` (file logging).
+
+**File logging:** Every tool invocation, server start/stop, and workspace error is logged to a rolling file.
+- Default path: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`
+- Override: set `ROSLYNMCP_LOG_PATH` env var to any path
+- Disable: set `ROSLYNMCP_LOG_PATH` to an empty string
+- Rotation: 10 MB cap, keeps last 3 files (`roslynmcp.log`, `.log.1`, `.log.2`, `.log.3`)
+- Format: `[yyyy-MM-dd HH:mm:ss.fffZ] [LEVEL ] message`
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility

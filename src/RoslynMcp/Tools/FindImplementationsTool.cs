@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class FindImplementationsTool : RoslynMcpTool
 {
-    public FindImplementationsTool(WorkspaceResolver workspace) : base(workspace) { }
+    public FindImplementationsTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_find_implementations", ReadOnly = true)]
     [Description(
@@ -20,6 +20,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
         [Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_find_implementations");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 

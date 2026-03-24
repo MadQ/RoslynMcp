@@ -10,7 +10,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 {
     readonly ApprovalStore approvals;
 
-    public PreviewRenameTool(WorkspaceResolver workspace, ApprovalStore approvals) : base(workspace)
+    public PreviewRenameTool(WorkspaceResolver workspace, ApprovalStore approvals, FileLogger logger) : base(workspace, logger)
     {
         this.approvals = approvals;
     }
@@ -26,6 +26,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
         [Description("Optional containing type to disambiguate, e.g. 'WindowTracker'.")] string? containingType = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_preview_rename");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return new PreviewRenameResult(
                 null, null,

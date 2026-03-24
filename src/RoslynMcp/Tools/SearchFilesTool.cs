@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class SearchFilesTool : RoslynMcpTool
 {
-	public SearchFilesTool(WorkspaceResolver workspace) : base(workspace) { }
+	public SearchFilesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
 	[
 		McpServerTool(Name = "roslyn_search_files", ReadOnly = true), Description(
@@ -26,6 +26,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string? projectPath = null
 	)
 	{
+		using var _ = BeginTool("roslyn_search_files");
 		filePattern ??= "*.cs";
 		take		  = Math.Clamp(take, 1, 200);
 		skip		  = Math.Max(0, skip);

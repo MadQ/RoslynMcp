@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class BuildTool : RoslynMcpTool
 {
-    public BuildTool(WorkspaceResolver workspace) : base(workspace) { }
+    public BuildTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     // Diagnostic codes to ignore (non-actionable SDK/tooling warnings).
     private static readonly HashSet<string> IgnoredDiagnostics = new(StringComparer.OrdinalIgnoreCase) {
@@ -37,6 +37,7 @@ internal sealed class BuildTool : RoslynMcpTool
         [Description("If true, skip Roslyn check and always run dotnet build. Use sparingly — only for MSBuild-specific validation.")] bool forceBuild = false,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_build_project");
         var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 
         if(csprojPath is null)

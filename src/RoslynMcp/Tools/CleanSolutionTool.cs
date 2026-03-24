@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class CleanSolutionTool : RoslynMcpTool
 {
-    public CleanSolutionTool(WorkspaceResolver workspace) : base(workspace) { }
+    public CleanSolutionTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_clean_solution", Destructive = true)]
     [Description(
@@ -17,6 +17,7 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
     public async Task<CleanResult> CleanSolution(
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_clean_solution");
         var rootPath = workspace.GetRootPath(projectPath);
 
         string? projectFile;

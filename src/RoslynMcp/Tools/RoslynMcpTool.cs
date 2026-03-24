@@ -1,19 +1,50 @@
 ﻿using System.ComponentModel;
+using System.Diagnostics;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp.Tools;
 
 /// <summary>
 ///     Base class for RoslynMcp tools. Provides common functionality for project path resolution,
-///     workspace access, and structured error handling.
+///     workspace access, structured error handling, and file logging.
 /// </summary>
 internal abstract class RoslynMcpTool
 {
     protected readonly WorkspaceResolver workspace;
+    readonly           FileLogger         logger;
 
-    protected RoslynMcpTool(WorkspaceResolver workspace)
+    protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger)
     {
         this.workspace = workspace;
+        this.logger    = logger;
+    }
+
+    /// <summary>
+    ///     Starts a timed tool scope. Dispose the returned handle to log the outcome.
+    ///     Usage: <c>using var _ = BeginTool("roslyn_foo");</c>
+    /// </summary>
+    protected ToolScope BeginTool(string name) => new(name, logger);
+
+    /// <summary>
+    ///     Disposable scope that logs a tool invocation with elapsed time on dispose.
+    ///     Mark <see cref="Failed"/> before dispose to log an ERROR outcome.
+    /// </summary>
+    protected sealed class ToolScope : IDisposable
+    {
+        readonly string      name;
+        readonly FileLogger  log;
+        readonly Stopwatch   sw = Stopwatch.StartNew();
+
+        public bool   Failed  { get; set; }
+        public string? Detail { get; set; }
+
+        internal ToolScope(string name, FileLogger log)
+        {
+            this.name = name;
+            this.log  = log;
+        }
+
+        public void Dispose() => log.LogTool(name, sw.ElapsedMilliseconds, !Failed, Detail);
     }
 
     /// <summary>
@@ -40,29 +71,32 @@ internal abstract class RoslynMcpTool
         catch(ProjectNotFoundException ex) {
 
             error = ProjectNotFoundError(ex);
+            logger.LogError("TryGetCompilation", ex.Message);
 
             return false;
         }
         catch(MultipleProjectsFoundException ex) {
 
             error = MultipleProjectsError(ex);
+            logger.LogError("TryGetCompilation", ex.Message);
 
             return false;
         }
         catch(InvalidProjectPathException ex) {
 
             error = InvalidPathError(ex);
+            logger.LogError("TryGetCompilation", ex.Message);
 
             return false;
         }
         catch(Exception ex) {
 
             error = UnexpectedError(ex);
+            logger.LogError("TryGetCompilation", $"{ex.GetType().Name}: {ex.Message}");
 
             return false;
         }
     }
-
     /// <summary>
     ///     Tries to resolve a project path and get the project instance. Returns structured errors on failure.
     ///     Use this for tools that need Project-level metadata (ProjectInfoTool, etc.).
@@ -84,24 +118,28 @@ internal abstract class RoslynMcpTool
         catch(ProjectNotFoundException ex) {
 
             error = ProjectNotFoundError(ex);
+            logger.LogError("TryGetProject", ex.Message);
 
             return false;
         }
         catch(MultipleProjectsFoundException ex) {
 
             error = MultipleProjectsError(ex);
+            logger.LogError("TryGetProject", ex.Message);
 
             return false;
         }
         catch(InvalidProjectPathException ex) {
 
             error = InvalidPathError(ex);
+            logger.LogError("TryGetProject", ex.Message);
 
             return false;
         }
         catch(Exception ex) {
 
             error = UnexpectedError(ex);
+            logger.LogError("TryGetProject", $"{ex.GetType().Name}: {ex.Message}");
 
             return false;
         }

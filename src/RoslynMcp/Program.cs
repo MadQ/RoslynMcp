@@ -29,12 +29,19 @@ builder.Services
 	.AddSingleton<WorkspaceManager>()
 	.AddSingleton<WorkspaceResolver>()
 	.AddSingleton<ApprovalStore>()
+	.AddSingleton<FileLogger>()
 	.AddMcpServer()
 	.WithStdioServerTransport()
 	.WithToolsFromAssembly()
 ;
 
 var host = builder.Build();
+
+var logger   = host.Services.GetRequiredService<FileLogger>();
+var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+
+lifetime.ApplicationStarted.Register(() => logger.LogStart());
+lifetime.ApplicationStopping.Register(() => logger.LogStop());
 
 // Pre-warm cache if projects specified
 if(projectsToPreload.Length > 0) {

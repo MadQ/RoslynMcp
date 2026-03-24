@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class FileOutlineTool : RoslynMcpTool
 {
-    public FileOutlineTool(WorkspaceResolver workspace) : base(workspace) { }
+    public FileOutlineTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true)]
     [Description(
@@ -18,6 +18,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
         [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_get_file_outline");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 

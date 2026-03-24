@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetUsingsTool : RoslynMcpTool
 {
-    public GetUsingsTool(WorkspaceResolver workspace) : base(workspace) { }
+    public GetUsingsTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_get_usings", ReadOnly = true)]
     [Description(
@@ -18,6 +18,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
         [Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_get_usings");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 

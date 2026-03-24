@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All 24 tools migrated to `RoslynMcpTool` base class pattern
 - All 24 tools renamed with `roslyn_` prefix (e.g. `get_type_members` → `roslyn_get_type_members`) for unambiguous identification in agent tool lists
 - All tools annotated with `ReadOnly`, `Destructive`, or `Idempotent` hints via `McpServerToolAttribute`
+- **File logging** — every tool invocation, server start/stop, and workspace error logged to a rotating file; controlled via `ROSLYNMCP_LOG_PATH` env var (default `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`, set to empty string to disable)
 - WorkspaceManager: LRU workspace cache; `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` added
 - TestHarness: path calculation fixed (5 levels up); `projectPath` added to all 23 tests
 

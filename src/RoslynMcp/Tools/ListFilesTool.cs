@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ListFilesTool : RoslynMcpTool
 {
-    public ListFilesTool(WorkspaceResolver workspace) : base(workspace) { }
+    public ListFilesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_list_files", ReadOnly = true)]
     [Description(
@@ -22,6 +22,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
         [Description(ProjectPathDescription)] string? projectPath = null
     )
     {
+        using var _ = BeginTool("roslyn_list_files");
         pattern ??= "**/*";
         take = Math.Clamp(take, 1, 500);
 

@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 {
-    public GetSymbolsInScopeTool(WorkspaceResolver workspace) : base(workspace) { }
+    public GetSymbolsInScopeTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_get_symbols_in_scope", ReadOnly = true)]
     [Description(
@@ -21,12 +21,12 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
         [Description("1-based column number.")] int column,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_get_symbols_in_scope");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
 
-        var normalized  = filePath.Replace('/', Path.DirectorySeparatorChar);
-
+        var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
         var tree = compilation.SyntaxTrees
             .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase));
 

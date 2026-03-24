@@ -1,4 +1,11 @@
-﻿{
+{
+  "inputs": [],
   "servers": {
+    "roslyn8": {
+      "type": "stdio",
+      "command": "J:\\Projects\\RoslynMcp\\publish\\net10.0\\RoslynMcp.exe",
+      "args": [],
+      "env": {}
+    }
   }
 }

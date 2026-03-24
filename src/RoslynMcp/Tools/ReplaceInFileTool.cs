@@ -12,7 +12,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ReplaceInFileTool : RoslynMcpTool
 {
-    public ReplaceInFileTool(WorkspaceResolver workspace) : base(workspace) { }
+    public ReplaceInFileTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_replace_in_file", Destructive = true)]
     [Description(
@@ -31,6 +31,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
         [Description(ProjectPathDescription)] string? projectPath = null
     )
     {
+        using var _ = BeginTool("roslyn_replace_in_file");
         var rootPath = workspace.GetRootPath(projectPath);
         var fullPath = Path.IsPathRooted(filePath)
             ? filePath

@@ -8,7 +8,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 {
 	readonly ApprovalStore approvals;
 
-	public ApplyRenameTool(WorkspaceResolver workspace, ApprovalStore approvals) : base(workspace)
+	public ApplyRenameTool(WorkspaceResolver workspace, ApprovalStore approvals, FileLogger logger) : base(workspace, logger)
 	{
 		this.approvals = approvals;
 	}
@@ -24,6 +24,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string? projectPath = null
 	)
 	{
+		using var _ = BeginTool("roslyn_apply_rename");
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			approvals.Reject(token);
 			return "Rename rejected. No files were changed.";

@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ListTypesTool : RoslynMcpTool
 {
-    public ListTypesTool(WorkspaceResolver workspace) : base(workspace) { }
+    public ListTypesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [McpServerTool(Name = "roslyn_list_types", ReadOnly = true)]
     [Description(
@@ -18,13 +18,14 @@ internal sealed class ListTypesTool : RoslynMcpTool
         [Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
+        using var _ = BeginTool("roslyn_list_types");
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return [error.ToString()!];
 
 
         var allTypes    = new List<INamedTypeSymbol>();
 
-        // Walk the global namespace tree to collect all types.
+        // Walk
         CollectTypes(compilation.GlobalNamespace, allTypes);
 
         var filtered = allTypes

@@ -11,7 +11,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class SemanticSearchTool : RoslynMcpTool
 {
-    public SemanticSearchTool(WorkspaceResolver workspace) : base(workspace) { }
+    public SemanticSearchTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
     [
         McpServerTool(Name = "roslyn_semantic_search", ReadOnly = true), Description(
@@ -47,6 +47,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
         string? projectPath = null
     )
     {
+        using var _ = BeginTool("roslyn_semantic_search");
         context		??= "all";
         filePattern	??= "*.cs";
         take		  = Math.Clamp(take, 1, 200);
