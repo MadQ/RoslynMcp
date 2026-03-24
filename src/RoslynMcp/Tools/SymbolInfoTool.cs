@@ -31,9 +31,8 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
         var tree = compilation.SyntaxTrees
             .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase));
 
-        if(tree is null) {
-            scope.Failed("file not found"); return $"File '{filePath}' not found in the compilation.";
-        }
+        if(tree is null)
+            return scope.Failed("file not found", $"File '{filePath}' not found in the compilation.");
 
         var text     = await tree.GetTextAsync();
         var position = GetPosition(text, line, column);

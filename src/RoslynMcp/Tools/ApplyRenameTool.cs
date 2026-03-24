@@ -37,9 +37,8 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
 		var op         = approvals.Consume(token, forSession);
 
-		if(op is null) {
-			scope.Failed("token not found"); return $"Token '{token}' not found or already consumed. Run preview_rename again.";
-		}
+		if(op is null)
+			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run preview_rename again.");
 
 		var oldSolution = workspace.GetSolution(projectPath);
         await SolutionDiff.ApplyToDiskAsync(oldSolution, op.NewSolution);

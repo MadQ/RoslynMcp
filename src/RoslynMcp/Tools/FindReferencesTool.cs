@@ -30,9 +30,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
         // Find the symbol declaration.
         var symbol = FindSymbol(compilation, symbolName, containingType);
 
-        if(symbol is null) {
-            scope.Failed("symbol not found"); return [$"Symbol '{symbolName}' not found."];
-        }
+        if(symbol is null)
+            return scope.Failed("symbol not found", new[] { $"Symbol '{symbolName}' not found." });
 
         var refs = await RoslynSymbolFinder.FindReferencesAsync(symbol, solution);
 

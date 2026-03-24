@@ -50,8 +50,14 @@ internal abstract class RoslynMcpTool
         /// <summary>Records a success detail appended to the log line on dispose.</summary>
         public void Outcome(string detail) => this.detail = detail;
 
+        /// <summary>Records a success detail and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
+        public T Outcome<T>(string detail, T returnValue) { this.detail = detail; return returnValue; }
+
         /// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
         public void Failed(string reason) { failed = true; detail = reason; }
+
+        /// <summary>Marks the invocation as failed and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
+        public T Failed<T>(string reason, T returnValue) { failed = true; detail = reason; return returnValue; }
 
         /// <summary>Appends a neutral annotation without changing the outcome.</summary>
         public void Record(string note) => detail = detail is null ? note : $"{detail}; {note}";

@@ -36,13 +36,12 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
-        if(symbol is null) {
-            scope.Failed("symbol not found"); return new PreviewRenameResult(
+        if(symbol is null)
+            return scope.Failed("symbol not found", new PreviewRenameResult(
                 null, null,
                 $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name.",
                 false
-            );
-        }
+            ));
 
         var solution    = workspace.GetSolution(projectPath);
         var symbolKey   = SymbolKey(symbol);

@@ -30,9 +30,8 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 
         var type = FindType(compilation, typeName);
 
-        if(type is null) {
-            scope.Failed("type not found"); return new { error = $"Type '{typeName}' not found in the project." };
-        }
+        if(type is null)
+            return scope.Failed("type not found", new { error = $"Type '{typeName}' not found in the project." });
 
         var members = type.GetMembers()
             .Where(m => !m.IsImplicitlyDeclared)

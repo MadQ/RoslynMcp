@@ -26,9 +26,8 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
         var rootPath = workspace.GetRootPath(projectPath);
         var symbol      = FindSymbol(compilation, symbolName, containingType);
 
-        if(symbol is null) {
-            scope.Failed("symbol not found"); return new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." };
-        }
+        if(symbol is null)
+            return scope.Failed("symbol not found", new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." });
 
         var location = symbol.Locations.FirstOrDefault(loc => loc.IsInSource);
 

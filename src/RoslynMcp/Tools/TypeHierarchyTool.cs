@@ -25,9 +25,8 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 
         var type        = FindType(compilation, typeName);
 
-        if(type is null) {
-            scope.Failed("type not found"); return new { error = $"Type '{typeName}' not found in the project." };
-        }
+        if(type is null)
+            return scope.Failed("type not found", new { error = $"Type '{typeName}' not found in the project." });
 
         var baseTypes   = GetBaseTypeChain(type);
         var interfaces  = type.AllInterfaces
