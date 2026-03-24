@@ -94,8 +94,8 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
 - `Tools/Analysis/` — 13 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
 - `Tools/Search/` — 3 file/content search tools (list files, text search, semantic search)
-- `Tools/Editing/` — 2 file mutation tools (`replace_in_file`, `replace_in_code`)
-- `Tools/Rename/` — 2-step rename workflow (`preview_rename` → `apply_rename`)
+- `Tools/Editing/` — 2 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`)
+- `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
 - `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RespawnTool.cs` (debug-only)
 

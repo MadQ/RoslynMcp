@@ -57,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Diagnostic filtering**: NETSDK1209 and other non-actionable SDK warnings automatically filtered from output
 
 ### Added (Infrastructure)
-- Comprehensive test suite: 16 tests covering all 18 tools (100% pass rate)
+- Comprehensive test suite: 23 tests covering all 24 tools (100% pass rate)
 - TestHarness project for dogfooding (RoslynMcp tests itself)
 - GitHub-ready documentation: README, CONTRIBUTING, INSTALLATION
 - MIT License

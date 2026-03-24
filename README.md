@@ -41,9 +41,9 @@ See [Configuration](#configuration) below for argument details and [INSTALLATION
 - **24 Roslyn-powered tools** — semantic code understanding, navigation, refactoring, and validation
 - **Multi-project support** — all tools accept an optional `projectPath` parameter to work across multiple projects in a single session
 - **Live compilation** — in-memory Roslyn workspace with incremental updates via FileSystemWatcher
-- **No external processes** — all analysis happens in-process using Roslyn APIs (except `build_project` which calls `dotnet build`)
+- **No external processes** — all analysis happens in-process using Roslyn APIs (except `roslyn_build_project` which calls `dotnet build`)
 - **Structured error handling** — tools return actionable error objects with hints when paths are invalid or symbols aren't found
-- **Smart build** — `build_project` checks Roslyn diagnostics first and skips MSBuild if errors exist (fast path)
+- **Smart build** — `roslyn_build_project` checks Roslyn diagnostics first and skips MSBuild if errors exist (fast path)
 
 ---
 
@@ -183,7 +183,7 @@ When discovering code:
 - `roslyn_find_references` — finds usage (semantic, Roslyn-based)
 ```
 
-**Why this matters:** RoslynMcp provides both text-level (`replace_in_file`) and semantic (`replace_in_code`) editing tools. Without explicit guidance, agents may default to the simpler text-based tool even when the semantic tool is more appropriate. The guidance above ensures your agent uses the most robust tool for C# code changes.
+**Why this matters:** RoslynMcp provides both text-level (`roslyn_replace_in_file`) and semantic (`roslyn_replace_in_code`) editing tools. Without explicit guidance, agents may default to the simpler text-based tool even when the semantic tool is more appropriate. The guidance above ensures your agent uses the most robust tool for C# code changes.
 
 ### Available Tools
 
@@ -258,14 +258,12 @@ Add to `.mcp.json` at your workspace root:
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "path/to/RoslynMcp/src/RoslynMcp/RoslynMcp.csproj", "--", "."]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["."]
     }
   }
 }
 ```
-
-> Build once first: `dotnet build src/RoslynMcp/RoslynMcp.csproj`
 
 ---
 
@@ -308,7 +306,7 @@ Roslyn's `Renamer` API operates on the `Solution` object and produces a new `Sol
 
 **Safety at scale.** Renames can affect dozens or hundreds of files. The two-phase flow lets agents (and users) review impact before committing:
 
-1. Agent calls `preview_rename` → sees diff affects 47 files across 3 projects
+1. Agent calls `roslyn_preview_rename` → sees diff affects 47 files across 3 projects
 2. Agent decides: "This is bigger than expected, let me check with the user"
 3. User reviews diff, approves or rejects
 
@@ -323,8 +321,8 @@ The two-phase design supports all three modes — the agent decides when to ask.
 
 | Tool | Roslyn API | What it does |
 |------|-----------|--------------|
-| `preview_rename` | `Renamer.RenameSymbolAsync` | Computes a rename across all files, returns unified diff + confirmation token |
-| `apply_rename` | — | Applies or rejects a pending rename by token |
+| `roslyn_preview_rename` | `Renamer.RenameSymbolAsync` | Computes a rename across all files, returns unified diff + confirmation token |
+| `roslyn_apply_rename` | — | Applies or rejects a pending rename by token |
 
 ### Approval model
 

@@ -391,13 +391,13 @@ For large codebases (>100K LOC), consider:
 
 **Cause:** Targeting .NET 11 with older Visual Studio version.
 
-**Impact:** None — these warnings are filtered from `build_project` output automatically.
+**Impact:** None — these warnings are filtered from `roslyn_build_project` output automatically.
 
 ### MCP client doesn't see tools
 
 **Checklist:**
 1. Server process started successfully (check client logs)
-2. MCP session initialized (`tools/list` should return 18 tools)
+2. MCP session initialized (`tools/list` should return 24 tools)
 3. Target directory is correct (check server stderr for `Target: ...`)
 4. Rebuild RoslynMcp if code changed: `dotnet build RoslynMcp/RoslynMcp.csproj`
 
