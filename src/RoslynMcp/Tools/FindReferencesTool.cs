@@ -52,7 +52,9 @@ internal sealed class FindReferencesTool : RoslynMcpTool
             .ToArray()
         ;
 
-        return results.Length > 0 ? results : [$"No references found for '{symbolName}'."];
+        return results.Length > 0
+            ? scope.Outcome($"{results.Length} reference(s)", results)
+            : [$"No references found for '{symbolName}'."];
     }
 
     private static ISymbol? FindSymbol(Compilation compilation, string name, string? inType)

@@ -41,6 +41,8 @@ internal sealed class TypeMembersTool : RoslynMcpTool
             .ToArray()
         ;
 
+        scope.Outcome($"{members.Length} member(s)");
+
         return new {
             type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
             type_kind = type.TypeKind.ToString().ToLowerInvariant(),

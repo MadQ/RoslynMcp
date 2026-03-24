@@ -9,7 +9,12 @@
 /// </summary>
 internal sealed class FileLogger : IDisposable
 {
-    const int    MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
+	//
+	// Could be using ILogger, but thus far I have not been able to like it one bit.
+	// Did we really need a whole new DSL just to log structured messages?
+	//
+
+	const int    MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
     const int    MaxRotatedFiles  = 3;
     const string EnvVar           = "ROSLYNMCP_LOG_PATH";
 

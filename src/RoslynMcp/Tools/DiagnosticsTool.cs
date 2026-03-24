@@ -42,7 +42,9 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
             .ToArray()
         ;
 
-        return results.Length > 0 ? results : ["No diagnostics."];
+        return results.Length > 0
+            ? scope.Outcome($"{results.Length} diagnostic(s)", results)
+            : ["No diagnostics."];
 	}
 
 	private static string Format(Diagnostic d)

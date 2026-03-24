@@ -36,7 +36,9 @@ internal sealed class ListTypesTool : RoslynMcpTool
             .Order()
             .ToArray();
 
-        return filtered.Length > 0 ? filtered : ["No types found matching the filters."];
+        return filtered.Length > 0
+            ? scope.Outcome($"{filtered.Length} type(s)", filtered)
+            : ["No types found matching the filters."];
     }
 
     private static void CollectTypes(INamespaceSymbol ns, List<INamedTypeSymbol> collector)

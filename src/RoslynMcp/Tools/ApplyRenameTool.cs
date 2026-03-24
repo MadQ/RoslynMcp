@@ -27,7 +27,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_apply_rename", token);
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			approvals.Reject(token);
-			return "Rename rejected. No files were changed.";
+			return scope.Failed("rejected", "Rename rejected. No files were changed.");
 		}
 
 		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase)
@@ -41,11 +41,15 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run preview_rename again.");
 
 		var oldSolution = workspace.GetSolution(projectPath);
-        await SolutionDiff.ApplyToDiskAsync(oldSolution, op.NewSolution);
+		await SolutionDiff.ApplyToDiskAsync(oldSolution, op.NewSolution);
 
-        // FileSystemWatcher will detect the writes and invalidate the compilation automatically.
-        var sessionNote = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
+		var filesChanged = op.NewSolution.GetChanges(oldSolution)
+			.GetProjectChanges()
+			.SelectMany(p => p.GetChangedDocuments())
+			.Count();
 
-        return $"Rename applied.{sessionNote} Files written to disk. Compilation will refresh automatically.";
+		var sessionNote = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
+
+		return scope.Outcome($"{filesChanged} file(s) written", $"Rename applied.{sessionNote} Files written to disk. Compilation will refresh automatically.");
 	}
 }

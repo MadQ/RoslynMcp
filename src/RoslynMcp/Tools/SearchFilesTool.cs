@@ -87,6 +87,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		var totalMatches = allMatches.Count;
 		var pagedMatches = allMatches.Skip(skip).Take(take).ToArray();
 
+		scope.Outcome($"{totalMatches} match(es)");
+
 		return new {
 			matches		  = pagedMatches,
 			total_matches = totalMatches,
