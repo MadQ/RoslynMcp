@@ -528,12 +528,6 @@ internal sealed class SignatureChangeOrchestrator
 }
 ```
 
-**Responsibilities:**
-- Find target method symbol
-- Select appropriate editor strategy based on method kind
-- Coordinate workflow: validate → find call sites → generate edits → apply
-- Collect warnings and diagnostics
-
 ---
 
 ### 3. Strategy Pattern: `SignatureEditor` Abstract Class
@@ -542,12 +536,11 @@ internal sealed class SignatureChangeOrchestrator
 
 **Design Choice: Abstract Class vs. Interface**
 
-We use an abstract class instead of an interface because:
-- No external implementations planned (internal to RoslynMcp only)
-- Shared implementation across editors (common validation, attribute creation, parameter building)
-- Enables `protected virtual` methods that subclasses can use as-is, extend, or replace
-- Avoids premature abstraction — abstract classes are the right tool for inheritance hierarchies
-- Still testable — concrete subclasses can be tested directly without mocking ceremony
+We use an abstract class instead of an interface:
+- No external implementations planned
+- Shared helpers needed (`CreateObsoleteAttribute`, `BuildNewParameterList`, `CreateForwardingInvocation`)
+- Enables `protected virtual` validation methods
+- Avoids premature abstraction
 
 ```csharp
 /// <summary>
@@ -557,9 +550,8 @@ We use an abstract class instead of an interface because:
 internal abstract class SignatureEditor
 {
     /// <summary>
-    /// Validates that parameter changes are legal for this method kind.
-    /// Base implementation checks for duplicate names and default value syntax.
-    /// Override to add method-kind-specific validation (call base first or replace entirely).
+    /// Validates parameter changes for this method kind.
+    /// Base implementation checks duplicate names and default value syntax.
     /// </summary>
     protected virtual ValidationResult ValidateParameterChanges(
         IMethodSymbol method,
@@ -602,7 +594,7 @@ internal abstract class SignatureEditor
     // Protected shared utilities (concrete implementations)
 
     /// <summary>
-    /// Creates [Obsolete] attribute with RoslynMcp marker for cleanup tool.
+    /// Creates [Obsolete] attribute with RoslynMcp marker.
     /// </summary>
     protected AttributeListSyntax CreateObsoleteAttribute(string message)
     {
@@ -627,7 +619,6 @@ internal abstract class SignatureEditor
 
     /// <summary>
     /// Builds new parameter list by adding/removing parameters.
-    /// Preserves existing parameter trivia.
     /// </summary>
     protected ParameterListSyntax BuildNewParameterList(
         ParameterListSyntax existingParams,
@@ -665,7 +656,6 @@ internal abstract class SignatureEditor
 
     /// <summary>
     /// Creates forwarding invocation for deprecated stub.
-    /// Example: ProcessData(id) => ProcessData(id, "default")
     /// </summary>
     protected InvocationExpressionSyntax CreateForwardingInvocation(
         MethodDeclarationSyntax oldMethod,
@@ -795,15 +785,12 @@ internal sealed class MethodSignatureEditor : SignatureEditor
     {
         var edits = new List<DocumentEdit>();
 
-        // 1. Create new method with new signature (copy implementation, preserve trivia)
         var existingDecl = (MethodDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
         var newMethod = CreateMethodWithNewSignature(existingDecl, paramSpec);
-
-        // 2. Create deprecated forwarding stub from old signature
         var deprecatedMethod = CreateDeprecatedForwardingStub(existingDecl, newMethod, paramSpec);
 
-        // 3. Atomic edit: insert new method BEFORE old, replace old with deprecated stub
-        //    Order matters: add new method first to avoid transient errors
+        // Atomic edit: insert new method BEFORE old, replace old with stub
+        // Order matters: avoids transient errors
         edits.Add(new DocumentEdit {
             DocumentId = method.ContainingDocument.Id,
             Changes = new[] {
@@ -835,7 +822,6 @@ internal sealed class MethodSignatureEditor : SignatureEditor
     {
         var edits = new List<DocumentEdit>();
 
-        // 1. Change method signature
         var existingDecl = (MethodDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
         var newMethod = CreateMethodWithNewSignature(existingDecl, paramSpec);
 
@@ -850,7 +836,7 @@ internal sealed class MethodSignatureEditor : SignatureEditor
             }
         });
 
-        // 2. Update all call sites with default arguments
+        // Update all call sites with default arguments
         foreach(var callSite in callSites) {
             var invocation = callSite.InvocationSyntax;
             var updatedInvocation = UpdateInvocationArguments(invocation, paramSpec);
@@ -879,15 +865,14 @@ internal sealed class MethodSignatureEditor : SignatureEditor
         MethodDeclarationSyntax existingMethod,
         ParameterChangeSpec paramSpec)
     {
-        // Use base class helper to build new parameter list
         var newParameterList = BuildNewParameterList(existingMethod.ParameterList, paramSpec);
 
-        // Preserve trivia, body, modifiers — use .With* methods for immutable updates
+        // Preserve trivia and body using .With* methods
         return existingMethod
             .WithParameterList(newParameterList)
-            .WithLeadingTrivia(existingMethod.GetLeadingTrivia())   // XML docs, comments
+            .WithLeadingTrivia(existingMethod.GetLeadingTrivia())
             .WithTrailingTrivia(existingMethod.GetTrailingTrivia())
-            .WithAttributeLists(SyntaxFactory.List<AttributeListSyntax>());  // Clear old attributes
+            .WithAttributeLists(SyntaxFactory.List<AttributeListSyntax>());
     }
 
     private MethodDeclarationSyntax CreateDeprecatedForwardingStub(
@@ -895,19 +880,16 @@ internal sealed class MethodSignatureEditor : SignatureEditor
         MethodDeclarationSyntax newMethod,
         ParameterChangeSpec paramSpec)
     {
-        // Use base class helper to create [Obsolete] attribute
         var obsoleteMessage = 
             $"RoslynMcp.ChangeSignature: Use {newMethod.Identifier}(...) instead. " +
             $"Migration ID: {Guid.NewGuid():N}";
         var obsoleteAttr = CreateObsoleteAttribute(obsoleteMessage);
-
-        // Use base class helper to create forwarding invocation
         var forwardingBody = CreateForwardingInvocation(existingMethod, newMethod, paramSpec);
 
-        // Convert method to expression-bodied member with [Obsolete]
+        // Convert to expression-bodied member with [Obsolete]
         return existingMethod
             .WithAttributeLists(existingMethod.AttributeLists.Add(obsoleteAttr))
-            .WithBody(null)  // Remove block body
+            .WithBody(null)
             .WithExpressionBody(SyntaxFactory.ArrowExpressionClause(forwardingBody))
             .WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken));
     }
@@ -940,12 +922,11 @@ internal sealed class MethodSignatureEditor : SignatureEditor
 
     private static int FindParameterIndex(List<ArgumentSyntax> args, string paramName)
     {
-        // Handle named arguments
         for(int i = 0; i < args.Count; i++) {
             if(args[i].NameColon?.Name.Identifier.Text == paramName)
                 return i;
         }
-        return -1;  // Positional argument — more complex logic needed
+        return -1;
     }
 }
 ```
@@ -957,17 +938,14 @@ internal sealed class MethodSignatureEditor : SignatureEditor
 ```csharp
 internal sealed class ExternMethodEditor : SignatureEditor
 {
-    // Extends base validation with P/Invoke-specific checks
     protected override ValidationResult ValidateParameterChanges(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec)
     {
-        // Call base validation first
         var baseResult = base.ValidateParameterChanges(method, paramSpec);
         if(!baseResult.IsValid)
             return baseResult;
 
-        // P/Invoke-specific checks
         var warnings = baseResult.Warnings.ToList();
 
         foreach(var addParam in paramSpec.AddParameters) {
@@ -984,8 +962,7 @@ internal sealed class ExternMethodEditor : SignatureEditor
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
-        // Can't create forwarding stub for extern methods (no implementation allowed)
-        // Fall back to breaking mode — just change signature
+        // Can't create forwarding stub for extern — fall back to breaking mode
         return GenerateBreakingEdits(method, paramSpec, callSites);
     }
 
@@ -994,12 +971,8 @@ internal sealed class ExternMethodEditor : SignatureEditor
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
-        // Change extern signature + update call sites (if any in this project)
-        // No forwarding stub possible
-
         var edits = new List<DocumentEdit>();
 
-        // 1. Update extern method signature
         var existingDecl = (MethodDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
         var newMethod = existingDecl
             .WithParameterList(BuildNewParameterList(existingDecl.ParameterList, paramSpec))
@@ -1017,8 +990,7 @@ internal sealed class ExternMethodEditor : SignatureEditor
             }
         });
 
-        // 2. Update call sites (if any in this project)
-        // Note: extern methods often called from unmanaged code, so may have no C# call sites
+        // Update call sites
         foreach(var callSite in callSites) {
             var invocation = callSite.InvocationSyntax;
             var updatedInvocation = UpdateCallSiteArguments(invocation, paramSpec);
@@ -1047,8 +1019,6 @@ internal sealed class ExternMethodEditor : SignatureEditor
         InvocationExpressionSyntax invocation,
         ParameterChangeSpec paramSpec)
     {
-        // Similar to MethodSignatureEditor.UpdateInvocationArguments
-        // Could be extracted to base class if needed
         var args = invocation.ArgumentList.Arguments.ToList();
 
         foreach(var addParam in paramSpec.AddParameters) {
@@ -1083,9 +1053,8 @@ internal sealed class ExternMethodEditor : SignatureEditor
 ```csharp
 internal sealed class DelegateSignatureEditor : SignatureEditor
 {
-    // Delegates use base validation + delegate-specific warnings
     protected override ValidationResult ValidateParameterChanges(
-        IMethodSymbol method,  // Delegate's Invoke method
+        IMethodSymbol method,
         ParameterChangeSpec paramSpec)
     {
         var baseResult = base.ValidateParameterChanges(method, paramSpec);
@@ -1093,8 +1062,6 @@ internal sealed class DelegateSignatureEditor : SignatureEditor
             return baseResult;
 
         var warnings = baseResult.Warnings.ToList();
-
-        // Delegates can't be overloaded — breaking change only
         warnings.Add("Delegate signature change is BREAKING — all subscribers must be updated");
 
         return ValidationResult.Valid(warnings);
@@ -1105,9 +1072,7 @@ internal sealed class DelegateSignatureEditor : SignatureEditor
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
-        // Non-breaking mode not practical for delegates
-        // (can't overload delegates, dual-delegate pattern too complex)
-        // Fall back to breaking mode with comprehensive diagnostics
+        // Can't overload delegates — fall back to breaking mode
         return GenerateBreakingEdits(method, paramSpec, callSites);
     }
 
@@ -1135,8 +1100,7 @@ internal sealed class DelegateSignatureEditor : SignatureEditor
             }
         });
 
-        // 2. Update all delegate invocations
-        //    (e.g., handler?.Invoke(42) → handler?.Invoke(42, "default"))
+        // Update all delegate invocations
         foreach(var callSite in callSites) {
             var invocation = callSite.InvocationSyntax;
             var updated = UpdateInvocationArguments(invocation, paramSpec);
@@ -1153,23 +1117,19 @@ internal sealed class DelegateSignatureEditor : SignatureEditor
             });
         }
 
-        // 3. Find subscriber methods (event handlers, callbacks)
-        //    These are NOT call sites — they're methods assigned to delegate variables/events
-        //    Agent will need to change their signatures separately
+        // Find subscriber methods for diagnostics
         var subscribers = FindSubscriberMethods(delegateType);
 
         if(subscribers.Any()) {
             warnings.Add($"Found {subscribers.Count} subscriber methods that require signature updates:");
-            foreach(var sub in subscribers.Take(10)) {  // Show first 10
+            foreach(var sub in subscribers.Take(10)) {
                 warnings.Add($"  - {sub.ContainingType.Name}.{sub.Name} ({sub.Locations.First().GetLineSpan().Path}:{sub.Locations.First().GetLineSpan().StartLinePosition.Line + 1})");
             }
             if(subscribers.Count > 10)
                 warnings.Add($"  ... and {subscribers.Count - 10} more");
         }
 
-        // 4. Find event declarations using this delegate
-        //    (e.g., public event DataHandler DataReceived;)
-        //    These automatically get the new signature — no edits needed, just for diagnostics
+        // Find event declarations using this delegate
         var events = FindEventDeclarations(delegateType);
 
         return new SignatureEdits {
@@ -1280,32 +1240,11 @@ internal sealed class DelegateSignatureEditor : SignatureEditor
 }
 ```
 
-**Responsibilities:**
-- Update delegate declaration signature
-- Update all delegate invocations (`.Invoke()` calls, direct calls)
-- **Detect but don't auto-update** subscriber methods (event handlers, callbacks)
-- Provide rich diagnostics for agent to orchestrate follow-up changes
-- No non-breaking mode (delegates can't be overloaded)
-
 **Agent Workflow:**
-```
-1. Agent calls roslyn_change_signature on delegate
-2. Tool returns:
-   - Updated delegate declaration
-   - Updated invocations
-   - List of subscriber methods needing updates
-3. Agent sees subscriber methods in diagnostics
-4. Agent calls roslyn_change_signature on each subscriber method
-5. All signatures now consistent
-```
+Agent calls `roslyn_change_signature` on delegate → tool returns subscriber methods in diagnostics → agent calls `roslyn_change_signature` on each subscriber → done.
 
 **Why no non-breaking mode?**
-Delegates can't be overloaded by parameter count/type. Creating a separate "legacy" delegate would require:
-- Dual event declarations (`DataReceived` + `DataReceivedLegacy`)
-- Complex adapter logic
-- High maintenance burden
-
-Breaking mode with comprehensive diagnostics is more practical — agent orchestrates the multi-step fix.
+Delegates can't be overloaded. Breaking mode with comprehensive diagnostics enables agent orchestration.
 
 ---
 
@@ -1316,14 +1255,12 @@ Breaking mode with comprehensive diagnostics is more practical — agent orchest
 ```csharp
 internal sealed class OperatorSignatureEditor : SignatureEditor
 {
-    // Replace base validation entirely — operators have strict signature rules
     protected override ValidationResult ValidateParameterChanges(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec)
     {
         var warnings = new List<string>();
 
-        // Operators must have exactly 1 or 2 parameters
         var finalParamCount = method.Parameters.Length
             + paramSpec.AddParameters.Length
             - paramSpec.RemoveParameters.Length;
@@ -1351,9 +1288,7 @@ internal sealed class OperatorSignatureEditor : SignatureEditor
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
-        // Operators don't support overloading by parameter count alone
-        // (C# doesn't allow two operators with same signature)
-        // Fall back to breaking mode
+        // Can't overload operators — fall back to breaking mode
         return GenerateBreakingEdits(method, paramSpec, callSites);
     }
 
@@ -1362,10 +1297,6 @@ internal sealed class OperatorSignatureEditor : SignatureEditor
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
-        // Change operator signature + update call sites
-        // Note: operators are usually called via syntax (a == b), not explicit invocations
-        // Call sites may be rare or non-existent
-
         var edits = new List<DocumentEdit>();
 
         var existingDecl = (OperatorDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
@@ -1385,12 +1316,9 @@ internal sealed class OperatorSignatureEditor : SignatureEditor
             }
         });
 
-        // Note: call sites for operators are typically binary expressions (a == b)
-        // Not simple invocations — may need special handling or just warn user
-
         return new SignatureEdits {
             MethodsChanged = 1,
-            CallSitesUpdated = 0,  // Operators rarely have explicit call sites
+            CallSitesUpdated = 0,
             AffectedDocuments = new[] { method.ContainingDocument.Id },
             DocumentEdits = edits
         };
@@ -1399,10 +1327,9 @@ internal sealed class OperatorSignatureEditor : SignatureEditor
 ```
 
 **Responsibilities:**
-- Validate operator signature constraints (1-2 parameters required)
-- Warn about paired operators (`==`/`!=`, `<`/`>`, etc.)
-- No non-breaking mode (operators can't be overloaded by count alone)
-- Allow signature changes with `force: true` parameter
+- Validate operator constraints (1-2 parameters)
+- Warn about paired operators
+- No non-breaking mode
 
 ---
 
@@ -1678,7 +1605,13 @@ var newMethod = existingMethod
 6. **What if cleaned [Obsolete] message is empty?**
    - If original was `[Obsolete("RoslynMcp.ChangeSignature: Migration ID: abc123")]`
    - After cleaning: `[Obsolete("")]` — should we remove attribute entirely?
-   - **Decision:** Yes, remove attribute if no meaningful message remains
+   - **Decision:** Yes, remove attribute if no meaningful message remains AND we can confirm it's our marker (starts with `RoslynMcp.ChangeSignature:`). Otherwise preserve it.
+
+7. **What if method already has [Obsolete]?**
+   - Appending to existing message could work: `[Obsolete("Legacy API. RoslynMcp.ChangeSignature: Use Foo(int, string) instead. Migration ID: abc123")]`
+   - Or fail with error: "Method already obsolete — manual intervention required"
+   - Or use XML doc comment marker (less intrusive): `/// <roslynmcp-migration id="abc123" />`
+   - **Lean toward:** Append to existing message for Phase 1; explore comment markers if this becomes problematic
 
 ---
 
