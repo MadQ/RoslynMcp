@@ -19,19 +19,9 @@ internal sealed class WorkspaceManager : IDisposable
 	readonly object                         cacheLock = new();
 	readonly int                            maxCachedWorkspaces;
 
-	static WorkspaceManager()
-	{
-		// Register MSBuild instance once per process — required for MSBuildWorkspace.
-		// Guard against environments where MSBuild SDK cannot be located (e.g., single-file publish).
-		// A failed registration is non-fatal; tools will return structured errors rather than crashing.
-		try {
-			if(MSBuildLocator.CanRegister)
-				MSBuildLocator.RegisterDefaults();
-		}
-		catch(Exception) {
-			// Intentionally swallowed — MSBuildWorkspace tools will fail gracefully per-call.
-		}
-	}
+	// Deferred MSBuild registration — only attempted on first MSBuildWorkspace use.
+	static bool           msbuildRegistered;
+	static readonly object msbuildLock = new();
 
 	public WorkspaceManager()
 	{
@@ -269,6 +259,38 @@ internal sealed class WorkspaceManager : IDisposable
 		}
 	}
 
+	// ── MSBuild registration ─────────────────────────────────────────────────────
+
+	/// <summary>
+	///     Registers the MSBuild SDK instance on first use. Deferred to avoid eager
+	///     initialization at startup — only needed when opening an MSBuildWorkspace.
+	///     Thread-safe via double-checked locking; failures are silently swallowed so
+	///     the server stays alive and tools return structured errors instead.
+	/// </summary>
+	static void EnsureMSBuildRegistered()
+	{
+		if(msbuildRegistered)
+			return;
+
+		lock(msbuildLock) {
+
+			if(msbuildRegistered)
+				return;
+
+			try {
+				if(MSBuildLocator.CanRegister)
+					MSBuildLocator.RegisterDefaults();
+			}
+			catch(Exception) {
+				// Intentionally swallowed — MSBuildWorkspace tools will fail gracefully per-call.
+			}
+			finally {
+				// Mark as attempted regardless of success — only one attempt per process.
+				msbuildRegistered = true;
+			}
+		}
+	}
+
 	// ── WorkspaceInstance (per-project workspace) ────────────────────────────────
 
 	/// <summary>
@@ -295,6 +317,8 @@ internal sealed class WorkspaceManager : IDisposable
 		{
 			this.csprojPath = csprojPath;
 			this.rootPath   = Path.GetDirectoryName(csprojPath)!;
+
+			EnsureMSBuildRegistered();
 
 			// Use MSBuildWorkspace for .csproj files
 			(workspace, projectId) = LoadMSBuildWorkspace(csprojPath);
