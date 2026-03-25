@@ -14,14 +14,19 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
     [McpServerTool(Name = "roslyn_get_type_hierarchy", ReadOnly = true)]
     [Description(
         "Returns the inheritance hierarchy for a type: base types (chain to object/ValueType), implemented interfaces, " +
-        "and derived types found in the project. Use this to understand polymorphism and type relationships.")]
+        "and derived types found in the project. Use this to understand polymorphism and type relationships. " +
+        "Derived types and interfaces are paged; use skip/take for large hierarchies.")]
     public async Task<object> GetTypeHierarchy(
         [Description("The type name, e.g. 'WindowTracker' or 'RoslynMcp.WorkspaceManager'.")] string typeName,
+        [Description("Number of derived types/interfaces to skip (for paging). Default: 0.")] int skip = 0,
+        [Description("Maximum number of derived types/interfaces to return. Default: 50, max: 200.")] int take = 50,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
         using var scope = BeginTool("roslyn_get_type_hierarchy", typeName);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
+
+        take = Math.Clamp(take, 1, 200);
 
         var type        = FindType(compilation, typeName);
 
@@ -29,25 +34,32 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
             return scope.Failed("type not found", new { error = $"Type '{typeName}' not found in the project." });
 
         var baseTypes   = GetBaseTypeChain(type);
-        var interfaces  = type.AllInterfaces
+        var allInterfaces = type.AllInterfaces
             .Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
             .ToArray();
 
         var solution    = workspace.GetSolution(projectPath);
         var derivedRefs = await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution);
-        var derived     = derivedRefs
+        var allDerived = derivedRefs
             .Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
             .ToArray();
 
-        return new {
-            type_name       = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-            type_kind       = type.TypeKind.ToString().ToLowerInvariant(),
-            base_types      = baseTypes,
-            interfaces      = interfaces,
-            derived_types   = derived
-        };
+        // Page both interfaces and derived types together (concatenated, then sliced)
+        var combined = allInterfaces.Concat(allDerived).ToArray();
+        var page     = combined.Skip(skip).Take(take).ToArray();
+
+        return scope.Outcome($"{page.Length} interface(s)/derived", new {
+            type_name           = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+            type_kind           = type.TypeKind.ToString().ToLowerInvariant(),
+            base_types          = baseTypes,
+            total_interfaces    = allInterfaces.Length,
+            total_derived_types = allDerived.Length,
+            skip,
+            take,
+            interfaces_and_derived = page
+        });
     }
 
     private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)

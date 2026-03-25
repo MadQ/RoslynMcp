@@ -11,6 +11,8 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using RoslynMcp;
 using RoslynMcp.Tools;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 
 // Optional: Pre-warm cache with specified projects (args).
 // If no args provided, projects are loaded on-demand when tools are called.
@@ -32,7 +34,11 @@ builder.Services
 	.AddSingleton<FileLogger>()
 	.AddMcpServer()
 	.WithStdioServerTransport()
-	.WithToolsFromAssembly()
+	// UnsafeRelaxedJsonEscaping: emit printable ASCII as-is instead of \uXXXX sequences.
+	// Reduces response size significantly for symbol signatures and doc comments (issue #3).
+	.WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions {
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+	})
 ;
 
 var host = builder.Build();
