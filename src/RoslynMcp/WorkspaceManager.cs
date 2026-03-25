@@ -44,7 +44,7 @@ internal sealed class WorkspaceManager : IDisposable
 
 		lock(cacheLock) {
 
-			// Cache hit
+			// Cache hit.
 			if(cache.TryGetValue(normalizedPath, out var entry)) {
 
 				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
@@ -52,12 +52,12 @@ internal sealed class WorkspaceManager : IDisposable
 				return entry.Instance.GetCompilation();
 			}
 
-			// Cache miss - load workspace
+			// Cache miss - load workspace.
 			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
 				? new WorkspaceInstance(normalizedPath)                // MSBuildWorkspace
 				: new WorkspaceInstance(normalizedPath, useAdhoc: true); // AdhocWorkspace
 
-			// Evict LRU if cache full
+			// Evict LRU if cache full.
 			if(cache.Count >= maxCachedWorkspaces) {
 
 				var lru = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
@@ -65,7 +65,7 @@ internal sealed class WorkspaceManager : IDisposable
 				lru.Value.Instance.Dispose();
 			}
 
-			// Add to cache
+			// Add to cache.
 			cache[normalizedPath] = new CacheEntry(normalizedPath, instance, DateTime.UtcNow);
 
 			return instance.GetCompilation();
@@ -88,7 +88,7 @@ internal sealed class WorkspaceManager : IDisposable
 				return entry.Instance.GetSolution();
 			}
 
-			// Load if not cached
+			// Load if not cached.
 			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
 				? new WorkspaceInstance(normalizedPath)
 				: new WorkspaceInstance(normalizedPath, useAdhoc: true);
@@ -114,7 +114,7 @@ internal sealed class WorkspaceManager : IDisposable
 				return entry.Instance.GetProject();
 			}
 
-			// Load if not cached
+			// Load if not cached.
 			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
 				? new WorkspaceInstance(normalizedPath)
 				: new WorkspaceInstance(normalizedPath, useAdhoc: true);
@@ -418,7 +418,7 @@ internal sealed class WorkspaceManager : IDisposable
 
 		private void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId pid)
 		{
-			// Enumerate files with error handling for protected directories
+			// Enumerate files with error handling for protected directories.
 			var files = EnumerateFilesWithErrorHandling(rootPath, "*.cs");
 
 			foreach(var path in files)
@@ -427,18 +427,18 @@ internal sealed class WorkspaceManager : IDisposable
 
 		private IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
 		{
-			// Don't scan system directories or drive roots
+			// Don't scan system directories or drive roots.
 			var pathInfo = new DirectoryInfo(path);
 			if(pathInfo.Attributes.HasFlag(FileAttributes.System) || pathInfo.Parent is null)
 				yield break;
 
-			// Try to enumerate files in current directory
+			// Try to enumerate files in current directory.
 			IEnumerable<string> files;
 			try {
 				files = Directory.EnumerateFiles(path, searchPattern, SearchOption.TopDirectoryOnly);
 			}
 			catch(UnauthorizedAccessException) {
-				yield break; // Skip directories we can't access
+				yield break; // Skip directories we can't access.
 			}
 			catch(DirectoryNotFoundException) {
 				yield break;
@@ -447,7 +447,7 @@ internal sealed class WorkspaceManager : IDisposable
 			foreach(var file in files)
 				yield return file;
 
-			// Recursively enumerate subdirectories
+			// Recursively enumerate subdirectories.
 			IEnumerable<string> directories;
 			try {
 				directories = Directory.EnumerateDirectories(path);
@@ -461,7 +461,7 @@ internal sealed class WorkspaceManager : IDisposable
 
 			foreach(var directory in directories) {
 
-				// Skip hidden, system, and common large directories
+				// Skip hidden, system, and common large directories.
 				var dirInfo = new DirectoryInfo(directory);
 				if(dirInfo.Attributes.HasFlag(FileAttributes.Hidden) ||
 				   dirInfo.Attributes.HasFlag(FileAttributes.System) ||

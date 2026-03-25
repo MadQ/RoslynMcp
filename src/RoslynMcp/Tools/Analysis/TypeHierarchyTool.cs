@@ -37,17 +37,17 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
         var allInterfaces = type.AllInterfaces
             .Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
-            .ToArray();  // Materialize - used for count
+            .ToArray();  // Materialize - used for count.
 
         var solution    = workspace.GetSolution(projectPath);
         var derivedRefs = await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution);
         var allDerived = derivedRefs
             .Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
-            .ToArray();  // Materialize - used for count
+            .ToArray();  // Materialize - used for count.
 
         // Page both interfaces and derived types together (concatenated, then sliced)
-        var combined = allInterfaces.Concat(allDerived).ToArray();  // Materialize combined for paging
+        var combined = allInterfaces.Concat(allDerived).ToArray();  // Materialize combined for paging.
         var page     = combined.Skip(skip).Take(take).ToArray();
 
         return scope.Outcome($"{page.Length} interface(s)/derived", new {

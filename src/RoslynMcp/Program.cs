@@ -53,7 +53,7 @@ var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStarted.Register(() => logger.LogStart());
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
 
-// Pre-warm cache if projects specified
+// Pre-warm cache if projects specified.
 if(projectsToPreload.Length > 0) {
 
 	var resolver = host.Services.GetRequiredService<WorkspaceResolver>();
@@ -63,7 +63,7 @@ if(projectsToPreload.Length > 0) {
 	foreach(var path in projectsToPreload) {
 
 		try {
-			// Pre-load into cache
+			// Pre-load into cache.
 			resolver.GetCompilation(path);
 			Console.Error.WriteLine($"✓ Loaded: {path}");
 		}

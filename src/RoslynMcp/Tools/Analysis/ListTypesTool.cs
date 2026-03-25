@@ -25,7 +25,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 
         var allTypes    = new List<INamedTypeSymbol>();
 
-        // Walk
+        // Walk namespace tree.
         CollectTypes(compilation.GlobalNamespace, allTypes);
 
         var filtered = allTypes
@@ -35,7 +35,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
             .Select(t => FormatType(t))
             .Order();
 
-        // Materialize only when needed for response
+        // Materialize only when needed for response.
         var results = filtered.ToArray();
 
         return results.Length > 0

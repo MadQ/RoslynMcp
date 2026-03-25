@@ -53,7 +53,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
                 return $"{file}:{line}";
             })
             .Distinct()
-            .ToArray();  // Materialize once - we need both count and page
+            .ToArray();  // Materialize once - we need both count and page.
 
         if(allResults.Length == 0)
             return new { total_references = 0, skip, take, references = new[] { $"No references found for '{symbolName}'." } };
