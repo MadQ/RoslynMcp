@@ -308,6 +308,11 @@ internal sealed class WorkspaceManager : IDisposable
 			this.csprojPath = null;
 			this.rootPath   = directoryPath;
 
+			// Fail fast if we're being asked to scan a root directory (e.g., "C:\", "J:\")
+			var dirInfo = new DirectoryInfo(directoryPath);
+			if(dirInfo.Parent == null)
+				throw new InvalidOperationException($"Cannot create AdhocWorkspace for root directory '{directoryPath}'. Specify a subdirectory or use a .csproj file.");
+
 			// Use AdhocWorkspace for source-only scenarios
 			(workspace, projectId) = LoadAdhocWorkspace();
 			isMSBuild = false;
@@ -424,7 +429,7 @@ internal sealed class WorkspaceManager : IDisposable
 		{
 			// Don't scan system directories or drive roots
 			var pathInfo = new DirectoryInfo(path);
-			if(pathInfo.Attributes.HasFlag(FileAttributes.System) || pathInfo.Parent == null)
+			if(pathInfo.Attributes.HasFlag(FileAttributes.System) || pathInfo.Parent is null)
 				yield break;
 
 			// Try to enumerate files in current directory
