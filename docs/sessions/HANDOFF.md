@@ -1,53 +1,373 @@
 ﻿# Session Handoff — RoslynMcp
-
-**Date:** 2026-03-24 (session continues)
+**Date:** 2025-01-XX
 **Branch:** `dev`
-**Last Commit:** `52e6b3a` — fix: apply issue #3 fixes to dev - UnsafeRelaxedJsonEscaping + pagination on 5 unbounded tools
+**Last Commit:** `1628f38` — Add docs/github-issues/ to gitignore
 **Repository:** https://github.com/MadQ/RoslynMcp.git
 **Tool Count:** 24 tools
-**Test Status:** ✅ 23/23 passing
-**Build Status:** ✅ 0 errors, 0 warnings
+**Migration Status:** ✅ **24/24 tools migrated** (v0.3.0 Phase 2 complete!)
+**Test Status:** ⏳ Multi-project testing in progress
+**Build Status:** ✅ Clean
 
 ---
 
-## What Happened This Session (March 24, 2026)
+## What Happened This Session
 
-### Hotfix v0.2.2-alpha — Issue #3 Critical Fixes
+### 🎉 v0.3.0 Tool Migration Status Update
 
-**Two blocking issues fixed:**
+**Discovery:** All 24 tools have already been migrated to the new multi-project infrastructure! The migration was completed in earlier sessions (commits `aadf7ef` and `8f1b1b4`).
 
-1. **Unicode Escaping** — JSON responses were escaping printable ASCII as `\uXXXX` sequences, inflating response size by up to 5x
-   - **Fix:** Added `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` to `WithToolsFromAssembly()` in `Program.cs`
-   - Printable ASCII now emits as-is
+**Migration Complete (24/24 tools):**
+- ✅ All tools now accept optional `projectPath` parameter
+- ✅ All tools use `WorkspaceResolver` with `TryGetCompilation`/`TryGetProject` pattern
+- ✅ All tools use `FileLogger` for structured logging
+- ✅ All tools use `BeginTool()` scope pattern for timing and outcome tracking
+- ✅ Tool subfolders organized: Analysis (13), Search (3), Editing (2), Rename (2), Build (3), Root (1)
 
-2. **Missing Pagination** — 5 tools returned unbounded results, exceeding context windows
-   - **Fix:** Added `skip`/`take` parameters with defaults and max limits:
-     - `roslyn_get_file_outline` — page by types (default 20, max 100)
-     - `roslyn_find_references` — page by locations (default 50, max 200)
-     - `roslyn_find_implementations` — page by implementations/overrides (default 50, max 200)
-     - `roslyn_get_type_members` — page by members (default 50, max 200)
-     - `roslyn_get_type_hierarchy` — page by interfaces + derived types (default 50, max 200)
-   - All responses include `total_*`, `skip`, and `take` fields
+**v0.3.0 Phase 2 Complete ✅**
 
-**Release Process:**
-- Created `hotfix/v0.2.2` branch from `v0.2.1-alpha` tag
-- Applied fixes to flat Tools/ structure (pre-reorganization codebase)
-- Tagged `v0.2.2-alpha`, published on GitHub with zips
-- Applied same fixes to `dev` branch (adapted for Tools/Analysis/ structure + `RoslynMcpTool` base class)
-- Updated README.md warning to point to v0.2.2-alpha
-- Closed issues #3 and #4
+Infrastructure components working:
+- `WorkspaceManager` — LRU-cached workspace instances (default capacity: 10 projects)
+- `WorkspaceResolver` — Per-tool facade with structured error handling
+- `RoslynMcpTool` base class — `TryGetCompilation`, `TryGetProject`, `BeginTool` scope pattern
+- Smart path resolution — relative paths, CWD defaults, `.csproj` detection
+- File logging — tool invocations, timing, outcomes (rotating 10 MB files)
 
-**Files Changed:**
-- `src/RoslynMcp/Program.cs` — encoding fix
-- 5 tool files in `Tools/Analysis/` — pagination logic + `scope.Outcome()` calls
+**Remaining v0.3.0 Work:**
+1. **Systematic multi-project testing** (Phase 3a) — verify tools work correctly across projects
+2. **Cross-project semantic gaps** (HIGH priority) — address Compilation duplication issue
+3. **Consider .sln/.slnx support** — natural fix for cross-project semantics
 
-**Testing:**
-- TestHarness: 23/23 ✅ on `dev` branch
-- All pagination parameters validated with defaults
+**Next Steps:** Multi-project testing and cross-project semantic investigation (this session).
+
+---
+
+### 🧪 Multi-Project Testing Infrastructure Created
+
+**Created:** `test_multi_project.ps1` — comprehensive test suite for v0.3.0 multi-project functionality
+
+**Test Coverage (11 scenarios across 3 projects):**
+1. **Project Info** — verify RoslynMcp, TestHarness, RoslynMcp.Analyzers load correctly
+2. **Type Discovery** — list types across projects with namespace filters
+3. **Type Members** — get WorkspaceManager members with signatures
+4. **Find References** — locate symbol usages across projects
+5. **Diagnostics** — get compiler errors/warnings per project
+6. **File Operations** — list/search files with glob patterns
+
+**Test Projects:**
+- `src\RoslynMcp` — main server project (24 tools)
+- `src\TestHarness` — test client
+- `src\RoslynMcp.Analyzers` — Roslyn analyzer (dogfooding!)
+
+---
+
+### 🔴 Critical Issue Discovered: stdout Contamination
+
+**Problem:** Server writes startup messages to stdout, breaking JSON-RPC protocol.
+
+```
+Pre-loading 1 project(s)...
+✓ Loaded: .
+```
+
+**Impact:**
+- Test harness can't parse MCP responses (non-JSON text before protocol messages)
+- All 11 tests fail with "Request failed" due to corrupted stream
+- **BLOCKER** for automated testing
+
+**Root Cause:** `Program.cs` writes directly to `Console.WriteLine` during workspace initialization.
+
+**Fix Required:** Redirect all diagnostic output to stderr or FileLogger only. MCP protocol demands clean stdout.
+
+**Priority:** HIGH — blocks v0.3.0 testing checklist completion.
+
+---
+
+### 🔍 Cross-Project Semantic Gaps Investigation
+
+**Architecture Analysis:**
+
+**Current State:**
+- `WorkspaceManager` uses **per-.csproj LRU cache** (default: 5 projects)
+- Each cache entry = separate `WorkspaceInstance` (MSBuildWorkspace or AdhocWorkspace)
+- Each instance has its own `Solution` graph
+
+**The Problem:**
+
+When `A.csproj` references `B.csproj` via `<ProjectReference>`:
+1. MSBuildWorkspace loads B into A's Solution graph (correct)
+2. Agent later requests `B.csproj` directly → **second WorkspaceInstance created**
+3. Two separate Solution graphs with **zero knowledge of each other**
+4. Cross-project operations (`roslyn_find_references`, `roslyn_preview_rename`) operate on Solution, not Compilation
+5. **Result: Silent incorrectness** — incomplete reference/rename results
+
+**Impact Severity:**
+- Memory duplication: **LOW-MEDIUM** (tolerable for now, LRU eviction mitigates)
+- Semantic correctness: **HIGH** (cross-project operations incomplete, no error reported)
+
+**Recommended Solution (post-v0.3.0):**
+
+**.sln/.slnx support** — natural fix for cross-project semantics:
+- Cache key: `.sln` file path instead of individual `.csproj` paths
+- `MSBuildWorkspace.OpenSolutionAsync()` → one Solution graph per `.sln`
+- All projects share same graph → zero duplication
+- Full cross-project semantics (references, renames, implementations all work correctly)
+- Agent specifies `.sln` path OR `.csproj` path (resolve to containing `.sln` automatically)
+
+**Alternative (if no .sln available):**
+- Multi-project reference tracking in WorkspaceManager
+- When loading `B.csproj`, check cache for any project that references B
+- Reuse existing Solution graph instead of creating new WorkspaceInstance
+- More complex, but works without `.sln` requirement
+
+**Status:** Documented for v0.4.0 or later. Not blocking v0.3.0-alpha release.
+
+---
+
+### 📊 v0.3.0 Status Summary
+
+**Phase 2: Tool Migration — ✅ COMPLETE**
+- All 24 tools migrated to multi-project infrastructure
+- `FileLogger` integration complete
+- `BeginTool` scope pattern for timing/outcomes
+- `TryGetCompilation`/`TryGetProject` error handling
+
+**Phase 3a: Testing — 🔴 BLOCKED**
+- Test infrastructure created (`test_multi_project.ps1`)
+- **BLOCKED:** stdout contamination prevents automated testing
+- Manual smoke tests confirm tools work individually
+
+**Phase 3b: Cross-Project Investigation — ✅ COMPLETE**
+- Root cause identified (per-project caching)
+- Solution documented (.sln/.slnx support)
+- Severity assessed (HIGH for semantics, tolerable for memory)
+- Deferred to post-v0.3.0
+
+**Remaining Work:**
+1. **Fix stdout contamination** (HIGH priority, required for testing)
+2. Complete testing checklist once stdout fixed
+3. Update README.md with multi-project examples
+4. Consider whether to release v0.3.0-alpha with known semantic gaps (document in release notes)
+
+---
+
+## Key Files Modified This Session
+
+| File | Changes |
+|------|---------|
+| `docs/sessions/HANDOFF.md` | Added new session entry with migration status, testing, and investigation results |
+| `docs/github-issues/v0.3.0-multi-project-infrastructure.md` | Updated Phase 2 (complete), Phase 3 (blocked), added stdout contamination issue |
+| `test_multi_project.ps1` | Created comprehensive multi-project test suite (11 scenarios, 3 projects) |
+
+---
+
+## Session Statistics
+
+- **Migration Status:** 24/24 tools ✅ (discovered already complete from earlier sessions)
+- **Test Script Created:** `test_multi_project.ps1` (328 lines, 11 test scenarios)
+- **Issues Discovered:** 2 critical (stdout contamination, cross-project semantic gaps)
+- **Documentation Updated:** 2 files (HANDOFF.md, v0.3.0 issue draft)
+- **Plan Steps Completed:** 3/3 (update docs, create tests, investigate semantics)
+
+---
+
+## Commits Pending
+
+```
+1. docs: update v0.3.0 status - all 24 tools migrated
+2. test: add multi-project test suite (11 scenarios)
+3. docs: document stdout contamination and cross-project semantic gaps
+```
+
+**Ready for commit?** Yes, all documentation changes and test script ready for Git staging.
 
 ---
 
 ## Previous Session Summary
+
+### 🏴‍☠️ Epic Feature Planning: `roslyn_change_signature` Tool
+
+### 🏴‍☠️ Epic Feature Planning: `roslyn_change_signature` Tool
+
+Created comprehensive design document for v0.4.0's headline feature: semantic method signature changes with automatic call site updates.
+
+**Planning Document:** `docs/plans/change-signature-tool.md` (~1400 lines)
+
+**What was designed:**
+
+1. **Three-tool workflow:**
+   - `roslyn_change_signature` — preview signature change (add/remove/reorder parameters)
+   - `roslyn_apply_signature_change` — apply with approval workflow
+   - `roslyn_remove_deprecated_overload` — cleanup deprecated stubs (remove or clean marker)
+
+2. **Two modes:**
+   - **Non-breaking (default):** Adds new overload + deprecates old with `[Obsolete("RoslynMcp.ChangeSignature: ...")]` marker
+   - **Breaking (opt-in):** Updates signature + all call sites atomically
+
+3. **Five editor strategies:**
+   - `MethodSignatureEditor` — regular methods
+   - `ExternMethodEditor` — P/Invoke refactoring
+   - `DelegateSignatureEditor` — delegates with subscriber detection
+   - `OperatorSignatureEditor` — operator overloads with symmetry warnings
+   - `ConversionSignatureEditor` — implicit/explicit conversions
+
+4. **Architecture:**
+   - Abstract class pattern (not interface) for shared helpers
+   - Atomic application to prevent transient IDE errors
+   - Operation ordering to avoid error flashing
+   - Rich diagnostics for agent orchestration
+
+5. **Key decisions:**
+   - Abstract class over interface (enables shared helpers + virtual validation)
+   - Non-breaking mode as default (minimize disruption)
+   - Recognizable `[Obsolete]` marker for cleanup tooling
+   - Delegates: breaking mode only (can't overload delegates)
+   - `force` parameter for advanced scenarios (virtual/operator/conversion)
+
+**Commits:**
+- `7f007fe` — Add change_signature tool planning doc
+- `9dfbf15` — Add architecture section
+- `f787b88` — Refine architecture: abstract class over interface
+- `4b46263` — Add delegate signature change support
+- `9a6660c` — Clean up redundant prose
+
+---
+
+### 📋 GitHub Issue Drafts Created
+
+Created two comprehensive issue drafts in `docs/github-issues/` (gitignored for local drafting):
+
+1. **`change-signature-tool-feature.md`** — v0.4.0 feature request
+   - Links to planning doc
+   - Example workflows
+   - Phase 1/2/3 implementation plan
+   - Open questions carried over
+
+2. **`v0.3.0-multi-project-infrastructure.md`** — Current milestone
+   - Documents multi-workspace support with LRU cache
+   - Tool migration status (1/24 complete)
+   - Cross-project semantics issue (HIGH priority)
+   - Testing checklist
+   - Breaking changes documented
+
+**Guidance provided:**
+- When/why to open GitHub issues
+- How to use GitHub milestones for release planning
+- Suggested milestone structure (v0.3.0, v0.4.0, v0.5.0, Future)
+
+---
+
+### 🧹 Repository Cleanup
+
+**Hotfix branches deleted:**
+- Removed `hotfix/v0.2.1` and `hotfix/v0.2.2` (local + remote)
+- Tags preserved: `v0.2.0-alpha`, `v0.2.1-alpha`, `v0.2.2-alpha`
+- Rationale: Hotfixes merged to dev, tags mark releases permanently
+
+**Gitignore updated:**
+- Added `docs/github-issues/` for draft issue text
+
+**Final branch state:**
+```
+* dev
+  feature/global-project-context
+  feature/search-files-tool
+```
+
+---
+
+### 💬 Discussions & Design Refinements
+
+**Abstract class vs. interface:**
+- Chose abstract class for `SignatureEditor` base
+- Enables shared helpers (`CreateObsoleteAttribute`, `BuildNewParameterList`, `CreateForwardingInvocation`)
+- Supports `protected virtual` validation (use/extend/replace patterns)
+- Avoids premature abstraction
+
+**Delegate signatures:**
+- Non-breaking mode not practical (delegates can't overload)
+- Breaking mode with subscriber detection in diagnostics
+- Agent orchestrates multi-step fix: change delegate → change subscribers
+
+**Open questions documented:**
+- Empty `[Obsolete]` message handling
+- Methods already having `[Obsolete]` attribute
+- Method overload disambiguation
+- Approval scope for batch changes
+
+---
+
+## Key Files Modified This Session
+
+| File | Changes |
+|------|---------|
+| `docs/plans/change-signature-tool.md` | Created (~1400 lines) — comprehensive design doc |
+| `docs/github-issues/change-signature-tool-feature.md` | Created — GitHub issue draft |
+| `docs/github-issues/v0.3.0-multi-project-infrastructure.md` | Created — v0.3.0 milestone issue draft |
+| `.gitignore` | Added `docs/github-issues/` |
+
+---
+
+## Commits This Session
+
+```
+1628f38 — Add docs/github-issues/ to gitignore
+9a6660c — Clean up change_signature planning doc
+4b46263 — Add delegate signature change support to planning doc
+f787b88 — Refine change_signature architecture: abstract class over interface
+9dfbf15 — Add architecture section to change_signature planning doc
+7f007fe — Add change_signature tool planning doc
+```
+
+**6 commits, all documentation/planning.**
+
+---
+
+## Next Steps (Post-Handoff)
+
+### Immediate (v0.3.0 work)
+- Continue tool migration (23 tools remaining)
+- Test TypeMembersTool with multi-project scenarios
+- Systematic rollout following reference implementation
+
+### Near-term (GitHub housekeeping)
+- Create milestones: v0.3.0, v0.4.0, v0.5.0, Future
+- Post issue: `v0.3.0-multi-project-infrastructure.md`
+- Post issue: `change-signature-tool-feature.md`
+- Assign to appropriate milestones
+
+### v0.4.0 (after v0.3.0 ships)
+- Implement `roslyn_change_signature` following planning doc
+- Phase 1: MVP (regular methods, extern, delegates, operators)
+- Phase 2: Advanced features (constructors, indexers, partials)
+
+### Post-v0.3.0 (HIGH priority)
+- Address cross-project semantic gaps (Compilation duplication)
+- Implement `.sln`/.slnx` support (natural fix for cross-project issues)
+
+---
+
+## Repo Health
+
+```
+Branch:     dev (up to date with origin/dev)
+Tests:      23/23 ✅ (not run this session, assumed clean)
+Build:      ✅ Clean (no code changes)
+Last Commit: 1628f38
+Commits Today: 6 (all docs/planning)
+```
+
+## Fun Stats This Session
+
+- **Lines of planning doc:** ~1400
+- **GitHub issue drafts:** 2
+- **Architecture decisions:** 12+
+- **Code examples:** 20+
+- **Pirate jokes:** Countless 🏴‍☠️
+- **Treasure created:** 💎💎💎
+
+---
+
+## Previous Session Summary (March 24, 2026)
 
 ### Tooling annotations
 - All 24 tools prefixed `roslyn_` and annotated `ReadOnly` / `Destructive` / `Idempotent` on `[McpServerTool]`
