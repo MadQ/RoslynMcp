@@ -8,8 +8,9 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 
 **Works with any MCP-compatible client:** GitHub Copilot, Claude Desktop, Cline, Roo Code, Continue, and more.
 
-> **⚠️ v0.2.0-alpha release is broken** — the `BuildHost` DLL was missing from the zip, causing every tool call to fail on first use.
-> Download [v0.2.1-alpha](https://github.com/MadQ/RoslynMcp/releases/tag/v0.2.1-alpha) instead. See [#4](https://github.com/MadQ/RoslynMcp/issues/4) for details.
+> **⚠️ v0.2.0-alpha and v0.2.1-alpha are broken** — v0.2.0 is missing the `BuildHost` DLL ([#4](https://github.com/MadQ/RoslynMcp/issues/4)), and v0.2.1 has excessive Unicode escaping + unbounded responses that blow the context window ([#3](https://github.com/MadQ/RoslynMcp/issues/3)).
+> 
+> **Download [v0.2.2-alpha](https://github.com/MadQ/RoslynMcp/releases/tag/v0.2.2-alpha) instead** — both issues fixed.
 
 ---
 
