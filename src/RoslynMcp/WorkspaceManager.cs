@@ -44,33 +44,33 @@ internal sealed class WorkspaceManager : IDisposable
 
 		lock(cacheLock) {
 
-					// Cache hit
-					if(cache.TryGetValue(normalizedPath, out var entry)) {
+			// Cache hit
+			if(cache.TryGetValue(normalizedPath, out var entry)) {
 
-						cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
+				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
 
-						return entry.Instance.GetCompilation();
-					}
-
-					// Cache miss - load workspace
-					var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-						? new WorkspaceInstance(normalizedPath)                // MSBuildWorkspace
-						: new WorkspaceInstance(normalizedPath, useAdhoc: true); // AdhocWorkspace
-
-					// Evict LRU if cache full
-					if(cache.Count >= maxCachedWorkspaces) {
-
-						var lru = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
-						cache.Remove(lru.Key);
-						lru.Value.Instance.Dispose();
-					}
-
-					// Add to cache
-					cache[normalizedPath] = new CacheEntry(normalizedPath, instance, DateTime.UtcNow);
-
-					return instance.GetCompilation();
-				}
+				return entry.Instance.GetCompilation();
 			}
+
+			// Cache miss - load workspace
+			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+				? new WorkspaceInstance(normalizedPath)                // MSBuildWorkspace
+				: new WorkspaceInstance(normalizedPath, useAdhoc: true); // AdhocWorkspace
+
+			// Evict LRU if cache full
+			if(cache.Count >= maxCachedWorkspaces) {
+
+				var lru = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
+				cache.Remove(lru.Key);
+				lru.Value.Instance.Dispose();
+			}
+
+			// Add to cache
+			cache[normalizedPath] = new CacheEntry(normalizedPath, instance, DateTime.UtcNow);
+
+			return instance.GetCompilation();
+		}
+	}
 
 	/// <summary>
 	///     Gets the solution for a specific project path.
