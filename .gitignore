@@ -395,4 +395,5 @@ FodyWeavers.xsd
 # These are local-only; each fork/workstation keeps its own copies.
 docs/sessions/
 docs/ScratchPad.md
+docs/github-issues/
 
