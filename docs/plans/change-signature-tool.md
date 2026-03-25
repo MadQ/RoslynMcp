@@ -480,6 +480,13 @@ internal sealed class SignatureChangeOrchestrator
     {
         warnings = new List<string>();
 
+        // Delegates (MethodKind.DelegateInvoke)
+        if(method.MethodKind == MethodKind.DelegateInvoke)
+        {
+            warnings.Add("Delegate signature change is breaking — all subscribers must be updated");
+            return new DelegateSignatureEditor();
+        }
+
         // Regular methods
         if(method.MethodKind == MethodKind.Ordinary)
         {
@@ -1069,6 +1076,239 @@ internal sealed class ExternMethodEditor : SignatureEditor
 - No forwarding stubs possible (extern methods can't have implementations)
 - Falls back to breaking mode for non-breaking requests
 
+#### Implementation: `DelegateSignatureEditor`
+
+**File:** `Tools/Refactoring/SignatureChange/Editors/DelegateSignatureEditor.cs`
+
+```csharp
+internal sealed class DelegateSignatureEditor : SignatureEditor
+{
+    // Delegates use base validation + delegate-specific warnings
+    protected override ValidationResult ValidateParameterChanges(
+        IMethodSymbol method,  // Delegate's Invoke method
+        ParameterChangeSpec paramSpec)
+    {
+        var baseResult = base.ValidateParameterChanges(method, paramSpec);
+        if(!baseResult.IsValid)
+            return baseResult;
+
+        var warnings = baseResult.Warnings.ToList();
+
+        // Delegates can't be overloaded — breaking change only
+        warnings.Add("Delegate signature change is BREAKING — all subscribers must be updated");
+
+        return ValidationResult.Valid(warnings);
+    }
+
+    public override SignatureEdits GenerateNonBreakingEdits(
+        IMethodSymbol method,
+        ParameterChangeSpec paramSpec,
+        IReadOnlyList<CallSiteInfo> callSites)
+    {
+        // Non-breaking mode not practical for delegates
+        // (can't overload delegates, dual-delegate pattern too complex)
+        // Fall back to breaking mode with comprehensive diagnostics
+        return GenerateBreakingEdits(method, paramSpec, callSites);
+    }
+
+    public override SignatureEdits GenerateBreakingEdits(
+        IMethodSymbol method,
+        ParameterChangeSpec paramSpec,
+        IReadOnlyList<CallSiteInfo> callSites)
+    {
+        var edits = new List<DocumentEdit>();
+        var warnings = new List<string>();
+
+        // 1. Find and update delegate declaration
+        var delegateType = method.ContainingType;  // INamedTypeSymbol for the delegate
+        var delegateDecl = FindDelegateDeclaration(delegateType);
+        var newDelegate = UpdateDelegateSignature(delegateDecl, paramSpec);
+
+        edits.Add(new DocumentEdit {
+            DocumentId = delegateDecl.SyntaxTree.GetDocument().Id,
+            Changes = new[] {
+                new NodeChange {
+                    Operation = NodeOperation.Replace,
+                    OriginalNode = delegateDecl,
+                    NewNode = newDelegate
+                }
+            }
+        });
+
+        // 2. Update all delegate invocations
+        //    (e.g., handler?.Invoke(42) → handler?.Invoke(42, "default"))
+        foreach(var callSite in callSites) {
+            var invocation = callSite.InvocationSyntax;
+            var updated = UpdateInvocationArguments(invocation, paramSpec);
+
+            edits.Add(new DocumentEdit {
+                DocumentId = callSite.DocumentId,
+                Changes = new[] {
+                    new NodeChange {
+                        Operation = NodeOperation.Replace,
+                        OriginalNode = invocation,
+                        NewNode = updated
+                    }
+                }
+            });
+        }
+
+        // 3. Find subscriber methods (event handlers, callbacks)
+        //    These are NOT call sites — they're methods assigned to delegate variables/events
+        //    Agent will need to change their signatures separately
+        var subscribers = FindSubscriberMethods(delegateType);
+
+        if(subscribers.Any()) {
+            warnings.Add($"Found {subscribers.Count} subscriber methods that require signature updates:");
+            foreach(var sub in subscribers.Take(10)) {  // Show first 10
+                warnings.Add($"  - {sub.ContainingType.Name}.{sub.Name} ({sub.Locations.First().GetLineSpan().Path}:{sub.Locations.First().GetLineSpan().StartLinePosition.Line + 1})");
+            }
+            if(subscribers.Count > 10)
+                warnings.Add($"  ... and {subscribers.Count - 10} more");
+        }
+
+        // 4. Find event declarations using this delegate
+        //    (e.g., public event DataHandler DataReceived;)
+        //    These automatically get the new signature — no edits needed, just for diagnostics
+        var events = FindEventDeclarations(delegateType);
+
+        return new SignatureEdits {
+            MethodsChanged = 1,  // Delegate declaration
+            CallSitesUpdated = callSites.Count,  // Invocations only
+            AffectedDocuments = edits.Select(e => e.DocumentId).Distinct().ToList(),
+            DocumentEdits = edits,
+            Warnings = warnings,
+            DiagnosticData = new {
+                subscriberMethods = subscribers.Select(s => new {
+                    containingType = s.ContainingType.Name,
+                    methodName = s.Name,
+                    currentSignature = s.ToDisplayString(),
+                    file = s.Locations.First().GetLineSpan().Path,
+                    line = s.Locations.First().GetLineSpan().StartLinePosition.Line + 1
+                }),
+                events = events.Select(e => new {
+                    name = e.Name,
+                    file = e.Locations.First().GetLineSpan().Path,
+                    line = e.Locations.First().GetLineSpan().StartLinePosition.Line + 1
+                })
+            }
+        };
+    }
+
+    private DelegateDeclarationSyntax FindDelegateDeclaration(INamedTypeSymbol delegateType)
+    {
+        var syntaxRef = delegateType.DeclaringSyntaxReferences.First();
+        return (DelegateDeclarationSyntax)syntaxRef.GetSyntax();
+    }
+
+    private DelegateDeclarationSyntax UpdateDelegateSignature(
+        DelegateDeclarationSyntax delegateDecl,
+        ParameterChangeSpec paramSpec)
+    {
+        var newParameterList = BuildNewParameterList(delegateDecl.ParameterList, paramSpec);
+
+        return delegateDecl
+            .WithParameterList(newParameterList)
+            .WithLeadingTrivia(delegateDecl.GetLeadingTrivia())
+            .WithTrailingTrivia(delegateDecl.GetTrailingTrivia());
+    }
+
+    private IReadOnlyList<IMethodSymbol> FindSubscriberMethods(INamedTypeSymbol delegateType)
+    {
+        // Find methods whose signature matches the delegate
+        // AND are assigned to delegate-typed variables/events
+        // This is complex — may need SymbolFinder.FindReferencesAsync on the delegate type
+        // then filter for method assignments
+
+        // Simplified implementation for planning doc
+        var compilation = delegateType.ContainingCompilation;
+        var subscribers = new List<IMethodSymbol>();
+
+        // TODO: Use SymbolFinder to find all references to delegate type
+        // Filter for method group assignments, event subscriptions, etc.
+
+        return subscribers;
+    }
+
+    private IReadOnlyList<IEventSymbol> FindEventDeclarations(INamedTypeSymbol delegateType)
+    {
+        var compilation = delegateType.ContainingCompilation;
+        var events = new List<IEventSymbol>();
+
+        // Find all events in the solution that use this delegate type
+        foreach(var tree in compilation.SyntaxTrees) {
+            var semanticModel = compilation.GetSemanticModel(tree);
+            var eventDecls = tree.GetRoot()
+                .DescendantNodes()
+                .OfType<EventFieldDeclarationSyntax>();
+
+            foreach(var eventDecl in eventDecls) {
+                var symbol = semanticModel.GetDeclaredSymbol(eventDecl.Declaration.Variables.First());
+                if(symbol is IEventSymbol eventSymbol && 
+                   SymbolEqualityComparer.Default.Equals(eventSymbol.Type, delegateType)) {
+                    events.Add(eventSymbol);
+                }
+            }
+        }
+
+        return events;
+    }
+
+    private InvocationExpressionSyntax UpdateInvocationArguments(
+        InvocationExpressionSyntax invocation,
+        ParameterChangeSpec paramSpec)
+    {
+        // Similar to MethodSignatureEditor — add/remove arguments
+        var args = invocation.ArgumentList.Arguments.ToList();
+
+        foreach(var addParam in paramSpec.AddParameters) {
+            args.Add(SyntaxFactory.Argument(
+                SyntaxFactory.ParseExpression(addParam.DefaultValue ?? "default")
+            ));
+        }
+
+        foreach(var removeParam in paramSpec.RemoveParameters) {
+            var index = args.FindIndex(a => a.NameColon?.Name.Identifier.Text == removeParam);
+            if(index >= 0)
+                args.RemoveAt(index);
+        }
+
+        return invocation.WithArgumentList(
+            SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(args))
+        );
+    }
+}
+```
+
+**Responsibilities:**
+- Update delegate declaration signature
+- Update all delegate invocations (`.Invoke()` calls, direct calls)
+- **Detect but don't auto-update** subscriber methods (event handlers, callbacks)
+- Provide rich diagnostics for agent to orchestrate follow-up changes
+- No non-breaking mode (delegates can't be overloaded)
+
+**Agent Workflow:**
+```
+1. Agent calls roslyn_change_signature on delegate
+2. Tool returns:
+   - Updated delegate declaration
+   - Updated invocations
+   - List of subscriber methods needing updates
+3. Agent sees subscriber methods in diagnostics
+4. Agent calls roslyn_change_signature on each subscriber method
+5. All signatures now consistent
+```
+
+**Why no non-breaking mode?**
+Delegates can't be overloaded by parameter count/type. Creating a separate "legacy" delegate would require:
+- Dual event declarations (`DataReceived` + `DataReceivedLegacy`)
+- Complex adapter logic
+- High maintenance burden
+
+Breaking mode with comprehensive diagnostics is more practical — agent orchestrates the multi-step fix.
+
+---
+
 #### Implementation: `OperatorSignatureEditor`
 
 **File:** `Tools/Refactoring/SignatureChange/Editors/OperatorSignatureEditor.cs`
@@ -1318,6 +1558,7 @@ Tools/
         SignatureEditor.cs                    (abstract base class)
         MethodSignatureEditor.cs              (regular methods)
         ExternMethodEditor.cs                 (P/Invoke)
+        DelegateSignatureEditor.cs            (delegate declarations)
         OperatorSignatureEditor.cs            (operator overloads)
         ConversionSignatureEditor.cs          (implicit/explicit)
 
@@ -1390,6 +1631,7 @@ var newMethod = existingMethod
 |-----------|---------------|------------------|
 | **Regular methods** | ✅ Full support | — |
 | **Extern methods** | ✅ Signature change only (no stub) | — |
+| **Delegates** | ✅ Breaking mode only (detect subscribers) | Consider adapter patterns |
 | **Virtual methods** | ✅ With `force: true` (warn about hierarchy) | Auto-update hierarchy |
 | **Override methods** | ❌ Error: suggest base class | Auto-detect base |
 | **Operators** | ✅ With `force: true` (warn about pairs) | Auto-check pairs |
@@ -1488,6 +1730,7 @@ Use cases:
 | 2025-01-XX | Extern methods: allow signature changes | P/Invoke refactoring is legit (e.g., `int` → `MyEnum`); no stub, just signature + call sites |
 | 2025-01-XX | Operators: allow with `force` + warning | Type changes legal (e.g., `Foo == Foo` → `Foo == Bar`); warn about paired operators |
 | 2025-01-XX | Conversions: allow with `force` + big scary warning | Breaks cast semantics but sometimes needed; preview shows consequences |
+| 2025-01-XX | **Delegates: breaking mode only** | Can't overload delegates; dual-delegate pattern too complex; provide rich diagnostics for agent orchestration |
 | 2025-01-XX | Defer constructors/indexers/partials to Phase 2 | Different semantics warrant dedicated design; Phase 1 covers 80% of use cases |
 
 ---
