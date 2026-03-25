@@ -92,9 +92,22 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `<target-path>` | Yes | Path to the project/directory to analyze (`.` for current directory, or absolute path) |
+| `<project-path>` | Optional | Path to a project/directory for pre-loading into the workspace cache. Can specify multiple paths. If omitted, projects are loaded on-demand when tools are called. Default: `.` (current directory) |
 
-**That's it!** Just point RoslynMcp.exe at your C# project directory.
+**v0.3.0 Note:** All tools accept an optional `projectPath` parameter for per-call project selection. The command-line argument is now only for **pre-warming the cache** on startup.
+
+**Examples:**
+
+```bash
+# Pre-load multiple projects:
+RoslynMcp.exe src/MyApp src/MyLib src/Tests
+
+# No pre-loading (fastest startup, load on-demand):
+RoslynMcp.exe .
+
+# Pre-load single project:
+RoslynMcp.exe src/MyApp
+```
 
 ### Configuration Examples
 

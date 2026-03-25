@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **AdhocWorkspace restored** — directories without `.csproj` now fully supported with FileSystemWatcher for incremental updates
 - **Exceptions.cs** — `InvalidProjectPathException`, `ProjectNotFoundException`, `MultipleProjectsFoundException` with structured messages
 - **`roslyn_semantic_search`** tool — Roslyn syntax-tree filtering by context (comments, strings, identifiers, xmldocs, code)
+- **Version centralization** — `Directory.Build.props` with `VersionPrefix`/`VersionSuffix`; Git commit SHA automatically appended to `InformationalVersion` for traceability
 
 ### Changed
 - All 24 tools migrated to `RoslynMcpTool` base class pattern
@@ -26,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tools reorganized** into semantic subfolders: `Analysis/` (13), `Search/` (3), `Editing/` (2), `Rename/` (2), `Build/` (3) — all remain in `RoslynMcp.Tools` namespace
 - WorkspaceManager: LRU workspace cache; `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` added
 - TestHarness: path calculation fixed (5 levels up); `projectPath` added to all 23 tests
+- **LINQ optimization** — tools use materialize-once pattern when enumerating multiple times (count + paging); avoids double enumeration
+
+### Fixed
+- **AdhocWorkspace safety** — protected directory enumeration with try/catch for `UnauthorizedAccessException`; skips system/hidden directories and common large folders (`node_modules`, `bin`, `obj`, `.git`)
+- **Root directory protection** — fail-fast check prevents accidental scanning of drive roots (e.g., `C:\`, `J:\`)
+- **TestHarness JSON parsing** — corrected `expectJson` flags for tools returning `string[]` (array is valid JSON)
+- **stdout contamination** — server startup messages use `Console.Error.WriteLine()` to avoid corrupting MCP protocol stream
 
 ### Planned
 - `undo_last_edit` — revert most recent Roslyn-generated edit (rename, refactoring) from in-memory snapshot

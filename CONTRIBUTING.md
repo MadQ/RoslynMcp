@@ -32,9 +32,9 @@ By contributing, you're helping AI agents work better with C# code. That's worth
 ### Submitting Pull Requests
 
 1. **Fork the repository** and create a feature branch from `dev`
-2. **Follow the code style** (see `.github/copilot-instructions.md`)
+2. **Follow the code style** (see `AGENTS.md`)
 3. **Add tests** for new tools or significant changes
-4. **Update documentation** (README.md, .meta/AGENTS.md, etc.)
+4. **Update documentation** (README.md, AGENTS.md, CHANGELOG.md, etc.)
 5. **Run the test suite** and ensure all tests pass:
    ```bash
    dotnet build src/RoslynMcp/RoslynMcp.csproj
