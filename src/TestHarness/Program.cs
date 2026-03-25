@@ -219,7 +219,7 @@ tests.Add(await RunTestAsync(
     "roslyn_get_type_hierarchy: WorkspaceManager inheritance",
     "roslyn_get_type_hierarchy",
     new { typeName = "WorkspaceManager", projectPath = targetPath },
-    data => data?["interfaces"]?.AsArray().Any(i => i?.GetValue<string>().Contains("IDisposable") == true) == true
+    data => data?["interfaces_and_derived"]?.AsArray().Any(i => i?.GetValue<string>().Contains("IDisposable") == true) == true
 ));
 
 tests.Add(await RunTestAsync(
