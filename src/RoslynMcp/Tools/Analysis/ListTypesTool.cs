@@ -36,7 +36,6 @@ internal sealed class ListTypesTool : RoslynMcpTool
             .Order()
         ;
 
-        // Materialize only when needed for response.
         var results = filtered.ToArray();
 
         return results.Length > 0

@@ -45,16 +45,16 @@ internal sealed class FindReferencesTool : RoslynMcpTool
             .ThenBy(l => l.Location.GetLineSpan().StartLinePosition.Line)
             .Select(l => {
                 var span = l.Location.GetLineSpan();
-                var file = span.Path is { Length: > 0 } p
-                    ? Path.GetRelativePath(rootPath, p)
-                    : "?"
-				;
+				var file = span.Path is { Length: > 0 } p
+					? Path.GetRelativePath(rootPath, p)
+					: "?";
+
                 var line = span.StartLinePosition.Line + 1;
 
                 return $"{file}:{line}";
             })
             .Distinct()
-            .ToArray()  // Materialize once - we need both count and page.
+            .ToArray()
         ;
 
         if(allResults.Length == 0)

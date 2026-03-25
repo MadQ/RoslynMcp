@@ -85,7 +85,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
                     .OfType<IMethodSymbol>()
                     .Select(m => FormatMethod(m))
                     .Order()
-                    .ToArray()  // Materialize once - we need both count and page.
+                    .ToArray()
                 ;
 
                 if(allResults.Length == 0)

@@ -37,7 +37,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
         var allInterfaces = type.AllInterfaces
             .Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
-            .ToArray()  // Materialize - used for count.
+            .ToArray()
         ;
 
         var solution    = workspace.GetSolution(projectPath);
@@ -45,11 +45,11 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
         var allDerived = derivedRefs
             .Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
-            .ToArray()  // Materialize - used for count.
+            .ToArray()
         ;
 
-        // Page both interfaces and derived types together (concatenated, then sliced).
-        var combined = allInterfaces.Concat(allDerived).ToArray()  // Materialize combined for paging.
+        // Page both interfaces
+        var combined = allInterfaces.Concat(allDerived).ToArray()
         ;
         var page     = combined.AsSpan(skip, Math.Min(take, combined.Length - skip)).ToArray();
 
