@@ -36,26 +36,24 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
         var baseTypes   = GetBaseTypeChain(type);
         var allInterfaces = type.AllInterfaces
             .Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
-            .Order()
-            .ToArray();
+            .Order();  // Lazy enumerable
 
         var solution    = workspace.GetSolution(projectPath);
         var derivedRefs = await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution);
         var allDerived = derivedRefs
             .Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
-            .Order()
-            .ToArray();
+            .Order();  // Lazy enumerable
 
         // Page both interfaces and derived types together (concatenated, then sliced)
-        var combined = allInterfaces.Concat(allDerived).ToArray();
-        var page     = combined.Skip(skip).Take(take).ToArray();
+        var combined = allInterfaces.Concat(allDerived);  // Still lazy
+        var page     = combined.Skip(skip).Take(take).ToArray();  // Only materialize the page
 
         return scope.Outcome($"{page.Length} interface(s)/derived", new {
             type_name           = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
             type_kind           = type.TypeKind.ToString().ToLowerInvariant(),
             base_types          = baseTypes,
-            total_interfaces    = allInterfaces.Length,
-            total_derived_types = allDerived.Length,
+            total_interfaces    = allInterfaces.Count(),  // Deferred execution
+            total_derived_types = allDerived.Count(),     // Deferred execution
             skip,
             take,
             interfaces_and_derived = page

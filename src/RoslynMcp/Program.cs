@@ -39,10 +39,9 @@ builder.Services
 	// UnsafeRelaxedJsonEscaping: emit printable ASCII as-is instead of \uXXXX sequences.
 	// Reduces response size significantly for symbol signatures and doc comments (issue #3).
 	.WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions(JsonSerializerDefaults.Web) {
-		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-		TypeInfoResolver = JsonSerializerOptions.Default.TypeInfoResolver // JsonSerializer.IsReflectionEnabledByDefault
-			//? new DefaultJsonTypeInfoResolver()
-			//: null
+		  Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+		, TypeInfoResolver = JsonSerializerOptions.Default.TypeInfoResolver
+		, WriteIndented = false
 	})
 ;
 

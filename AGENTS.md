@@ -144,6 +144,7 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 - **Comments:** explain *why*, not *what* — after any edit, re-evaluate nearby comments and update or remove stale ones; one space after a period, never two; complete sentences, proper punctuation, no personal pronouns (`we`/`I`/`our` have no place in code comments)
 - **`TODO` comments:** must include the actual question or concern, not just "fix"
 - **Condition ordering:** simple/common path first — early return or assignment; complex path in `else`
+- **LINQ lazy evaluation:** prefer deferred execution; avoid unnecessary `.ToList()` / `.ToArray()` — materialize only when required (e.g., response object, multiple enumeration); use `.Any()` instead of `.Count > 0` or `.Length > 0`; use `!Any()` instead of `.Count == 0` or `.Length == 0`; when you need both a count and a page, enumerate once with `.Count()` (deferred) after paging
 - **Blank lines:**
   - One blank line before `return` and before code blocks
   - Blank line **after the opening brace** of any multi-statement control-flow block

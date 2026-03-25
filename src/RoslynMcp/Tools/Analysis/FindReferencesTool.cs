@@ -52,17 +52,16 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 
                 return $"{file}:{line}";
             })
-            .Distinct()
-            .ToArray()
-        ;
+            .Distinct();  // Lazy enumerable
 
-        if(allResults.Length == 0)
+        if(!allResults.Any())
             return new { total_references = 0, skip, take, references = new[] { $"No references found for '{symbolName}'." } };
 
-        var page = allResults.Skip(skip).Take(take).ToArray();
+        var page = allResults.Skip(skip).Take(take).ToArray();  // Only materialize the page
+        var total = allResults.Count();  // Deferred execution
 
-        return scope.Outcome($"{page.Length}/{allResults.Length} reference(s)", new {
-            total_references = allResults.Length,
+        return scope.Outcome($"{page.Length}/{total} reference(s)", new {
+            total_references = total,
             skip,
             take,
             references = page

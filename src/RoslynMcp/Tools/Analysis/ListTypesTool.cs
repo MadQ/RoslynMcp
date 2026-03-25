@@ -33,11 +33,13 @@ internal sealed class ListTypesTool : RoslynMcpTool
             .Where(t => MatchesNamespace(t, namespaceFilter))
             .Where(t => MatchesKind(t, kindFilter))
             .Select(t => FormatType(t))
-            .Order()
-            .ToArray();
+            .Order();
 
-        return filtered.Length > 0
-            ? scope.Outcome($"{filtered.Length} type(s)", filtered)
+        // Materialize only when needed for response
+        var results = filtered.ToArray();
+
+        return results.Length > 0
+            ? scope.Outcome($"{results.Length} type(s)", results)
             : ["No types found matching the filters."];
     }
 
