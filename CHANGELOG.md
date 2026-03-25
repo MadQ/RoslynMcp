@@ -10,12 +10,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
+- Multi-project infrastructure (v0.3.0) — optional `projectPath` parameter on all tools
+- `change_signature` tool (v0.4.0) — semantic method signature changes
 - `undo_last_edit` — revert most recent Roslyn-generated edit (rename, refactoring) from in-memory snapshot
 - NuGet package publication
-- CI/CD pipeline (GitHub Actions)
 - Performance optimizations for large projects
 - Additional tool: `get_nullable_flow_state`
 - Additional tool: `get_call_info` (resolve method call targets)
+
+---
+
+## [0.2.3-alpha] - 2025-01-XX
+
+### Changed
+- **JsonSerializerOptions improvements** — switched to `JsonSerializerDefaults.Web` with explicit `TypeInfoResolver` and `WriteIndented` settings for better compatibility and robustness
+
+### Added
+- `test_mcp_manual.ps1` — manual MCP server testing script for quick verification
+- `docs/sessions/HANDOFF.md` — session state documentation
+- `docs/ScratchPad.md` — development notes and planning
+- `docs/github-issues/*.md` — planning documents for future features (v0.3.0, v0.4.0)
+
+---
+
+## [0.2.2-alpha] - 2025-01-XX
+
+### Fixed
+- **Unicode escaping** (issue #3) — Added `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` to prevent printable ASCII from being escaped as `\uXXXX` sequences (reduced response size by up to 5x)
+- **Pagination** (issue #3) — Added `skip`/`take` parameters to 5 unbounded tools: `get_file_outline`, `find_references`, `find_implementations`, `get_type_members`, `get_type_hierarchy`
+
+---
+
+## [0.2.1-alpha] - 2025-01-XX
+
+### Fixed
+- **BuildHost DLL exclusion** (issue #4) — Exclude BuildHost DLLs from single-file bundle
 
 ---
 
