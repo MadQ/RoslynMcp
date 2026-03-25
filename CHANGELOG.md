@@ -32,8 +32,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **AdhocWorkspace safety** — protected directory enumeration with try/catch for `UnauthorizedAccessException`; skips system/hidden directories and common large folders (`node_modules`, `bin`, `obj`, `.git`)
 - **Root directory protection** — fail-fast check prevents accidental scanning of drive roots (e.g., `C:\`, `J:\`)
-- **TestHarness JSON parsing** — corrected `expectJson` flags for tools returning `string[]` (array is valid JSON)
 - **stdout contamination** — server startup messages use `Console.Error.WriteLine()` to avoid corrupting MCP protocol stream
+- **Server crash on startup** — `MSBuildLocator.RegisterDefaults()` moved out of static constructor into deferred `EnsureMSBuildRegistered()` with double-checked locking; a `TypeInitializationException` from a static ctor is unrecoverable, so failure is now silently swallowed and the server stays alive
+- **`LoadMSBuildWorkspace` unhandled exception** — wrapped in try/catch; exceptions now surface as `InvalidOperationException` with context instead of crashing the process
+- **`ListTypesTool` / `DiagnosticsTool` return type** — changed `string[]` → `object`; MCP SDK serializes `string[]` as multiple content blocks rather than a JSON array, breaking TestHarness JSON parsing
+- **`AppDomain.UnhandledException` handler** — fatal crashes before DI/hosting is up now write a `[FATAL]` entry to the log file; previously startup crashes were completely silent
+- **TestHarness `ReceiveAsync`** — catches `OperationCanceledException` and `IOException` instead of crashing; pipe-closed and timeout both return `null` gracefully
+- **TestHarness initialization** — aborts with a useful message and flushes stderr if server exits before responding to `initialize`
+- **TestHarness stale field references** — `containingType` updated from `WorkspaceManager` → `WorkspaceInstance` for `compilation` field (moved during LRU refactor); `interfaces` → `interfaces_and_derived` in hierarchy test
+- **TestHarness timeout** — `ReceiveAsync` default increased from 15s → 30s to cover `dotnet run` cold-start time
 
 ### Planned
 - `undo_last_edit` — revert most recent Roslyn-generated edit (rename, refactoring) from in-memory snapshot
