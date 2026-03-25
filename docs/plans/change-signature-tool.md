@@ -295,7 +295,8 @@ ChangeSignatureTool (thin MCP tool entry point)
 SignatureChangeOrchestrator (validation + workflow coordination)
     ↓
 ┌─────────────────────────────────────────────────┐
-│  Strategy Pattern: ISignatureEditor             │
+│  Abstract Class: SignatureEditor                │
+│  (provides shared helpers + virtual validation) │
 ├─────────────────────────────────────────────────┤
 │  - MethodSignatureEditor (regular methods)      │
 │  - ExternMethodEditor (P/Invoke refactoring)    │
@@ -309,6 +310,13 @@ SignatureChangeApplicator (atomic solution transformation)
     ↓
 CallSiteUpdater (find & update invocations)
 ```
+
+**Why abstract class instead of interface?**
+- No external implementations planned (internal RoslynMcp-only)
+- Shared utilities needed: `CreateObsoleteAttribute()`, `BuildNewParameterList()`, `CreateForwardingInvocation()`
+- Enables `protected virtual` validation that subclasses can use, extend, or replace
+- Avoids premature abstraction — abstract classes are for inheritance hierarchies, interfaces are for contracts
+- Still testable — concrete subclasses tested directly without mocking
 
 ---
 
@@ -465,7 +473,7 @@ internal sealed class SignatureChangeOrchestrator
         };
     }
 
-    private ISignatureEditor? SelectEditor(
+    private SignatureEditor? SelectEditor(
         IMethodSymbol method,
         bool force,
         out List<string> warnings)
@@ -521,24 +529,57 @@ internal sealed class SignatureChangeOrchestrator
 
 ---
 
-### 3. Strategy Pattern: `ISignatureEditor`
+### 3. Strategy Pattern: `SignatureEditor` Abstract Class
 
-**File:** `Tools/Refactoring/SignatureChange/Editors/ISignatureEditor.cs`
+**File:** `Tools/Refactoring/SignatureChange/Editors/SignatureEditor.cs`
+
+**Design Choice: Abstract Class vs. Interface**
+
+We use an abstract class instead of an interface because:
+- No external implementations planned (internal to RoslynMcp only)
+- Shared implementation across editors (common validation, attribute creation, parameter building)
+- Enables `protected virtual` methods that subclasses can use as-is, extend, or replace
+- Avoids premature abstraction — abstract classes are the right tool for inheritance hierarchies
+- Still testable — concrete subclasses can be tested directly without mocking ceremony
 
 ```csharp
-internal interface ISignatureEditor
+/// <summary>
+/// Base class for signature change strategies.
+/// Provides shared utilities and defines the workflow contract.
+/// </summary>
+internal abstract class SignatureEditor
 {
     /// <summary>
     /// Validates that parameter changes are legal for this method kind.
+    /// Base implementation checks for duplicate names and default value syntax.
+    /// Override to add method-kind-specific validation (call base first or replace entirely).
     /// </summary>
-    ValidationResult ValidateParameterChanges(
+    protected virtual ValidationResult ValidateParameterChanges(
         IMethodSymbol method,
-        ParameterChangeSpec paramSpec);
+        ParameterChangeSpec paramSpec)
+    {
+        var warnings = new List<string>();
+
+        // Common validation: check for duplicate parameter names
+        var existingNames = method.Parameters.Select(p => p.Name).ToHashSet();
+        foreach(var addParam in paramSpec.AddParameters) {
+            if(existingNames.Contains(addParam.Name))
+                return ValidationResult.Invalid($"Parameter '{addParam.Name}' already exists");
+        }
+
+        // Common validation: check default value syntax
+        foreach(var addParam in paramSpec.AddParameters) {
+            if(addParam.DefaultValue != null && !IsValidExpression(addParam.DefaultValue))
+                warnings.Add($"Default value '{addParam.DefaultValue}' may not parse correctly");
+        }
+
+        return ValidationResult.Valid(warnings);
+    }
 
     /// <summary>
     /// Generates edits for non-breaking mode (add overload + deprecate old).
     /// </summary>
-    SignatureEdits GenerateNonBreakingEdits(
+    public abstract SignatureEdits GenerateNonBreakingEdits(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites);
@@ -546,10 +587,170 @@ internal interface ISignatureEditor
     /// <summary>
     /// Generates edits for breaking mode (change signature + update call sites).
     /// </summary>
-    SignatureEdits GenerateBreakingEdits(
+    public abstract SignatureEdits GenerateBreakingEdits(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites);
+
+    // Protected shared utilities (concrete implementations)
+
+    /// <summary>
+    /// Creates [Obsolete] attribute with RoslynMcp marker for cleanup tool.
+    /// </summary>
+    protected AttributeListSyntax CreateObsoleteAttribute(string message)
+    {
+        var obsoleteAttr = SyntaxFactory.Attribute(
+            SyntaxFactory.ParseName("System.Obsolete"),
+            SyntaxFactory.AttributeArgumentList(
+                SyntaxFactory.SingletonSeparatedList(
+                    SyntaxFactory.AttributeArgument(
+                        SyntaxFactory.LiteralExpression(
+                            SyntaxKind.StringLiteralExpression,
+                            SyntaxFactory.Literal(message)
+                        )
+                    )
+                )
+            )
+        );
+
+        return SyntaxFactory.AttributeList(
+            SyntaxFactory.SingletonSeparatedList(obsoleteAttr)
+        );
+    }
+
+    /// <summary>
+    /// Builds new parameter list by adding/removing parameters.
+    /// Preserves existing parameter trivia.
+    /// </summary>
+    protected ParameterListSyntax BuildNewParameterList(
+        ParameterListSyntax existingParams,
+        ParameterChangeSpec paramSpec)
+    {
+        var parameters = existingParams.Parameters.ToList();
+
+        // Remove parameters
+        foreach(var removeParam in paramSpec.RemoveParameters) {
+            parameters.RemoveAll(p => p.Identifier.Text == removeParam);
+        }
+
+        // Add parameters
+        foreach(var addParam in paramSpec.AddParameters) {
+            var newParam = SyntaxFactory.Parameter(
+                SyntaxFactory.Identifier(addParam.Name)
+            )
+            .WithType(SyntaxFactory.ParseTypeName(addParam.Type));
+
+            if(addParam.DefaultValue != null) {
+                newParam = newParam.WithDefault(
+                    SyntaxFactory.EqualsValueClause(
+                        SyntaxFactory.ParseExpression(addParam.DefaultValue)
+                    )
+                );
+            }
+
+            parameters.Add(newParam);
+        }
+
+        return SyntaxFactory.ParameterList(
+            SyntaxFactory.SeparatedList(parameters)
+        );
+    }
+
+    /// <summary>
+    /// Creates forwarding invocation for deprecated stub.
+    /// Example: ProcessData(id) => ProcessData(id, "default")
+    /// </summary>
+    protected InvocationExpressionSyntax CreateForwardingInvocation(
+        MethodDeclarationSyntax oldMethod,
+        MethodDeclarationSyntax newMethod,
+        ParameterChangeSpec paramSpec)
+    {
+        // Build argument list: existing params + defaults for new params
+        var args = oldMethod.ParameterList.Parameters
+            .Select(p => SyntaxFactory.Argument(
+                SyntaxFactory.IdentifierName(p.Identifier)
+            ))
+            .ToList();
+
+        // Add default values for new parameters
+        foreach(var addParam in paramSpec.AddParameters) {
+            args.Add(SyntaxFactory.Argument(
+                SyntaxFactory.ParseExpression(addParam.DefaultValue ?? "default")
+            ));
+        }
+
+        return SyntaxFactory.InvocationExpression(
+            SyntaxFactory.IdentifierName(newMethod.Identifier),
+            SyntaxFactory.ArgumentList(
+                SyntaxFactory.SeparatedList(args)
+            )
+        );
+    }
+
+    private static bool IsValidExpression(string expr)
+    {
+        try {
+            SyntaxFactory.ParseExpression(expr);
+            return true;
+        }
+        catch {
+            return false;
+        }
+    }
+}
+```
+
+**Usage Patterns:**
+
+**Pattern 1: Use base validation as-is**
+```csharp
+internal sealed class MethodSignatureEditor : SignatureEditor
+{
+    // Inherits ValidateParameterChanges — common checks are sufficient
+    public override SignatureEdits GenerateNonBreakingEdits(...) { ... }
+    public override SignatureEdits GenerateBreakingEdits(...) { ... }
+}
+```
+
+**Pattern 2: Extend base validation**
+```csharp
+internal sealed class ExternMethodEditor : SignatureEditor
+{
+    protected override ValidationResult ValidateParameterChanges(...)
+    {
+        // Call base validation first
+        var baseResult = base.ValidateParameterChanges(method, paramSpec);
+        if(!baseResult.IsValid)
+            return baseResult;
+
+        // Add P/Invoke-specific checks
+        var warnings = baseResult.Warnings.ToList();
+        foreach(var addParam in paramSpec.AddParameters) {
+            if(addParam.Type.Contains("string"))
+                warnings.Add($"P/Invoke string may need [MarshalAs]");
+        }
+
+        return ValidationResult.Valid(warnings);
+    }
+}
+```
+
+**Pattern 3: Replace validation entirely**
+```csharp
+internal sealed class OperatorSignatureEditor : SignatureEditor
+{
+    protected override ValidationResult ValidateParameterChanges(...)
+    {
+        // Operators have strict rules — base validation doesn't apply
+        var finalCount = method.Parameters.Length 
+            + paramSpec.AddParameters.Length 
+            - paramSpec.RemoveParameters.Length;
+
+        if(finalCount < 1 || finalCount > 2)
+            return ValidationResult.Invalid("Operators must have 1-2 parameters");
+
+        return ValidationResult.Valid();
+    }
 }
 ```
 
@@ -558,40 +759,44 @@ internal interface ISignatureEditor
 **File:** `Tools/Refactoring/SignatureChange/Editors/MethodSignatureEditor.cs`
 
 ```csharp
-internal sealed class MethodSignatureEditor : ISignatureEditor
+internal sealed class MethodSignatureEditor : SignatureEditor
 {
-    public ValidationResult ValidateParameterChanges(
+    // Inherits base ValidateParameterChanges — adds method-specific checks
+    protected override ValidationResult ValidateParameterChanges(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec)
     {
-        var warnings = new List<string>();
+        // Call base validation (duplicate names, default value syntax)
+        var baseResult = base.ValidateParameterChanges(method, paramSpec);
+        if(!baseResult.IsValid)
+            return baseResult;
 
-        // Check: no 'this' parameter (would make it extension method)
-        if(paramSpec.AddParameters.Any(p => p.Name == "this"))
+        var warnings = baseResult.Warnings.ToList();
+
+        // Method-specific: check for 'this' parameter (would make it extension method)
+        if(paramSpec.AddParameters.Any(p => p.Name == "this")) {
             return ValidationResult.Invalid("Cannot add 'this' parameter to existing method");
-
-        // Check: default values are valid
-        // Check: no name conflicts with existing parameters
-        // ...
+        }
 
         return ValidationResult.Valid(warnings);
     }
 
-    public SignatureEdits GenerateNonBreakingEdits(
+    public override SignatureEdits GenerateNonBreakingEdits(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
         var edits = new List<DocumentEdit>();
 
-        // 1. Create new method with new signature (copy implementation)
-        var existingDecl = method.DeclaringSyntaxReferences.First().GetSyntax();
+        // 1. Create new method with new signature (copy implementation, preserve trivia)
+        var existingDecl = (MethodDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
         var newMethod = CreateMethodWithNewSignature(existingDecl, paramSpec);
 
         // 2. Create deprecated forwarding stub from old signature
-        var deprecatedMethod = CreateDeprecatedForwardingStub(existingDecl, newMethod);
+        var deprecatedMethod = CreateDeprecatedForwardingStub(existingDecl, newMethod, paramSpec);
 
-        // 3. Atomic edit: insert new method, replace old with deprecated stub
+        // 3. Atomic edit: insert new method BEFORE old, replace old with deprecated stub
+        //    Order matters: add new method first to avoid transient errors
         edits.Add(new DocumentEdit {
             DocumentId = method.ContainingDocument.Id,
             Changes = new[] {
@@ -616,7 +821,7 @@ internal sealed class MethodSignatureEditor : ISignatureEditor
         };
     }
 
-    public SignatureEdits GenerateBreakingEdits(
+    public override SignatureEdits GenerateBreakingEdits(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
@@ -624,7 +829,7 @@ internal sealed class MethodSignatureEditor : ISignatureEditor
         var edits = new List<DocumentEdit>();
 
         // 1. Change method signature
-        var existingDecl = method.DeclaringSyntaxReferences.First().GetSyntax();
+        var existingDecl = (MethodDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
         var newMethod = CreateMethodWithNewSignature(existingDecl, paramSpec);
 
         edits.Add(new DocumentEdit {
@@ -664,40 +869,76 @@ internal sealed class MethodSignatureEditor : ISignatureEditor
     }
 
     private MethodDeclarationSyntax CreateMethodWithNewSignature(
-        SyntaxNode existingDecl,
+        MethodDeclarationSyntax existingMethod,
         ParameterChangeSpec paramSpec)
     {
-        var method = (MethodDeclarationSyntax)existingDecl;
+        // Use base class helper to build new parameter list
+        var newParameterList = BuildNewParameterList(existingMethod.ParameterList, paramSpec);
 
-        // Preserve trivia, body, modifiers
-        var newMethod = method
-            .WithParameterList(BuildNewParameterList(method.ParameterList, paramSpec))
-            .WithLeadingTrivia(method.GetLeadingTrivia())
-            .WithTrailingTrivia(method.GetTrailingTrivia());
-
-        return newMethod;
+        // Preserve trivia, body, modifiers — use .With* methods for immutable updates
+        return existingMethod
+            .WithParameterList(newParameterList)
+            .WithLeadingTrivia(existingMethod.GetLeadingTrivia())   // XML docs, comments
+            .WithTrailingTrivia(existingMethod.GetTrailingTrivia())
+            .WithAttributeLists(SyntaxFactory.List<AttributeListSyntax>());  // Clear old attributes
     }
 
     private MethodDeclarationSyntax CreateDeprecatedForwardingStub(
-        SyntaxNode existingDecl,
-        MethodDeclarationSyntax newMethod)
+        MethodDeclarationSyntax existingMethod,
+        MethodDeclarationSyntax newMethod,
+        ParameterChangeSpec paramSpec)
     {
-        var method = (MethodDeclarationSyntax)existingDecl;
-
-        // Add [Obsolete] attribute with recognizable marker
-        var obsoleteAttr = CreateObsoleteAttribute(
+        // Use base class helper to create [Obsolete] attribute
+        var obsoleteMessage = 
             $"RoslynMcp.ChangeSignature: Use {newMethod.Identifier}(...) instead. " +
-            $"Migration ID: {Guid.NewGuid():N}"
-        );
+            $"Migration ID: {Guid.NewGuid():N}";
+        var obsoleteAttr = CreateObsoleteAttribute(obsoleteMessage);
 
-        // Forwarding body: => NewMethod(param1, param2, "default")
-        var forwardingBody = CreateForwardingInvocation(method, newMethod);
+        // Use base class helper to create forwarding invocation
+        var forwardingBody = CreateForwardingInvocation(existingMethod, newMethod, paramSpec);
 
-        return method
-            .WithAttributeLists(method.AttributeLists.Add(obsoleteAttr))
-            .WithBody(null)
+        // Convert method to expression-bodied member with [Obsolete]
+        return existingMethod
+            .WithAttributeLists(existingMethod.AttributeLists.Add(obsoleteAttr))
+            .WithBody(null)  // Remove block body
             .WithExpressionBody(SyntaxFactory.ArrowExpressionClause(forwardingBody))
             .WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken));
+    }
+
+    private InvocationExpressionSyntax UpdateInvocationArguments(
+        InvocationExpressionSyntax invocation,
+        ParameterChangeSpec paramSpec)
+    {
+        var args = invocation.ArgumentList.Arguments.ToList();
+
+        // Add default arguments for new parameters
+        foreach(var addParam in paramSpec.AddParameters) {
+            var defaultArg = SyntaxFactory.Argument(
+                SyntaxFactory.ParseExpression(addParam.DefaultValue ?? "default")
+            );
+            args.Add(defaultArg);
+        }
+
+        // Remove arguments for removed parameters
+        foreach(var removeParam in paramSpec.RemoveParameters) {
+            var index = FindParameterIndex(args, removeParam);
+            if(index >= 0)
+                args.RemoveAt(index);
+        }
+
+        return invocation.WithArgumentList(
+            SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(args))
+        );
+    }
+
+    private static int FindParameterIndex(List<ArgumentSyntax> args, string paramName)
+    {
+        // Handle named arguments
+        for(int i = 0; i < args.Count; i++) {
+            if(args[i].NameColon?.Name.Identifier.Text == paramName)
+                return i;
+        }
+        return -1;  // Positional argument — more complex logic needed
     }
 }
 ```
@@ -707,73 +948,221 @@ internal sealed class MethodSignatureEditor : ISignatureEditor
 **File:** `Tools/Refactoring/SignatureChange/Editors/ExternMethodEditor.cs`
 
 ```csharp
-internal sealed class ExternMethodEditor : ISignatureEditor
+internal sealed class ExternMethodEditor : SignatureEditor
 {
-    public ValidationResult ValidateParameterChanges(
+    // Extends base validation with P/Invoke-specific checks
+    protected override ValidationResult ValidateParameterChanges(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec)
     {
-        // P/Invoke refactoring: allow anything
-        return ValidationResult.Valid();
+        // Call base validation first
+        var baseResult = base.ValidateParameterChanges(method, paramSpec);
+        if(!baseResult.IsValid)
+            return baseResult;
+
+        // P/Invoke-specific checks
+        var warnings = baseResult.Warnings.ToList();
+
+        foreach(var addParam in paramSpec.AddParameters) {
+            if(addParam.Type.Contains("string") && !addParam.Type.Contains("MarshalAs")) {
+                warnings.Add($"P/Invoke string parameter '{addParam.Name}' may need [MarshalAs] attribute");
+            }
+        }
+
+        return ValidationResult.Valid(warnings);
     }
 
-    public SignatureEdits GenerateNonBreakingEdits(
+    public override SignatureEdits GenerateNonBreakingEdits(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
-        // Can't create forwarding stub for extern
-        // Fall back to breaking mode (just change signature)
+        // Can't create forwarding stub for extern methods (no implementation allowed)
+        // Fall back to breaking mode — just change signature
         return GenerateBreakingEdits(method, paramSpec, callSites);
     }
 
-    public SignatureEdits GenerateBreakingEdits(
+    public override SignatureEdits GenerateBreakingEdits(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec,
         IReadOnlyList<CallSiteInfo> callSites)
     {
-        // Change extern signature
-        // Update call sites if any in this project
+        // Change extern signature + update call sites (if any in this project)
         // No forwarding stub possible
-        // ...
+
+        var edits = new List<DocumentEdit>();
+
+        // 1. Update extern method signature
+        var existingDecl = (MethodDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
+        var newMethod = existingDecl
+            .WithParameterList(BuildNewParameterList(existingDecl.ParameterList, paramSpec))
+            .WithLeadingTrivia(existingDecl.GetLeadingTrivia())
+            .WithTrailingTrivia(existingDecl.GetTrailingTrivia());
+
+        edits.Add(new DocumentEdit {
+            DocumentId = method.ContainingDocument.Id,
+            Changes = new[] {
+                new NodeChange {
+                    Operation = NodeOperation.Replace,
+                    OriginalNode = existingDecl,
+                    NewNode = newMethod
+                }
+            }
+        });
+
+        // 2. Update call sites (if any in this project)
+        // Note: extern methods often called from unmanaged code, so may have no C# call sites
+        foreach(var callSite in callSites) {
+            var invocation = callSite.InvocationSyntax;
+            var updatedInvocation = UpdateCallSiteArguments(invocation, paramSpec);
+
+            edits.Add(new DocumentEdit {
+                DocumentId = callSite.DocumentId,
+                Changes = new[] {
+                    new NodeChange {
+                        Operation = NodeOperation.Replace,
+                        OriginalNode = invocation,
+                        NewNode = updatedInvocation
+                    }
+                }
+            });
+        }
+
+        return new SignatureEdits {
+            MethodsChanged = 1,
+            CallSitesUpdated = callSites.Count,
+            AffectedDocuments = edits.Select(e => e.DocumentId).Distinct().ToList(),
+            DocumentEdits = edits
+        };
+    }
+
+    private InvocationExpressionSyntax UpdateCallSiteArguments(
+        InvocationExpressionSyntax invocation,
+        ParameterChangeSpec paramSpec)
+    {
+        // Similar to MethodSignatureEditor.UpdateInvocationArguments
+        // Could be extracted to base class if needed
+        var args = invocation.ArgumentList.Arguments.ToList();
+
+        foreach(var addParam in paramSpec.AddParameters) {
+            args.Add(SyntaxFactory.Argument(
+                SyntaxFactory.ParseExpression(addParam.DefaultValue ?? "default")
+            ));
+        }
+
+        foreach(var removeParam in paramSpec.RemoveParameters) {
+            var index = args.FindIndex(a => a.NameColon?.Name.Identifier.Text == removeParam);
+            if(index >= 0)
+                args.RemoveAt(index);
+        }
+
+        return invocation.WithArgumentList(
+            SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(args))
+        );
     }
 }
 ```
 
 **Responsibilities:**
 - Handle P/Invoke signature changes (e.g., `int wParam` → `MyEnum wParam`)
-- No forwarding stubs (can't have implementation)
-- Falls back to breaking mode
+- Add marshaling warnings for string parameters
+- No forwarding stubs possible (extern methods can't have implementations)
+- Falls back to breaking mode for non-breaking requests
 
 #### Implementation: `OperatorSignatureEditor`
 
 **File:** `Tools/Refactoring/SignatureChange/Editors/OperatorSignatureEditor.cs`
 
 ```csharp
-internal sealed class OperatorSignatureEditor : ISignatureEditor
+internal sealed class OperatorSignatureEditor : SignatureEditor
 {
-    public ValidationResult ValidateParameterChanges(
+    // Replace base validation entirely — operators have strict signature rules
+    protected override ValidationResult ValidateParameterChanges(
         IMethodSymbol method,
         ParameterChangeSpec paramSpec)
     {
         var warnings = new List<string>();
 
-        // Check for paired operators
+        // Operators must have exactly 1 or 2 parameters
+        var finalParamCount = method.Parameters.Length
+            + paramSpec.AddParameters.Length
+            - paramSpec.RemoveParameters.Length;
+
+        if(finalParamCount < 1 || finalParamCount > 2) {
+            return ValidationResult.Invalid("Operators must have 1 or 2 parameters");
+        }
+
+        // Warn about paired operators
         if(method.Name == "op_Equality") {
-            warnings.Add("Changing == operator: ensure != operator is also updated");
+            warnings.Add("Changing == operator: ensure != operator is also updated for symmetry");
+        }
+        else if(method.Name == "op_Inequality") {
+            warnings.Add("Changing != operator: ensure == operator is also updated for symmetry");
+        }
+        else if(method.Name == "op_LessThan" || method.Name == "op_GreaterThan") {
+            warnings.Add("Changing comparison operator: ensure paired operators (<, >, <=, >=) are consistent");
         }
 
         return ValidationResult.Valid(warnings);
     }
 
-    // ... similar pattern to MethodSignatureEditor
+    public override SignatureEdits GenerateNonBreakingEdits(
+        IMethodSymbol method,
+        ParameterChangeSpec paramSpec,
+        IReadOnlyList<CallSiteInfo> callSites)
+    {
+        // Operators don't support overloading by parameter count alone
+        // (C# doesn't allow two operators with same signature)
+        // Fall back to breaking mode
+        return GenerateBreakingEdits(method, paramSpec, callSites);
+    }
+
+    public override SignatureEdits GenerateBreakingEdits(
+        IMethodSymbol method,
+        ParameterChangeSpec paramSpec,
+        IReadOnlyList<CallSiteInfo> callSites)
+    {
+        // Change operator signature + update call sites
+        // Note: operators are usually called via syntax (a == b), not explicit invocations
+        // Call sites may be rare or non-existent
+
+        var edits = new List<DocumentEdit>();
+
+        var existingDecl = (OperatorDeclarationSyntax)method.DeclaringSyntaxReferences.First().GetSyntax();
+        var newOperator = existingDecl
+            .WithParameterList(BuildNewParameterList(existingDecl.ParameterList, paramSpec))
+            .WithLeadingTrivia(existingDecl.GetLeadingTrivia())
+            .WithTrailingTrivia(existingDecl.GetTrailingTrivia());
+
+        edits.Add(new DocumentEdit {
+            DocumentId = method.ContainingDocument.Id,
+            Changes = new[] {
+                new NodeChange {
+                    Operation = NodeOperation.Replace,
+                    OriginalNode = existingDecl,
+                    NewNode = newOperator
+                }
+            }
+        });
+
+        // Note: call sites for operators are typically binary expressions (a == b)
+        // Not simple invocations — may need special handling or just warn user
+
+        return new SignatureEdits {
+            MethodsChanged = 1,
+            CallSitesUpdated = 0,  // Operators rarely have explicit call sites
+            AffectedDocuments = new[] { method.ContainingDocument.Id },
+            DocumentEdits = edits
+        };
+    }
 }
 ```
 
 **Responsibilities:**
-- Validate operator signature constraints
+- Validate operator signature constraints (1-2 parameters required)
 - Warn about paired operators (`==`/`!=`, `<`/`>`, etc.)
-- Allow signature changes with `force: true`
+- No non-breaking mode (operators can't be overloaded by count alone)
+- Allow signature changes with `force: true` parameter
 
 ---
 
@@ -916,30 +1305,30 @@ internal static class CallSiteUpdater
 ```
 Tools/
   Refactoring/
-    ChangeSignatureTool.cs                     (thin MCP tool)
-    ApplySignatureChangeTool.cs                (apply preview)
-    RemoveDeprecatedOverloadTool.cs            (cleanup)
+    ChangeSignatureTool.cs                    (thin MCP tool)
+    ApplySignatureChangeTool.cs               (apply preview)
+    RemoveDeprecatedOverloadTool.cs           (cleanup)
 
     SignatureChange/
-      SignatureChangeOrchestrator.cs           (validation + workflow)
-      SignatureChangeApplicator.cs             (atomic application)
-      CallSiteUpdater.cs                       (find & update call sites)
+      SignatureChangeOrchestrator.cs          (validation + workflow)
+      SignatureChangeApplicator.cs            (atomic application)
+      CallSiteUpdater.cs                      (find & update call sites)
 
       Editors/
-        ISignatureEditor.cs                    (strategy interface)
-        MethodSignatureEditor.cs               (regular methods)
-        ExternMethodEditor.cs                  (P/Invoke)
-        OperatorSignatureEditor.cs             (operator overloads)
-        ConversionSignatureEditor.cs           (implicit/explicit)
+        SignatureEditor.cs                    (abstract base class)
+        MethodSignatureEditor.cs              (regular methods)
+        ExternMethodEditor.cs                 (P/Invoke)
+        OperatorSignatureEditor.cs            (operator overloads)
+        ConversionSignatureEditor.cs          (implicit/explicit)
 
       Models/
-        SignatureChangeResult.cs               (orchestrator result)
-        SignatureEdits.cs                      (edit collection)
-        ParameterChangeSpec.cs                 (add/remove spec)
-        CallSiteInfo.cs                        (call site metadata)
-        ValidationResult.cs                    (validation outcome)
-        DocumentEdit.cs                        (document-level edits)
-        NodeChange.cs                          (node-level operation)
+        SignatureChangeResult.cs              (orchestrator result)
+        SignatureEdits.cs                     (edit collection)
+        ParameterChangeSpec.cs                (add/remove spec)
+        CallSiteInfo.cs                       (call site metadata)
+        ValidationResult.cs                   (validation outcome)
+        DocumentEdit.cs                       (document-level edits)
+        NodeChange.cs                         (node-level operation)
 ```
 
 ---
@@ -1093,7 +1482,7 @@ Use cases:
 | 2025-01-XX | Preview-first workflow | Consistent with rename; avoids surprise breaking changes |
 | 2025-01-XX | Defer to post-v0.3.0 | v0.3.0 focused on multi-project infrastructure; signature changes are complex and non-blocking |
 | 2025-01-XX | `mode` parameter for cleanup tool | Single tool with `remove`/`clean` modes more intuitive than separate tools; keeps tool list manageable |
-| 2025-01-XX | Strategy pattern for method kinds | Clean separation of concerns; extensible for Phase 2 (constructors, indexers) |
+| 2025-01-XX | **Abstract class over interface** | No external implementations; enables shared helpers + `virtual` validation; avoids premature abstraction |
 | 2025-01-XX | Atomic application per document | Avoid transient IDE errors; all changes visible together |
 | 2025-01-XX | `force` parameter for edge cases | Allow virtual/operator/conversion changes with explicit opt-in; show warnings, let user decide |
 | 2025-01-XX | Extern methods: allow signature changes | P/Invoke refactoring is legit (e.g., `int` → `MyEnum`); no stub, just signature + call sites |

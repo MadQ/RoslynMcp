@@ -1,8 +1,8 @@
 ﻿# Session Handoff — RoslynMcp
 
-**Date:** 2026-03-22 (session 2)
+**Date:** 2026-03-24 (session continues)
 **Branch:** `dev`
-**Last Commit:** `4312a32` — refactor: reorganize Tools/ into subfolders
+**Last Commit:** `52e6b3a` — fix: apply issue #3 fixes to dev - UnsafeRelaxedJsonEscaping + pagination on 5 unbounded tools
 **Repository:** https://github.com/MadQ/RoslynMcp.git
 **Tool Count:** 24 tools
 **Test Status:** ✅ 23/23 passing
@@ -10,7 +10,44 @@
 
 ---
 
-## What Happened This Session
+## What Happened This Session (March 24, 2026)
+
+### Hotfix v0.2.2-alpha — Issue #3 Critical Fixes
+
+**Two blocking issues fixed:**
+
+1. **Unicode Escaping** — JSON responses were escaping printable ASCII as `\uXXXX` sequences, inflating response size by up to 5x
+   - **Fix:** Added `JavaScriptEncoder.UnsafeRelaxedJsonEscaping` to `WithToolsFromAssembly()` in `Program.cs`
+   - Printable ASCII now emits as-is
+
+2. **Missing Pagination** — 5 tools returned unbounded results, exceeding context windows
+   - **Fix:** Added `skip`/`take` parameters with defaults and max limits:
+     - `roslyn_get_file_outline` — page by types (default 20, max 100)
+     - `roslyn_find_references` — page by locations (default 50, max 200)
+     - `roslyn_find_implementations` — page by implementations/overrides (default 50, max 200)
+     - `roslyn_get_type_members` — page by members (default 50, max 200)
+     - `roslyn_get_type_hierarchy` — page by interfaces + derived types (default 50, max 200)
+   - All responses include `total_*`, `skip`, and `take` fields
+
+**Release Process:**
+- Created `hotfix/v0.2.2` branch from `v0.2.1-alpha` tag
+- Applied fixes to flat Tools/ structure (pre-reorganization codebase)
+- Tagged `v0.2.2-alpha`, published on GitHub with zips
+- Applied same fixes to `dev` branch (adapted for Tools/Analysis/ structure + `RoslynMcpTool` base class)
+- Updated README.md warning to point to v0.2.2-alpha
+- Closed issues #3 and #4
+
+**Files Changed:**
+- `src/RoslynMcp/Program.cs` — encoding fix
+- 5 tool files in `Tools/Analysis/` — pagination logic + `scope.Outcome()` calls
+
+**Testing:**
+- TestHarness: 23/23 ✅ on `dev` branch
+- All pagination parameters validated with defaults
+
+---
+
+## Previous Session Summary
 
 ### Tooling annotations
 - All 24 tools prefixed `roslyn_` and annotated `ReadOnly` / `Destructive` / `Idempotent` on `[McpServerTool]`
@@ -28,7 +65,7 @@
 - `scope.Outcome<T>(detail, returnValue)` — records success detail, returns value
 - `scope.Record(note)` — neutral mid-scope annotation, accumulates with `; ` separator
 - Extracted into `RoslynMcpTool.ToolScope.cs` via `partial class` — `RoslynMcpTool.cs` stays lean
-- All 24 tools wired: subject on `BeginTool`, `Failed` on all key error paths, `Outcome` where counts/results are meaningful (7 tools)
+- All 24 tools wired: subject on `BeginTool`, `Failed` on all key error paths, `Outcome` where counts/results are meaningful (now 12 tools with Outcome)
 
 ### Tools folder reorganization
 - `Tools/` root now only: `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RespawnTool.cs`
@@ -47,17 +84,17 @@
 - **`BuildTool` logging** — add `scope.Record(...)` for Roslyn fast-path decision:
   `scope.Record("roslyn: 3 errors, skipped build")` vs `scope.Record("roslyn: clean, running dotnet build")`
 - **`scope.Outcome` coverage** — remaining tools with interesting success signals:
-  `ReplaceInFileTool` (lines changed), `ReplaceInCodeTool` (nodes replaced), `FindImplementationsTool` (count), `TypeHierarchyTool` (depth)
+  `ReplaceInFileTool` (lines changed), `ReplaceInCodeTool` (nodes replaced)
 
 ### Priority: MEDIUM
-- **`README.md` + `CHANGELOG.md`** — need polish pass reflecting this session's additions
-- **`.sln/.slnx` support** — PRIORITY BUMPED (see ScratchPad): also fixes silent cross-project semantic gaps in `find_references`, `preview_rename`, etc. — tackle together with `Compilation` duplication fix
+- **`CHANGELOG.md`** — update with v0.2.1-alpha and v0.2.2-alpha hotfix releases
+- **`.sln/.slnx` support** — fixes silent cross-project semantic gaps in `find_references`, `preview_rename`, etc.
 - **Glob patterns in `projectPath` preload args** — `src/**/*.csproj` for multi-project startup
 
 ### Priority: LOW
 - **`undo_last_edit`** — revert most recent Roslyn edit from in-memory snapshot
 - **NuGet publication** — package + push pipeline
-- **Doc review checklist / automated doc freshness checks** (see ScratchPad)
+- **Doc review checklist / automated doc freshness checks**
 
 ---
 
@@ -66,8 +103,16 @@
 Branch:     dev (up to date with origin/dev)
 Tests:      23/23 ✅
 Build:      0 errors, 0 warnings ✅
-Commits:    6 new commits this session (d5e3b29 → 4312a32)
+Last Commit: 52e6b3a (March 24, 2026)
 ```
+
+## Recent Releases
+
+- **v0.2.2-alpha** (March 24, 2026) — hotfix: Unicode escaping + pagination fixes
+- **v0.2.1-alpha** (March 22, 2026) — hotfix: BuildHost DLL missing fix
+- **v0.2.0-alpha** (March 22, 2026) — initial public release (broken, superseded)
+
+---
 ### ✅ Completed in Part 10
 
 **Feature:** Global Project Context (Multi-Project Support)
