@@ -22,8 +22,15 @@ internal sealed class WorkspaceManager : IDisposable
 	static WorkspaceManager()
 	{
 		// Register MSBuild instance once per process — required for MSBuildWorkspace.
-		if(MSBuildLocator.CanRegister)
-			MSBuildLocator.RegisterDefaults();
+		// Guard against environments where MSBuild SDK cannot be located (e.g., single-file publish).
+		// A failed registration is non-fatal; tools will return structured errors rather than crashing.
+		try {
+			if(MSBuildLocator.CanRegister)
+				MSBuildLocator.RegisterDefaults();
+		}
+		catch(Exception) {
+			// Intentionally swallowed — MSBuildWorkspace tools will fail gracefully per-call.
+		}
 	}
 
 	public WorkspaceManager()
@@ -389,10 +396,15 @@ internal sealed class WorkspaceManager : IDisposable
 
 		private (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath)
 		{
-			var msbuildWorkspace = MSBuildWorkspace.Create();
-			var project = msbuildWorkspace.OpenProjectAsync(csprojPath).GetAwaiter().GetResult();
+			try {
+				var msbuildWorkspace = MSBuildWorkspace.Create();
+				var project = msbuildWorkspace.OpenProjectAsync(csprojPath).GetAwaiter().GetResult();
 
-			return (msbuildWorkspace, project.Id);
+				return (msbuildWorkspace, project.Id);
+			}
+			catch(Exception ex) when(ex is not OperationCanceledException) {
+				throw new InvalidOperationException($"Failed to load MSBuildWorkspace for '{csprojPath}': {ex.Message}", ex);
+			}
 		}
 
 		private (Workspace workspace, ProjectId projectId) LoadAdhocWorkspace()
