@@ -275,7 +275,7 @@ Console.WriteLine("────────────────────�
 tests.Add(await RunTestAsync(
     "roslyn_preview_rename: generate diff for renaming compilation",
     "roslyn_preview_rename",
-    new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceManager" },
+    new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceInstance" },
     data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
 ));
 
