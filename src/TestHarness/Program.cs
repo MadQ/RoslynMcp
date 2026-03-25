@@ -49,10 +49,21 @@ async Task SendAsync(object payload)
 
 async Task<JsonNode?> ReceiveAsync(int timeoutMs = 15_000)
 {
-    using var cts  = new CancellationTokenSource(timeoutMs);
-    var       line = await reader.ReadLineAsync(cts.Token);
+    using var cts = new CancellationTokenSource(timeoutMs);
 
-    return line is not null ? JsonNode.Parse(line) : null;
+    try {
+        var line = await reader.ReadLineAsync(cts.Token);
+
+        return line is not null ? JsonNode.Parse(line) : null;
+    }
+    catch(OperationCanceledException) {
+        return null; // Timeout.
+    }
+    catch(Exception ex) {
+        Console.Error.WriteLine($"[recv error] {ex.Message}");
+
+        return null; // Pipe closed or other I/O error.
+    }
 }
 
 async Task<(bool pass, string message)> RunTestAsync(string testName, string toolName, object arguments, Func<JsonNode?, bool> validate, bool expectJson = true)
@@ -124,7 +135,15 @@ await SendAsync(new {
     }
 });
 
-await ReceiveAsync();
+var initResponse = await ReceiveAsync();
+
+if(initResponse is null) {
+    await Task.Delay(200); // Allow stderr to flush.
+    Console.Error.WriteLine("\n[FATAL] Server did not respond to initialize — check stderr above for crash details.");
+    proc.Kill(entireProcessTree: true);
+
+    return 1;
+}
 
 await SendAsync(new { jsonrpc = "2.0", method = "notifications/initialized" });
 
