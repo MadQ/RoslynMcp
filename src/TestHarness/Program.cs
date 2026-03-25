@@ -19,7 +19,7 @@ Console.WriteLine($"Target:  {targetPath}");
 Console.WriteLine();
 
 var psi = new ProcessStartInfo("dotnet") {
-    Arguments              = $"run --project \"{serverProj}\" -f net10.0 --no-build",
+    Arguments              = $"run --project \"{serverProj}\" -f net10.0",
     RedirectStandardInput  = true,
     RedirectStandardOutput = true,
     RedirectStandardError  = true,
@@ -155,7 +155,8 @@ tests.Add(await RunTestAsync(
     "roslyn_list_types: enumerate types in RoslynMcp.Tools namespace",
     "roslyn_list_types",
     new { namespaceFilter = "RoslynMcp.Tools" },
-    data => data?.AsArray().Count > 10
+    data => data?.AsArray().Count > 10,
+    expectJson: false  // Returns string[] directly
 ));
 
 tests.Add(await RunTestAsync(
@@ -207,7 +208,7 @@ tests.Add(await RunTestAsync(
     "roslyn_find_implementations: IDisposable implementers",
     "roslyn_find_implementations",
     new { symbolName = "IDisposable" },
-    data => data?["error"] is not null || data?["implementations"]?.AsArray().Count >= 0
+    data => data?["error"] is not null || (data?["total_implementations"] is not null && data?["implementations"]?.AsArray() is not null)
 ));
 
 tests.Add(await RunTestAsync(
@@ -232,7 +233,7 @@ tests.Add(await RunTestAsync(
     "roslyn_find_references: locate WorkspaceManager usages",
     "roslyn_find_references",
     new { symbolName = "WorkspaceManager" },
-    data => data?.AsArray().Count > 0
+    data => data?["total_references"]?.GetValue<int>() > 0 && data?["references"]?.AsArray().Count > 0
 ));
 
 tests.Add(await RunTestAsync(
@@ -259,7 +260,8 @@ tests.Add(await RunTestAsync(
     "roslyn_get_diagnostics: check for compiler errors",
     "roslyn_get_diagnostics",
     new { },
-    data => data?.AsArray() is not null
+    data => data?.AsArray() is not null,
+    expectJson: false  // Returns string[] directly
 ));
 
 tests.Add(await RunTestAsync(

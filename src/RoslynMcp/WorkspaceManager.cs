@@ -413,8 +413,59 @@ internal sealed class WorkspaceManager : IDisposable
 
 		private void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId pid)
 		{
-			foreach(var path in Directory.EnumerateFiles(rootPath, "*.cs", SearchOption.AllDirectories))
+			// Enumerate files with error handling for protected directories
+			var files = EnumerateFilesWithErrorHandling(rootPath, "*.cs");
+
+			foreach(var path in files)
 				AddOrUpdateDocument(adhocWorkspace, pid, path);
+		}
+
+		private IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
+		{
+			// Don't scan system directories or drive roots
+			var pathInfo = new DirectoryInfo(path);
+			if(pathInfo.Attributes.HasFlag(FileAttributes.System) || pathInfo.Parent == null)
+				yield break;
+
+			// Try to enumerate files in current directory
+			IEnumerable<string> files;
+			try {
+				files = Directory.EnumerateFiles(path, searchPattern, SearchOption.TopDirectoryOnly);
+			}
+			catch(UnauthorizedAccessException) {
+				yield break; // Skip directories we can't access
+			}
+			catch(DirectoryNotFoundException) {
+				yield break;
+			}
+
+			foreach(var file in files)
+				yield return file;
+
+			// Recursively enumerate subdirectories
+			IEnumerable<string> directories;
+			try {
+				directories = Directory.EnumerateDirectories(path);
+			}
+			catch(UnauthorizedAccessException) {
+				yield break;
+			}
+			catch(DirectoryNotFoundException) {
+				yield break;
+			}
+
+			foreach(var directory in directories) {
+
+				// Skip hidden, system, and common large directories
+				var dirInfo = new DirectoryInfo(directory);
+				if(dirInfo.Attributes.HasFlag(FileAttributes.Hidden) ||
+				   dirInfo.Attributes.HasFlag(FileAttributes.System) ||
+				   dirInfo.Name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages")
+					continue;
+
+				foreach(var file in EnumerateFilesWithErrorHandling(directory, searchPattern))
+					yield return file;
+			}
 		}
 
 		private void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
