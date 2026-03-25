@@ -155,8 +155,7 @@ tests.Add(await RunTestAsync(
     "roslyn_list_types: enumerate types in RoslynMcp.Tools namespace",
     "roslyn_list_types",
     new { namespaceFilter = "RoslynMcp.Tools" },
-    data => data?.AsArray().Count > 10,
-    expectJson: false  // Returns string[] directly
+    data => data?.AsArray().Count > 10
 ));
 
 tests.Add(await RunTestAsync(
@@ -260,8 +259,7 @@ tests.Add(await RunTestAsync(
     "roslyn_get_diagnostics: check for compiler errors",
     "roslyn_get_diagnostics",
     new { },
-    data => data?.AsArray() is not null,
-    expectJson: false  // Returns string[] directly
+    data => data?.AsArray() is not null
 ));
 
 tests.Add(await RunTestAsync(
