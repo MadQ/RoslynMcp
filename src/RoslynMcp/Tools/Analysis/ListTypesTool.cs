@@ -13,14 +13,14 @@ internal sealed class ListTypesTool : RoslynMcpTool
     [Description(
         "Lists all types (classes, interfaces, enums, structs, records) in the project. " +
         "Optionally filter by namespace or type kind. Use this to discover what's available in the codebase.")]
-    public string[] ListTypes(
+    public object ListTypes(
         [Description("Optional namespace filter, e.g. 'RoslynMcp.Tools'. Types in this namespace and its sub-namespaces are returned.")] string? namespaceFilter = null,
         [Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
         using var scope = BeginTool("roslyn_list_types", namespaceFilter);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
-            return [error.ToString()!];
+            return new[] { error.ToString()! };
 
 
         var allTypes    = new List<INamedTypeSymbol>();
@@ -40,7 +40,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 
         return results.Length > 0
             ? scope.Outcome($"{results.Length} type(s)", results)
-            : ["No types found matching the filters."];
+            : (object) new[] { "No types found matching the filters." };
     }
 
     private static void CollectTypes(INamespaceSymbol ns, List<INamedTypeSymbol> collector)

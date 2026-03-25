@@ -14,13 +14,13 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
     [Description(
         "Returns compiler diagnostics (errors and warnings) for the project or a single file. " +
         "Faster than running dotnet build — uses the in-process Roslyn compilation.")]
-    public string[] GetDiagnostics(
+    public object GetDiagnostics(
         [Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null,
         [Description(ProjectPathDescription)] string? projectPath = null)
     {
         using var scope = BeginTool("roslyn_get_diagnostics", filePath);
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
-            return [error.ToString()!];
+            return new[] { error.ToString()! };
 
 
         IEnumerable<Diagnostic> diagnostics = compilation.GetDiagnostics();
@@ -44,7 +44,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 
         return results.Length > 0
             ? scope.Outcome($"{results.Length} diagnostic(s)", results)
-            : ["No diagnostics."];
+            : (object) new[] { "No diagnostics." };
 	}
 
 	private static string Format(Diagnostic d)

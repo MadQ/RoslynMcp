@@ -16,9 +16,25 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
+
 // Optional: Pre-warm cache with specified projects (args).
 // If no args provided, projects are loaded on-demand when tools are called.
 var projectsToPreload = args;
+
+// Log unhandled exceptions before the host/DI is available.
+// This is the last line of defence — catches crashes that occur before tool handlers run.
+AppDomain.CurrentDomain.UnhandledException += (_, e) => {
+	var path = Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH")
+		?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RoslynMcp", "logs", "roslynmcp.log");
+
+	if(!string.IsNullOrEmpty(path)) {
+		try {
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+			File.AppendAllText(path, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fffZ}] [FATAL ] Unhandled exception: {e.ExceptionObject}\n");
+		}
+		catch { /* nowhere left to report */ }
+	}
+};
 
 var builder = Host.CreateApplicationBuilder(args);
 
