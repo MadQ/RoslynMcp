@@ -11,9 +11,11 @@
     <LangVersion>preview</LangVersion>
 
     <!-- Package metadata -->
+    <!-->
     <Version>0.2.1-alpha</Version>
     <AssemblyVersion>0.2.1.0</AssemblyVersion>
     <FileVersion>0.2.1.0</FileVersion>
+    -->
     <Authors>Quinten Martens</Authors>
     <Description>Model Context Protocol server exposing Roslyn-powered code intelligence tools to AI coding agents</Description>
     <PackageProjectUrl>https://github.com/MadQ/RoslynMcp</PackageProjectUrl>
@@ -24,6 +26,7 @@
 
     <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
     <PublishSingleFile>true</PublishSingleFile>
+    <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
   </PropertyGroup>
 
   <!-- Detect if .NET 11 SDK is available and add it to TargetFrameworks -->
@@ -38,10 +41,12 @@
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net10.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net11.0|AnyCPU'">
@@ -50,10 +55,12 @@
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net8.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net10.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
+    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net11.0|AnyCPU'">
@@ -93,8 +100,7 @@
   -->
   <Target Name="ExcludeBuildHostFromSingleFile" BeforeTargets="_ComputeFilesToBundle">
     <ItemGroup>
-      <ResolvedFileToPublish Condition="$([System.String]::Copy('%(RelativePath)').StartsWith('BuildHost-'))"
-                             ExcludeFromSingleFile="true" />
+      <ResolvedFileToPublish Condition="$([System.String]::Copy('%(RelativePath)').StartsWith('BuildHost-'))" ExcludeFromSingleFile="true" />
     </ItemGroup>
   </Target>
 

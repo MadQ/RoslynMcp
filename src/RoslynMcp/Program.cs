@@ -13,6 +13,8 @@ using RoslynMcp;
 using RoslynMcp.Tools;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 
 // Optional: Pre-warm cache with specified projects (args).
 // If no args provided, projects are loaded on-demand when tools are called.
@@ -36,8 +38,11 @@ builder.Services
 	.WithStdioServerTransport()
 	// UnsafeRelaxedJsonEscaping: emit printable ASCII as-is instead of \uXXXX sequences.
 	// Reduces response size significantly for symbol signatures and doc comments (issue #3).
-	.WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions {
-		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+	.WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions(JsonSerializerDefaults.Web) {
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+		TypeInfoResolver = JsonSerializerOptions.Default.TypeInfoResolver // JsonSerializer.IsReflectionEnabledByDefault
+			//? new DefaultJsonTypeInfoResolver()
+			//: null
 	})
 ;
 
