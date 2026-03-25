@@ -104,7 +104,8 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
                     Name: e.Attribute("name")?.Value ?? "?",
                     Description: e.Value.Trim()
                 ))
-                .ToArray();
+                .ToArray()
+            ;
 
             return new DocumentationComment(summary, parameters, returns, remarks, example);
         }

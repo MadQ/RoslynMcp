@@ -37,18 +37,21 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
         var allInterfaces = type.AllInterfaces
             .Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
-            .ToArray();  // Materialize - used for count.
+            .ToArray()  // Materialize - used for count.
+        ;
 
         var solution    = workspace.GetSolution(projectPath);
         var derivedRefs = await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution);
         var allDerived = derivedRefs
             .Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
             .Order()
-            .ToArray();  // Materialize - used for count.
+            .ToArray()  // Materialize - used for count.
+        ;
 
-        // Page both interfaces and derived types together (concatenated, then sliced)
-        var combined = allInterfaces.Concat(allDerived).ToArray();  // Materialize combined for paging.
-        var page     = combined.Skip(skip).Take(take).ToArray();
+        // Page both interfaces and derived types together (concatenated, then sliced).
+        var combined = allInterfaces.Concat(allDerived).ToArray()  // Materialize combined for paging.
+        ;
+        var page     = combined.AsSpan(skip, Math.Min(take, combined.Length - skip)).ToArray();
 
         return scope.Outcome($"{page.Length} interface(s)/derived", new {
             type_name           = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
@@ -72,7 +75,8 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 
         // Fall back to simple name search.
         return compilation.GlobalNamespace
-            .Accept(new SimpleNameFinder<INamedTypeSymbol>(typeName));
+            .Accept(new SimpleNameFinder<INamedTypeSymbol>(typeName))
+        ;
     }
 
     private static string[] GetBaseTypeChain(INamedTypeSymbol type)

@@ -176,7 +176,8 @@ internal sealed class BuildTool : RoslynMcpTool
             .Where(d => d.Severity >= DiagnosticSeverity.Warning)
             .Where(d => !IgnoredDiagnostics.Contains(d.Id))
             .Select(d => ConvertRoslynDiagnostic(d, rootPath))
-            .ToArray();
+            .ToArray()
+        ;
 
         return diagnostics;
     }

@@ -45,7 +45,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
                     .OfType<INamedTypeSymbol>()
                     .Select(t => t.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
                     .Order()
-                    .ToArray();
+                    .ToArray()
+                ;
 
                 if(allResults.Length == 0)
                     return new {
@@ -57,7 +58,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
                         implementations = new[] { "No implementations found." }
                     };
 
-                var page = allResults.Skip(skip).Take(take).ToArray();
+                var page = allResults.AsSpan(skip, Math.Min(take, allResults.Length - skip)).ToArray();
 
                 return scope.Outcome($"{page.Length}/{allResults.Length} implementation(s)", new {
                     symbol_type  = typeSymbol.TypeKind.ToString().ToLowerInvariant(),
@@ -84,7 +85,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
                     .OfType<IMethodSymbol>()
                     .Select(m => FormatMethod(m))
                     .Order()
-                    .ToArray();  // Materialize once - we need both count and page.
+                    .ToArray()  // Materialize once - we need both count and page.
+                ;
 
                 if(allResults.Length == 0)
                     return new {
@@ -96,7 +98,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
                         overrides = new[] { "No overrides found." }
                     };
 
-                var page = allResults.Skip(skip).Take(take).ToArray();
+                var page = allResults.AsSpan(skip, Math.Min(take, allResults.Length - skip)).ToArray();
 
                 return scope.Outcome($"{page.Length}/{allResults.Length} override(s)", new {
                     symbol_type = "method",

@@ -26,7 +26,8 @@ internal sealed class GetUsingsTool : RoslynMcpTool
         var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
 
         var tree = compilation.SyntaxTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase));
+            .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
+        ;
 
         if(tree is null)
             return scope.Failed("file not found", new { error = $"File '{filePath}' not found in the compilation." });
@@ -41,7 +42,8 @@ internal sealed class GetUsingsTool : RoslynMcpTool
                 Alias:     u.Alias?.Name.ToString()
             ))
             .Where(u => u.Namespace is not null || u.Alias is not null)
-            .ToArray();
+            .ToArray()
+        ;
 
         // Extract global usings from compilation options.
         var globalUsings = compilation.Options.SyntaxTreeOptionsProvider is { } provider

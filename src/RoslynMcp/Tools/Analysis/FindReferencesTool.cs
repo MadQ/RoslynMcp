@@ -47,18 +47,20 @@ internal sealed class FindReferencesTool : RoslynMcpTool
                 var span = l.Location.GetLineSpan();
                 var file = span.Path is { Length: > 0 } p
                     ? Path.GetRelativePath(rootPath, p)
-                    : "?";
+                    : "?"
+				;
                 var line = span.StartLinePosition.Line + 1;
 
                 return $"{file}:{line}";
             })
             .Distinct()
-            .ToArray();  // Materialize once - we need both count and page.
+            .ToArray()  // Materialize once - we need both count and page.
+        ;
 
         if(allResults.Length == 0)
             return new { total_references = 0, skip, take, references = new[] { $"No references found for '{symbolName}'." } };
 
-        var page = allResults.Skip(skip).Take(take).ToArray();
+        var page = allResults.AsSpan(skip, Math.Min(take, allResults.Length - skip)).ToArray();
 
         return scope.Outcome($"{page.Length}/{allResults.Length} reference(s)", new {
             total_references = allResults.Length,

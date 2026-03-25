@@ -33,7 +33,8 @@ internal sealed class ListTypesTool : RoslynMcpTool
             .Where(t => MatchesNamespace(t, namespaceFilter))
             .Where(t => MatchesKind(t, kindFilter))
             .Select(t => FormatType(t))
-            .Order();
+            .Order()
+        ;
 
         // Materialize only when needed for response.
         var results = filtered.ToArray();

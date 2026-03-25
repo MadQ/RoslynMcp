@@ -69,17 +69,19 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 
         var matchedNodes = root.DescendantNodes()
             .Where(n => n.IsKind(kind))
-            .ToList();
+            .ToArray()
+        ;
 
         // Filter by text pattern if provided
         if(!string.IsNullOrWhiteSpace(textPattern)) {
 
             matchedNodes = matchedNodes
                 .Where(n => n.ToString().Contains(textPattern, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+                .ToArray()
+            ;
         }
 
-        if(matchedNodes.Count == 0) {
+        if(matchedNodes.Length == 0) {
 
             return new {
                 applied = false,
@@ -126,7 +128,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
             };
         }
 
-        // Collect change info before replacement
+        // Collect change info before replacement.
         var changedNodeInfo = matchedNodes.Select(n => {
 
             var lineSpan = syntaxTree.GetLineSpan(n.Span);
@@ -136,15 +138,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
                 line = lineSpan.StartLinePosition.Line + 1,
                 column = lineSpan.StartLinePosition.Character + 1
             };
-        }).ToArray();
+        }).ToArray()
+        ;
 
         if(dryRun) {
 
             return new {
                 applied = false,
-                changeCount = matchedNodes.Count,
+                changeCount = matchedNodes.Length,
                 changedNodes = changedNodeInfo,
-                message = $"Dry run: {matchedNodes.Count} node(s) would be replaced."
+                message = $"Dry run: {matchedNodes.Length} node(s) would be replaced."
             };
         }
 
@@ -156,7 +159,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 
         // Validate the new tree has no new errors
         var newTree = CSharpSyntaxTree.Create((CSharpSyntaxNode) newRoot, path: fullPath);
-        var newDiagnostics = newTree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        var newDiagnostics = newTree.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToArray()
+        ;
 
         var syntaxValid = newDiagnostics.Length == 0;
 
@@ -186,7 +192,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 
         return new {
             applied = true,
-            changeCount = matchedNodes.Count,
+            changeCount = matchedNodes.Length,
             changedNodes = changedNodeInfo,
             syntaxValid
         };

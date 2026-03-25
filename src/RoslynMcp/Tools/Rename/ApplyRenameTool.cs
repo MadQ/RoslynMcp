@@ -46,7 +46,8 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		var filesChanged = op.NewSolution.GetChanges(oldSolution)
 			.GetProjectChanges()
 			.SelectMany(p => p.GetChangedDocuments())
-			.Count();
+			.Count()
+		;
 
 		var sessionNote = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
 

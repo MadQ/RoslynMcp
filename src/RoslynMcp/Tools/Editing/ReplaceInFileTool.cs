@@ -82,7 +82,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
             .Select(m => GetLineNumber(lineStarts, m.Index))
             .Distinct()
             .Order()
-            .ToArray();
+            .ToArray()
+        ;
 
         if(matches.Count == 0) {
 

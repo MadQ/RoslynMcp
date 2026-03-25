@@ -43,9 +43,10 @@ internal sealed class TypeMembersTool : RoslynMcpTool
             .Where(m => memberKind is null || MatchesKind(m, memberKind))
             .Select(FormatMember)
             .Where(m => m is not null)
-            .ToArray();  // Materialize once - we need both count and page.
+            .ToArray()  // Materialize once - we need both count and page.
+        ;
 
-        var page = allMembers.Skip(skip).Take(take).ToArray();
+        var page = allMembers.AsSpan(skip, Math.Min(take, allMembers.Length - skip)).ToArray();
 
         return scope.Outcome($"{page.Length}/{allMembers.Length} member(s)", new {
             type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
