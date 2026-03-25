@@ -83,9 +83,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
                 var allResults = overrides
                     .OfType<IMethodSymbol>()
                     .Select(m => FormatMethod(m))
-                    .Order();  // Lazy enumerable
+                    .Order()
+                    .ToArray();  // Materialize once - we need both count and page
 
-                if(!allResults.Any())
+                if(allResults.Length == 0)
                     return new {
                         symbol_type = "method",
                         symbol_name = FormatMethod(methodSymbol),
@@ -95,13 +96,12 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
                         overrides = new[] { "No overrides found." }
                     };
 
-                var page = allResults.Skip(skip).Take(take).ToArray();  // Only materialize the page
-                var total = allResults.Count();  // Deferred execution
+                var page = allResults.Skip(skip).Take(take).ToArray();
 
-                return scope.Outcome($"{page.Length}/{total} override(s)", new {
+                return scope.Outcome($"{page.Length}/{allResults.Length} override(s)", new {
                     symbol_type = "method",
                     symbol_name = FormatMethod(methodSymbol),
-                    total_overrides = total,
+                    total_overrides = allResults.Length,
                     skip,
                     take,
                     overrides = page
