@@ -47,7 +47,7 @@ async Task SendAsync(object payload)
     await writer.FlushAsync();
 }
 
-async Task<JsonNode?> ReceiveAsync(int timeoutMs = 15_000)
+async Task<JsonNode?> ReceiveAsync(int timeoutMs = 30_000)
 {
     using var cts = new CancellationTokenSource(timeoutMs);
 
