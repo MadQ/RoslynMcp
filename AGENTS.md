@@ -47,9 +47,7 @@ Three projects:
 - `src/TestHarness/TestHarness.csproj` — local testing client
 - `src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj` — Roslyn analyzers applied to this codebase; the most direct expression of dogfooding — Roslyn-powered analysis running on the repo that wraps Roslyn
 
-```
-dotnet build src/RoslynMcp/RoslynMcp.csproj
-```
+Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 
 ---
 
@@ -111,6 +109,12 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj
 - **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms)
 
 **Tool Selection Guidance:**
+
+> **⚠️ USE THE ROSLYN TOOLS. Every time. No exceptions unless the server is confirmed down.**
+> - `roslyn_build_project` — **never** use `dotnet build` in a terminal when this tool exists
+> - `roslyn_search_files` / `roslyn_semantic_search` — **never** use `Select-String`, `grep`, or `Get-ChildItem | Select-String` for C# source search
+> - `roslyn_get_diagnostics` — **never** use terminal output parsing to check for errors
+> - Terminal / PowerShell is a **last resort**, not a default. If the server is down, say so explicitly and explain why you're falling back.
 
 When editing C# code, **actively prefer `roslyn_replace_in_code`** over `roslyn_replace_in_file`:
 - `roslyn_replace_in_code` is semantically aware, validates syntax, preserves formatting/trivia
