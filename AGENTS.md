@@ -398,3 +398,32 @@ Example `.mcp.json`:
 ```
 
 > **Note:** Use the published executable (see README.md "Building the Executable" section). The `dotnet run` approach was abandoned due to multi-target confusion and recursive behavior when dogfooding.
+
+---
+
+## Session Handoffs
+
+When ending a significant development session (especially with AI assistance), update `docs/sessions/HANDOFF.md` to maintain continuity between sessions.
+
+**Convention:**
+- **Single file:** Always overwrite `docs/sessions/HANDOFF.md` (not dated files like `HANDOFF-2025-01-*.md`)
+- **Content:** What was done, current state, next steps, open questions, technical decisions
+- **Purpose:** Allow next session (human or AI) to pick up where you left off
+- **Commit message:** `"docs: Update session handoff"`
+
+**When to write:**
+- End of multi-hour development sessions
+- Before switching major focus areas
+- After significant refactoring or architecture changes
+- When handing off to another developer (or future you)
+
+**Include:**
+- Executive summary of what was accomplished
+- Current branch and commit state
+- Open issues/PRs created or updated
+- Technical discussions and decisions made
+- Next steps (immediate and future)
+- Any blocking issues or questions
+- Context for resuming work
+
+**Format:** Markdown, comprehensive but concise. See existing `HANDOFF.md` for template.
