@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "RoslynMcp.LogViewer": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:55817;http://localhost:55818"
+    }
+  }
+}

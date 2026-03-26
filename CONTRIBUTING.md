@@ -43,6 +43,14 @@ By contributing, you're helping AI agents work better with C# code. That's worth
 6. **Commit with clear messages** — describe *what* and *why*, not *how*
 7. **Submit PR against `dev` branch** (not `main`)
 
+### Session Handoffs
+
+When ending a significant development session (especially with AI assistance), update `docs/sessions/HANDOFF.md`:
+- **Single file** — Always overwrite `HANDOFF.md` (not dated files like `HANDOFF-2025-01-*.md`)
+- **Include:** What was done, current state, next steps, open questions, technical decisions
+- **Purpose:** Continuity for next session (human or AI)
+- **Commit message:** "docs: Update session handoff"
+
 ---
 
 ## Development Setup

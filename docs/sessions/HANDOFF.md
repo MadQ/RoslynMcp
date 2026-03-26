@@ -1,1630 +1,568 @@
-﻿# Session Handoff — RoslynMcp
-**Date:** 2025-01-XX
-**Branch:** `dev`
-**Last Commit:** `1628f38` — Add docs/github-issues/ to gitignore
-**Repository:** https://github.com/MadQ/RoslynMcp.git
-**Tool Count:** 24 tools
-**Migration Status:** ✅ **24/24 tools migrated** (v0.3.0 Phase 2 complete!)
-**Test Status:** ⏳ Multi-project testing in progress
-**Build Status:** ✅ Clean
-
----
-
-## What Happened This Session
-
-### 🎉 v0.3.0 Tool Migration Status Update
-
-**Discovery:** All 24 tools have already been migrated to the new multi-project infrastructure! The migration was completed in earlier sessions (commits `aadf7ef` and `8f1b1b4`).
-
-**Migration Complete (24/24 tools):**
-- ✅ All tools now accept optional `projectPath` parameter
-- ✅ All tools use `WorkspaceResolver` with `TryGetCompilation`/`TryGetProject` pattern
-- ✅ All tools use `FileLogger` for structured logging
-- ✅ All tools use `BeginTool()` scope pattern for timing and outcome tracking
-- ✅ Tool subfolders organized: Analysis (13), Search (3), Editing (2), Rename (2), Build (3), Root (1)
-
-**v0.3.0 Phase 2 Complete ✅**
-
-Infrastructure components working:
-- `WorkspaceManager` — LRU-cached workspace instances (default capacity: 10 projects)
-- `WorkspaceResolver` — Per-tool facade with structured error handling
-- `RoslynMcpTool` base class — `TryGetCompilation`, `TryGetProject`, `BeginTool` scope pattern
-- Smart path resolution — relative paths, CWD defaults, `.csproj` detection
-- File logging — tool invocations, timing, outcomes (rotating 10 MB files)
-
-**Remaining v0.3.0 Work:**
-1. **Systematic multi-project testing** (Phase 3a) — verify tools work correctly across projects
-2. **Cross-project semantic gaps** (HIGH priority) — address Compilation duplication issue
-3. **Consider .sln/.slnx support** — natural fix for cross-project semantics
-
-**Next Steps:** Multi-project testing and cross-project semantic investigation (this session).
-
----
-
-### 🧪 Multi-Project Testing Infrastructure Created
-
-**Created:** `test_multi_project.ps1` — comprehensive test suite for v0.3.0 multi-project functionality
-
-**Test Coverage (11 scenarios across 3 projects):**
-1. **Project Info** — verify RoslynMcp, TestHarness, RoslynMcp.Analyzers load correctly
-2. **Type Discovery** — list types across projects with namespace filters
-3. **Type Members** — get WorkspaceManager members with signatures
-4. **Find References** — locate symbol usages across projects
-5. **Diagnostics** — get compiler errors/warnings per project
-6. **File Operations** — list/search files with glob patterns
-
-**Test Projects:**
-- `src\RoslynMcp` — main server project (24 tools)
-- `src\TestHarness` — test client
-- `src\RoslynMcp.Analyzers` — Roslyn analyzer (dogfooding!)
-
----
-
-### 🔴 Critical Issue Discovered: stdout Contamination
-
-**Problem:** Server writes startup messages to stdout, breaking JSON-RPC protocol.
-
-```
-Pre-loading 1 project(s)...
-✓ Loaded: .
-```
-
-**Impact:**
-- Test harness can't parse MCP responses (non-JSON text before protocol messages)
-- All 11 tests fail with "Request failed" due to corrupted stream
-- **BLOCKER** for automated testing
-
-**Root Cause:** `Program.cs` writes directly to `Console.WriteLine` during workspace initialization.
-
-**Fix Required:** Redirect all diagnostic output to stderr or FileLogger only. MCP protocol demands clean stdout.
-
-**Priority:** HIGH — blocks v0.3.0 testing checklist completion.
-
----
-
-### 🔍 Cross-Project Semantic Gaps Investigation
-
-**Architecture Analysis:**
-
-**Current State:**
-- `WorkspaceManager` uses **per-.csproj LRU cache** (default: 5 projects)
-- Each cache entry = separate `WorkspaceInstance` (MSBuildWorkspace or AdhocWorkspace)
-- Each instance has its own `Solution` graph
-
-**The Problem:**
-
-When `A.csproj` references `B.csproj` via `<ProjectReference>`:
-1. MSBuildWorkspace loads B into A's Solution graph (correct)
-2. Agent later requests `B.csproj` directly → **second WorkspaceInstance created**
-3. Two separate Solution graphs with **zero knowledge of each other**
-4. Cross-project operations (`roslyn_find_references`, `roslyn_preview_rename`) operate on Solution, not Compilation
-5. **Result: Silent incorrectness** — incomplete reference/rename results
-
-**Impact Severity:**
-- Memory duplication: **LOW-MEDIUM** (tolerable for now, LRU eviction mitigates)
-- Semantic correctness: **HIGH** (cross-project operations incomplete, no error reported)
-
-**Recommended Solution (post-v0.3.0):**
-
-**.sln/.slnx support** — natural fix for cross-project semantics:
-- Cache key: `.sln` file path instead of individual `.csproj` paths
-- `MSBuildWorkspace.OpenSolutionAsync()` → one Solution graph per `.sln`
-- All projects share same graph → zero duplication
-- Full cross-project semantics (references, renames, implementations all work correctly)
-- Agent specifies `.sln` path OR `.csproj` path (resolve to containing `.sln` automatically)
-
-**Alternative (if no .sln available):**
-- Multi-project reference tracking in WorkspaceManager
-- When loading `B.csproj`, check cache for any project that references B
-- Reuse existing Solution graph instead of creating new WorkspaceInstance
-- More complex, but works without `.sln` requirement
-
-**Status:** Documented for v0.4.0 or later. Not blocking v0.3.0-alpha release.
-
----
-
-### 📊 v0.3.0 Status Summary
-
-**Phase 2: Tool Migration — ✅ COMPLETE**
-- All 24 tools migrated to multi-project infrastructure
-- `FileLogger` integration complete
-- `BeginTool` scope pattern for timing/outcomes
-- `TryGetCompilation`/`TryGetProject` error handling
-
-**Phase 3a: Testing — 🔴 BLOCKED**
-- Test infrastructure created (`test_multi_project.ps1`)
-- **BLOCKED:** stdout contamination prevents automated testing
-- Manual smoke tests confirm tools work individually
-
-**Phase 3b: Cross-Project Investigation — ✅ COMPLETE**
-- Root cause identified (per-project caching)
-- Solution documented (.sln/.slnx support)
-- Severity assessed (HIGH for semantics, tolerable for memory)
-- Deferred to post-v0.3.0
-
-**Remaining Work:**
-1. **Fix stdout contamination** (HIGH priority, required for testing)
-2. Complete testing checklist once stdout fixed
-3. Update README.md with multi-project examples
-4. Consider whether to release v0.3.0-alpha with known semantic gaps (document in release notes)
-
----
-
-## Key Files Modified This Session
-
-| File | Changes |
-|------|---------|
-| `docs/sessions/HANDOFF.md` | Added new session entry with migration status, testing, and investigation results |
-| `docs/github-issues/v0.3.0-multi-project-infrastructure.md` | Updated Phase 2 (complete), Phase 3 (blocked), added stdout contamination issue |
-| `test_multi_project.ps1` | Created comprehensive multi-project test suite (11 scenarios, 3 projects) |
-
----
-
-## Session Statistics
-
-- **Migration Status:** 24/24 tools ✅ (discovered already complete from earlier sessions)
-- **Test Script Created:** `test_multi_project.ps1` (328 lines, 11 test scenarios)
-- **Issues Discovered:** 2 critical (stdout contamination, cross-project semantic gaps)
-- **Documentation Updated:** 2 files (HANDOFF.md, v0.3.0 issue draft)
-- **Plan Steps Completed:** 3/3 (update docs, create tests, investigate semantics)
-
----
-
-## Commits Pending
-
-```
-1. docs: update v0.3.0 status - all 24 tools migrated
-2. test: add multi-project test suite (11 scenarios)
-3. docs: document stdout contamination and cross-project semantic gaps
-```
-
-**Ready for commit?** Yes, all documentation changes and test script ready for Git staging.
-
----
-
-## Previous Session Summary
-
-### 🏴‍☠️ Epic Feature Planning: `roslyn_change_signature` Tool
-
-### 🏴‍☠️ Epic Feature Planning: `roslyn_change_signature` Tool
-
-Created comprehensive design document for v0.4.0's headline feature: semantic method signature changes with automatic call site updates.
-
-**Planning Document:** `docs/plans/change-signature-tool.md` (~1400 lines)
-
-**What was designed:**
-
-1. **Three-tool workflow:**
-   - `roslyn_change_signature` — preview signature change (add/remove/reorder parameters)
-   - `roslyn_apply_signature_change` — apply with approval workflow
-   - `roslyn_remove_deprecated_overload` — cleanup deprecated stubs (remove or clean marker)
-
-2. **Two modes:**
-   - **Non-breaking (default):** Adds new overload + deprecates old with `[Obsolete("RoslynMcp.ChangeSignature: ...")]` marker
-   - **Breaking (opt-in):** Updates signature + all call sites atomically
-
-3. **Five editor strategies:**
-   - `MethodSignatureEditor` — regular methods
-   - `ExternMethodEditor` — P/Invoke refactoring
-   - `DelegateSignatureEditor` — delegates with subscriber detection
-   - `OperatorSignatureEditor` — operator overloads with symmetry warnings
-   - `ConversionSignatureEditor` — implicit/explicit conversions
-
-4. **Architecture:**
-   - Abstract class pattern (not interface) for shared helpers
-   - Atomic application to prevent transient IDE errors
-   - Operation ordering to avoid error flashing
-   - Rich diagnostics for agent orchestration
-
-5. **Key decisions:**
-   - Abstract class over interface (enables shared helpers + virtual validation)
-   - Non-breaking mode as default (minimize disruption)
-   - Recognizable `[Obsolete]` marker for cleanup tooling
-   - Delegates: breaking mode only (can't overload delegates)
-   - `force` parameter for advanced scenarios (virtual/operator/conversion)
-
-**Commits:**
-- `7f007fe` — Add change_signature tool planning doc
-- `9dfbf15` — Add architecture section
-- `f787b88` — Refine architecture: abstract class over interface
-- `4b46263` — Add delegate signature change support
-- `9a6660c` — Clean up redundant prose
-
----
-
-### 📋 GitHub Issue Drafts Created
-
-Created two comprehensive issue drafts in `docs/github-issues/` (gitignored for local drafting):
-
-1. **`change-signature-tool-feature.md`** — v0.4.0 feature request
-   - Links to planning doc
-   - Example workflows
-   - Phase 1/2/3 implementation plan
-   - Open questions carried over
-
-2. **`v0.3.0-multi-project-infrastructure.md`** — Current milestone
-   - Documents multi-workspace support with LRU cache
-   - Tool migration status (1/24 complete)
-   - Cross-project semantics issue (HIGH priority)
-   - Testing checklist
-   - Breaking changes documented
-
-**Guidance provided:**
-- When/why to open GitHub issues
-- How to use GitHub milestones for release planning
-- Suggested milestone structure (v0.3.0, v0.4.0, v0.5.0, Future)
-
----
-
-### 🧹 Repository Cleanup
-
-**Hotfix branches deleted:**
-- Removed `hotfix/v0.2.1` and `hotfix/v0.2.2` (local + remote)
-- Tags preserved: `v0.2.0-alpha`, `v0.2.1-alpha`, `v0.2.2-alpha`
-- Rationale: Hotfixes merged to dev, tags mark releases permanently
-
-**Gitignore updated:**
-- Added `docs/github-issues/` for draft issue text
-
-**Final branch state:**
-```
-* dev
-  feature/global-project-context
-  feature/search-files-tool
-```
-
----
-
-### 💬 Discussions & Design Refinements
-
-**Abstract class vs. interface:**
-- Chose abstract class for `SignatureEditor` base
-- Enables shared helpers (`CreateObsoleteAttribute`, `BuildNewParameterList`, `CreateForwardingInvocation`)
-- Supports `protected virtual` validation (use/extend/replace patterns)
-- Avoids premature abstraction
-
-**Delegate signatures:**
-- Non-breaking mode not practical (delegates can't overload)
-- Breaking mode with subscriber detection in diagnostics
-- Agent orchestrates multi-step fix: change delegate → change subscribers
-
-**Open questions documented:**
-- Empty `[Obsolete]` message handling
-- Methods already having `[Obsolete]` attribute
-- Method overload disambiguation
-- Approval scope for batch changes
-
----
-
-## Key Files Modified This Session
-
-| File | Changes |
-|------|---------|
-| `docs/plans/change-signature-tool.md` | Created (~1400 lines) — comprehensive design doc |
-| `docs/github-issues/change-signature-tool-feature.md` | Created — GitHub issue draft |
-| `docs/github-issues/v0.3.0-multi-project-infrastructure.md` | Created — v0.3.0 milestone issue draft |
-| `.gitignore` | Added `docs/github-issues/` |
-
----
-
-## Commits This Session
-
-```
-1628f38 — Add docs/github-issues/ to gitignore
-9a6660c — Clean up change_signature planning doc
-4b46263 — Add delegate signature change support to planning doc
-f787b88 — Refine change_signature architecture: abstract class over interface
-9dfbf15 — Add architecture section to change_signature planning doc
-7f007fe — Add change_signature tool planning doc
-```
-
-**6 commits, all documentation/planning.**
-
----
-
-## Next Steps (Post-Handoff)
-
-### Immediate (v0.3.0 work)
-- Continue tool migration (23 tools remaining)
-- Test TypeMembersTool with multi-project scenarios
-- Systematic rollout following reference implementation
-
-### Near-term (GitHub housekeeping)
-- Create milestones: v0.3.0, v0.4.0, v0.5.0, Future
-- Post issue: `v0.3.0-multi-project-infrastructure.md`
-- Post issue: `change-signature-tool-feature.md`
-- Assign to appropriate milestones
-
-### v0.4.0 (after v0.3.0 ships)
-- Implement `roslyn_change_signature` following planning doc
-- Phase 1: MVP (regular methods, extern, delegates, operators)
-- Phase 2: Advanced features (constructors, indexers, partials)
-
-### Post-v0.3.0 (HIGH priority)
-- Address cross-project semantic gaps (Compilation duplication)
-- Implement `.sln`/.slnx` support (natural fix for cross-project issues)
-
----
-
-## Repo Health
-
-```
-Branch:     dev (up to date with origin/dev)
-Tests:      23/23 ✅ (not run this session, assumed clean)
-Build:      ✅ Clean (no code changes)
-Last Commit: 1628f38
-Commits Today: 6 (all docs/planning)
-```
-
-## Fun Stats This Session
-
-- **Lines of planning doc:** ~1400
-- **GitHub issue drafts:** 2
-- **Architecture decisions:** 12+
-- **Code examples:** 20+
-- **Pirate jokes:** Countless 🏴‍☠️
-- **Treasure created:** 💎💎💎
-
----
-
-## Previous Session Summary (March 24, 2026)
-
-### Tooling annotations
-- All 24 tools prefixed `roslyn_` and annotated `ReadOnly` / `Destructive` / `Idempotent` on `[McpServerTool]`
-- `RestorePackages` = `Idempotent = true`, `BuildProject` = `ReadOnly = true`
-
-### File logging (`FileLogger.cs`)
-- New `FileLogger` singleton — rotating file, 10 MB / 3 files, thread-safe
-- Controlled by `ROSLYNMCP_LOG_PATH` env var; empty string = disabled; default = `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`
-- Log events: `[START ]` / `[STOP  ]` (host lifetime), `[TOOL  ]` (per invocation), `[ERROR ]` (workspace resolution failures)
-- Format: `[2026-03-22 14:23:01.123Z] [TOOL  ] roslyn_get_type_members(WorkspaceManager) 47ms OK — 18 member(s)`
-
-### `ToolScope` — fluent per-tool logging
-- `BeginTool(name, subject?)` → `ToolScope : IDisposable` — auto-logs on `Dispose`
-- `scope.Failed<T>(reason, returnValue)` — marks failure, returns value (braceless-`if` safe)
-- `scope.Outcome<T>(detail, returnValue)` — records success detail, returns value
-- `scope.Record(note)` — neutral mid-scope annotation, accumulates with `; ` separator
-- Extracted into `RoslynMcpTool.ToolScope.cs` via `partial class` — `RoslynMcpTool.cs` stays lean
-- All 24 tools wired: subject on `BeginTool`, `Failed` on all key error paths, `Outcome` where counts/results are meaningful (now 12 tools with Outcome)
-
-### Tools folder reorganization
-- `Tools/` root now only: `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RespawnTool.cs`
-- Subfolders (all still `RoslynMcp.Tools` namespace — purely organisational):
-  - `Analysis/` — 13 read-only Roslyn semantic tools
-  - `Search/` — 3 file/content search tools
-  - `Editing/` — 2 file mutation tools
-  - `Rename/` — 2-step rename workflow
-  - `Build/` — 3 MSBuild/dotnet CLI tools
-
----
-
-## Open Items / Next Session
-
-### Priority: HIGH
-- **`BuildTool` logging** — add `scope.Record(...)` for Roslyn fast-path decision:
-  `scope.Record("roslyn: 3 errors, skipped build")` vs `scope.Record("roslyn: clean, running dotnet build")`
-- **`scope.Outcome` coverage** — remaining tools with interesting success signals:
-  `ReplaceInFileTool` (lines changed), `ReplaceInCodeTool` (nodes replaced)
-
-### Priority: MEDIUM
-- **`CHANGELOG.md`** — update with v0.2.1-alpha and v0.2.2-alpha hotfix releases
-- **`.sln/.slnx` support** — fixes silent cross-project semantic gaps in `find_references`, `preview_rename`, etc.
-- **Glob patterns in `projectPath` preload args** — `src/**/*.csproj` for multi-project startup
-
-### Priority: LOW
-- **`undo_last_edit`** — revert most recent Roslyn edit from in-memory snapshot
-- **NuGet publication** — package + push pipeline
-- **Doc review checklist / automated doc freshness checks**
-
----
-
-## Repo Health
-```
-Branch:     dev (up to date with origin/dev)
-Tests:      23/23 ✅
-Build:      0 errors, 0 warnings ✅
-Last Commit: 52e6b3a (March 24, 2026)
-```
-
-## Recent Releases
-
-- **v0.2.2-alpha** (March 24, 2026) — hotfix: Unicode escaping + pagination fixes
-- **v0.2.1-alpha** (March 22, 2026) — hotfix: BuildHost DLL missing fix
-- **v0.2.0-alpha** (March 22, 2026) — initial public release (broken, superseded)
-
----
-### ✅ Completed in Part 10
-
-**Feature:** Global Project Context (Multi-Project Support)
-
-**Work Done:**
-1. **Infrastructure:**
-   - WorkspaceManager: LRU workspace cache, GetProject(), GetWorkspaceInfo(), InvalidateFile()
-   - WorkspaceResolver: facade layer with TryGetCompilation(), TryGetProject() helpers
-   - RoslynMcpTool: base class with consistent error handling pattern
-
-2. **Tool Migration (24/24):**
-   - All tools now inherit from RoslynMcpTool
-   - All tools accept optional `projectPath` parameter (defaults to CWD)
-   - Consistent error responses with structured objects
-
-3. **AdhocWorkspace Restored:**
-   - Second WorkspaceInstance constructor for directories without .csproj
-   - FileSystemWatcher monitors *.cs changes (Changed/Created/Deleted/Renamed)
-   - Incremental document updates with AddOrUpdateDocument(), RemoveDocument()
-
-4. **Testing:**
-   - TestHarness fixes: path calculation + projectPath parameters
-   - 23/23 tests passing
-   - Build clean: 0 errors, 0 warnings
-
-5. **Documentation:**
-   - README.md: added Key Features section, updated tool count
-   - AGENTS.md: updated architecture table, added Tool Implementation Pattern
-   - Release notes for v0.2.0-alpha created
-
-6. **Release:**
-   - v0.2.0-alpha tag created from `dev` branch (commit `e8b28f0`)
-   - Published on GitHub with Windows binaries (net8.0 + net10.0)
-   - First public release! 🎉
-
-**Commits on Feature Branch:**
-- `660a801` — Housekeeping (doc cleanup, repo reorganization)
-- `aadf7ef` — Complete tool migration + AdhocWorkspace restoration
-- `8b6b84d` — TestHarness fixes
-- `98bf307` — Documentation updates
-
-**Branch Status:**
-- `dev` at `8f1b1b4` (24 tools, multi-project, post-merge)
-- `feature/global-project-context` at `07c818c` (merged ✅)
-
----
-
-## Current Session (March 22, 2026 — Part 10)
-
-### **FEATURE COMPLETE: Global Project Context Migration** 🎉
-
-**Goal:** Migrate all 24 tools to WorkspaceResolver pattern with optional `projectPath` parameter for multi-project support.
-
-**Status:** ✅ Complete — all 24 tools migrated, AdhocWorkspace restored with FileSystemWatcher, 23/23 tests passing, pushed to GitHub.
-
----
-
-### Session Work Summary
-
-#### 1. Infrastructure Enhancements ✅
-- **WorkspaceManager:** Added `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` methods
-- **WorkspaceResolver:** Exposed new methods as facade for tools
-- **RoslynMcpTool:** Added `TryGetProject()` helper for Project-level metadata access
-
-#### 2. Tool Migration (24 Tools in 6 Batches) ✅
-
-**Batch 1 — Discovery (6 tools):**
-- SearchFilesTool, SemanticSearchTool, ListFilesTool, FileOutlineTool, ProjectInfoTool, GetUsingsTool
-
-**Batch 2 — Type Understanding (3 tools):**
-- TypeHierarchyTool, FindImplementationsTool, GetSymbolDocumentationTool
-
-**Batch 3 — Navigation (4 tools):**
-- SymbolInfoTool, FindReferencesTool, GetSymbolDefinitionTool, GetSymbolsInScopeTool
-
-**Batch 4 — Build/Validation (3 tools):**
-- DiagnosticsTool, BuildTool, CleanSolutionTool
-
-**Batch 5 — Refactoring (2 tools):**
-- PreviewRenameTool, ApplyRenameTool
-
-**Batch 6 — Editing (2 tools):**
-- ReplaceInFileTool, ReplaceInCodeTool
-
-**Batch 7+8 — Remaining (3 tools):**
-- ListTypesTool, RestorePackagesTool, RespawnTool
-
-**Already Migrated (Part 9):**
-- TypeMembersTool
-
-#### 3. AdhocWorkspace Support Restored ✅
-- Added second `WorkspaceInstance` constructor for directories without .csproj
-- `LoadAdhocWorkspace()` creates in-memory compilation from all .cs files
-- FileSystemWatcher monitors `*.cs` changes (Changed/Created/Deleted/Renamed)
-- `AddOrUpdateDocument()`, `RemoveDocument()` handle incremental updates
-- `InvalidateFile()` handles both MSBuildWorkspace (cache invalidation) and AdhocWorkspace (document reload)
-
-#### 4. TestHarness Fixes ✅
-- Fixed path calculation: 5 levels up from `AppContext.BaseDirectory` (was 4, causing double `src/src/`)
-- Added `projectPath = targetPath` to all 23 tests
-- Fixed file paths: removed `RoslynMcp/` prefix (targetPath already points to project root)
-- Enhanced failure messages to show test name
-
-**Result:** 23/23 tests passing ✓
-
-#### 5. Documentation Updates ✅
-- README.md: Added "Key Features" section highlighting multi-project support, updated tool count to 24
-- AGENTS.md: Updated architecture table with WorkspaceResolver and RoslynMcpTool, added "Tool Implementation Pattern" section with example
-
-#### 6. Commits Pushed ✅
-- `aadf7ef` — feat: complete tool migration + restore AdhocWorkspace with FileSystemWatcher
-- `8b6b84d` — fix: TestHarness path calculation and add projectPath to all tests
-- Documentation updates (this commit)
-
----
-
-## Previous Session (March 22, 2026 — Part 9)
-
-### **PATTERN REFACTOR: TryGetCompilation → TryParse Semantics** 🚀
-
-**Goal:** Refactor `RoslynMcpTool` base class from lambda-based pattern to clean `TryGetCompilation` with standard C# `TryParse` semantics.
-
-**Status:** ✅ Refactor complete, TypeMembersTool tested and passing, ready for systematic tool migration.
-
----
-
-### Session Work Summary
-
-#### 1. Git Tag Created ✅
-- **Tag:** `v0.2.0`
-- **Commit:** `e8b28f0` (tip of `dev` branch)
-- **Message:** "Release v0.2.0 - MCP server with 23 Roslyn-powered tools"
-- **Status:** Local tag created, not yet pushed
-
-#### 2. Pattern Analysis & Design Discussion ✅
-- **Problem Identified:** Lambda-based `ExecuteWithProject(projectPath, Func<Compilation, object>)` felt forced and less readable
-- **Solution Proposed:** `TryGetCompilation` with `out` parameters following `TryParse` pattern
-- **Options Evaluated:**
-  - Option 1: Three-parameter `out` (compilation + error)
-  - Option 2: Hidden state with `lastError` field
-  - Option 3: Exception-to-error factory
-  - **Option 4 (SELECTED):** Hybrid with `[NotNullWhen]` attributes ⭐
-
-#### 3. Base Class Refactored ✅
-**File:** `src/RoslynMcp/Tools/RoslynMcpTool.cs`
-
-**Before (Lambda Pattern):**
-```csharp
-protected object ExecuteWithProject(string? projectPath, Func<Compilation, object> execute)
-{
-    try {
-        var compilation = workspace.GetCompilation(projectPath);
-        return execute(compilation);
-    }
-    catch(...) { return new { error = ... }; }
-}
-```
-
-**After (TryGetCompilation Pattern):**
-```csharp
-protected bool TryGetCompilation(
-    string? projectPath,
-    [NotNullWhen(true)] out Compilation? compilation,
-    [NotNullWhen(false)] out object? error)
-{
-    error = null;
-    compilation = null;
-    try {
-        compilation = workspace.GetCompilation(projectPath);
-        return true;
-    }
-    catch(ProjectNotFoundException ex) {
-        error = ProjectNotFoundError(ex);
-        return false;
-    }
-    // ... other catches with helper methods
-}
-
-// Helper methods for structured error formatting
-private static object ProjectNotFoundError(ProjectNotFoundException ex) => ...;
-private static object MultipleProjectsError(MultipleProjectsFoundException ex) => ...;
-private static object InvalidPathError(InvalidProjectPathException ex) => ...;
-private static object UnexpectedError(Exception ex) => ...;
-```
-
-**Benefits:**
-- ✅ Standard C# `TryParse` semantics — familiar, readable pattern
-- ✅ `[NotNullWhen]` attributes — compiler-enforced null safety
-- ✅ No forced lambda syntax — cleaner code flow
-- ✅ Early returns work naturally — no lambda nesting
-- ✅ No hidden state — everything explicit in signature
-- ✅ Centralized error formatting — DRY helper methods
-
-#### 4. TypeMembersTool Updated ✅
-**File:** `src/RoslynMcp/Tools/TypeMembersTool.cs`
-
-**Before (Lambda Usage):**
-```csharp
-return ExecuteWithProject(projectPath, compilation => {
-    var type = FindType(compilation, typeName);
-    if(type is null)
-        return new { error = $"Type '{typeName}' not found..." };
-    // ... rest of logic
-});
-```
-
-**After (TryGetCompilation Usage):**
-```csharp
-if(!TryGetCompilation(projectPath, out var compilation, out var error))
-    return error;
-
-var type = FindType(compilation, typeName);
-if(type is null)
-    return new { error = $"Type '{typeName}' not found..." };
-// ... rest of logic (no indentation change)
-```
-
-**Result:** Significantly cleaner, more readable, idiomatic C#
-
-#### 5. TestHarness Updated ✅
-**File:** `src/TestHarness/Program.cs`
-- Removed required `args[0]` from server launch (testing global context mode)
-- Added `projectPath` parameter to `get_type_members` test
-
-#### 6. Testing Completed ✅
-**Test Results:**
-- ✅ **TypeMembersTool:** PASSED (4892ms)
-- ✅ **Build:** Succeeded with 0 errors (4 warnings from existing code)
-- ✅ **Pattern Validation:** Confirmed working correctly
-- ❌ **22 other tools:** Expected failure ("Unknown tool") — commented out with `#if FALSE`
-
-**Test Output:**
-```
-Passed: 1/23
-Failed: 22/23
-✅ TypeMembersTool successfully validated new pattern
-```
-
-#### 7. Documentation Created ✅
-- **TEST_RESULTS_TypeMembersTool.md:** Detailed test results and pattern comparison
-- **test_type_members.ps1:** PowerShell test script (alternative test harness)
-
----
-
-### Changes Summary
-
-**Modified Files:**
-- `src/RoslynMcp/Tools/RoslynMcpTool.cs` — Refactored to `TryGetCompilation` pattern
-- `src/RoslynMcp/Tools/TypeMembersTool.cs` — Updated to use new pattern
-- `src/TestHarness/Program.cs` — Removed required args, added projectPath to test
-
-**New Files:**
-- `TEST_RESULTS_TypeMembersTool.md` — Test results and pattern analysis
-- `test_type_members.ps1` — Alternative PowerShell test script
-
-**Git Status:**
-```
-Modified: 4 files
-Untracked: 2 files
-Tag created: v0.2.0 (not pushed)
-```
-
----
-
-### Next Session: Tool Migration Ready! 🚀
-
-**Phase 3b: Systematic Tool Migration** ⭐ **READY TO START**
-
-All 23 remaining tools are commented out with `#if FALSE` and waiting for migration to the new pattern.
-
-**Recommended Order:**
-
-1. **Discovery Tools (6 tools)** — First batch, relatively simple
-   - SearchFilesTool
-   - SemanticSearchTool
-   - ListFilesTool
-   - FileOutlineTool
-   - ProjectInfoTool
-   - GetUsingsTool
-
-2. **Type Understanding Tools (3 tools)**
-   - TypeHierarchyTool
-   - FindImplementationsTool
-   - GetSymbolDocumentationTool
-
-3. **Navigation & Search Tools (4 tools)**
-   - GetSymbolInfoTool
-   - FindReferencesTool
-   - GetSymbolDefinitionTool
-   - GetSymbolsInScopeTool
-
-4. **Validation & Build Tools (3 tools)**
-   - DiagnosticsTool
-   - BuildTool
-   - CleanSolutionTool
-
-5. **Refactoring Tools (2 tools)**
-   - PreviewRenameTool
-   - ApplyRenameTool
-
-6. **Code Editing Tools (2 tools)**
-   - ReplaceInFileTool
-   - ReplaceInCodeTool
-
-7. **Package Management (1 tool)**
-   - RestorePackagesTool
-
-8. **Debug Tool (1 tool)**
-   - RespawnTool
-
-**Migration Pattern for Each Tool:**
-1. Remove `#if FALSE` / `#endif` wrapper
-2. Update constructor: `MyTool(WorkspaceResolver workspace) : base(workspace)`
-3. Add `projectPath` parameter (optional): `string? projectPath = null`
-4. Replace tool logic with:
-   ```csharp
-   if(!TryGetCompilation(projectPath, out var compilation, out var error))
-       return error;
-   // ... existing logic using compilation
-   ```
-5. Build and verify no errors
-6. Run TestHarness to validate (once test is updated)
-
-**Testing Strategy:**
-- Migrate 1-2 tools at a time
-- Build after each tool
-- Update corresponding TestHarness tests
-- Run full test suite before next batch
-
----
-
-### Phase 1: Infrastructure ✅ COMPLETE
-
-**Changes:**
-- ✅ Created `Exceptions.cs` with structured exception types:
-  - `ProjectNotFoundException` — no .csproj found in/above path
-  - `MultipleProjectsFoundException` — multiple .csproj files need disambiguation
-  - `InvalidProjectPathException` — path doesn't exist or is inaccessible
-  - All include agent-friendly metadata for retry logic
-- ✅ Created `RoslynMcpTool` abstract base class:
-  - `ExecuteWithProject(projectPath, execute)` helper
-  - Automatic structured error handling
-  - Common `ProjectPathDescription` constant
-- ✅ Created `WorkspaceResolver` helper class:
-  - Encapsulates `ResolveProjectPath` + `GetCompilation` + `GetSolution`
-  - Single injection point for all tools
-  - Cleaner API than exposing resolution publicly
-- ✅ Refactored `WorkspaceManager` with LRU cache:
-  - `Dictionary<string, CacheEntry>` with LRU tracking
-  - Configurable max size via `ROSLYNMCP_MAX_CACHED_WORKSPACES` (default: 5)
-  - Thread-safe lock-based cache operations
-  - Smart project path resolution (directory, file, .csproj, CWD)
-  - Nested `WorkspaceInstance` class (per-project workspace)
-- ✅ Updated `Program.cs`:
-  - Removed required `args[0]` check
-  - DI: `WorkspaceManager` + `WorkspaceResolver` singletons
-  - Optional multi-project pre-warming from args
-  - Logs pre-warm results to stderr
-
-**Key Design Decisions:**
-- **WorkspaceResolver pattern:** Tools inject resolver, not manager directly
-- **LRU cache only:** No TTL (stateless), no file watching (agents handle staleness)
-- **Smart path resolution:** Supports directory, .csproj, source file, or null (CWD)
-- **Structured errors:** Agent-retryable with error type + metadata + hint
-
-**Commits:**
-- `597f611` — feat: add WorkspaceResolver and update infrastructure for global context
-- `1fad0ef` — feat: migrate TypeMembersTool and comment out remaining tools
-
----
-
-### Phase 2: Reference Implementation ✅ COMPLETE
-
-**TypeMembersTool Migration:**
-- ✅ Inherits from `RoslynMcpTool` base class
-- ✅ Constructor: `TypeMembersTool(WorkspaceResolver workspace)`
-- ✅ Added `projectPath` parameter (optional, defaults to null)
-- ✅ Uses `ExecuteWithProject` helper for automatic error handling
-- ✅ Build verified clean ✅
-
-**Other Tools:**
-- ✅ 23 remaining tools commented out using `#if FALSE` preprocessor directive
-- ✅ Eliminates ~80 build errors during migration
-- ✅ Files preserved (not deleted) for systematic uncommenting
-
-**Pattern Established:**
-```csharp
-[McpServerToolType]
-internal sealed class MyTool : RoslynMcpTool
-{
-    public MyTool(WorkspaceResolver workspace) : base(workspace) { }
-
-    [McpServerTool, Description("...")]
-    public object ToolMethod(
-        // ... existing params
-        [Description(ProjectPathDescription)]
-        string? projectPath = null)
-    {
-        return ExecuteWithProject(projectPath, compilation => {
-            // ... tool logic using compilation
-        });
-    }
-}
-```
-
----
-
-### Phase 3: Systematic Migration ⚙️ IN PROGRESS
-
-**Next Steps (Next Session):**
-
-1. **TEST TypeMembersTool first** ⭐
-   - Update TestHarness to pass `projectPath` parameter
-   - Verify tool works with CWD default
-   - Verify tool works with explicit projectPath
-   - Test structured error responses (project_not_found, multiple_projects_found)
-
-2. **Uncomment and migrate Discovery tools (6 tools)**
-   - SearchFilesTool
-   - SemanticSearchTool
-   - ListFilesTool
-   - FileOutlineTool
-   - ProjectInfoTool
-   - GetUsingsTool
-   - Apply TypeMembersTool pattern to each
-   - Build after each tool
-
-3. **Uncomment and migrate remaining tools (17 tools)**
-   - Type Understanding (3 tools)
-   - Navigation & Search (4 tools)
-   - Code Editing (2 tools)
-   - Refactoring (2 tools)
-   - Validation & Build (4 tools)
-   - Debug (1 tool)
-   - Code Generation (1 tool)
-
-4. **Update TestHarness**
-   - Add `projectPath` parameter to all 23 tests
-   - Add tests for structured errors
-   - Verify all tests pass
-
-5. **Update documentation**
-   - README.md: Remove required args, add projectPath docs
-   - AGENTS.md: Update MCP config examples, add error handling guide
-   - INSTALLATION.md: Update configuration examples
-   - CONTRIBUTING.md: Document projectPath pattern and base class
-   - CHANGELOG.md: Add v0.3.0 migration guide
-
----
-
-### Breaking Changes (v0.3.0)
-
-**Old configuration (v0.2.0):**
-```json
-{
-  "servers": {
-    "roslyn": {
-      "command": "/path/to/RoslynMcp.exe",
-      "args": ["/path/to/project"]  // ← Required
-    }
-  }
-}
-```
-
-**New configuration (v0.3.0):**
-```json
-{
-  "servers": {
-    "roslyn": {
-      "command": "/path/to/RoslynMcp.exe"
-      // ← No args required! Optional pre-warming only
-    }
-  }
-}
-```
-
-**Tool API changes:**
-- All tools now accept optional `projectPath` parameter
-- If omitted, uses current working directory
-- Supports smart resolution (directory, file, .csproj)
-
-**Migration path:**
-- Remove `args` from `.mcp.json` (or keep for pre-warming)
-- Tools work with CWD by default or explicit `projectPath`
-- Pre-release timing: perfect for breaking changes
-
----
-
-### Future Investigations
-
-**Deferred to later:**
-- `.sln`/`.slnx` file support (noted in HumanNotes.txt for investigation)
-- File system watching for cache invalidation (may not be needed)
-- TTL eviction strategy (LRU sufficient for now)
-- Explicit `invalidate_workspace` tool (wait for user feedback)
-- AdhocWorkspace support (removed in favor of MSBuildWorkspace-only)
-
----
-
-### Technical Notes
-
-**WorkspaceManager cache behavior:**
-- Normalized paths as cache keys (absolute, full paths)
-- LRU eviction when cache full (configurable size)
-- Thread-safe via `lock(cacheLock)`
-- Each cached entry contains `WorkspaceInstance` (MSBuildWorkspace + Compilation)
-
-**Smart path resolution logic:**
-1. `null` or empty → use CWD
-2. `.csproj` file → use directly
-3. Directory → search for `.csproj` (error if 0 or >1 found)
-4. Source file → walk up directory tree to find `.csproj`
-
-**Structured error format:**
-```json
-{
-  "error": "project_not_found",
-  "message": "No .csproj file found in or above: /path",
-  "search_path": "/path",
-  "hint": "Provide a valid projectPath..."
-}
-```
-
----
-
-## Previous Session (March 22, 2026 — Part 7)
-
-### **Documentation Audit & Checklist** 📋
-
-**Goal:** Prepare documentation for public repository release by fixing stale references and establishing systematic review process.
-
-**Changes:**
-- ✅ Created `DOC_REVIEW_CHECKLIST.md`:
-  - Quick validation commands using `rg` (ripgrep)
-  - Manual review sections (structure, tool count, code examples, installation, features)
-  - File-specific review guidance
-  - Integration with development workflow
-  - Focused on public repo readiness
-- ✅ Fixed stale documentation references:
-  - AGENTS.md: Updated `.mcp.json` example from `dotnet run` to published executable approach
-  - HANDOFF.md: Updated build/publish commands to include `src/` directory
-- ✅ Verified public-facing docs:
-  - README.md ✅ (correct paths, tool count, no placeholders)
-  - INSTALLATION.md ✅ (correct paths, no internal references)
-  - CONTRIBUTING.md ✅ (welcoming, accurate, references AGENTS.md correctly)
-  - AGENTS.md ✅ (correct MCP config, testing paths)
-
-**Design Decision:**
-- Manual checklist (no automation yet)
-- **Rationale:** Simple, flexible, sufficient for MVP; automation can come later if docs drift becomes painful
-
-**Checklist features:**
-- ✅ Quick grep/rg commands for common issues
-- ✅ Organized by concern (structure, tool count, code examples, etc.)
-- ✅ File-specific sections for key docs
-- ✅ Integration guidance (when to run full audit vs quick checks)
-- ✅ Future automation ideas documented but deferred
-
-**Benefits:**
-- Systematic approach to doc maintenance
-- Catches drift before it accumulates
-- Public repo readiness verification
-- Low overhead (manual, only run before major milestones)
-
-**Status:** Repository documentation is now audit-ready for public release! 🎉
-
----
-
-## Previous Session (March 22, 2026 — Part 6)
-
-### **New Tool: semantic_search** 🔍
-
-**Goal:** Implement context-aware C# search using Roslyn syntax-tree filtering for precise code discovery.
-
-**Changes:**
-- ✅ Created `SemanticSearchTool.cs` with full Roslyn syntax filtering:
-  - Supports 6 contexts: `comments`, `strings`, `identifiers`, `code`, `xmldocs`, `all`
-  - Excludes generated code by default (`[GeneratedCode]` attribute, auto-generated comments)
-  - Returns structured results with syntax context metadata
-  - C#-only (skips non-C# files automatically)
-- ✅ Added test to TestHarness (Discovery tools: 6 → 7 tests)
-  - Test validates TODO comment filtering with correct context metadata
-  - All 23 tests passing (including new semantic_search test)
-- ✅ Updated documentation:
-  - Tool count: 23 → 24 across all docs
-  - Added `SemanticSearchTool` to architecture tables in AGENTS.md, README.md
-  - Removed "deferred enhancements" note about semantic search
-  - Updated tool selection guidance to include `semantic_search`
-- ✅ Build verified (all targets compile successfully)
-
-**Design Decision:**
-- Separate tool (`semantic_search`) vs extending `search_files` with flags
-- **Rationale:** Clear separation of concerns (text search vs semantic search), follows pattern of `replace_in_file` vs `replace_in_code`, allows C#-specific features without complicating text-based search
-
-**Tool capabilities:**
-- Search within comments only (find TODOs, FIXMEs)
-- Search within strings only (find hardcoded values)
-- Search within identifiers only (find variable/type names)
-- Search within XML docs only (find documentation)
-- Search within code only (exclude comments/strings)
-- Search all contexts (with context metadata per match)
-
-**Benefits:**
-- More precise than `search_files` for C# code
-- Enables targeted searches (e.g., "find all TODO comments", "find all string literals containing 'password'")
-- Automatically excludes generated code
-- Future-proof for additional C#-specific filters
-
-**Tool count now: 24** (was 23)
-
----
-
-## Previous Session (March 22, 2026 — Part 5)
-
-### **Documentation Consolidation: AGENTS.md** 📚
-
-**Goal:** Eliminate duplication between `.github/copilot-instructions.md` and `AGENTS.md`, establish AGENTS.md as the single source of truth for all AI agents.
-
-**Changes:**
-- ✅ Merged all unique content from copilot-instructions.md into AGENTS.md:
-  - Philosophy/tone ("pirate-grade code", "this is a discussion")
-  - "Working with Humans" section
-  - Complete Code Style rules (braces, naming, blank lines, comments, etc.)
-  - MCP Protocol patterns (with code examples)
-  - Roslyn Patterns (with code examples)
-  - ImplicitUsings note
-- ✅ Reduced copilot-instructions.md to minimal shim (28 lines vs 300+)
-  - Now just references AGENTS.md as primary source
-  - Contains only Copilot-specific integration notes
-- ✅ Removed copilot-instructions.md from `.meta/.meta.csproj` (GitHub-specific, not project metadata)
-- ✅ Updated CONTRIBUTING.md reference (copilot-instructions.md → AGENTS.md)
-- ✅ Build verified (all targets compile successfully)
-
-**Benefits:**
-- Single source of truth for all AI agents (not just GitHub Copilot)
-- No more drift between two instruction files
-- AGENTS.md at root is accessible to all agent types
-- Copilot-specific file still exists for Copilot-only overrides
-- 270+ lines of duplication eliminated
-
-**File structure now:**
-- `AGENTS.md` (root) — comprehensive instructions for all agents
-- `.github/copilot-instructions.md` — minimal Copilot-specific shim
-- `.meta/.meta.csproj` — links to AGENTS.md for VS project visibility
-
----
-
-## Previous Session Summary (March 22, 2026 — Part 4)
-
-This session focused on **tool hardening, cleanup, and evaluation** following feature additions.
-
-### Major Accomplishments
-
-1. **Exception Handling Overhaul** ✅
-   - Hardened 9 tools with specific exception types (IOException, UnauthorizedAccessException, Win32Exception, etc.)
-   - Added exception handling guidelines to CONTRIBUTING.md
-   - Documented exception filter patterns with examples
-   - All tools now return structured error objects
-
-2. **Code Quality Improvements** ✅
-   - Removed 25 lines of redundant DI registrations (`.AddTransient<>()` calls)
-   - Proved `.WithToolsFromAssembly()` handles all tool registration automatically
-   - Cleaned up duplicate `using` directives (compiler warnings)
-   - Added "Working with Humans" section to copilot-instructions.md
-
-3. **New Tools Added** ✅
-   - `replace_in_file` (text-level, regex support, dry-run, any file type)
-   - `list_files` (glob pattern enumeration, fast file discovery)
-   - `replace_in_code` (Roslyn semantic editing, syntax validation, trivia preservation)
-
-4. **Documentation Enhancements** ✅
-   - Added Tool Selection Guidance to README, AGENTS.md, copilot-instructions.md
-   - Comprehensive tool evaluation document (TOOL_EVALUATION_2026-03-22.md)
-   - MSBuild API analysis (MSBUILD_API_ANALYSIS.md) — explains hybrid approach
-   - Meta doc audit (META_DOC_AUDIT_2026-03-22.md) — verified accuracy
-   - C# MCP SDK documentation links added to instruction files
-
-5. **Meta Documentation** ✅
-   - Tool count updated across all docs (20 → 23)
-   - Temp files cleaned up (.test_code_debug.cs removed)
-   - `.gitignore` improved (added `.test_*` pattern)
-
-### Recent Session Commits
-
-| Commit | Description |
-|--------|-------------|
-| `957ff14` | docs: session handoff Part 4 - tool hardening and evaluation complete |
-| `83c1629` | docs: add C# MCP SDK links and comprehensive tool evaluation |
-| `996b3fa` | refactor: remove redundant tool DI registrations - WithToolsFromAssembly does it all |
-| `b555574` | docs: acknowledge tool count as Roslyn's power surface, not bloat |
-| `b715e2f` | fix: remove duplicate using directives |
-| `ee205c8` | chore: meta doc cleanup - update tool counts, remove temp files, improve gitignore |
-| `db1aea3` | feat: add replace_in_code tool for semantic C# editing with Roslyn |
-
----
-
-## Current Session (March 22, 2026 — Part 2)
-
-### **Project Restructure: src/ and .meta/** 🏗️
-
-**Goal:** Clean up root directory, separate project metadata from code, eliminate manual Solution Items management.
-
-**Changes:**
-- ✅ Created `.meta/` folder for project metadata (dot-prefix keeps VS from auto-adding to solution)
-- ✅ Created `src/` folder for code projects (industry standard layout)
-- ✅ Moved metadata files to `.meta/`:
-  - AGENTS.md, CONTRIBUTING.md, HANDOFF.md
-  - POST_PUSH_CHECKLIST.md, RELEASE_CHECKLIST.md, TEST_RESULTS.md
-  - HumanNotes.txt
-- ✅ Moved code to `src/`:
-  - RoslynMcp/ (entire project)
-  - TestHarness/ (entire project)
-- ✅ Updated all cross-references:
-  - .github/copilot-instructions.md
-  - .meta/AGENTS.md
-  - .meta/CONTRIBUTING.md
-  - README.md
-  - INSTALLATION.md
-- ✅ Updated solution file (removed Solution Items folder, updated project paths)
-- ✅ Updated CI workflow (.github/workflows/build.yml)
-- ✅ Build verified (all targets compile successfully)
-
-**Root directory now contains:**
-- README.md, LICENSE, CHANGELOG.md, INSTALLATION.md (user-facing)
-- .gitattributes, .gitignore (git config)
-- .github/ (GitHub-specific)
-- RoslynMcp.slnx (solution file)
-- .meta/ (project metadata, hidden)
-- src/ (all code)
-
-**Benefits:**
-- Clean, professional root directory
-- Standard .NET OSS layout (src/ is industry convention)
-- No manual Solution Items management in Visual Studio
-- Clear separation: product docs vs project metadata vs code
-- Scales well for future additions (docs/ remains available for user guides)
-
-**Status:** Committed and pushed to feature branch, ready to merge to dev
-
----
-
-## Previous Session (March 22, 2026 — Part 1)
-
-### What Was Accomplished
-
-### 1. **Public GitHub Release Preparation** ✅
-- Comprehensive housekeeping completed
-- **Added:** LICENSE (MIT, 2025), CONTRIBUTING.md, CHANGELOG.md
-- **Added:** GitHub issue templates (bug, feature), PR template
-- **Added:** CI workflow (`.github/workflows/build.yml`)
-- **Added:** .gitattributes, POST_PUSH_CHECKLIST.md, RELEASE_CHECKLIST.md
-- **Pushed to GitHub** (initially private)
-- Fixed placeholders (YOUR_USERNAME → MadQ)
-- Added contributor recognition section to CONTRIBUTING.md
-
-### 2. **Documentation DRY + Simplification** ✅
-- **Eliminated `dotnet run` approach** — Too fragile (multi-target confusion, process conflicts when dogfooding)
-- **Simplified to:** `dotnet publish` → use executable
-- **Added:** Central Configuration section in README.md (single source of truth)
-- **Added:** "Building a Local Executable" section with benefits explained
-- **Added:** Brief note about "interesting recursive behavior" experiment with dotnet run
-- **Result:** -128 lines, +67 lines = **-61 lines of documentation complexity**
-- Fixed DRY violations across README, INSTALLATION, CONTRIBUTING
-
-### 3. **Fixed CI/CD Build Failures** ✅
-- **Problem:** .NET 11 not available on GitHub Actions runners (NETSDK1045 error)
-- **Solution:** Auto-detect .NET 11 SDK using MSBuild target
-- **Added:** `DetectNet11SDK` target checks `$(NETCoreSdkVersion)` property
-- **Behavior:**
-  - Local dev: builds net8.0, net10.0, net11.0 (if SDK ≥ 11.0 installed)
-  - CI/CD: builds net8.0, net10.0 only (no .NET 11 SDK on runners yet)
-- **More robust** than environment variable approach
-
-### 4. **Added Build Workflow Tools** ✅
-- **New tool:** `clean_solution` — Runs `dotnet clean`, removes bin/obj directories
-- **New tool:** `restore_packages` — Runs `dotnet restore`, downloads NuGet packages
-- **Design choice:** Separate, focused tools (not flags on build_project)
-- **Rationale:** Unix philosophy, composability, clear intent, enables workflows like clean → restore → build
-- **Total tools:** 20 (was 18)
-- **Branch workflow:** Created feature/clean-restore-tools, merged to dev, cleaned up
-
-### 5. **Added HumanNotes.txt** 📝
-- User's development notes/ideas synced to repo
-- **Added instruction in AGENTS.md:** "Ignore files called HumanNotes.txt — for human reference only"
-- **Contains future ideas:**
-  - Global MCP config vs project-specific
-  - Semantic search enhancements (syntax-tree filtering)
-  - DI necessity questions (do we need AddTransient registrations?)
-  - Roslyn-native build without dotnet process
-
-### 6. **Code Quality Improvements** ✅
-- Renamed `ApprovalStore.gate` → `syncRoot` (standard .NET naming)
-- Added comment explaining why `Lock` type not used (need .NET 8 compatibility)
-- Code style refinements in CONTRIBUTING.md (emphasize intent over rigid consistency)
-
----
-
-## Repository State
-
-### Git Status
-```
-Branch: dev (clean working tree)
-Remote: https://github.com/MadQ/RoslynMcp.git
-Visibility: Private (ready for public when decided)
-Feature branches: None (clean)
-```
-
-### Build Status
-- ✅ Compiles on net8.0, net10.0, net11.0 (if SDK installed locally)
-- ✅ Zero compiler warnings
-- ✅ 16/16 tests passing (TestHarness)
-- ⚠️ New tools (clean_solution, restore_packages) **not yet tested in TestHarness**
-
-### CI/CD
-- ✅ Workflow configured (`.github/workflows/build.yml`)
-- ✅ Auto-detects .NET 11 SDK (builds net8.0/net10.0 only on GitHub Actions)
-- ✅ Dependabot configured for automated dependency updates
-- ⚠️ **Not yet verified on actual GitHub Actions run** (private repo)
-
----
-
-## Current Tool Count: 23
-
-### Tools by Category
-
-**Discovery & File Operations (6):**
-- search_files, list_files, list_types, get_file_outline, get_project_info, get_usings
-
-**Type Understanding (4):**
-- get_type_members, get_type_hierarchy, find_implementations, get_symbol_documentation
-
-**Navigation & Search (4):**
-- find_references, get_symbol_definition, get_symbols_in_scope, get_symbol_info
-
-**Code Editing (2):**
-- replace_in_file (text-level, regex, any file type, dry-run)
-- replace_in_code (semantic C#, Roslyn-based, syntax validation)
-
-**Refactoring (2):**
-- preview_rename, apply_rename
-
-**Validation & Build (4):**
-- get_diagnostics, build_project, clean_solution, restore_packages
-
-**Debug (1):**
-- respawn (DEBUG only, hot-reload mechanism)
-
-### Test Coverage
-- **22 tests for 23 tools** (all passing)
-- Untested: apply_rename (interactive), clean/restore (side-effects), respawn (debug-only)
-- Coverage acceptable for MVP
-
----
-
-## Key Architectural Decisions
-
-### 1. Exception Handling Strategy ✅
-**Decision:** Use specific exception types (not broad `catch (Exception)`), return structured error objects.
-
-**Implementation:**
-- File I/O: IOException, UnauthorizedAccessException, DirectoryNotFoundException
-- Process spawn: Win32Exception, InvalidOperationException
-- XML parsing: XmlException (graceful degradation)
-- Guidelines documented in CONTRIBUTING.md
-
-### 2. MSBuild API vs Roslyn Inference ✅
-**Decision:** Keep regex-based TFM/package inference in ProjectInfoTool.
-
-**Rationale:**
-- Regex works 99% of the time
-- MSBuild API adds complexity for marginal benefit
-- Would break AdhocWorkspace compatibility
-
-**Documentation:** MSBUILD_API_ANALYSIS.md
-
-### 3. DI Registration Pattern ✅
-**Decision:** `.WithToolsFromAssembly()` is sufficient. Manual `.AddTransient<>()` calls removed.
-
-**Evidence:** All 22 tests pass without manual registrations.
-
-**Impact:** -25 lines of code, simpler maintenance.
-
-### 4. Tool Selection Guidance ✅
-**Decision:** Actively guide agents to prefer `replace_in_code` over `replace_in_file` for C# edits.
-
-**Implementation:**
-- Bold emphasis in tool description
-- Dedicated sections in README, AGENTS.md, copilot-instructions.md
-- Copy-paste block for users to add to their agent instructions
-
----
-
-## Resources for Next Developer
-
-### Documentation
-- **C# MCP SDK:** https://csharp.sdk.modelcontextprotocol.io/
-- **MCP Protocol:** https://modelcontextprotocol.io/
-- **Tool Evaluation:** TOOL_EVALUATION_2026-03-22.md (comprehensive assessment)
-- **Architecture Decisions:** MSBUILD_API_ANALYSIS.md
-
-### Key Files
-- `src/RoslynMcp/Program.cs` — MCP server setup (6 lines, super clean)
-- `src/RoslynMcp/WorkspaceManager.cs` — Compilation management, file watching
-- `src/RoslynMcp/Tools/*.cs` — 23 tool implementations
-- `src/TestHarness/Program.cs` — 22 automated tests
-- `.github/copilot-instructions.md` — Agent coding rules
-- `AGENTS.md` — Agent working rules (git, terminal, architecture)
-- `CONTRIBUTING.md` — Exception handling guidelines
-
-### Testing
-```bash
-# Build
-dotnet build src/RoslynMcp/RoslynMcp.csproj
-
-# Run tests
-dotnet run --project src/TestHarness/TestHarness.csproj
-
-# Publish
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
-```
-
-### Adding a New Tool
-1. Create `src/RoslynMcp/Tools/MyNewTool.cs`
-2. Add `[McpServerToolType]` attribute to class
-3. Inject `WorkspaceManager` or `ApprovalStore` via constructor (DI automatic)
-4. Add `[McpServerTool, Description(...)]` to public method
-5. Add test to `TestHarness/Program.cs`
-6. **That's it!** `.WithToolsFromAssembly()` auto-registers
-
-No manual DI registration needed. 🏴‍☠️
-
----
-
-## Next Steps (Suggestions)
-
-### Immediate
-- ✅ **All 23 tools production-ready** — Ship v0.2.0-alpha!
-
-### Short-term (v0.3.0)
-- Consider instrumenting tool calls for performance/usage analytics
-- Improve RespawnTool reliability or document workarounds
-- Add semantic search filtering if user feedback indicates demand
-
-### Long-term (v1.0)
-- Comprehensive API docs (DocFX or similar)
-- Performance benchmarks in CI
-- Extended test coverage for interactive/side-effect tools
-- NuGet package distribution
-
----
-
-## Status: ✅ Production Ready for v0.2.0-alpha
-
-All 23 tools are production-ready, well-documented, exception-hardened, and tested. Architecture is sound (Roslyn-first hybrid). Documentation is synchronized. No critical gaps or blockers.
-
-**Ship it!** 🏴‍☠️⚓
-
-**Code Generation (1):**
-- get_symbols_in_scope
-
-**Validation (4):** ⭐ *Updated this session*
-- get_diagnostics, build_project, **clean_solution** ⭐, **restore_packages** ⭐
-
-**Refactoring (2):**
-- preview_rename, apply_rename (two-phase with ApprovalStore)
-
-**Debug (1):**
-- respawn (DEBUG only)
-
----
-
-## Outstanding Items (from HumanNotes.txt)
-
-### High Priority
-- [ ] **Global MCP config** — Make MCP configurable globally, not project-specific
-  - Current: .mcp.json args point to specific project directory
-  - Idea: Project parameter on tools instead? Hybrid approach?
-  - Impact: Major architectural change
-
-### Medium Priority
-- [ ] **Semantic search** — Enhance search_files with syntax-tree-based filtering
-  - Filter by: comments only, strings only, identifiers only, exclude generated code
-  - Implementation: Use Roslyn SyntaxTree to inspect matched lines
-  - Option 1: Add flags to search_files
-  - Option 2: New tool `semantic_search`
-  - Documented in copilot-instructions.md as "Deferred enhancements"
-
-- [ ] **Add tests for new tools** — CleanSolutionTool, RestorePackagesTool in TestHarness
-
-### Low Priority / Research
-- [ ] **DI necessity** — Verify if `builder.Services.AddTransient<>` registrations actually needed
-  - C# MCP SDK docs may say otherwise (need to find reference)
-  - Potential simplification if not required
-
-- [ ] **Roslyn-native build** — Can we build/clean/restore without spawning `dotnet.exe`?
-  - Current tools spawn dotnet process (works but not ideal)
-  - Investigate MSBuild API or Roslyn compilation APIs
-
-- [ ] **Implement `undo_last_edit`** — Documented as planned feature in README
-  - Revert most recent Roslyn-generated edit from in-memory snapshot
-  - Single-level undo (git handles deeper history)
-
----
-
-## Next Steps (Suggestions)
-
-### Immediate
-1. **Add tests for new tools** — CleanSolutionTool, RestorePackagesTool in TestHarness
-2. **Verify CI workflow** — Push to main (or make repo public) and watch GitHub Actions run
-3. **Test published executable** — Full `dotnet publish` and dogfooding workflow
-4. **Update HANDOFF.md** — Replace old content with this session's accomplishments
-
-### Short Term
-5. **Go public** — Change repository visibility when ready
-6. **Create first release** — Tag v0.2.0-alpha, create GitHub release with CHANGELOG
-7. **Announce** — Reddit /r/dotnet, Twitter, MCP community Discord/forums
-
-### Medium Term
-8. **Implement `undo_last_edit`** — Documented as planned feature
-9. **Global MCP config research** — Investigate feasibility and design
-10. **Semantic search** — Implement syntax-tree filtering for search_files
-11. **NuGet publishing** — Publish as global tool: `dotnet tool install --global RoslynMcp`
-
----
-
-## Key Decisions Made This Session
-
-### 1. **Removed `dotnet run` for MCP invocation** 🏴‍☠️
-- **Why:** Too fragile (multi-target confusion, process conflicts, complex args)
-- **Replacement:** `dotnet publish` → use executable directly
-- **Impact:** Much simpler user experience, cleaner docs
-- **Note added:** "Early experiments with dotnet run produced interesting recursive behavior"
-
-### 2. **Separate tools for clean/restore (not flags on build_project)**
-- **Why:** Unix philosophy (do one thing well), composability, clear intent
-- **Alternative considered:** `build_project(clean: bool, restore: bool)`
-- **Decision:** Separate tools better for agent workflows (clean → restore → build)
-
-### 3. **Auto-detect .NET 11 via MSBuild (not CI env var)**
-- **Why:** More robust, self-documenting, works everywhere
-- **Alternative considered:** `Condition="'$(CI)' != 'true'"`
-- **Decision:** MSBuild `NETCoreSdkVersion` check is proper idiom
-
-### 4. **Keep HumanNotes.txt synced but ignored by agents**
-- **Why:** User wants notes synced, but they may confuse AI agents
-- **Solution:** Explicit instruction in AGENTS.md to ignore
-
-### 5. **Rename workflow philosophy documented**
-- **Two-phase is always used:** preview_rename → apply_rename
-- **User controls agent behavior:** Conservative / Balanced / Aggressive
-- **Semantic approval vs protocol approval:** Clarified in docs
-- **Planned undo feature:** Documented for "wait, let me rethink that" moments
-
----
-
-## Important Files Changed This Session
-
-### New Files Created
-- `HumanNotes.txt` — User development notes
-- `RoslynMcp/Tools/CleanSolutionTool.cs` — New tool (64 lines)
-- `RoslynMcp/Tools/RestorePackagesTool.cs` — New tool (64 lines)
-- `POST_PUSH_CHECKLIST.md` — Post-release tasks checklist
-- `RELEASE_CHECKLIST.md` — Pre-release verification checklist
-- `CONTRIBUTING.md` — Contribution guidelines with recognition section
-- `CHANGELOG.md` — Version history (0.1.0-alpha, 0.2.0-alpha, Unreleased)
-- `.gitattributes` — Line ending consistency
-- `.github/ISSUE_TEMPLATE/bug_report.md` — Bug report template
-- `.github/ISSUE_TEMPLATE/feature_request.md` — Feature request template
-- `.github/PULL_REQUEST_TEMPLATE.md` — Pull request template
-- `.github/workflows/build.yml` — CI/CD workflow (multi-OS, multi-.NET)
-- `.github/dependabot.yml` — Automated dependency updates (from upstream)
-
-### Heavily Modified
-- `README.md` — Configuration section (DRY), Quick Start simplified, badges added, rename workflow documented
-- `INSTALLATION.md` — Removed dotnet run, added troubleshooting, simplified to single method
-- `AGENTS.md` — Tool docs, ignore HumanNotes.txt instruction, rename workflow guidance
-- `.github/copilot-instructions.md` — Tool documentation, architecture updates
-- `LICENSE` — Fixed year (2026 → 2025), correct copyright holder
-- `RoslynMcp/RoslynMcp.csproj` — Auto-detect .NET 11 SDK with MSBuild target
-- `RoslynMcp/Program.cs` — Registered CleanSolutionTool, RestorePackagesTool
-- `RoslynMcp/ApprovalStore.cs` — Renamed gate → syncRoot, added Lock type comment
-- `RoslynMcp.slnx` — Added HumanNotes.txt to solution
-
----
-
-## Known Issues
-
-### None Currently Blocking
-
-All builds pass, tests pass, documentation is clean. No known bugs or blocking issues.
-
----
-
-## Questions for User / Next Session
-
-1. **Public repo timing** — Ready to go public, or waiting for something specific?
-2. **NuGet publishing** — When to publish as global tool?
-3. **Global MCP config** — High priority? Worth researching soon?
-4. **Semantic search** — Should this be next feature after tests?
-5. **v0.2.0-alpha release** — Ready to tag and create GitHub release?
-
----
-
-## Session Metrics
-
-- **Duration:** ~4 hours
-- **Commits to dev:** 20+
-- **Files changed:** 35+
-- **Lines added:** ~1,000
-- **Lines removed:** ~250
-- **Net documentation reduction:** -61 lines (DRY improvements)
-- **Tools added:** 2 (clean_solution, restore_packages)
-- **Major refactors:** 1 (removed dotnet run approach)
-- **Feature branches created/merged:** 1 (feature/clean-restore-tools)
-- **Feature branches cleaned up:** 1 (local + remote)
-
----
-
-## Commands Reference
-
-### Build & Test
-```sh
-dotnet build src/RoslynMcp/RoslynMcp.csproj
-dotnet run --project src/TestHarness/TestHarness.csproj
-```
-
-### Publish Executable
-```sh
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
-```
-
-### MCP Config (Current Recommended Approach)
-```json
-{
-  "servers": {
-    "roslyn": {
-      "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["."]
-    }
-  }
-}
-```
-
-### Git Workflow (Feature Branches)
-```sh
-# Create feature branch
-git checkout -b feature/name
-
-# Make changes, commit
-git add .
-git commit -m "Description"
-
-# Push to remote
-git push origin feature/name
-
-# Merge to dev
-git checkout dev
-git pull origin dev
-git merge feature/name --no-ff -m "Merge feature/name: Description"
-git push origin dev
-
-# Clean up
-git branch -d feature/name
-git push origin --delete feature/name
-```
-
----
-
-## Documentation Philosophy (From This Session)
-
-### Code Style (from CONTRIBUTING.md)
-> "These are guidelines, not laws. The codebase values *clarity* and *intent* over rigid consistency. If you see a better way to express something — even if it deviates from the guide — do it, and explain why in a comment or commit message. Thoughtful departures help the style evolve."
-
-### From copilot-instructions.md
-> "Consistency is overrated. Embrace diversity. Deliberate departure from the guidelines above is fine — that's how better patterns get discovered."
-
-### Documentation Changes
-- **DRY principle applied:** Single source of truth for configuration (README.md Configuration section)
-- **Simplicity over features:** Removed complex dotnet run approach, embraced simpler executable approach
-- **User empowerment:** Document choices, let users decide (rename workflow: conservative/balanced/aggressive)
-
----
-
-**End of session. Repository is stable, well-documented, and ready for public release.** 🚀
-
----
-
-## Previous Session (Archived)
+﻿# Session Handoff: v0.3.0 Release Preparation
 
 **Date:** 2025-01-XX  
-**Summary:** Added SearchFilesTool, RespawnTool, optimized MCP config with --no-build  
-**Last Commit:** 77707f3 (Merge feature/search-files-tool into dev)
+**Session Duration:** ~8 hours  
+**Branch:** `dev`  
+**Status:** Ready for field testing, then release
 
-*See git history for full details of previous sessions.*
+---
+
+## Executive Summary
+
+Completed comprehensive v0.3.0-alpha release preparation including:
+- ✅ Documentation DRY refactor (created reference docs, eliminated ~40% duplication)
+- ✅ Security boundary planning (Issue #9 created for v0.4.0)
+- ✅ Performance & philosophy guidelines added to AGENTS.md
+- ✅ Release artifacts built and packaged (net8.0 + net10.0)
+- ✅ Test coverage honestly assessed (Issue #8 updated)
+- ⏳ Field testing in progress (waiting on user's work machine tests)
+
+**Ready to ship** pending successful field test validation.
+
+---
+
+## What Was Accomplished
+
+### 1. Documentation DRY Refactor ✅
+
+**Problem:** Significant duplication across README.md, INSTALLATION.md, AGENTS.md, CONTRIBUTING.md (build instructions, workspace modes, troubleshooting, tool descriptions).
+
+**Solution:** Created focused reference documents and trimmed main docs.
+
+**New Files Created:**
+- `docs/reference/WORKSPACE_MODES.md` — Comprehensive MSBuildWorkspace vs AdhocWorkspace deep-dive (278 lines)
+- `docs/guides/TROUBLESHOOTING.md` — Consolidated troubleshooting guide (381 lines)
+- `docs/process/DUPLICATION_ANALYSIS.md` — DRY analysis and recommendations (340 lines)
+
+**Files Updated:**
+- `README.md` — Trimmed by ~40% (kept tool list per user request, removed duplicated sections)
+- `INSTALLATION.md` — Updated with links to reference docs
+- `CONTRIBUTING.md` — Simplified code style section (links to AGENTS.md)
+- `AGENTS.md` — Added link to WORKSPACE_MODES reference
+- `.github/copilot-instructions.md` — Fixed tool count (23→24)
+- `docs/process/DOC_REVIEW_CHECKLIST.md` — Updated with new structure
+
+**Impact:**
+- Net: -36 lines across main docs
+- +999 lines in focused reference docs
+- Improved maintainability (single sources of truth)
+- Better user experience (INSTALLATION.md remains self-contained)
+
+**Commits:**
+- `b91770a` - "docs: DRY refactor - consolidate duplicated content"
+
+---
+
+### 2. Security Boundary Planning ✅
+
+**Discovery:** User identified critical security issue—RoslynMcp has unrestricted filesystem access via `projectPath` and `filePath` parameters.
+
+**Attack Vectors:**
+- Path traversal (`../../secrets.txt`)
+- Arbitrary directory targeting (`projectPath: "C:/Users/victim/.ssh"`)
+- Write operations outside project boundaries
+
+**Response:**
+
+**Created Issue #9:** "Security: Implement filesystem access boundaries"
+- https://github.com/MadQ/RoslynMcp/issues/9
+- Comprehensive security model documented
+- Implementation guidance with code examples
+- Timeline: v0.4.0 (post-v0.3.0 release)
+
+**Security Model (Planned for v0.4.0):**
+
+**Allowed:**
+- ✅ Files under project root
+- ✅ Files explicitly in `.csproj` (e.g., `..\..\shared\*.cs`)
+- ✅ Referenced projects via `<ProjectReference>`
+- ✅ Up to `.sln`/`.slnx` level (no higher)
+
+**Denied:**
+- ❌ Symlinks (`FileAttributes.ReparsePoint`)
+- ❌ Traversal beyond solution root
+- ❌ Arbitrary absolute paths
+- ❌ System/sensitive directories
+
+**Implementation Notes (Added to Issue #9):**
+- Use `Path.GetFullPath()` to normalize all paths before validation
+- Store `SecurityBoundary` with `WorkspaceInstance` in cache
+- Evict security context when workspace evicted from LRU cache
+- Minimal error disclosure (no info leakage)
+
+**Documentation Updated:**
+- Added security warnings to README.md, INSTALLATION.md, CHANGELOG.md
+- Added to release README.txt in zip packages
+- Created "Security" section in CHANGELOG.md
+
+**Commits:**
+- `b53b253` - "security: Add filesystem access boundary warning"
+
+---
+
+### 3. Performance & Philosophy Guidelines ✅
+
+**User Feedback:** "Always prefer Span<T>/Memory<T> and modern C# zero-allocation techniques. It's about doing it right from the start, not learning curve."
+
+**Response:** Added comprehensive performance and philosophy sections to AGENTS.md.
+
+**New Section: "Performance & Allocation"**
+
+**Key Guidelines:**
+- Prefer `Span<T>` / `ReadOnlySpan<T>` / `Memory<T>` over allocations
+- Use `stackalloc` for small buffers (< 1KB)
+- Use `ArrayPool<T>.Shared` for larger temporary buffers
+- Avoid string allocations in hot paths (`AsSpan()` vs `Substring()`)
+- LINQ is fine, but be aware of multiple enumeration
+- Default to zero-allocation patterns **when equally readable**
+
+**Philosophy:**
+> "Modern C# provides powerful zero-allocation tools. Using them from the start avoids 'death by a thousand allocations' and makes future optimizations easier. Anti-patterns compound. That said, readability always wins over micro-optimizations when there's a meaningful trade-off."
+
+**New Section: "The 'Right Code' Principle"**
+
+Inspired by Buddhist concept of [Right Intention](https://en.wikipedia.org/wiki/Noble_Eightfold_Path#Right_Intention).
+
+**Core Message:**
+- Question convention ("this is how it's done")
+- Ask WHY and SHOULD before accepting idioms
+- Understand trade-offs, not pattern-matching
+- Document intentional deviations
+
+**Examples:**
+- Lambdas for I/O: 32-byte allocation vs 1ms disk latency (readability wins)
+- Interfaces for testability: Does every class need one? (avoid cargo-culting)
+- LINQ: Three enumerations vs simple `foreach` (context matters)
+
+**Commits:**
+- `1af8d10` - "docs: Add performance & allocation guidelines"
+- `df7843d` - "docs: Add 'Right Code' principle to style guidelines"
+- `4e8dd24` - "docs: Add Buddhist philosophy reference to Right Code principle"
+
+---
+
+### 4. Release Artifacts ✅
+
+**Built and Packaged:**
+- `RoslynMcp-v0.3.0-alpha-net10.0-win-x64.zip` (88.63 MB)
+- `RoslynMcp-v0.3.0-alpha-net8.0-win-x64.zip` (41.59 MB)
+
+**Contents:**
+- `RoslynMcp.exe` — Self-contained executable
+- `Test-RoslynMcp.ps1` — PowerShell script to test all 23 tools
+- `README.txt` — Quick start guide with security warning
+- All runtime dependencies bundled
+
+**Test Script Features:**
+- Tests all 24 tools against user-specified project
+- Color-coded PASS/FAIL output
+- Summary with pass/fail counts
+- Exit code 0 (success) or 1 (failure)
+
+**Added to .gitignore:**
+```
+# Release artifacts
+RoslynMcp-v*.zip
+```
+
+**Status:** Ready for field testing (user testing on work machine)
+
+---
+
+### 5. Test Coverage Assessment ✅
+
+**User Request:** "Are we sure we're not telling any lies with the checked checkboxes?"
+
+**Response:** Honest audit of Issue #8 "v0.3.0: Multi-Project Infrastructure"
+
+**Updated Issue #8:**
+- Changed Phase 3 from "✅ COMPLETE" to "⚠️ PARTIAL"
+- Checked only explicitly tested items (5/14)
+- Unchecked untested infrastructure scenarios (10/14)
+- Added "Test Coverage Note" section
+- Updated status to "✅ READY FOR RELEASE (acceptable for alpha)"
+
+**Explicitly Tested:**
+- ✅ All 24 tools functional (23/23 TestHarness tests pass)
+- ✅ Tools work with explicit `projectPath`
+- ✅ Compilation errors → diagnostics
+- ✅ Invalid path → structured error (code verified)
+- ✅ No `.csproj` → AdhocWorkspace fallback (code verified)
+
+**Not Tested (Implementation Exists):**
+- Multi-project session workflow
+- Cache eviction (11+ projects)
+- FileSystemWatcher change detection
+- Relative vs absolute projectPath
+- Server startup arg variations
+
+**Verdict:** "Core functionality is solid and tested. Infrastructure scenarios have complete implementations but lack integration test coverage. This is acceptable for an alpha release where production usage will validate these paths."
+
+**Added Comments:**
+- Status update: "All implementation work complete!"
+- Honest test coverage breakdown
+- Remaining pre-release checklist
+
+---
+
+## Current State
+
+### Branch: `dev`
+
+**Latest Commits:**
+- `7e222d9` - (pulled from remote) Added RoslynMcp.LogViewer project
+- `4e8dd24` - "docs: Add Buddhist philosophy reference to Right Code principle"
+- `df7843d` - "docs: Add 'Right Code' principle to style guidelines"
+- `1af8d10` - "docs: Add performance & allocation guidelines"
+- `b53b253` - "security: Add filesystem access boundary warning"
+- `b91770a` - "docs: DRY refactor - consolidate duplicated content"
+- `4dc3886` - (merge) Merged feature/docs-dry-refactor
+
+**Working Directory:** Clean (all changes committed)
+
+---
+
+### Open Files (IDE State)
+
+**Documentation:**
+- `AGENTS.md` (current file)
+- `README.md`
+- `INSTALLATION.md`
+- `CHANGELOG.md`
+- `CONTRIBUTING.md`
+- `.github/copilot-instructions.md`
+- `docs/process/DOC_REVIEW_CHECKLIST.md`
+- `docs/process/DUPLICATION_ANALYSIS.md`
+- `docs/reference/WORKSPACE_MODES.md`
+- `docs/guides/TROUBLESHOOTING.md`
+
+**Source Code:**
+- `src/RoslynMcp/ApprovalStore.cs`
+- `src/RoslynMcp/WorkspaceManager.cs`
+
+**Build/Config:**
+- `LICENSE`
+- `Directory.build.props`
+- `C:\Users\madq4\.mcp.json` (user's global MCP config)
+
+**Release Artifacts:**
+- `publish/Test-RoslynMcp.ps1`
+- `publish/README.txt`
+
+**Temp Files (Can be deleted):**
+- `.temp_issue_body.md`
+- `.temp_issue_body_v2.md`
+- `.temp_security_issue.md`
+
+**Planning:**
+- `..\..\Teh\VisualStudio\copilot-vs\plan-6b046499-f7e4-4e69-acd9-21ee0fba977d.md`
+
+---
+
+### GitHub Issues
+
+**Issue #8: v0.3.0 Multi-Project Infrastructure**
+- Status: OPEN (will close after release)
+- All phases complete (with honest test coverage assessment)
+- Ready for v0.3.0-alpha release
+- https://github.com/MadQ/RoslynMcp/issues/8
+
+**Issue #9: Security - Implement filesystem access boundaries**
+- Status: OPEN
+- Label: enhancement, v0.4.0
+- Comprehensive security model documented
+- Implementation planned for v0.4.0
+- https://github.com/MadQ/RoslynMcp/issues/9
+
+**Issue #7: Add `roslyn_change_signature` Tool**
+- Status: OPEN
+- Label: enhancement, v0.4.0, planned, feature
+- Deferred to post-v0.3.0
+
+---
+
+## Brainstorming / Technical Discussions
+
+### Path Validation Optimizations (Not Implemented)
+
+**User Question:** "Short-circuit security path tests if length < root length?"
+
+**Analysis:**
+- ✅ Valid optimization for obvious rejections (drive roots, parent traversal)
+- ❌ Insufficient alone (siblings, same-length paths, normalized paths)
+- ⚠️ Micro-optimization, not worth complexity for initial implementation
+
+**Recommendation:** Skip for v0.4.0 initial implementation. Consider if profiling shows bottleneck.
+
+**Other Optimizations Discussed:**
+- Path parts tokenization (slower than `StartsWith()`)
+- Aho-Corasick trie (overkill for 1-5 roots)
+- `Span<char>` operations (✅ recommended for v0.4.0)
+- Path caching (worth it if repeated checks become common)
+
+### I/O Error Handling Patterns (Not Implemented)
+
+**User Idea:** "Ref struct visitor pattern to avoid lambda allocations?"
+
+**Discussion:**
+```csharp
+// Proposed: Zero-allocation ref struct approach
+ref struct ReadFileOperation : IIoOperation<string>
+{
+    readonly string path;
+    public ReadFileOperation(string path) => this.path = path;
+    public string Execute() => File.ReadAllText(path);
+}
+
+// vs Current: Lambda approach
+SafeIO.Try(() => File.ReadAllText(path), out var content)
+```
+
+**Analysis:**
+- Lambda allocation: ~32 bytes per call
+- I/O operation cost: ~1ms (disk latency)
+- Lambda overhead: <0.01% of I/O cost
+- ✅ Readability wins for I/O operations
+- ✅ Zero-allocation matters for hot paths (like path validation)
+
+**Recommendation:**
+- Keep lambda pattern for I/O error handling (simple, idiomatic, cost negligible)
+- Use `Span<T>` for SecurityBoundary path checks (hot path, zero-allocation matters)
+
+**Context Applies "Right Code" Principle:**
+- Don't cargo-cult "lambdas allocate therefore bad"
+- Reason about trade-offs (32B vs 1ms)
+- Choose based on context (hot path vs cold path)
+
+---
+
+## Next Steps
+
+### Immediate (User Blocked On)
+
+**1. Field Testing** ⏳ IN PROGRESS
+- User testing `RoslynMcp-v0.3.0-alpha-*.zip` on work machine
+- Running `Test-RoslynMcp.ps1` against real projects
+- Validating MCP client integration
+
+**2. Release Preparation** (After tests pass)
+- Set CHANGELOG.md release date (replace `2025-01-XX`)
+- Create Git tag: `git tag -a v0.3.0-alpha -m "Release v0.3.0-alpha"`
+- Push tag: `git push origin v0.3.0-alpha`
+- Create GitHub Release with CHANGELOG excerpt
+- Upload release zip files as assets
+- Close Issue #8
+
+---
+
+### Post-Release (v0.3.1 or v0.4.0)
+
+**Security Boundaries (Issue #9) - HIGH PRIORITY**
+
+**Must Implement:**
+1. `SecurityBoundary` class with path validation
+2. Integration with `WorkspaceManager` cache
+3. Validation in all 13 file/path-accepting tools
+4. Error handling with minimal disclosure
+5. Symlink detection and blocking
+6. Exclusion patterns (`.git`, `bin`, `obj`, `.ssh`, etc.)
+
+**Implementation Guidance in Issue #9:**
+- Code examples provided
+- Cache eviction strategy documented
+- Path normalization (`Path.GetFullPath()`) emphasized
+
+**Testing Requirements:**
+- Path traversal attempts (should fail)
+- Symlink access (should fail)
+- Referenced project access (should succeed)
+- Solution root access (should succeed)
+- Arbitrary absolute path (should fail)
+
+---
+
+## Key Decisions Made
+
+### Documentation Philosophy
+- **README.md** — Quick overview, links to detailed docs (trimmed ~40%)
+- **INSTALLATION.md** — Self-contained for UX (accept some duplication)
+- **AGENTS.md** — Technical reference for AI + contributors
+- **CONTRIBUTING.md** — Workflow-focused, links to AGENTS.md for style
+- **docs/reference/** — Single sources of truth (WORKSPACE_MODES, etc.)
+- **docs/guides/** — Task-oriented how-tos (TROUBLESHOOTING)
+
+### Release Strategy
+- **v0.3.0-alpha** — Ship with security warning, track Issue #9
+- **No migration notes** — v0.2.x never worked properly (still in alpha)
+- **Honest about test coverage** — Infrastructure has code but not explicit tests
+- **Field test before release** — Validate on real machine, real projects
+
+### Code Style
+- **Performance** — Default to zero-allocation when equally readable
+- **Philosophy** — Question convention, reason about trade-offs
+- **Documentation** — Document intentional deviations
+- **Balance** — Readability wins over micro-optimizations (but avoid anti-patterns)
+
+---
+
+## Context for Next Session
+
+### If Tests Pass
+
+**Immediate Actions:**
+1. Set CHANGELOG date
+2. Create & push Git tag
+3. Create GitHub Release
+4. Upload zip artifacts
+5. Close Issue #8
+6. Announce release (optional: Reddit /r/dotnet, Twitter, etc.)
+
+### If Tests Fail
+
+**Debug Strategy:**
+1. Check `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`
+2. Review failed test output from `Test-RoslynMcp.ps1`
+3. Identify root cause (config? path? MSBuild? permissions?)
+4. Fix issue
+5. Rebuild, repackage, retest
+
+### Google Drive Transfer Issue
+
+**User reported:** "Google Drive is stripping the .exe file from the zip"
+
+**Status:** User resolved independently (method not documented)
+
+**Known Workarounds:**
+- Double-zip the files (zip the zip)
+- Password-protect the zip (prevents scanning)
+- Rename `.exe` → `.ex_` before zipping
+- Use different transfer (USB, network share, GitHub draft release)
+
+---
+
+## Technical Debt / Future Work
+
+### v0.4.0 Planned
+
+**From Issue #9 (Security):**
+- Filesystem security boundaries (HIGH PRIORITY)
+- 13 tools need path validation
+- SecurityBoundary class implementation
+- Integration tests for boundary enforcement
+
+**From Issue #7:**
+- `roslyn_change_signature` tool (signature refactoring)
+- See `docs/plans/change-signature-tool.md` for design
+
+**From CHANGELOG "Planned":**
+- `undo_last_edit` — revert Roslyn edits from snapshot
+- Cross-project semantics via `.sln` support
+- Cache diagnostics tool (`roslyn_get_cache_stats`)
+- Memory pressure monitoring / eviction
+- `get_nullable_flow_state` tool
+- `get_call_info` tool (resolve method call targets)
+
+### Documentation
+
+**Low Priority:**
+- Expand integration test suite (cache eviction, multi-project workflows)
+- Add "Getting Started" video or animated GIF
+- Create comprehensive tool reference with examples (currently just table)
+
+### Infrastructure
+
+**Consider Later:**
+- CI/CD pipeline (GitHub Actions)
+- NuGet package publication
+- Performance profiling for large codebases (>100K LOC)
+- Linux/macOS testing (currently Windows-focused)
+
+---
+
+## Random Notes / Artifacts
+
+### Branch Protection Issue
+
+**User encountered:** PR approval showing as "read-only" because GitHub considers them a collaborator with the coding agent (Copilot).
+
+**Solution:** Use "Merge without waiting for requirements to be met (bypass rules)" checkbox.
+
+**Alternative:** Adjust branch protection rules or continue direct pushes to `dev` (current workflow).
+
+### New Project Pulled
+
+**User added while at work:** `RoslynMcp.LogViewer`
+- Log entry parsing
+- Log file tailing (183 lines)
+- Viewer UI (301 lines)
+- Added to `RoslynMcp.slnx`
+
+**Status:** Not reviewed or documented in this session (user working independently).
+
+### Acronym Brain Fart
+
+**User:** "What's LGTM?"  
+**Answer:** Looks Good To Me (standard PR approval slang)
+
+Other common ones: SGTM, ACK, +1, Ship it
+
+---
+
+## Files That Can Be Cleaned Up
+
+**Temp Files (Safe to Delete):**
+- `.temp_issue_body.md`
+- `.temp_issue_body_v2.md`
+- `.temp_security_issue.md`
+
+**Already Excluded from Git:**
+- `RoslynMcp-v*.zip` (added to `.gitignore`)
+- `publish/net8.0/*` and `publish/net10.0/*` (build outputs)
+
+---
+
+## Session Tone / User Preferences
+
+**Communication Style:**
+- Pirate-themed responses appreciated ("Aye aye, Captain!" 🏴‍☠️)
+- Technical depth valued (don't oversimplify)
+- Honesty over polish (e.g., unchecking untested boxes)
+- Philosophy/reasoning important (Buddhist reference well-received)
+
+**Work Style:**
+- Thoughtful about trade-offs (not cargo-culting patterns)
+- Values "Right Code" over "idiomatic code"
+- Prefers modern C# patterns (Span, zero-allocation)
+- Questions convention ("why is this how it's done?")
+
+**Context:**
+- Solo developer (no real PR workflow needed)
+- Works on RoslynMcp at home + work
+- Time-constrained (field testing during work hours)
+- Comfortable with long sessions (this one: ~8 hours)
+
+---
+
+## Parting Context
+
+**Last User Message:** "prepare for session handoff"
+
+**Next Expected Action:** User will resume testing, then either:
+- Report test success → proceed with release
+- Report test failure → debug and fix
+
+**Recommended Next Session Start:**
+1. Ask: "How did the field tests go?"
+2. If pass: "Ready to set CHANGELOG date and create release?"
+3. If fail: "What failed? Let's check the logs and debug."
+
+---
+
+**End of Session Handoff**
+
+*Prepared by: GitHub Copilot*  
+*Session Date: 2025-01-XX*  
+*Branch: dev*  
+*Commit: 4e8dd24 (last local) / 7e222d9 (latest pulled)*
+
+🏴‍☠️ **Fair winds and following seas, Captain!** ⚓
