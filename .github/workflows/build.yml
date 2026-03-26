@@ -29,6 +29,8 @@ jobs:
         # For pull_request_target the default checkout is the base branch, not the
         # PR's head — explicitly check out the contributor's commit so we build
         # the actual proposed changes rather than the unchanged base.
+        # Safe: workflow only builds code with contents:read permission — no secrets.
+        # Empty string falls back to the default ref for push/pull_request events.
         ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
     - name: Setup .NET

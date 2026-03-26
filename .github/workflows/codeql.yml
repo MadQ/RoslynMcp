@@ -1,0 +1,44 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+  schedule:
+    # Weekly scan on Sundays at 03:17 UTC, independent of PR activity.
+    # Off-peak minute (:17) avoids the GitHub Actions queue spike at top-of-hour.
+    - cron: '17 3 * * 0'
+
+# Minimal permissions — read source, write security events (SARIF upload).
+permissions:
+  contents:        read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (csharp)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: csharp
+        # Use the default security-and-quality query suite.
+        queries: security-and-quality
+
+    - name: Build
+      run: dotnet build src/RoslynMcp/RoslynMcp.csproj --configuration Release
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: /language:csharp
