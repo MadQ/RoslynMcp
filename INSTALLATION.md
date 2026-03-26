@@ -9,6 +9,8 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 > **Configuration reference:** See [Configuration section in README.md](README.md#configuration) for detailed examples and troubleshooting.
 
+> **v0.3.0 Note:** All 24 tools support multi-project workflows via the optional `projectPath` parameter. The command-line argument configures the default workspace — individual tool calls can target different projects without restarting the server.
+
 > **Quick start:** Most clients use one of two patterns:
 > - **Workspace config**: `.mcp.json` or similar file in your project root
 > - **Global config**: Client-specific settings file in your home directory
@@ -114,8 +116,8 @@ Add to `.cursor/mcp.json` in your project root:
 {
   "mcpServers": {
     "roslyn": {
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["${workspaceFolder}"]
     }
   }
 }
@@ -130,7 +132,7 @@ Add to `.cursor/mcp.json` in your project root:
 
 **Path notes:**
 - `${workspaceFolder}` auto-resolves to current workspace directory
-- Use absolute path to `RoslynMcp.csproj`
+- Use absolute path to the published `RoslynMcp.exe` executable
 
 **Restart:** Reload window (Cmd/Ctrl+Shift+P → "Developer: Reload Window").
 
@@ -146,8 +148,8 @@ Add to `.windsurf/mcp_config.json` in your project root:
 {
   "mcpServers": {
     "roslyn": {
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["${workspaceFolder}"]
     }
   }
 }
@@ -179,8 +181,8 @@ Add to `.windsurf/mcp_config.json` in your project root:
 ```json
 {
   "roslyn": {
-    "command": "dotnet",
-    "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+    "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+    "args": ["${workspaceFolder}"]
   }
 }
 ```
@@ -193,8 +195,8 @@ Add to `.vscode/mcp.json` or `.cline/mcp_settings.json` in your project root (ex
 {
   "mcpServers": {
     "roslyn": {
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["${workspaceFolder}"]
     }
   }
 }
@@ -216,8 +218,8 @@ Add to `.continue/config.json` in your project root:
         "name": "roslyn",
         "transport": {
           "type": "stdio",
-          "command": "dotnet",
-          "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+          "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+          "args": ["${workspaceFolder}"]
         }
       }
     ]
@@ -227,7 +229,7 @@ Add to `.continue/config.json` in your project root:
 
 **Path notes:**
 - Continue supports `${workspaceFolder}` variable
-- Use absolute path to `RoslynMcp.csproj`
+- Use absolute path to the published `RoslynMcp.exe` executable
 
 **Restart:** Reload window or restart Continue extension.
 
@@ -244,8 +246,8 @@ Add to `.vscode/mcp.json` in your project root:
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+      "args": ["${workspaceFolder}"]
     }
   }
 }
@@ -264,8 +266,8 @@ Add to `~/.config/zed/settings.json`:
   "context_servers": {
     "roslyn": {
       "settings": {
-        "command": "dotnet",
-        "args": ["run", "--no-build", "--project", "/absolute/path/to/RoslynMcp/RoslynMcp.csproj", "--", "/absolute/path/to/your/project/src"]
+        "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
+        "args": ["/absolute/path/to/your/project/src"]
       }
     }
   }
@@ -274,6 +276,7 @@ Add to `~/.config/zed/settings.json`:
 
 **Path notes:**
 - Zed uses absolute paths (no variable expansion)
+- Use absolute path to the published `RoslynMcp.exe` executable
 - Config file location:
   - **macOS/Linux**: `~/.config/zed/settings.json`
   - **Windows**: `%APPDATA%\Zed\settings.json`
@@ -340,11 +343,17 @@ RoslynMcp automatically falls back to AdhocWorkspace (source-only mode) if MSBui
 
 ### Multi-project workspaces
 
-RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point the last argument at the solution directory or the primary project directory.
+**v0.3.0+:** All 24 tools accept an optional `projectPath` parameter, enabling multi-project workflows without restarting the server.
+
+RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point the command-line argument at the solution directory or primary project directory for pre-loading.
+
+**See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for details on MSBuildWorkspace vs AdhocWorkspace.**
 
 ### Custom compilation options
 
-RoslynMcp uses project-defined compilation options (language version, preprocessor symbols) when using MSBuildWorkspace. In AdhocWorkspace mode, it defaults to C# preview with `DEBUG` defined.
+RoslynMcp uses project-defined settings when using MSBuildWorkspace. In AdhocWorkspace mode, defaults to C# preview with `DEBUG` defined.
+
+**See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for mode details and tradeoffs.**
 
 ### Performance tuning
 
@@ -358,40 +367,31 @@ For large codebases (>100K LOC), consider:
 ## Next Steps
 
 - Try the [tools reference](README.md#tools) to see what RoslynMcp can do
-- Read about [workspace modes](README.md#workspace-modes) to understand MSBuildWorkspace vs AdhocWorkspace
-- Check out the [write operations](README.md#write-operations) for rename previewing and applying
+- Read [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for MSBuildWorkspace vs AdhocWorkspace details
+- Check [Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md) for common issues
+- Review [write operations](README.md#write-operations) for rename previewing and applying
 
 ---
 
 ## Troubleshooting
 
+**See [Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md) for comprehensive solutions to common issues.**
+
+**Quick fixes:**
+
 ### Server fails to start
 
-**Error:** `Your project targets multiple frameworks. Specify which framework to run using '--framework'.`
+**Error:** `Could not execute because the specified command or file was not found.`
 
-**Solution:** Add `-f net10.0` (or net8.0/net11.0) to the args:
-``json
-`args`: [`run`, `--no-build`, `--project`, `path/to/RoslynMcp.csproj`, `-f`, `net10.0`, `--`, `.]`
-````n
+**Solution:** Verify the `command` path points to the published `RoslynMcp.exe` executable. Use absolute paths in configuration files.
+
 ### No type resolution (AdhocWorkspace fallback)
 
 **Symptom:** NuGet types (`List<T>`, `HttpClient`) not resolved.
 
 **Cause:** No `.csproj` file in target directory.
 
-**Solution:** Ensure RoslynMcp is pointed at a directory containing a `.csproj` file for full MSBuildWorkspace support.
-
-### Stale compilation after file changes
-
-**Cause:** FileSystemWatcher may miss rapid changes.
-
-**Solution:** Tools automatically rebuild on next call. For immediate refresh, call any tool again.
-
-### NETSDK1209 warnings in output
-
-**Cause:** Targeting .NET 11 with older Visual Studio version.
-
-**Impact:** None — these warnings are filtered from `roslyn_build_project` output automatically.
+**Solution:** Ensure RoslynMcp is pointed at a directory containing a `.csproj` file for full MSBuildWorkspace support. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md).
 
 ### MCP client doesn't see tools
 
@@ -399,7 +399,6 @@ For large codebases (>100K LOC), consider:
 1. Server process started successfully (check client logs)
 2. MCP session initialized (`tools/list` should return 24 tools)
 3. Target directory is correct (check server stderr for `Target: ...`)
-4. Rebuild RoslynMcp if code changed: `dotnet build RoslynMcp/RoslynMcp.csproj`
 
 ---
 

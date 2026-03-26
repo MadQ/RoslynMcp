@@ -106,41 +106,24 @@ Publish a Release build and configure your MCP client to use it:
 
 ## Code Style Guidelines
 
-**See [`AGENTS.md`](AGENTS.md) for the complete style guide.**
+**See [AGENTS.md § Code Style](AGENTS.md#code-style) for the complete style guide.**
 
-These are guidelines, not laws. The codebase values *clarity* and *intent* over rigid consistency. If you see a better way to express something — even if it deviates from the guide — do it, and explain why in a comment or commit message. Thoughtful departures help the style evolve.
+**Quick checklist:**
+- Modern C# (pattern matching, target-typed `new`, collection expressions)
+- Braces on same line for control flow, new line for methods/classes
+- Comments explain *why*, not *what* — no personal pronouns
+- `async` for Roslyn APIs (`GetCompilationAsync`, `FindReferencesAsync`)
+- Return structured objects from tools, not strings
 
-That said, some patterns make collaboration easier:
-
-### General C# Conventions
-
-- **Braces:** same line for control flow, new line for methods/classes
-- **No space** after `if`/`foreach`/`while`
-- **Naming:** PascalCase for types/methods, camelCase for fields/locals
-- **Modern C#:** pattern matching, target-typed `new`, collection expressions
-- **Comments:** explain *why*, not *what* — no personal pronouns
-- **Blank lines:** indented to match scope
-
-### Roslyn-Specific Patterns
-
-- Use `ISymbol`, `INamedTypeSymbol`, `SemanticModel`, etc. for code analysis
-- Prefer `async` Roslyn APIs (`GetCompilationAsync`, `FindReferencesAsync`)
-- Return structured objects (anonymous types) from tools, not strings
-- Handle metadata symbols gracefully (e.g., external types like `System.IDisposable`)
-
-**When in doubt:** match the surrounding code. If the file uses a different convention consistently, follow that instead of the guide.
+**Philosophy:** These are guidelines, not laws. Thoughtful departures that improve clarity are welcome — explain why in a comment or commit message.
 
 ### Code Quality Tools
 
-**No linting or automated style enforcement.** The project's style guidelines are deliberate and don't align with standard linter rulesets. A linter that disrespects your guidelines is worse than no linter at all.
+**No linting or automated style enforcement.** The project's style guidelines are deliberate and don't align with standard linter rulesets.
 
-**PRs that add `.editorconfig` files will not be approved.** These files are just as opinionated as linters and create the same conflicts with the project's intentional style choices.
+**PRs that add `.editorconfig` files will not be approved.** These create the same conflicts with the project's intentional style choices.
 
-**Custom analyzers are acceptable** if they enforce narrow, high-value rules aligned with the project style. Example: `RoslynMcp.Analyzers` contains analyzers that gently suggest modern C# alternatives:
-- **RMCP001**: Prefer `nint` over `IntPtr` (with code fix)
-- **RMCP002**: Prefer `nuint` over `UIntPtr` (with code fix)
-
-All analyzer diagnostics are warnings only, never errors. Code fixes are provided for one-click replacements.
+**Custom analyzers are acceptable** if they enforce narrow, high-value rules. Example: `RoslynMcp.Analyzers` suggests modern C# alternatives (all warnings, never errors).
 
 ---
 

@@ -107,6 +107,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
 - **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms)
+- See [docs/reference/WORKSPACE_MODES.md](docs/reference/WORKSPACE_MODES.md) for detailed comparison and FAQ
 
 **Tool Selection Guidance:**
 

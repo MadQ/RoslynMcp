@@ -339,7 +339,6 @@ internal sealed class WorkspaceManager : IDisposable
 			this.csprojPath = null;
 			this.rootPath   = directoryPath;
 
-			// Fail fast if we're being asked to scan a root directory (e.g., "C:\", "J:\")
 			var dirInfo = new DirectoryInfo(directoryPath);
 			if(dirInfo.Parent == null)
 				throw new InvalidOperationException($"Cannot create AdhocWorkspace for root directory '{directoryPath}'. Specify a subdirectory or use a .csproj file.");
