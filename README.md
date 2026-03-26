@@ -8,10 +8,6 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 
 **Works with any MCP-compatible client:** GitHub Copilot, Claude Desktop, Cline, Roo Code, Continue, and more.
 
-> **⚠️ v0.2.0-alpha and v0.2.1-alpha are broken** — v0.2.0 is missing the `BuildHost` DLL ([#4](https://github.com/MadQ/RoslynMcp/issues/4)), and v0.2.1 has excessive Unicode escaping + unbounded responses that blow the context window ([#3](https://github.com/MadQ/RoslynMcp/issues/3)).
-> 
-> **Download [v0.2.2-alpha](https://github.com/MadQ/RoslynMcp/releases/tag/v0.2.2-alpha) instead** — both issues fixed.
-
 ---
 
 ## Quick Start
@@ -70,44 +66,16 @@ RoslynMcp runs as a standalone executable. Configuration goes in your MCP client
 }
 ```
 
-### Building the Executable
+**See [INSTALLATION.md](INSTALLATION.md) for complete setup instructions** including client-specific examples and troubleshooting.
 
-Publish a Release build for your platform:
+### Quick Build
 
 ```bash
 cd /path/to/RoslynMcp
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
-**Choose your target framework:**
-- `net8.0` — .NET 8 (LTS)
-- `net10.0` — .NET 10 (recommended)
-- `net11.0` — .NET 11 (auto-added when .NET 11 SDK is detected)
-
-> **Note:** RoslynMcp automatically detects if .NET 11 SDK is installed and includes it as a target framework. No manual configuration needed!
-
-> **Why published executable?** Early experiments with `dotnet run` in `.mcp.json` produced interesting recursive behavior when dogfooding RoslynMcp on itself. Abandoned in favor of the simpler, more reliable executable approach.
-
-### Command Line Arguments
-
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `<project-path>` | Optional | Path to a project/directory for pre-loading into the workspace cache. Can specify multiple paths. If omitted, projects are loaded on-demand when tools are called. Default: `.` (current directory) |
-
-**v0.3.0 Note:** All tools accept an optional `projectPath` parameter for per-call project selection. The command-line argument is now only for **pre-warming the cache** on startup.
-
-**Examples:**
-
-```bash
-# Pre-load multiple projects:
-RoslynMcp.exe src/MyApp src/MyLib src/Tests
-
-# No pre-loading (fastest startup, load on-demand):
-RoslynMcp.exe .
-
-# Pre-load single project:
-RoslynMcp.exe src/MyApp
-```
+Supports `net8.0`, `net10.0`, or `net11.0` (auto-detected if SDK is installed).
 
 ### Configuration Examples
 
@@ -284,34 +252,14 @@ Add to `.mcp.json` at your workspace root:
 
 ---
 
-## Workspace modes
+## Workspace Modes
 
-### MSBuildWorkspace (full resolution)
+RoslynMcp automatically selects the best workspace mode for your project:
 
-**When:** Target directory contains a `.csproj` file.
+- **MSBuildWorkspace** (when `.csproj` found) — Full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility. Startup: 1-2 seconds.
+- **AdhocWorkspace** (fallback) — Fast startup (<100 ms), source-only type resolution. Perfect for scripts or demos without project files.
 
-**Capabilities:**
-- ✅ NuGet package type resolution (`List<T>`, `HttpClient`, etc.)
-- ✅ Multi-project support (follows `<ProjectReference>`)
-- ✅ .NET Framework projects (4.6.1+)
-- ✅ Correct preprocessor symbols from project file
-
-**Requirements:**
-- MSBuild must be on PATH (installed with .NET SDK or Visual Studio)
-
-### AdhocWorkspace (fast, source-only)
-
-**When:** No `.csproj` file found in target directory.
-
-**Capabilities:**
-- ✅ Fast startup (<100 ms)
-- ✅ Source-defined type resolution
-- ✅ Syntax and semantic analysis
-
-**Limitations:**
-- ❌ No NuGet type resolution
-- ❌ Fixed parse options (C# preview, `DEBUG` defined)
-- ❌ Single directory tree only
+**See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for detailed comparison, troubleshooting, and FAQ.**
 
 ---
 

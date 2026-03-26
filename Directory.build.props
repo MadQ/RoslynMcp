@@ -5,5 +5,7 @@
         
         <VersionSuffix>alpha</VersionSuffix>
         
+        <Copyright>Copyright (c) 2026 Quinten Martens &lt;madq42@gmail.com&gt;</Copyright>
+        
 	</PropertyGroup>
 </Project>

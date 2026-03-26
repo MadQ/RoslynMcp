@@ -4,6 +4,25 @@ Run this checklist before making the repository public or after significant stru
 
 ---
 
+## Documentation Structure (v0.3.0+)
+
+### Primary User-Facing Docs
+- **README.md** — Quick overview, selling points, tool list (keep concise, link to details)
+- **INSTALLATION.md** — Client-specific setup (self-contained for UX)
+- **CONTRIBUTING.md** — Contributor workflow, testing, PR guidelines
+
+### Technical Reference
+- **AGENTS.md** — AI agent working rules, architecture, code patterns
+- **docs/reference/WORKSPACE_MODES.md** — MSBuildWorkspace vs AdhocWorkspace deep-dive
+- **docs/guides/TROUBLESHOOTING.md** — Comprehensive issue resolution guide
+
+### Process Docs
+- **docs/process/DOC_REVIEW_CHECKLIST.md** — This file
+- **docs/process/DUPLICATION_ANALYSIS.md** — DRY analysis and recommendations
+- **docs/process/RELEASE_CHECKLIST.md** — Pre-release verification
+
+---
+
 ## Quick Validation Commands
 
 These `rg` (ripgrep) commands catch common documentation drift issues:
@@ -56,10 +75,15 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 
 ### Installation & Setup
 - [ ] README.md installation steps are current
-- [ ] INSTALLATION.md matches README.md (DRY check)
+- [ ] INSTALLATION.md matches README.md intent (some duplication acceptable for UX)
 - [ ] Prerequisites are accurate (.NET versions, etc.)
 - [ ] Published executable approach is documented
-- [ ] No references to abandoned approaches (`dotnet run` confusion)
+- [ ] No references to abandoned approaches
+
+### Reference Documentation
+- [ ] docs/reference/WORKSPACE_MODES.md is accurate and complete
+- [ ] docs/guides/TROUBLESHOOTING.md covers common issues
+- [ ] All links to reference docs from main docs work
 
 ### Feature Completeness
 - [ ] Remove "planned feature" notes for shipped features
@@ -95,9 +119,27 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] `.mcp.json` example uses executable approach
 
 ### INSTALLATION.md
-- [ ] Matches README.md installation steps
+- [ ] Matches README.md installation steps (some duplication OK)
 - [ ] Paths are correct (src/ structure)
 - [ ] Published executable approach documented
+- [ ] Links to reference docs work
+
+### AGENTS.md
+- [ ] Architecture section has correct tool/component count
+- [ ] Links to docs/reference/ work
+- [ ] Workspace modes summary is current
+
+### docs/reference/WORKSPACE_MODES.md
+- [ ] MSBuildWorkspace section complete and accurate
+- [ ] AdhocWorkspace section complete and accurate
+- [ ] FAQ addresses common questions
+- [ ] Performance comparison up to date
+
+### docs/guides/TROUBLESHOOTING.md
+- [ ] Covers common installation issues
+- [ ] Workspace/type resolution issues documented
+- [ ] Platform-specific solutions included
+- [ ] Links to other docs work
 - [ ] Platform-specific notes are accurate
 
 ### CONTRIBUTING.md

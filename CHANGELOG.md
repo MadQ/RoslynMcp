@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **AdhocWorkspace safety** — protected directory enumeration with try/catch for `UnauthorizedAccessException`; skips system/hidden directories and common large folders (`node_modules`, `bin`, `obj`, `.git`)
-- **Root directory protection** — fail-fast check prevents accidental scanning of drive roots (e.g., `C:\`, `J:\`)
+- **Root directory protection** — fail-fast check prevents accidental scanning of drive roots (e.g., `C:\`, `D:\`, `/`)
 - **stdout contamination** — server startup messages use `Console.Error.WriteLine()` to avoid corrupting MCP protocol stream
 - **Server crash on startup** — `MSBuildLocator.RegisterDefaults()` moved out of static constructor into deferred `EnsureMSBuildRegistered()` with double-checked locking; a `TypeInitializationException` from a static ctor is unrecoverable, so failure is now silently swallowed and the server stays alive
 - **`LoadMSBuildWorkspace` unhandled exception** — wrapped in try/catch; exceptions now surface as `InvalidOperationException` with context instead of crashing the process
