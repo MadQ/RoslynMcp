@@ -6,4 +6,5 @@
   <Project Path="src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj" />
   <Project Path="src/RoslynMcp/RoslynMcp.csproj" />
   <Project Path="src/TestHarness/TestHarness.csproj" />
+  <Project Path="src/RoslynMcp.LogViewer/RoslynMcp.LogViewer.csproj" />
 </Solution>
