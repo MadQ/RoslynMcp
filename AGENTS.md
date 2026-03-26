@@ -187,6 +187,8 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 - **Should** this be the idiom *here*? (Different constraints, different answers)
 - **What** problem does this pattern actually solve? (If unclear, maybe it doesn't)
 
+*Inspired by the Buddhist concept of [Right Intention](https://en.wikipedia.org/wiki/Noble_Eightfold_Path#Right_Intention) from the Noble Eightfold Path—applying mindful discernment to code decisions.*
+
 **Examples of healthy skepticism:**
 - "Lambdas are idiomatic for callbacks" — *Sure, but for I/O where disk latency is 1000x the lambda allocation cost, does the 32-byte overhead matter? Or is readability the real win here?*
 - "Interfaces enable testability" — *True, but does every class need an interface? Or are we just making our codebase harder to navigate for a benefit we're not actually getting?*
