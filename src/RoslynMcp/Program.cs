@@ -1,4 +1,4 @@
-﻿//
+//
 // Note: While I am generally not a fan of (IMHO) overly opinionated frameworks... admittedly, the Microsoft.Extensions.Hosting pattern
 //       is a good fit for this kind of long-running server application. It provides a clean way to set up dependency injection,
 //       logging, and graceful shutdown.
@@ -26,7 +26,7 @@ var projectsToPreload = args;
 AppDomain.CurrentDomain.UnhandledException += (_, e) => {
 	var path = Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH")
 		?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RoslynMcp", "logs", "roslynmcp.log");
-
+	
 	if(!string.IsNullOrEmpty(path)) {
 		try {
 			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -73,11 +73,11 @@ lifetime.ApplicationStopping.Register(() => logger.LogStop());
 if(projectsToPreload.Length > 0) {
 
 	var resolver = host.Services.GetRequiredService<WorkspaceResolver>();
-
+	
 	Console.Error.WriteLine($"Pre-loading {projectsToPreload.Length} project(s)...");
-
+	
 	foreach(var path in projectsToPreload) {
-
+	
 		try {
 			// Pre-load into cache.
 			resolver.GetCompilation(path);
