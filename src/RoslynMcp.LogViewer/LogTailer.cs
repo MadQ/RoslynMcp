@@ -34,72 +34,121 @@ sealed class LogTailer
         using var signal  = new SemaphoreSlim(0, 1);
         using var watcher = CreateWatcher(signal);
 
-        using var stream = new FileStream(
-            logPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete
-        );
+        FileStream?   stream = null;
+        StreamReader? reader = null;
 
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+        // Helper to open a fresh stream/reader pair for the current log file.
+        void OpenStreamAndReader()
+        {
+            var newStream = new FileStream(
+                logPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete
+            );
 
-        // Replay last N lines from history, then tail live from EOF.
-        foreach(var entry in ReadLastLines(stream, reader, tailLines))
-            yield return entry;
+            var newReader = new StreamReader(
+                newStream,
+                Encoding.UTF8,
+                detectEncodingFromByteOrderMarks: false,
+                leaveOpen: true
+            );
 
-        // Live tail.
-        while(!ct.IsCancellationRequested) {
+            // Dispose previous instances (if any) before switching.
+            reader?.Dispose();
+            stream?.Dispose();
 
-            var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+            stream = newStream;
+            reader = newReader;
+        }
 
-            if(line is not null) {
-                yield return Parse(line);
-                continue;
-            }
+        try {
+            OpenStreamAndReader();
 
-            // Check for log rotation: file was truncated/replaced.
-            try {
-                if(File.Exists(logPath) && new FileInfo(logPath).Length < stream.Position) {
-                    stream.Seek(0, SeekOrigin.Begin);
-                    reader.DiscardBufferedData();
+            // Replay last N lines from history, then tail live from EOF.
+            foreach(var entry in ReadLastLines(stream!, reader!, tailLines, ct))
+                yield return entry;
+
+            // Live tail.
+            while(!ct.IsCancellationRequested) {
+
+                var line = await reader!.ReadLineAsync(ct).ConfigureAwait(false);
+
+                if(line is not null) {
+                    yield return Parse(line);
                     continue;
                 }
-            }
-            catch { /* non-fatal — file may be temporarily inaccessible during rotation */ }
 
-            // No new data — wait for the watcher to signal, then loop to read.
-            try {
-                await signal.WaitAsync(ct).ConfigureAwait(false);
+                // Check for log rotation: file was truncated/replaced.
+                try {
+                    if(File.Exists(logPath) && new FileInfo(logPath).Length < stream!.Position) {
+                        try {
+                            // Under RoslynMcp's rotation strategy, the original stream
+                            // now points at the renamed old file. Reopen so we follow
+                            // the newly created log file instead of rewinding the old one.
+                            OpenStreamAndReader();
+                        }
+                        catch {
+                            // Non-fatal — if reopening fails (e.g., during rotation window),
+                            // we'll try again on the next iteration.
+                        }
+
+                        continue;
+                    }
+                }
+                catch { /* non-fatal — file may be temporarily inaccessible during rotation */ }
+
+                // No new data — wait for the watcher to signal, then loop to read.
+                try {
+                    await signal.WaitAsync(ct).ConfigureAwait(false);
+                }
+                catch(OperationCanceledException) {
+                    yield break;
+                }
             }
-            catch(OperationCanceledException) {
-                yield break;
-            }
+        }
+        finally {
+            reader?.Dispose();
+            stream?.Dispose();
         }
     }
 
     // ── Private ──────────────────────────────────────────────────────────────
 
     /// <summary>
-    ///     Reads all lines from the beginning of the file, returns the last <paramref name="count"/>,
-    ///     and leaves the stream positioned at EOF for live tailing.
+    ///     Returns the last <paramref name="count"/> lines from the file using a ring buffer,
+    ///     keeping memory bounded to <paramref name="count"/> strings regardless of file size.
+    ///     Leaves the stream positioned at EOF for live tailing.
     /// </summary>
-    static IEnumerable<LogEntry> ReadLastLines(FileStream stream, StreamReader reader, int count)
+    static IEnumerable<LogEntry> ReadLastLines(FileStream stream, StreamReader reader, int count, CancellationToken ct)
     {
         stream.Seek(0, SeekOrigin.Begin);
         reader.DiscardBufferedData();
 
-        var all = new List<string>(capacity: count + 1);
+        if(count <= 0)
+            yield break;
+
+        // Ring buffer — evicts the oldest entry once full, so memory is bounded by `count`.
+        var ring     = new string[count];
+        var ringHead = 0;
+        var ringSize = 0;
 
         string? line;
 
-        while((line = reader.ReadLine()) is not null)
-            all.Add(line);
+        while((line = reader.ReadLine()) is not null) {
+            ct.ThrowIfCancellationRequested();
+            ring[ringHead] = line;
+            ringHead       = (ringHead + 1) % count;
+
+            if(ringSize < count)
+                ringSize++;
+        }
 
         // stream/reader are now at EOF — ready for live tail without a seek.
-        var start = Math.Max(0, all.Count - count);
+        var start = ringSize < count ? 0 : ringHead;
 
-        for(var i = start; i < all.Count; i++)
-            yield return Parse(all[i]);
+        for(var i = 0; i < ringSize; i++)
+            yield return Parse(ring[(start + i) % count]);
     }
 
     FileSystemWatcher CreateWatcher(SemaphoreSlim signal)

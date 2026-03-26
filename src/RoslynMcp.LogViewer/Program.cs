@@ -1,12 +1,31 @@
+using System.Net;
 using System.Text.Json;
 using RoslynMcp.LogViewer;
 
-var logPath = args.Length > 0
-    ? args[0]
-    : Path.Combine(
+var envLogPath = Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH");
+
+string logPath;
+
+if(args.Length > 0) {
+    logPath = args[0];
+}
+else if(envLogPath is not null) {
+    if(envLogPath.Length == 0) {
+        Console.Error.WriteLine("RoslynMcp Log Viewer");
+        Console.Error.WriteLine("ROSLYNMCP_LOG_PATH is set to an empty string, so logging is disabled.");
+        Console.Error.WriteLine("Provide a log file path as an argument to view logs, e.g.:");
+        Console.Error.WriteLine("    RoslynMcp.LogViewer.exe <path-to-log-file>");
+        return;
+    }
+
+    logPath = envLogPath;
+}
+else {
+    logPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "RoslynMcp", "logs", "roslynmcp.log"
     );
+}
 
 Console.Error.WriteLine("RoslynMcp Log Viewer");
 Console.Error.WriteLine($"Watching : {logPath}");
@@ -29,7 +48,25 @@ var app = builder.Build();
 
 app.MapGet("/", () => Results.Content(ViewerHtml.Page, "text/html; charset=utf-8"));
 
-app.MapGet("/shutdown", (IHostApplicationLifetime lifetime) => {
+app.MapPost("/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) => {
+    // Guard against CSRF-style requests: if an Origin header is present it must be
+    // from a loopback address (a same-origin fetch from the browser UI won't include
+    // Origin for same-origin requests, but cross-site requests always will).
+    var origin = ctx.Request.Headers.Origin.FirstOrDefault();
+
+    if(origin is not null) {
+        var isLoopback = false;
+
+        if(Uri.TryCreate(origin, UriKind.Absolute, out var uri)) {
+            var host = uri.Host;
+            isLoopback = host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+                || (IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip));
+        }
+
+        if(!isLoopback)
+            return Results.Forbid();
+    }
+
     lifetime.StopApplication();
     return Results.Ok("Shutting down…");
 });
@@ -216,7 +253,7 @@ static class ViewerHtml
 
         // ── Shutdown ──────────────────────────────────────────────────────────
         document.getElementById('shutdownBtn').addEventListener('click', () => {
-          fetch('/shutdown').catch(() => {});
+          fetch('/shutdown', { method: 'POST' }).catch(() => {});
         });
 
         // ── Clear ─────────────────────────────────────────────────────────────
