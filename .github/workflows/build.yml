@@ -5,6 +5,15 @@ on:
     branches: [ main, dev ]
   pull_request:
     branches: [ main, dev ]
+  # pull_request_target runs in the trusted base-branch context and does not
+  # require manual "Approve and run" from maintainers for bot/Copilot PRs.
+  # pull_request still runs for human contributor PRs on the same repo.
+  pull_request_target:
+    branches: [ main, dev ]
+
+# Minimal token permissions — this workflow only reads source and builds.
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -16,6 +25,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        # For pull_request_target the default checkout is the base branch, not the
+        # PR's head — explicitly check out the contributor's commit so we build
+        # the actual proposed changes rather than the unchanged base.
+        ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
