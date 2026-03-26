@@ -4,6 +4,8 @@
 
 Complete setup instructions for all major MCP-compatible AI coding assistants.
 
+> **⚠️ Security Note:** RoslynMcp runs with your user permissions and currently has unrestricted filesystem access. Only use with trusted agents and on projects you control. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
+
 > **⚠️ Not all configurations have been verified in production.**  
 > GitHub Copilot and Claude Desktop are tested and confirmed working. Other clients follow documented MCP patterns but may require adjustments. Contributions and corrections welcome!
 

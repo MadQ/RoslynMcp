@@ -397,3 +397,6 @@ docs/sessions/
 docs/ScratchPad.md
 docs/github-issues/
 
+
+# Release artifacts
+RoslynMcp-v*.zip

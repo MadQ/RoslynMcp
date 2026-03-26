@@ -42,7 +42,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TestHarness stale field references** — `containingType` updated from `WorkspaceManager` → `WorkspaceInstance` for `compilation` field (moved during LRU refactor); `interfaces` → `interfaces_and_derived` in hierarchy test
 - **TestHarness timeout** — `ReceiveAsync` default increased from 15s → 30s to cover `dotnet run` cold-start time
 
+### Security
+
+⚠️ **Known Issue:** RoslynMcp currently has unrestricted filesystem access. Only use with trusted agents and on projects you control. Filesystem security boundaries (project root enforcement, symlink blocking, path traversal prevention) are planned for v0.4.0. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
+
 ### Planned
+- Filesystem security boundaries (see Issue #9)
 - `undo_last_edit` — revert most recent Roslyn-generated edit (rename, refactoring) from in-memory snapshot
 - NuGet package publication
 - CI/CD pipeline (GitHub Actions)

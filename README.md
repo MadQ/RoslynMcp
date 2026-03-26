@@ -8,6 +8,8 @@ A [Model Context Protocol](https://modelcontextprotocol.io/) server that exposes
 
 **Works with any MCP-compatible client:** GitHub Copilot, Claude Desktop, Cline, Roo Code, Continue, and more.
 
+> **⚠️ Security Note:** RoslynMcp runs with your user permissions and currently has unrestricted filesystem access. Only use with trusted agents and on projects you control. Filesystem security boundaries are planned for a future release. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
+
 ---
 
 ## Quick Start
