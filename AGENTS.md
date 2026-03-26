@@ -407,6 +407,10 @@ When ending a significant development session (especially with AI assistance), u
 
 **Convention:**
 - **Single file:** Always overwrite `docs/sessions/HANDOFF.md` (not dated files like `HANDOFF-2025-01-*.md`)
+- **Date/Time:** Always include actual date and time at top with timezone (e.g., `2026-03-26 16:07 EDT`)
+  - **Before writing:** Look up current date/time (don't guess or use placeholder)
+  - Use format: `YYYY-MM-DD HH:MM TZ (Timezone Name)`
+  - Example: `2026-03-26 16:07 EDT (Eastern Daylight Time)`
 - **Content:** What was done, current state, next steps, open questions, technical decisions
 - **Purpose:** Allow next session (human or AI) to pick up where you left off
 - **Commit message:** `"docs: Update session handoff"`
