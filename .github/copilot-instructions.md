@@ -12,6 +12,7 @@ This file contains Copilot-specific overrides and notes only.
 - When suggesting code, prefer using RoslynMcp tools to understand the codebase semantically
 - Always dogfood the tools — use `search_files`, `get_type_members`, `find_references`, etc.
 - For C# edits, strongly prefer `replace_in_code` over text-based replacements
+- **Performance:** Default to modern zero-allocation patterns (`Span<T>`, `ReadOnlySpan<T>`, `stackalloc`) when equally readable — see AGENTS.md § Performance & Allocation
 
 ### Quick Reference
 

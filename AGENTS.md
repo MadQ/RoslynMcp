@@ -157,7 +157,29 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
   - Blank lines between logically distinct statement groups within a method body
   - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block (Yeah, weird one, IK. High-maintenance bipedals: feel free to ignore this)
 - **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies) (Just recently started test-driving this one - liking it so far.)
-  
+
+### Performance & Allocation
+
+- **Prefer modern zero-allocation APIs** when practical:
+  - `Span<T>` / `ReadOnlySpan<T>` / `Memory<T>` over substring/array allocations
+  - `stackalloc` for small, short-lived buffers (< 1KB)
+  - `ArrayPool<T>.Shared` for larger temporary buffers
+  - String interpolation handlers (when targeting .NET 6+)
+- **Avoid string allocations in hot paths:**
+  - Use `AsSpan()` for prefix/suffix checks instead of `Substring()`
+  - Use `Span<char>.StartsWith()` instead of string concatenation for comparisons
+  - Cache frequently used strings (e.g., normalized paths, common error messages)
+- **LINQ is fine** — but be aware of multiple enumeration:
+  - Materialize with `.ToList()` / `.ToArray()` if enumerating more than once
+  - Avoid in tight loops (use `foreach` + manual logic instead)
+- **Don't prematurely optimize:**
+  - Write clear code first
+  - Profile if performance matters
+  - But when writing *new* code, default to zero-allocation patterns if equally readable
+  - Example: `path.AsSpan().StartsWith(root.AsSpan())` vs `path.StartsWith(root)` — same readability, zero allocations
+
+**Rationale:** Modern C# provides powerful zero-allocation tools. Using them from the start avoids "death by a thousand allocations" and makes future optimizations easier. Anti-patterns compound. That said, readability always wins over micro-optimizations when there's a meaningful trade-off.
+
 - If/When we start using unit tests, rule #1: No tautological tests (Did I just do the thing that I just did?). Tests must verify meaningful behavior, not just "does it compile" or "does it return the same thing as the code it's testing". All tests shall have extensive XML doc comments describing the reason for their existence, the specific behavior they verify, and the rationale for the chosen inputs and expected outputs. Tests without such documentation are not valid tests. Not everyone is a unit test SME... complicated mock setups tend to look like opaque black boxes (to some of us) that may as well be testing the test framework itself. So, all mock setups must also be documented with the same level of detail as the tests they support. Rule #2: Unit tests are a secondary concern. No non-test code shall be written with the primary goal of making it easier to test. There shall be no interface extractions for the sole purpose of testing. Not everything is inherently testable. Accept it and move on.
   - Also... Wow! Opine much?
 
