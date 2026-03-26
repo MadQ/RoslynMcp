@@ -180,6 +180,22 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 
 **Rationale:** Modern C# provides powerful zero-allocation tools. Using them from the start avoids "death by a thousand allocations" and makes future optimizations easier. Anti-patterns compound. That said, readability always wins over micro-optimizations when there's a meaningful trade-off.
 
+### The "Right Code" Principle
+
+**Question convention.** Not every "idiomatic" pattern exists for good reasons—some are just cargo-culted from contexts that don't apply here. Before accepting "this is how it's done," ask:
+- **Why** is this the idiom? (Historical accident? Valid reasoning? Marketing?)
+- **Should** this be the idiom *here*? (Different constraints, different answers)
+- **What** problem does this pattern actually solve? (If unclear, maybe it doesn't)
+
+**Examples of healthy skepticism:**
+- "Lambdas are idiomatic for callbacks" — *Sure, but for I/O where disk latency is 1000x the lambda allocation cost, does the 32-byte overhead matter? Or is readability the real win here?*
+- "Interfaces enable testability" — *True, but does every class need an interface? Or are we just making our codebase harder to navigate for a benefit we're not actually getting?*
+- "LINQ is readable" — *Often yes, but does `.Where().Select().FirstOrDefault()` with three enumerations beat a simple `foreach` with early exit? Context matters.*
+
+**The point:** Understand the **why** behind patterns. Conventions are useful defaults, not unquestionable laws. The "right" code for a given situation comes from reasoning about trade-offs, not from pattern-matching against "what's idiomatic."
+
+When you deviate from convention because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on.
+
 - If/When we start using unit tests, rule #1: No tautological tests (Did I just do the thing that I just did?). Tests must verify meaningful behavior, not just "does it compile" or "does it return the same thing as the code it's testing". All tests shall have extensive XML doc comments describing the reason for their existence, the specific behavior they verify, and the rationale for the chosen inputs and expected outputs. Tests without such documentation are not valid tests. Not everyone is a unit test SME... complicated mock setups tend to look like opaque black boxes (to some of us) that may as well be testing the test framework itself. So, all mock setups must also be documented with the same level of detail as the tests they support. Rule #2: Unit tests are a secondary concern. No non-test code shall be written with the primary goal of making it easier to test. There shall be no interface extractions for the sole purpose of testing. Not everything is inherently testable. Accept it and move on.
   - Also... Wow! Opine much?
 
