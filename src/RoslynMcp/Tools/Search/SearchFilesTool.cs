@@ -10,6 +10,11 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 {
 	public SearchFilesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 	
+	[McpServerTool(Name = "roslyn_search_files", ReadOnly = true)]
+	[Description(
+		"Searches workspace files for lines matching a regex pattern. " +
+		"Returns file paths, line numbers, and matching text with paging support. " +
+		"Use this to discover code locations before applying Roslyn tools.")]
 	public object SearchFiles(
 		[Description("Regex pattern to search for (e.g., 'class.*Tool', 'TODO.*performance').")] string pattern,
 		[Description(ProjectPathDescription)] string projectPath,

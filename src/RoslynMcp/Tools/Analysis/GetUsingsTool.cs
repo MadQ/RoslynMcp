@@ -10,6 +10,9 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 {
 	public GetUsingsTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 	
+	[McpServerTool(Name = "roslyn_get_usings", ReadOnly = true)]
+	[Description(
+		"Returns all using directives in a file plus implicit global usings from the project.")]
 	public async Task<object> GetUsings(
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description(ProjectPathDescription)] string projectPath)

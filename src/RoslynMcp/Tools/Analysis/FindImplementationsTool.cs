@@ -58,7 +58,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 						implementations = new[] { "No implementations found." }
 					};
 				
-				var page = allResults.AsSpan(skip, Math.Min(take, allResults.Length - skip)).ToArray();
+				var page = Paginate(allResults, ref skip, take);
 				
 				return scope.Outcome($"{page.Length}/{allResults.Length} implementation(s)", new {
 					symbol_type  = typeSymbol.TypeKind.ToString().ToLowerInvariant(),
@@ -99,7 +99,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 						overrides = new[] { "No overrides found." }
 					};
 				
-				var page = allResults.AsSpan(skip, Math.Min(take, allResults.Length - skip)).ToArray();
+				var page = Paginate(allResults, ref skip, take);
 				
 				return scope.Outcome($"{page.Length}/{allResults.Length} override(s)", new {
 					symbol_type = "method",

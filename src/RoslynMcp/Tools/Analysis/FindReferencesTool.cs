@@ -60,7 +60,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		if(allResults.Length == 0)
 			return new { total_references = 0, skip, take, references = new[] { $"No references found for '{symbolName}'." } };
 		
-		var page = allResults.AsSpan(skip, Math.Min(take, allResults.Length - skip)).ToArray();
+		var page = Paginate(allResults, ref skip, take);
 		
 		return scope.Outcome($"{page.Length}/{allResults.Length} reference(s)", new {
 			total_references = allResults.Length,

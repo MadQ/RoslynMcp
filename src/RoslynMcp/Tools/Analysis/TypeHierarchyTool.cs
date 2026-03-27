@@ -51,7 +51,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		// Page both interfaces
 		var combined = allInterfaces.Concat(allDerived).ToArray()
 		;
-		var page     = combined.AsSpan(skip, Math.Min(take, combined.Length - skip)).ToArray();
+		var page     = Paginate(combined, ref skip, take);
 		
 		return scope.Outcome($"{page.Length} interface(s)/derived", new {
 			type_name           = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
