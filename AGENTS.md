@@ -137,6 +137,24 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 
 ## Code Style
 
+> **🤖 FOR AI AGENTS: These formatting rules are MANDATORY for consistency.**
+>
+> **What's mandatory:** Formatting, syntax, visual style (braces, spacing, naming).  
+> **What's NOT mandatory:** Problem-solving approach, architecture decisions, questioning patterns.
+>
+> **Your mission:** Make code that *looks* like the repo owner wrote it, while *thinking* like a rebel ninja warrior pirate. Follow the style rules precisely—this is about **visual consistency**, not creative constraint. Innovation happens in design, not in brace placement.
+>
+> **Want to experiment with a formatting pattern?** Go ahead! Just:
+> 1. Add a comment explaining the experiment and why it might be better
+> 2. Ask the human for feedback before committing to it project-wide
+> 3. Example: `// Experiment: using expression bodies for single-line getters. Thoughts?`
+>
+> **TL;DR:** Braces go here, names look like this, but **how you solve problems is up to you**. Push back on bad ideas, suggest better approaches, question assumptions—just format it right when you're done. Want to try a new formatting pattern? Comment it and ask! 🏴‍☠️
+>
+> **Human contributors:** These guidelines are strong recommendations but not strict requirements. Local style preferences are fine as long as they don't clash with project-wide patterns. See the "Consistency is overrated" note at the end of this section.
+
+### Formatting Rules (AI: Follow These)
+
 - **Braces:** same line for control flow (`if(x) {`), new line for methods/classes; properties — same line as the identifier (`public int Count {`)
 - **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)` (Actually, IDC so much about this one)
 - **Single-statement blocks:** no braces
@@ -203,11 +221,22 @@ When you deviate from convention because you've *thought it through*, that's not
 
 ---
 
-> **Consistency is overrated. Embrace diversity.**
+> **Consistency is overrated. Embrace diversity.** *(For everyone—AI and humans)*
 >
-> Deliberate departure from the guidelines above is fine — that's how better patterns get discovered. Try something different, sit with it long enough to make an informed opinion, then decide. A snap judgement that "it's wrong" is just a reflex; a considered judgement after living with it is **data**. The guidelines exist because someone already walked that mile — but if your mile leads somewhere new, the map gets updated. Just don't go completely feral on us. 🏴‍☠️
+> **What this means for AI agents:**
+> - **Style/formatting:** Follow the rules (that's the easy part)
+> - **Problem-solving:** Question everything! If the existing approach sucks, say so. If there's a better pattern, propose it. If a "best practice" is actually cargo-culting, call it out. **Innovation lives here.**
+> - **Experimenting with formatting?** Add a comment explaining why the experiment might be better, then ask the human. Example: `// Experiment: using file-scoped namespaces. Reduces nesting by one level. Thoughts?`
+> - **When to deviate:** Compelling technical reason (performance, API limitation, framework requirement). Add a comment explaining why.
 >
-> When you do go off-map, a quick comment saying so helps — future you (and future AI) will know it was intentional, not an accident waiting to be "fixed". That comment might even be the Treasure (Arrrr!). 💎
+> **What this means for human contributors:**
+> - Deliberate departure from formatting guidelines is fine—that's how better patterns get discovered
+> - Try something different, sit with it, form an informed opinion
+> - A snap judgment that "it's wrong" is a reflex; a considered judgment after living with it is **data**
+> - The guidelines exist because someone already walked that mile—but if your mile leads somewhere new, the map gets updated
+> - Just don't go completely feral on us 🏴‍☠️
+>
+> **Bottom line:** Code should *look* consistent (formatting). Code should *think* rebelliously (design). When you deviate from convention because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on. That comment might even be the Treasure (Arrrr!). 💎
 
 ---
 
