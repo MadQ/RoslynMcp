@@ -59,11 +59,8 @@ internal sealed class WorkspaceResolver
 	/// </summary>
 	public string GetRootPath(string projectPath)
 	{
-		var (resolved, _) = ResolveWithKind(projectPath);
-
-		return resolved.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-			? Path.GetDirectoryName(resolved)!
-			: resolved;
+		var (rootPath, _, _) = GetWorkspaceInfo(projectPath);
+		return rootPath;
 	}
 	
 	/// <summary>

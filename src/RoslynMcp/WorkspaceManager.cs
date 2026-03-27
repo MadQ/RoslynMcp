@@ -1,9 +1,5 @@
-﻿using Microsoft.Build.Locator;
+using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.MSBuild;
-using Microsoft.CodeAnalysis.Text;
-using RoslynMcp.Tools;
 
 namespace RoslynMcp;
 
@@ -23,21 +19,28 @@ enum ResolutionKind
 }
 
 /// <summary>
-///     Manages multiple Roslyn workspaces with LRU caching. Supports smart project path resolution
-///     (directory, file, or .csproj). Thread-safe for parallel agent access.
+///     Manages Roslyn workspaces with LRU caching. When a .sln/.slnx is found above a .csproj,
+///     loads the full solution so cross-project semantics (references, rename, implementations)
+///     work naturally. Falls back to single-project or AdhocWorkspace when no solution exists.
+///     Thread-safe for parallel agent access.
 /// </summary>
-internal sealed class WorkspaceManager : IDisposable
+internal sealed partial class WorkspaceManager : IDisposable
 {
-	record CacheEntry(string NormalizedPath, WorkspaceInstance Instance, DateTime LastAccess);
-	
-	readonly Dictionary<string, CacheEntry> cache = new();
-	readonly object                         cacheLock = new();
-	readonly int                            maxCachedWorkspaces;
-	
+	record CacheEntry(string Key, WorkspaceInstance Instance, DateTime LastAccess);
+
+	readonly Dictionary<string, CacheEntry> cache = new(StringComparer.OrdinalIgnoreCase);
+
+	// Secondary index: maps normalized .csproj paths → cache keys for solution-level entries.
+	// Enables O(1) lookup when a tool passes a .csproj that's part of an already-loaded solution.
+	readonly Dictionary<string, string> projectToCacheKey = new(StringComparer.OrdinalIgnoreCase);
+
+	readonly object cacheLock = new();
+	readonly int    maxCachedWorkspaces;
+
 	// Deferred MSBuild registration — only attempted on first MSBuildWorkspace use.
 	static bool           msbuildRegistered;
 	static readonly object msbuildLock = new();
-	
+
 	public WorkspaceManager()
 	{
 		maxCachedWorkspaces = int.TryParse(
@@ -45,303 +48,156 @@ internal sealed class WorkspaceManager : IDisposable
 			out var val
 		) ? val : 5;
 	}
-	
+
+	// ── Cache helper ─────────────────────────────────────────────────────────
+
 	/// <summary>
-	///     Resolves a project path using smart inference and returns the compilation.
-	///     Caches workspaces with LRU eviction.
+	///     Resolves a path to a cached WorkspaceInstance, loading if necessary.
+	///     For .csproj paths, searches upward for a .sln/.slnx and loads the full solution
+	///     so all projects share one workspace. Falls back to single-project loading when
+	///     no solution is found. Handles LRU eviction.
 	/// </summary>
-	public Compilation GetCompilation(string resolvedProjectPath)
+	WorkspaceInstance GetOrLoadInstance(string resolvedPath)
 	{
-		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
-		
+		var normalizedPath = Path.GetFullPath(resolvedPath);
+
 		lock(cacheLock) {
-		
-			// Cache hit.
-			if(cache.TryGetValue(normalizedPath, out var entry)) {
-			
-				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
-				
-				return entry.Instance.GetCompilation();
+
+			// Check secondary index (handles .csproj → solution mapping).
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var mappedEntry)) {
+
+				cache[mappedKey] = mappedEntry with { LastAccess = DateTime.UtcNow };
+				return mappedEntry.Instance;
 			}
-			
-			// Cache miss - load workspace.
-			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-				? new WorkspaceInstance(normalizedPath)                // MSBuildWorkspace
-				: new WorkspaceInstance(normalizedPath, useAdhoc: true); // AdhocWorkspace
-			
-			// Evict LRU if cache full.
+
+			if(cache.TryGetValue(normalizedPath, out var entry)) {
+
+				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
+				return entry.Instance;
+			}
+
+			WorkspaceInstance instance;
+			string cacheKey;
+
+			if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
+
+				var solutionPath = FindSolutionFileUpwards(Path.GetDirectoryName(normalizedPath)!);
+
+				if(solutionPath is not null) {
+
+					instance = WorkspaceInstance.ForSolution(solutionPath);
+					cacheKey = Path.GetFullPath(solutionPath);
+				}
+				else {
+
+					instance = WorkspaceInstance.ForProject(normalizedPath);
+					cacheKey = normalizedPath;
+				}
+
+				// Map all project paths to this cache key for future lookups.
+				foreach(var csproj in instance.ProjectPaths)
+					projectToCacheKey[csproj] = cacheKey;
+			}
+			else {
+
+				instance = WorkspaceInstance.ForDirectory(normalizedPath);
+				cacheKey = normalizedPath;
+			}
+
 			if(cache.Count >= maxCachedWorkspaces) {
-			
+
 				var lru = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
 				cache.Remove(lru.Key);
+
+				// Clean secondary index entries pointing to evicted workspace.
+				var staleKeys = projectToCacheKey
+					.Where(kvp => string.Equals(kvp.Value, lru.Key, StringComparison.OrdinalIgnoreCase))
+					.Select(kvp => kvp.Key)
+					.ToArray()
+				;
+
+				foreach(var k in staleKeys)
+					projectToCacheKey.Remove(k);
+
 				lru.Value.Instance.Dispose();
 			}
-			
-			// Add to cache.
-			cache[normalizedPath] = new CacheEntry(normalizedPath, instance, DateTime.UtcNow);
-			
-			return instance.GetCompilation();
+
+			cache[cacheKey] = new CacheEntry(cacheKey, instance, DateTime.UtcNow);
+			return instance;
 		}
 	}
-	
-	/// <summary>
-	///     Gets the solution for a specific project path.
-	/// </summary>
+
+	// ── Public API ───────────────────────────────────────────────────────────
+
+	public Compilation GetCompilation(string resolvedProjectPath)
+	{
+		var instance = GetOrLoadInstance(resolvedProjectPath);
+		return instance.GetCompilation(Path.GetFullPath(resolvedProjectPath));
+	}
+
 	public Solution GetSolution(string resolvedProjectPath)
 	{
-		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
-		
-		lock(cacheLock) {
-		
-			if(cache.TryGetValue(normalizedPath, out var entry)) {
-			
-				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
-				
-				return entry.Instance.GetSolution();
-			}
-			
-			// Load if not cached.
-			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-				? new WorkspaceInstance(normalizedPath)
-				: new WorkspaceInstance(normalizedPath, useAdhoc: true);
-			cache[normalizedPath] = new CacheEntry(normalizedPath, instance, DateTime.UtcNow);
-			
-			return instance.GetSolution();
-		}
+		var instance = GetOrLoadInstance(resolvedProjectPath);
+		return instance.GetSolution();
 	}
-	
-	/// <summary>
-	///     Gets the project for a specific project path.
-	/// </summary>
+
 	public Project GetProject(string resolvedProjectPath)
 	{
-		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
-		
-		lock(cacheLock) {
-		
-			if(cache.TryGetValue(normalizedPath, out var entry)) {
-			
-				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
-				
-				return entry.Instance.GetProject();
-			}
-			
-			// Load if not cached.
-			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-				? new WorkspaceInstance(normalizedPath)
-				: new WorkspaceInstance(normalizedPath, useAdhoc: true);
-			cache[normalizedPath] = new CacheEntry(normalizedPath, instance, DateTime.UtcNow);
-			
-			return instance.GetProject();
-		}
+		var instance = GetOrLoadInstance(resolvedProjectPath);
+		return instance.GetProject(Path.GetFullPath(resolvedProjectPath));
 	}
-	
-	/// <summary>
-	///     Gets metadata about the workspace instance for a project path.
-	/// </summary>
+
 	public (string RootPath, bool IsMSBuild, string? CsprojPath) GetWorkspaceInfo(string resolvedProjectPath)
 	{
-		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
-		
-		lock(cacheLock) {
-		
-			if(cache.TryGetValue(normalizedPath, out var entry)) {
-			
-				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
-				
-				return (entry.Instance.RootPath, entry.Instance.IsMSBuild, entry.Instance.CsprojPath);
-			}
-			
-			// Load if not cached
-			var instance = normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-				? new WorkspaceInstance(normalizedPath)
-				: new WorkspaceInstance(normalizedPath, useAdhoc: true);
-			cache[normalizedPath] = new CacheEntry(normalizedPath, instance, DateTime.UtcNow);
-			
-			return (instance.RootPath, instance.IsMSBuild, instance.CsprojPath);
-		}
+		var instance   = GetOrLoadInstance(resolvedProjectPath);
+		var csprojPath = instance.FindCsprojForPath(Path.GetFullPath(resolvedProjectPath));
+		return (instance.RootPath, instance.IsMSBuild, csprojPath);
 	}
-	
-	/// <summary>
-	///     Invalidates the cached compilation for a project when a file changes.
-	/// </summary>
+
 	public void InvalidateFile(string resolvedProjectPath, string fullPath)
 	{
 		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
-		
+
 		lock(cacheLock) {
-		
-			if(cache.TryGetValue(normalizedPath, out var entry))
+
+			// Check secondary index (solution-level entries).
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var entry)) {
+
 				entry.Instance.InvalidateFile(fullPath);
-		}
-	}
-	
-	/// <summary>
-	///     Resolves a project path using smart inference:
-	///     - .csproj file → use directly
-	///     - directory → search for .csproj
-	///     - source file → walk up to find .csproj
-	///     - bare filename → scan cached MSBuild workspaces
-	/// </summary>
-	public (string Path, ResolutionKind Kind) ResolveProjectPath(string inputPath)
-	{
-		if(string.IsNullOrWhiteSpace(inputPath))
-			throw new ArgumentException("Project path is required and cannot be empty. The agent must explicitly specify which project to operate on.", nameof(inputPath));
-
-		var fullPath = Path.GetFullPath(inputPath);
-
-		// Already a .csproj file — explicit, no inference needed.
-		if(fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
-
-			if(!File.Exists(fullPath))
-				throw new InvalidProjectPathException(fullPath, "File does not exist");
-
-			return (fullPath, ResolutionKind.Explicit);
-		}
-
-		// Directory - search for .csproj
-		if(Directory.Exists(fullPath)) {
-
-			var csprojPath = FindProjectInDirectory(fullPath);
-
-			if(csprojPath is not null)
-				return (csprojPath, ResolutionKind.Directory);
-
-			// No .csproj — AdhocWorkspace.
-			return (fullPath, ResolutionKind.Adhoc);
-		}
-
-		// File path - walk up to find .csproj
-		if(File.Exists(fullPath))
-			return (FindProjectFileUpwards(fullPath), ResolutionKind.FileWalkUp);
-
-		// Last resort: bare filename — scan cached MSBuild workspaces.
-		var inferred = TryInferWorkspaceFromFileName(Path.GetFileName(fullPath));
-
-		if(inferred is not null)
-			return (inferred, ResolutionKind.InferredFromCache);
-
-		throw new InvalidProjectPathException(fullPath, "Path does not exist");
-	}
-	
-	/// <summary>
-	///     Scans all cached MSBuild workspaces for a SyntaxTree whose file path ends with
-	///     <paramref name="fileName"/>. Returns the .csproj path if exactly one workspace matches.
-	///     Throws <see cref="AmbiguousFileException"/> if multiple workspaces contain the file.
-	///     Returns null if no cached workspace contains the file (cold cache or AdhocWorkspace only).
-	/// </summary>
-	string? TryInferWorkspaceFromFileName(string fileName)
-	{
-		if(string.IsNullOrEmpty(fileName))
-			return null;
-
-		var suffix = Path.DirectorySeparatorChar + fileName;
-
-		List<string>? matches = null;
-
-		lock(cacheLock) {
-
-			foreach(var (_, entry) in cache) {
-
-				// Only MSBuild workspaces are worth inferring — Adhoc has no .csproj to return.
-				if(!entry.Instance.IsMSBuild)
-					continue;
-
-				// Validate membership via the live SyntaxTree set — not just a file index.
-				var compilation = entry.Instance.GetCompilation();
-				var hasFile = compilation.SyntaxTrees.Any(t =>
-					t.FilePath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-					|| string.Equals(Path.GetFileName(t.FilePath), fileName, StringComparison.OrdinalIgnoreCase)
-				);
-
-				if(!hasFile)
-					continue;
-
-				matches ??= [];
-				matches.Add(entry.Instance.CsprojPath!);
+				return;
 			}
-		}
 
-		if(matches is null)
-			return null;
-
-		if(matches.Count == 1)
-			return matches[0];
-
-		throw new AmbiguousFileException(fileName, matches.ToArray());
-	}
-
-	string? FindProjectInDirectory(string directory)
-	{
-		var csprojFiles = Directory.GetFiles(directory, "*.csproj");
-		
-		if(csprojFiles.Length == 0)
-			return null; // No .csproj — will use AdhocWorkspace
-		
-		if(csprojFiles.Length == 1)
-			return csprojFiles[0];
-		
-		// Multiple .csproj files - need disambiguation
-		throw new MultipleProjectsFoundException(directory, csprojFiles);
-	}
-	
-	string FindProjectFileUpwards(string startPath)
-	{
-		var dir = File.Exists(startPath)
-			? Path.GetDirectoryName(startPath)
-			: startPath;
-		
-		if(dir is null)
-			throw new ProjectNotFoundException(startPath);
-		
-		while(true) {
-		
-			var csprojFiles = Directory.GetFiles(dir, "*.csproj");
-			
-			if(csprojFiles.Length == 1)
-				return csprojFiles[0];
-			
-			if(csprojFiles.Length > 1)
-				throw new MultipleProjectsFoundException(dir, csprojFiles);
-			
-			var parent = Directory.GetParent(dir);
-			
-			if(parent is null)
-				throw new ProjectNotFoundException(startPath);
-			
-			dir = parent.FullName;
+			if(cache.TryGetValue(normalizedPath, out var directEntry))
+				directEntry.Instance.InvalidateFile(fullPath);
 		}
 	}
-	
+
 	public void Dispose()
 	{
 		lock(cacheLock) {
-		
+
 			foreach(var entry in cache.Values)
 				entry.Instance.Dispose();
-			
+
 			cache.Clear();
+			projectToCacheKey.Clear();
 		}
 	}
-	
-	// ── MSBuild registration ─────────────────────────────────────────────────────
-	
-	/// <summary>
-	///     Registers the MSBuild SDK instance on first use. Deferred to avoid eager
-	///     initialization at startup — only needed when opening an MSBuildWorkspace.
-	///     Thread-safe via double-checked locking; failures are silently swallowed so
-	///     the server stays alive and tools return structured errors instead.
-	/// </summary>
+
+	// ── MSBuild registration ─────────────────────────────────────────────────
+
 	static void EnsureMSBuildRegistered()
 	{
 		if(msbuildRegistered)
 			return;
-		
+
 		lock(msbuildLock) {
-		
+
 			if(msbuildRegistered)
 				return;
-			
+
 			try {
 				if(MSBuildLocator.CanRegister)
 					MSBuildLocator.RegisterDefaults();
@@ -350,408 +206,7 @@ internal sealed class WorkspaceManager : IDisposable
 				// Intentionally swallowed — MSBuildWorkspace tools will fail gracefully per-call.
 			}
 			finally {
-				// Mark as attempted regardless of success — only one attempt per process.
 				msbuildRegistered = true;
-			}
-		}
-	}
-	
-	// ── WorkspaceInstance (per-project workspace) ────────────────────────────────
-	
-	/// <summary>
-	///     Encapsulates a single workspace (MSBuildWorkspace or AdhocWorkspace) for one project.
-	///     This is what was previously the entire WorkspaceManager class.
-	/// </summary>
-	sealed class WorkspaceInstance : IDisposable
-	{
-		private readonly Workspace            workspace;
-		private readonly ProjectId            projectId;
-		private readonly string               rootPath;
-		private readonly string?              csprojPath;
-		private readonly bool                 isMSBuild;
-		private readonly ReaderWriterLockSlim rwLock = new();
-		private readonly FileSystemWatcher?   watcher;
-
-		// Debounce: accumulate FSW events for 300ms before processing — avoids hammering
-		// Roslyn on every keystroke during active editing.
-		private readonly object           debounceLock   = new();
-		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
-		private          Timer?           debounceTimer;
-		private const    int              DebounceMs     = 300;
-
-		// The current compilation — replaced atomically on each file change.
-		private Compilation? compilation;
-		
-		/// <summary>
-		///     Creates a workspace instance for a .csproj file (MSBuildWorkspace).
-		/// </summary>
-		public WorkspaceInstance(string csprojPath)
-		{
-			this.csprojPath = csprojPath;
-			this.rootPath   = Path.GetDirectoryName(csprojPath)!;
-			
-			EnsureMSBuildRegistered();
-			
-			// Use MSBuildWorkspace for .csproj files
-			(workspace, projectId) = LoadMSBuildWorkspace(csprojPath);
-			isMSBuild = true;
-			
-			// MSBuildWorkspace is a snapshot — it does NOT auto-detect file changes.
-			// External edits are picked up only when InvalidateFile is explicitly called by a tool.
-		}
-		
-		/// <summary>
-		///     Creates a workspace instance for a directory without a .csproj (AdhocWorkspace).
-		///     Loads all .cs files and watches for changes via FileSystemWatcher.
-		/// </summary>
-		public WorkspaceInstance(string directoryPath, bool useAdhoc)
-		{
-			if(!useAdhoc)
-				throw new ArgumentException("Second constructor is for AdhocWorkspace only. Pass true.", nameof(useAdhoc));
-			
-			this.csprojPath = null;
-			this.rootPath   = directoryPath;
-			
-			var dirInfo = new DirectoryInfo(directoryPath);
-			if(dirInfo.Parent == null)
-				throw new InvalidOperationException($"Cannot create AdhocWorkspace for root directory '{directoryPath}'. Specify a subdirectory or use a .csproj file.");
-			
-			// Use AdhocWorkspace for source-only scenarios
-			(workspace, projectId) = LoadAdhocWorkspace();
-			isMSBuild = false;
-			
-			// AdhocWorkspace requires manual file watching
-			watcher = new FileSystemWatcher(rootPath, "*.cs")
-			{
-				IncludeSubdirectories = true,
-				NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
-			};
-			
-			watcher.Changed += OnFileChanged;
-			watcher.Created += OnFileChanged;
-			watcher.Deleted += OnFileDeleted;
-			watcher.Renamed += OnFileRenamed;
-			watcher.EnableRaisingEvents = true;
-		}
-		
-		public string  RootPath   => rootPath;
-		public bool    IsMSBuild  => isMSBuild;
-		public string? CsprojPath => csprojPath;
-		
-		public Solution GetSolution() => workspace.CurrentSolution;
-		
-		public Project GetProject() => workspace.CurrentSolution.GetProject(projectId)!;
-		
-		public void InvalidateFile(string fullPath)
-		{
-			if(isMSBuild) {
-
-				// MSBuildWorkspace tracks files via Solution — push the new on-disk text in
-				// so that read_file / get_file_outline etc. see fresh content immediately,
-				// without waiting for the FSW debounce cycle.
-				var docIds = workspace.CurrentSolution.GetDocumentIdsWithFilePath(fullPath);
-
-				if(docIds.Length > 0) {
-
-					try {
-
-						var newText    = SourceText.From(File.ReadAllText(fullPath));
-						var newSolution = workspace.CurrentSolution;
-
-						foreach(var id in docIds)
-							newSolution = newSolution.WithDocumentText(id, newText);
-
-						workspace.TryApplyChanges(newSolution);
-					}
-					catch(IOException) { }
-					catch(UnauthorizedAccessException) { }
-				}
-
-				InvalidateCompilation();
-			}
-			else if(workspace is AdhocWorkspace adhoc) {
-
-				// AdhocWorkspace requires manual reload.
-				try {
-
-					AddOrUpdateDocument(adhoc, projectId, fullPath);
-				}
-				catch(IOException) {
-
-					// File may be locked — watcher will retry on next event.
-				}
-				catch(UnauthorizedAccessException) {
-
-					// Insufficient permissions — ignore.
-				}
-			}
-		}
-		
-		public Compilation GetCompilation()
-		{
-			rwLock.EnterReadLock();
-			
-			try {
-			
-				if(compilation is not null)
-					return compilation;
-			}
-			finally {
-				rwLock.ExitReadLock();
-			}
-			
-			return RebuildCompilation();
-		}
-		
-		public void Dispose()
-		{
-			watcher?.Dispose();
-
-			lock(debounceLock)
-				debounceTimer?.Dispose();
-
-			rwLock.Dispose();
-			workspace.Dispose();
-		}
-		
-		private (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath)
-		{
-			try {
-				var msbuildWorkspace = MSBuildWorkspace.Create();
-				var project = msbuildWorkspace.OpenProjectAsync(csprojPath).GetAwaiter().GetResult();
-				
-				return (msbuildWorkspace, project.Id);
-			}
-			catch(Exception ex) when(ex is not OperationCanceledException) {
-				throw new InvalidOperationException($"Failed to load MSBuildWorkspace for '{csprojPath}': {ex.Message}", ex);
-			}
-		}
-		
-		private (Workspace workspace, ProjectId projectId) LoadAdhocWorkspace()
-		{
-			var adhocWorkspace = new AdhocWorkspace();
-			
-			var projectInfo = ProjectInfo.Create(
-				id:             ProjectId.CreateNewId(),
-				version:        VersionStamp.Create(),
-				name:           Path.GetFileName(rootPath),
-				assemblyName:   Path.GetFileName(rootPath),
-				language:       LanguageNames.CSharp,
-				compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
-				parseOptions:       new CSharpParseOptions(LanguageVersion.Preview)
-			);
-			
-			adhocWorkspace.AddProject(projectInfo);
-			
-			LoadAllFiles(adhocWorkspace, projectInfo.Id);
-			
-			return (adhocWorkspace, projectInfo.Id);
-		}
-		
-		private void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId pid)
-		{
-			// Enumerate files with error handling for protected directories.
-			var files = EnumerateFilesWithErrorHandling(rootPath, "*.cs");
-			
-			foreach(var path in files)
-				AddOrUpdateDocument(adhocWorkspace, pid, path);
-		}
-		
-		private IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
-		{
-			// Don't scan system directories or drive roots.
-			var pathInfo = new DirectoryInfo(path);
-			if(pathInfo.Attributes.HasFlag(FileAttributes.System) || pathInfo.Parent is null)
-				yield break;
-			
-			// Try to enumerate files in current directory.
-			IEnumerable<string> files;
-			try {
-				files = Directory.EnumerateFiles(path, searchPattern, SearchOption.TopDirectoryOnly);
-			}
-			catch(UnauthorizedAccessException) {
-				yield break; // Skip directories we can't access.
-			}
-			catch(DirectoryNotFoundException) {
-				yield break;
-			}
-			
-			foreach(var file in files)
-				yield return file;
-			
-			// Recursively enumerate subdirectories.
-			IEnumerable<string> directories;
-			try {
-				directories = Directory.EnumerateDirectories(path);
-			}
-			catch(UnauthorizedAccessException) {
-				yield break;
-			}
-			catch(DirectoryNotFoundException) {
-				yield break;
-			}
-			
-			foreach(var directory in directories) {
-			
-				// Skip hidden, system, and common large directories.
-				var dirInfo = new DirectoryInfo(directory);
-				if(dirInfo.Attributes.HasFlag(FileAttributes.Hidden) ||
-				   dirInfo.Attributes.HasFlag(FileAttributes.System) ||
-				   dirInfo.Name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages")
-					continue;
-				
-				foreach(var file in EnumerateFilesWithErrorHandling(directory, searchPattern))
-					yield return file;
-			}
-		}
-		
-		private void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
-		{
-			// Skip temp files (editor atomic-save artifacts) and non-C# files.
-			if(!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-				return;
-
-			var text = SourceText.From(File.ReadAllText(path));
-			var name = Path.GetRelativePath(rootPath, path);
-			
-			var project  = adhocWorkspace.CurrentSolution.GetProject(pid)!;
-			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
-			
-			Solution newSolution;
-			
-			if(existing is not null)
-				newSolution = adhocWorkspace.CurrentSolution.WithDocumentText(existing.Id, text);
-			else
-				newSolution = adhocWorkspace.CurrentSolution.AddDocument(
-					DocumentId.CreateNewId(pid), name, text, filePath: path
-				);
-			
-			adhocWorkspace.TryApplyChanges(newSolution);
-			InvalidateCompilation();
-		}
-		
-		private void RemoveDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
-		{
-			var name     = Path.GetRelativePath(rootPath, path);
-			var project  = adhocWorkspace.CurrentSolution.GetProject(pid)!;
-			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
-			
-			if(existing is null)
-				return;
-			
-			adhocWorkspace.TryApplyChanges(adhocWorkspace.CurrentSolution.RemoveDocument(existing.Id));
-			InvalidateCompilation();
-		}
-		
-		private void OnFileChanged(object sender, FileSystemEventArgs e)
-		{
-			if(isMSBuild)
-				return;
-
-			ScheduleDebounced(e.FullPath);
-		}
-
-		private void OnFileDeleted(object sender, FileSystemEventArgs e)
-		{
-			if(isMSBuild || workspace is not AdhocWorkspace adhoc)
-				return;
-
-			RemoveDocument(adhoc, projectId, e.FullPath);
-		}
-
-		private void OnFileRenamed(object sender, RenamedEventArgs e)
-		{
-			if(isMSBuild || workspace is not AdhocWorkspace adhoc)
-				return;
-
-			RemoveDocument(adhoc, projectId, e.OldFullPath);
-			ScheduleDebounced(e.FullPath);
-		}
-
-		private void ScheduleDebounced(string fullPath)
-		{
-			lock(debounceLock) {
-
-				// Accumulate the changed path — duplicates collapsed by HashSet.
-				pendingChanges.Add(fullPath);
-
-				// Reset the timer — extends the quiet window on rapid events.
-				if(debounceTimer is null)
-					debounceTimer = new Timer(FlushPendingChanges, null, DebounceMs, Timeout.Infinite);
-				else
-					debounceTimer.Change(DebounceMs, Timeout.Infinite);
-			}
-		}
-
-		private void FlushPendingChanges(object? _)
-		{
-			string[] paths;
-
-			lock(debounceLock) {
-
-				paths = [.. pendingChanges];
-				pendingChanges.Clear();
-			}
-
-			if(workspace is not AdhocWorkspace adhoc)
-				return;
-
-			foreach(var path in paths) {
-
-				try {
-
-					AddOrUpdateDocument(adhoc, projectId, path);
-				}
-				catch(FileNotFoundException) {
-
-					// File gone by the time we processed it — remove from workspace.
-					RemoveDocument(adhoc, projectId, path);
-				}
-				catch(IOException) {
-
-					// File locked mid-write — next FSW event will retry.
-				}
-				catch(UnauthorizedAccessException) {
-
-					// Insufficient permissions — ignore.
-				}
-			}
-		}
-		
-		private Compilation RebuildCompilation()
-		{
-			rwLock.EnterWriteLock();
-			
-			try {
-			
-				// Double-checked: another thread may have rebuilt while we waited.
-				if(compilation is not null)
-					return compilation;
-				
-				var project = workspace.CurrentSolution.GetProject(projectId)!;
-				
-				// GetCompilationAsync is the correct async path; block here because
-				// tool calls arrive on a thread pool thread without a live SynchronizationContext.
-				compilation = project.GetCompilationAsync().GetAwaiter().GetResult()
-					?? CSharpCompilation.Create("empty");
-				
-				return compilation;
-			}
-			finally {
-				rwLock.ExitWriteLock();
-			}
-		}
-		
-		private void InvalidateCompilation()
-		{
-			rwLock.EnterWriteLock();
-			
-			try {
-			
-				compilation = null;
-			}
-			finally {
-				rwLock.ExitWriteLock();
 			}
 		}
 	}
