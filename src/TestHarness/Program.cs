@@ -258,7 +258,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_get_symbol_definition: find WorkspaceManager declaration",
 	"roslyn_get_symbol_definition",
 	new { symbolName = "WorkspaceManager", projectPath = targetPath },
-));
+	data => data?["file"]?.GetValue<string>().Contains("WorkspaceManager.cs") == true));
 
 Console.WriteLine("\nCode Generation Tools (1 test)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
