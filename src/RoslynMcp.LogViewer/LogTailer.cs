@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -11,9 +11,20 @@ namespace RoslynMcp.LogViewer;
 /// </summary>
 sealed class LogTailer
 {
-	// Format: [2026-03-26 14:30:45.123Z] [TOOL  ] roslyn_get_type_members 142ms OK
+	// Format: [2026-03-26 14:30:45.123Z] [TOOL  ] ◆ roslyn_get_type_members(WorkspaceManager) 142ms OK    — 18/18 member(s)
 	static readonly Regex LinePattern = new(
 		@"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}Z)\] \[(.{6})\] (.*)$",
+		RegexOptions.Compiled
+	);
+
+	// Parses the TOOL message body: optional mode char, tool name, elapsed, outcome, optional detail
+	// Group 1: workspace mode char (◆, ◇, or space)
+	// Group 2: tool name (with optional subject in parens)
+	// Group 3: elapsed ms
+	// Group 4: OK or ERROR
+	// Group 5: detail after ' — ' (optional)
+	static readonly Regex ToolPattern = new(
+		@"^([◆◇ ]) ([\w_]+(?:\([^)]*\))?) (\d+)ms (OK\s*|ERROR)(?: — (.*))?$",
 		RegexOptions.Compiled
 	);
 	
@@ -218,15 +229,36 @@ sealed class LogTailer
 	static LogEntry Parse(string raw)
 	{
 		var m = LinePattern.Match(raw);
-		
+
 		if(!m.Success)
 			return new LogEntry("", "OTHER", raw, raw);
-		
-		return new LogEntry(
-			Timestamp: m.Groups[1].Value,
-			Level:     m.Groups[2].Value.TrimEnd(),
-			Message:   m.Groups[3].Value,
-			Raw:       raw
-		);
+
+		var timestamp = m.Groups[1].Value;
+		var level     = m.Groups[2].Value.TrimEnd();
+		var message   = m.Groups[3].Value;
+
+		if(level == "TOOL") {
+
+			var t = ToolPattern.Match(message);
+
+			if(t.Success) {
+
+				var modeChar = t.Groups[1].Value.Trim(); // "◆", "◇", or ""
+
+				return new LogEntry(
+					Timestamp:     timestamp,
+					Level:         level,
+					Message:       message,
+					Raw:           raw,
+					WorkspaceMode: modeChar.Length > 0 ? modeChar : null,
+					ToolName:      t.Groups[2].Value,
+					ElapsedMs:     long.TryParse(t.Groups[3].Value, out var ms) ? ms : null,
+					Success:       t.Groups[4].Value.TrimEnd() == "OK",
+					Detail:        t.Groups[5].Value is { Length: > 0 } d ? d : null
+				);
+			}
+		}
+
+		return new LogEntry(timestamp, level, message, raw);
 	}
 }

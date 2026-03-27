@@ -11,20 +11,31 @@ internal abstract partial class RoslynMcpTool
 {
 	protected readonly WorkspaceResolver workspace;
 	readonly           FileLogger         logger;
-	
+
+	// Tracks the in-flight scope so TryGetCompilation/TryGetProject can set workspace mode without
+	// requiring callers to thread the scope through as a parameter.
+	[ThreadStatic]
+	private static ToolScope? activeScope;
+
 	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger)
 	{
 		this.workspace = workspace;
 		this.logger    = logger;
 	}
-	
+
 	/// <summary>
 	///     Starts a timed tool scope. Dispose the returned handle to log the outcome.
 	///     Usage: <c>using var scope = BeginTool("roslyn_foo", subject);</c>
 	///     Call <c>scope.Failed("reason")</c> on error paths, <c>scope.Outcome("detail")</c> on notable
 	///     success, or <c>scope.Record("note")</c> for neutral mid-scope annotations.
 	/// </summary>
-	protected ToolScope BeginTool(string name, string? subject = null) => new(name, subject, logger);
+	protected ToolScope BeginTool(string name, string? subject = null)
+	{
+		var scope  = new ToolScope(name, subject, logger, () => activeScope = null);
+		activeScope = scope;
+
+		return scope;
+	}
 	
 	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
@@ -42,9 +53,10 @@ internal abstract partial class RoslynMcpTool
 		compilation = null;
 		
 		try {
-		
+
 			compilation = workspace.GetCompilation(projectPath);
-			
+			activeScope?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+
 			return true;
 		}
 		catch(ProjectNotFoundException ex) {
@@ -100,9 +112,10 @@ internal abstract partial class RoslynMcpTool
 		project = null;
 		
 		try {
-		
+
 			project = workspace.GetProject(projectPath);
-			
+			activeScope?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+
 			return true;
 		}
 		catch(ProjectNotFoundException ex) {

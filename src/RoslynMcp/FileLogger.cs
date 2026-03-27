@@ -1,4 +1,4 @@
-namespace RoslynMcp;
+﻿namespace RoslynMcp;
 
 /// <summary>
 ///     Lightweight file logger with rotation. All writes are thread-safe via a lock.
@@ -59,14 +59,16 @@ internal sealed class FileLogger : IDisposable
 	public void LogStop()
 		=> Write("STOP  ", "Server stopping");
 	
-	/// <summary>Logs a tool invocation with outcome and elapsed time.</summary>
-	public void LogTool(string toolName, long elapsedMs, bool success, string? detail = null)
+	/// <summary>Logs a tool invocation with outcome, elapsed time, and workspace mode indicator.</summary>
+	/// <param name="isMSBuild">True for MSBuildWorkspace (◆), false for AdhocWorkspace (◇), null when unknown.</param>
+	public void LogTool(string toolName, long elapsedMs, bool success, string? detail = null, bool? isMSBuild = null)
 	{
-		var outcome = success ? "OK   " : "ERROR";
-		var message = detail is not null
-			? $"{toolName} {elapsedMs}ms {outcome} — {detail}"
-			: $"{toolName} {elapsedMs}ms {outcome}";
-		
+		var outcome       = success ? "OK   " : "ERROR";
+		var workspaceMode = isMSBuild switch { true => "◆", false => "◇", null => " " };
+		var message       = detail is not null
+			? $"{workspaceMode} {toolName} {elapsedMs}ms {outcome} — {detail}"
+			: $"{workspaceMode} {toolName} {elapsedMs}ms {outcome}";
+
 		Write("TOOL  ", message);
 	}
 	

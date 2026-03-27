@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using RoslynMcp.LogViewer;
 
@@ -191,9 +191,18 @@ static class ViewerHtml
 		.lvl-TOOL  { color: rgb(20 100 40); }
 		.lvl-ERROR { color: rgb(160 0 0); }
 		.lvl-OTHER { color: rgb(110 105 70); }
-		
+
 		/* ERROR rows get a subtle left border */
 		.entry[data-level="ERROR"] { border-left: 2px solid rgb(160 0 0); }
+
+		/* TOOL message sub-fields */
+		.ws-msb  { color: rgb(20 100 40);  font-weight: 700; }  /* ◆ MSBuild  */
+		.ws-adhc { color: rgb(170 100 0);  font-weight: 700; }  /* ◇ Adhoc    */
+		.tool-name { color: rgb(0 0 0); font-weight: 600; }
+		.tool-ms   { color: rgb(110 105 70); }
+		.tool-ok   { color: rgb(20 100 40); font-weight: 600; }
+		.tool-err  { color: rgb(160 0 0);   font-weight: 600; }
+		.tool-det  { color: rgb(80 75 45);  font-style: italic; }
 		
 		.hidden { display: none !important; }
 	  </style>
@@ -271,27 +280,59 @@ static class ViewerHtml
 		  const div   = document.createElement('div');
 		  div.className    = 'entry';
 		  div.dataset.level = level;
-		  
+
 		  if(filter !== 'ALL' && level !== filter)
 			div.classList.add('hidden');
-			
+
 		  const ts  = document.createElement('span');
 		  ts.className   = 'ts';
 		  ts.textContent = e.Timestamp;
-		  
+
 		  const lvl = document.createElement('span');
 		  lvl.className   = `lvl lvl-${level}`;
 		  lvl.textContent = level;
-		  
+
 		  const msg = document.createElement('span');
-		  msg.className   = 'msg';
-		  msg.textContent = e.Message || e.Raw;
-		  
+		  msg.className = 'msg';
+
+		  if(level === 'TOOL' && e.ToolName) {
+			// Structured TOOL entry: ◆/◇  toolName  42ms  OK/ERROR  — detail
+			if(e.WorkspaceMode) {
+			  const ws = document.createElement('span');
+			  ws.className   = e.WorkspaceMode === '◆' ? 'ws-msb' : 'ws-adhc';
+			  ws.textContent = e.WorkspaceMode + ' ';
+			  msg.appendChild(ws);
+			}
+			const tn = document.createElement('span');
+			tn.className   = 'tool-name';
+			tn.textContent = e.ToolName;
+			msg.appendChild(tn);
+
+			const ms = document.createElement('span');
+			ms.className   = 'tool-ms';
+			ms.textContent = ` ${e.ElapsedMs}ms `;
+			msg.appendChild(ms);
+
+			const ok = document.createElement('span');
+			ok.className   = e.Success ? 'tool-ok' : 'tool-err';
+			ok.textContent = e.Success ? 'OK' : 'ERROR';
+			msg.appendChild(ok);
+
+			if(e.Detail) {
+			  const det = document.createElement('span');
+			  det.className   = 'tool-det';
+			  det.textContent = ' — ' + e.Detail;
+			  msg.appendChild(det);
+			}
+		  } else {
+			msg.textContent = e.Message || e.Raw;
+		  }
+
 		  div.appendChild(ts);
 		  div.appendChild(lvl);
 		  div.appendChild(msg);
 		  logEl.appendChild(div);
-		  
+
 		  count++;
 		  updateStatus();
 		  
