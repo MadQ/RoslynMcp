@@ -46,7 +46,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 				.Where(m => m is not null)
 		];
 		
-		var page = allMembers.AsSpan(skip, Math.Min(take, allMembers.Length - skip)).ToArray();
+		var page = Paginate(allMembers, ref skip, take);
 		
 		return scope.Outcome($"{page.Length}/{allMembers.Length} member(s)", new {
 			type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),

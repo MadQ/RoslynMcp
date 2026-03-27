@@ -319,6 +319,17 @@ internal abstract partial class RoslynMcpTool
 		"reduced functionality). Prefer passing the .csproj path directly for full MSBuild support.";
 
 	/// <summary>
+	///     Returns a safe page slice from an array. Clamps <paramref name="skip"/> to
+	///     <c>[0, items.Length]</c> so callers never hit <see cref="ArgumentOutOfRangeException"/>.
+	/// </summary>
+	protected static T[] Paginate<T>(T[] items, ref int skip, int take)
+	{
+		skip = Math.Clamp(skip, 0, items.Length);
+
+		return items.AsSpan(skip, Math.Min(take, items.Length - skip)).ToArray();
+	}
+
+	/// <summary>
 	///     Normalizes a file path for cross-platform compatibility by converting forward slashes
 	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
 	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.

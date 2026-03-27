@@ -10,6 +10,9 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 {
     public GetLineCountTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
+    [McpServerTool(Name = "roslyn_get_line_count", ReadOnly = true)]
+    [Description(
+        "Returns the line count for one or more files. Accepts a single path or comma-separated list.")]
     public async Task<object> GetLineCount(
 		[Description("Relative file path or comma-separated list of paths, e.g. 'WorkspaceManager.cs' or 'Foo.cs,Bar.cs,appsettings.json'.")] string filePaths,
 		[Description(ProjectPathDescription)] string projectPath)

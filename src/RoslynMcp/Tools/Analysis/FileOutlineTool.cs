@@ -10,6 +10,10 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 {
 	public FileOutlineTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 	
+	[McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true)]
+	[Description(
+		"Returns a structured outline of a file: types and their members (signatures only, no bodies). " +
+		"Saves tokens by avoiding full file reads. Results are paged; use skip/take for large files.")]
 	public async Task<object> GetFileOutline(
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description(ProjectPathDescription)] string projectPath,
@@ -35,7 +39,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		var root     = await tree.GetRootAsync();
 		var model    = compilation.GetSemanticModel(tree);
 		var allTypes = ExtractTypes(root, model);
-		var page     = allTypes.AsSpan(skip, Math.Min(take, allTypes.Length - skip));
+		var page     = Paginate(allTypes, ref skip, take);
 		
 		return scope.Outcome($"{page.Length}/{allTypes.Length} type(s)", new {
 			file        = Path.GetRelativePath(rootPath, tree.FilePath),

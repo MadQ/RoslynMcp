@@ -61,8 +61,9 @@ internal sealed class WorkspaceResolver
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
 
-		// Root path is the directory containing the .csproj
-		return Path.GetDirectoryName(resolved)!;
+		return resolved.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+			? Path.GetDirectoryName(resolved)!
+			: resolved;
 	}
 	
 	/// <summary>

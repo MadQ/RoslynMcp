@@ -10,6 +10,10 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 {
 	public GetSymbolsInScopeTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 	
+	[McpServerTool(Name = "roslyn_get_symbols_in_scope", ReadOnly = true)]
+	[Description(
+		"Returns all symbols accessible at a specific file location: locals, parameters, fields, properties, methods, types. " +
+		"Use when generating code to understand what's available in scope.")]
 	public async Task<object> GetSymbolsInScope(
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description("1-based line number.")] int line,
