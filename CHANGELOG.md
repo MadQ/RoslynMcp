@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — v0.3.0-alpha
 
 ### Added
-- **Multi-project support** — all 24 tools accept optional `projectPath` parameter (defaults to CWD); switch projects mid-session without restarting
+- **Multi-project support** — all 24 tools accept `projectPath` parameter; switch projects mid-session without restarting
 - **WorkspaceResolver** facade layer for consistent per-tool project resolution and structured error handling
 - **RoslynMcpTool** base class — `TryGetCompilation()` / `TryGetProject()` with `[NotNullWhen]` attributes; eliminates boilerplate from every tool
 - **AdhocWorkspace restored** — directories without `.csproj` now fully supported with FileSystemWatcher for incremental updates
@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Version centralization** — `Directory.Build.props` with `VersionPrefix`/`VersionSuffix`; Git commit SHA automatically appended to `InformationalVersion` for traceability
 
 ### Changed
+- **BREAKING: `projectPath` now REQUIRED** — all 24 tools require explicit project path; no CWD fallback (prevents catastrophic drive root enumeration, Issue #9 prerequisite)
 - All 24 tools migrated to `RoslynMcpTool` base class pattern
 - All 24 tools renamed with `roslyn_` prefix (e.g. `get_type_members` → `roslyn_get_type_members`) for unambiguous identification in agent tool lists
 - All tools annotated with `ReadOnly`, `Destructive`, or `Idempotent` hints via `McpServerToolAttribute`
@@ -28,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - WorkspaceManager: LRU workspace cache; `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` added
 - TestHarness: path calculation fixed (5 levels up); `projectPath` added to all 23 tests
 - **LINQ optimization** — tools use materialize-once pattern when enumerating multiple times (count + paging); avoids double enumeration
+
+### Security
+- **Removed CWD fallback** — prevents server started from drive roots (`J:\`, `C:\`) from enumerating entire drives and accessing system directories
+- **ArgumentException on missing projectPath** — clear error message when agent fails to specify project
 
 ### Fixed
 - **AdhocWorkspace safety** — protected directory enumeration with try/catch for `UnauthorizedAccessException`; skips system/hidden directories and common large folders (`node_modules`, `bin`, `obj`, `.git`)

@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -11,173 +11,254 @@ namespace RoslynMcp.LogViewer;
 /// </summary>
 sealed class LogTailer
 {
-    // Format: [2026-03-26 14:30:45.123Z] [TOOL  ] roslyn_get_type_members 142ms OK
-    static readonly Regex LinePattern = new(
-        @"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}Z)\] \[(.{6})\] (.*)$",
-        RegexOptions.Compiled
-    );
+	// Format: [2026-03-26 14:30:45.123Z] [TOOL  ] ◆ roslyn_get_type_members(WorkspaceManager) 142ms OK    — 18/18 member(s)
+	static readonly Regex LinePattern = new(
+		@"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}Z)\] \[(.{6})\] (.*)$",
+		RegexOptions.Compiled
+	);
 
-    readonly string logPath;
-    readonly int    tailLines;
+	// Parses the TOOL message body: optional mode char, tool name, elapsed, outcome, optional detail
+	// Group 1: workspace mode char (◆, ◇, or space)
+	// Group 2: tool name (with optional subject in parens)
+	// Group 3: elapsed ms
+	// Group 4: OK or ERROR
+	// Group 5: detail after ' — ' (optional)
+	static readonly Regex ToolPattern = new(
+		@"^([◆◇ ]) ([\w_]+(?:\([^)]*\))?) (\d+)ms (OK\s*|ERROR)(?: — (.*))?$",
+		RegexOptions.Compiled
+	);
+	
+	readonly string logPath;
+	readonly int    tailLines;
+	
+	public LogTailer(string logPath, int tailLines = 200)
+	{
+		this.logPath   = logPath;
+		this.tailLines = tailLines;
+	}
+	
+	public async IAsyncEnumerable<LogEntry> TailAsync(
+		[EnumeratorCancellation] CancellationToken ct)
+	{
+		await WaitForFileAsync(ct);
+		
+		using var signal  = new SemaphoreSlim(0, 1);
+		using var watcher = CreateWatcher(signal);
+		
+		FileStream?   stream = null;
+		StreamReader? reader = null;
+		
+		// Helper to open a fresh stream/reader pair for the current log file.
+		void OpenStreamAndReader()
+		{
+			var newStream = new FileStream(
+				logPath,
+				FileMode.Open,
+				FileAccess.Read,
+				FileShare.ReadWrite | FileShare.Delete
+			);
+			
+			var newReader = new StreamReader(
+				newStream,
+				Encoding.UTF8,
+				detectEncodingFromByteOrderMarks: false,
+				leaveOpen: true
+			);
+			
+			// Dispose previous instances (if any) before switching.
+			reader?.Dispose();
+			stream?.Dispose();
+			
+			stream = newStream;
+			reader = newReader;
+		}
+		
+		try {
+			OpenStreamAndReader();
+			
+			// Replay last N lines from history, then tail live from EOF.
+			foreach(var entry in ReadLastLines(stream!, reader!, tailLines, ct))
+				yield return entry;
+			
+			// Live tail.
+			while(!ct.IsCancellationRequested) {
+			
+				var line = await reader!.ReadLineAsync(ct).ConfigureAwait(false);
+				
+				if(line is not null) {
+					yield return Parse(line);
+					continue;
+				}
+				
+				// Check for log rotation: file was truncated/replaced.
+				try {
+					if(File.Exists(logPath) && new FileInfo(logPath).Length < stream!.Position) {
+						try {
+							// Under RoslynMcp's rotation strategy, the original stream
+							// now points at the renamed old file. Reopen so we follow
+							// the newly created log file instead of rewinding the old one.
+							OpenStreamAndReader();
+						}
+						catch {
+							// Non-fatal — if reopening fails (e.g., during rotation window),
+							// we'll try again on the next iteration.
+						}
+						
+						continue;
+					}
+				}
+				catch { /* non-fatal — file may be temporarily inaccessible during rotation */ }
+				
+				// No new data — wait for the watcher to signal, then loop to read.
+				try {
+					await signal.WaitAsync(ct).ConfigureAwait(false);
+				}
+				catch(OperationCanceledException) {
+					yield break;
+				}
+			}
+		}
+		finally {
+			reader?.Dispose();
+			stream?.Dispose();
+		}
+	}
+	
+	// ── Private ──────────────────────────────────────────────────────────────
+	
+	/// <summary>
+	///     Returns the last <paramref name="count"/> lines from the file using a ring buffer,
+	///     keeping memory bounded to <paramref name="count"/> strings regardless of file size.
+	///     Leaves the stream positioned at EOF for live tailing.
+	/// </summary>
+	static IEnumerable<LogEntry> ReadLastLines(FileStream stream, StreamReader reader, int count, CancellationToken ct)
+	{
+		stream.Seek(0, SeekOrigin.Begin);
+		reader.DiscardBufferedData();
+		
+		if(count <= 0)
+			yield break;
+		
+		// Ring buffer — evicts the oldest entry once full, so memory is bounded by `count`.
+		var ring     = new string[count];
+		var ringHead = 0;
+		var ringSize = 0;
+		
+		string? line;
+		
+		while((line = reader.ReadLine()) is not null) {
+			ct.ThrowIfCancellationRequested();
+			ring[ringHead] = line;
+			ringHead       = (ringHead + 1) % count;
+			
+			if(ringSize < count)
+				ringSize++;
+		}
+		
+		// stream/reader are now at EOF — ready for live tail without a seek.
+		var start = ringSize < count ? 0 : ringHead;
+		
+		for(var i = 0; i < ringSize; i++)
+			yield return Parse(ring[(start + i) % count]);
+	}
+	
+	FileSystemWatcher CreateWatcher(SemaphoreSlim signal)
+	{
+		var fullPath = Path.GetFullPath(logPath);
+		var dir      = Path.GetDirectoryName(fullPath) ?? Directory.GetCurrentDirectory();
+		
+		var w = new FileSystemWatcher(dir) {
+			NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
+			IncludeSubdirectories = false,
+			EnableRaisingEvents   = true
+		};
+		
+		void Notify(object _, FileSystemEventArgs e)
+		{
+			if(!string.Equals(e.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+				return;
+			
+			if(signal.CurrentCount == 0)
+				signal.Release();
+		}
+		
+		w.Changed += Notify;
+		w.Created += Notify;
+		
+		return w;
+	}
+	
+	/// <summary>Waits until the log file exists, watching the directory for creation if possible.</summary>
+	async Task WaitForFileAsync(CancellationToken ct)
+	{
+		if(File.Exists(logPath))
+			return;
+		
+		Console.Error.WriteLine($"Log file not found — waiting: {logPath}");
+		
+		var fullPath = Path.GetFullPath(logPath);
+		var dir      = Path.GetDirectoryName(fullPath);
+		
+		if(dir is null || !Directory.Exists(dir)) {
+			while(!File.Exists(logPath))
+				await Task.Delay(1000, ct).ConfigureAwait(false);
+			
+			return;
+		}
+		
+		var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		
+		await using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
+		
+		using var w = new FileSystemWatcher(dir) {
+			NotifyFilter        = NotifyFilters.FileName,
+			EnableRaisingEvents = true
+		};
+		
+		w.Created += (_, e) => {
+			if(string.Equals(e.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+				tcs.TrySetResult();
+		};
+		
+		// Double-check after watcher is set up to avoid a race between the File.Exists
+		// check at the top and the watcher starting.
+		if(!File.Exists(logPath))
+			await tcs.Task.ConfigureAwait(false);
+	}
+	
+	static LogEntry Parse(string raw)
+	{
+		var m = LinePattern.Match(raw);
 
-    public LogTailer(string logPath, int tailLines = 200)
-    {
-        this.logPath   = logPath;
-        this.tailLines = tailLines;
-    }
+		if(!m.Success)
+			return new LogEntry("", "OTHER", raw, raw);
 
-    public async IAsyncEnumerable<LogEntry> TailAsync(
-        [EnumeratorCancellation] CancellationToken ct)
-    {
-        await WaitForFileAsync(ct);
+		var timestamp = m.Groups[1].Value;
+		var level     = m.Groups[2].Value.TrimEnd();
+		var message   = m.Groups[3].Value;
 
-        using var signal  = new SemaphoreSlim(0, 1);
-        using var watcher = CreateWatcher(signal);
+		if(level == "TOOL") {
 
-        using var stream = new FileStream(
-            logPath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete
-        );
+			var t = ToolPattern.Match(message);
 
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
+			if(t.Success) {
 
-        // Replay last N lines from history, then tail live from EOF.
-        foreach(var entry in ReadLastLines(stream, reader, tailLines))
-            yield return entry;
+				var modeChar = t.Groups[1].Value.Trim(); // "◆", "◇", or ""
 
-        // Live tail.
-        while(!ct.IsCancellationRequested) {
+				return new LogEntry(
+					Timestamp:     timestamp,
+					Level:         level,
+					Message:       message,
+					Raw:           raw,
+					WorkspaceMode: modeChar.Length > 0 ? modeChar : null,
+					ToolName:      t.Groups[2].Value,
+					ElapsedMs:     long.TryParse(t.Groups[3].Value, out var ms) ? ms : null,
+					Success:       t.Groups[4].Value.TrimEnd() == "OK",
+					Detail:        t.Groups[5].Value is { Length: > 0 } d ? d : null
+				);
+			}
+		}
 
-            var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
-
-            if(line is not null) {
-                yield return Parse(line);
-                continue;
-            }
-
-            // Check for log rotation: file was truncated/replaced.
-            try {
-                if(File.Exists(logPath) && new FileInfo(logPath).Length < stream.Position) {
-                    stream.Seek(0, SeekOrigin.Begin);
-                    reader.DiscardBufferedData();
-                    continue;
-                }
-            }
-            catch { /* non-fatal — file may be temporarily inaccessible during rotation */ }
-
-            // No new data — wait for the watcher to signal, then loop to read.
-            try {
-                await signal.WaitAsync(ct).ConfigureAwait(false);
-            }
-            catch(OperationCanceledException) {
-                yield break;
-            }
-        }
-    }
-
-    // ── Private ──────────────────────────────────────────────────────────────
-
-    /// <summary>
-    ///     Reads all lines from the beginning of the file, returns the last <paramref name="count"/>,
-    ///     and leaves the stream positioned at EOF for live tailing.
-    /// </summary>
-    static IEnumerable<LogEntry> ReadLastLines(FileStream stream, StreamReader reader, int count)
-    {
-        stream.Seek(0, SeekOrigin.Begin);
-        reader.DiscardBufferedData();
-
-        var all = new List<string>(capacity: count + 1);
-
-        string? line;
-
-        while((line = reader.ReadLine()) is not null)
-            all.Add(line);
-
-        // stream/reader are now at EOF — ready for live tail without a seek.
-        var start = Math.Max(0, all.Count - count);
-
-        for(var i = start; i < all.Count; i++)
-            yield return Parse(all[i]);
-    }
-
-    FileSystemWatcher CreateWatcher(SemaphoreSlim signal)
-    {
-        var fullPath = Path.GetFullPath(logPath);
-        var dir      = Path.GetDirectoryName(fullPath) ?? Directory.GetCurrentDirectory();
-
-        var w = new FileSystemWatcher(dir) {
-            NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName,
-            IncludeSubdirectories = false,
-            EnableRaisingEvents   = true
-        };
-
-        void Notify(object _, FileSystemEventArgs e)
-        {
-            if(!string.Equals(e.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
-                return;
-
-            if(signal.CurrentCount == 0)
-                signal.Release();
-        }
-
-        w.Changed += Notify;
-        w.Created += Notify;
-
-        return w;
-    }
-
-    /// <summary>Waits until the log file exists, watching the directory for creation if possible.</summary>
-    async Task WaitForFileAsync(CancellationToken ct)
-    {
-        if(File.Exists(logPath))
-            return;
-
-        Console.Error.WriteLine($"Log file not found — waiting: {logPath}");
-
-        var fullPath = Path.GetFullPath(logPath);
-        var dir      = Path.GetDirectoryName(fullPath);
-
-        if(dir is null || !Directory.Exists(dir)) {
-            while(!File.Exists(logPath))
-                await Task.Delay(1000, ct).ConfigureAwait(false);
-
-            return;
-        }
-
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        await using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
-
-        using var w = new FileSystemWatcher(dir) {
-            NotifyFilter        = NotifyFilters.FileName,
-            EnableRaisingEvents = true
-        };
-
-        w.Created += (_, e) => {
-            if(string.Equals(e.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
-                tcs.TrySetResult();
-        };
-
-        // Double-check after watcher is set up to avoid a race between the File.Exists
-        // check at the top and the watcher starting.
-        if(!File.Exists(logPath))
-            await tcs.Task.ConfigureAwait(false);
-    }
-
-    static LogEntry Parse(string raw)
-    {
-        var m = LinePattern.Match(raw);
-
-        if(!m.Success)
-            return new LogEntry("", "OTHER", raw, raw);
-
-        return new LogEntry(
-            Timestamp: m.Groups[1].Value,
-            Level:     m.Groups[2].Value.TrimEnd(),
-            Message:   m.Groups[3].Value,
-            Raw:       raw
-        );
-    }
+		return new LogEntry(timestamp, level, message, raw);
+	}
 }

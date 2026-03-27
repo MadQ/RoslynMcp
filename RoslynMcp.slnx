@@ -1,8 +1,8 @@
 <Solution>
   <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
     <File Path="Directory.build.props" />
   </Folder>
-  <Project Path=".meta/.meta.csproj" />
   <Project Path="src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj" />
   <Project Path="src/RoslynMcp/RoslynMcp.csproj" />
   <Project Path="src/TestHarness/TestHarness.csproj" />

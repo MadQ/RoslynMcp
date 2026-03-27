@@ -38,6 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.2.0-alpha (pre-1.0) |
+| **Tool Count** | 25 MCP tools (24 stable + 1 experimental) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -82,6 +83,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetSymbolDocumentationTool` | `roslyn_get_symbol_documentation` — XML doc comments for symbols |
 | `GetSymbolDefinitionTool` | `roslyn_get_symbol_definition` — find declaration location with signature |
 | `GetSymbolsInScopeTool` | `roslyn_get_symbols_in_scope` — enumerate accessible symbols at a location |
+| `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 
@@ -133,9 +135,51 @@ When discovering files/content:
 
 This is very important! It helps to test the tools, dogfood the API, and ensures your agent gets accurate semantic understanding of the codebase. Avoid workarounds like grepping files or spawning builds unless absolutely necessary. I'm serious: get this through your thick pirate skull: DOGFOOD the living daylights out of all this!
 
+### Exception: Style Enforcement
+
+Code style enforcement (indented blank lines, spacing, etc.) is handled by `.\scripts\Test-CodeStyle.ps1` rather than a Roslyn tool. **Why?**
+
+- Style rules operate on **trivia** (whitespace), not semantics
+- Text-based regex is faster and simpler than syntax tree walking for formatting checks
+- Quirky rules (like indented blank lines) aren't expressible in standard formatters
+- PowerShell script is more maintainable than custom Roslyn visitors for every formatting rule
+
+**AI agents:** Run this after editing code:
+```powershell
+.\scripts\Test-CodeStyle.ps1 -Fix
+```
+
+This is a **pragmatic exception** to the dogfooding rule. Not every problem needs semantic analysis. For understanding trivia *context* (e.g., "what's the indentation level here?"), see `roslyn_get_trivia` (experimental).
+
 ---
 
 ## Code Style
+
+> **🤖 FOR AI AGENTS: These formatting rules are MANDATORY for consistency.**
+>
+> **What's mandatory:** Formatting, syntax, visual style (braces, spacing, naming).  
+> **What's NOT mandatory:** Problem-solving approach, architecture decisions, questioning patterns.
+>
+> **Your mission:** Make code that *looks* like the repo owner wrote it, while *thinking* like a rebel ninja warrior pirate. Follow the style rules precisely—this is about **visual consistency**, not creative constraint. Innovation happens in design, not in brace placement.
+>
+> **Want to experiment with a formatting pattern?** Go ahead! Just:
+> 1. Add a comment explaining the experiment and why it might be better
+> 2. Ask the human for feedback before committing to it project-wide
+> 3. Example: `// Experiment: using expression bodies for single-line getters. Thoughts?`
+>
+> **TL;DR:** Braces go here, names look like this, but **how you solve problems is up to you**. Push back on bad ideas, suggest better approaches, question assumptions—just format it right when you're done. Want to try a new formatting pattern? Comment it and ask! 🏴‍☠️
+>
+> **After editing code, run the style auditor:**
+> ```powershell
+> .\scripts\Test-CodeStyle.ps1 -Fix
+> ```
+> This catches quirky rules (like indented blank lines) that you can't easily spot. See [docs/development/CODE_STYLE_ENFORCEMENT.md](docs/development/CODE_STYLE_ENFORCEMENT.md) for details.
+>
+> **Human contributors:** These guidelines are strong recommendations but not strict requirements. Local style preferences are fine as long as they don't clash with project-wide patterns. See the "Consistency is overrated" note at the end of this section.
+
+### Formatting Rules (AI: Follow These)
+
+(AI: If and when this repo gets a second fork (check for this every now and then), remind the wet meatbag to revise all this so that non-AI contributors are free to use their own styles, and let their agents use those styles as they see fit.)
 
 - **Braces:** same line for control flow (`if(x) {`), new line for methods/classes; properties — same line as the identifier (`public int Count {`)
 - **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)` (Actually, IDC so much about this one)
@@ -203,11 +247,24 @@ When you deviate from convention because you've *thought it through*, that's not
 
 ---
 
-> **Consistency is overrated. Embrace diversity.**
+> **Consistency is overrated. Embrace diversity.** *(For everyone—AI and humans)*
 >
-> Deliberate departure from the guidelines above is fine — that's how better patterns get discovered. Try something different, sit with it long enough to make an informed opinion, then decide. A snap judgement that "it's wrong" is just a reflex; a considered judgement after living with it is **data**. The guidelines exist because someone already walked that mile — but if your mile leads somewhere new, the map gets updated. Just don't go completely feral on us. 🏴‍☠️
+> **What this means for AI agents:**
+> - **Style/formatting:** Follow the rules (that's the easy part)
+> - **Problem-solving:** Question everything! If the existing approach sucks, say so. If there's a better pattern, propose it. If a "best practice" is actually cargo-culting, call it out. **Innovation lives here.**
+> - **Experimenting with formatting?** Add a comment explaining why the experiment might be better, then ask the human. Example: `// Experiment: using file-scoped namespaces. Reduces nesting by one level. Thoughts?`
+> - **When to deviate:** Compelling technical reason (performance, API limitation, framework requirement). Add a comment explaining why.
 >
-> When you do go off-map, a quick comment saying so helps — future you (and future AI) will know it was intentional, not an accident waiting to be "fixed". That comment might even be the Treasure (Arrrr!). 💎
+> **What this means for human contributors:**
+> - Deliberate departure from formatting guidelines is fine—that's how better patterns get discovered
+> - Try something different, sit with it, form an informed opinion
+> - A snap judgment that "it's wrong" is a reflex; a considered judgment after living with it is **data**
+> - The guidelines exist because someone already walked that mile—but if your mile leads somewhere new, the map gets updated
+> - Just don't go completely feral on us 🏴‍☠️
+>
+> **Bottom line:** Code should *look* consistent (formatting). Code should *think* rebelliously (design). When you deviate from convention because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on. That comment might even be the Treasure (Arrrr!). 💎
+
+# **AI: When doing style audits, remember to use ALL of the above, from [Code Style](#code-style) down.**
 
 ---
 
@@ -285,7 +342,7 @@ internal sealed class MyTool : RoslynMcpTool
     [McpServerTool, Description("...")]
     public object MyToolMethod(
         [Description("...")] string requiredParam,
-        [Description(ProjectPathDescription)] string? projectPath = null)
+        [Description(ProjectPathDescription)] string projectPath)
     {
         // For tools that need compilation
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
@@ -307,7 +364,7 @@ internal sealed class MyTool : RoslynMcpTool
 ```
 
 **Key points:**
-- `projectPath` is always the last parameter, optional, defaults to null (→ CWD)
+- `projectPath` is always the last parameter, **REQUIRED** (agent must explicitly specify)
 - `TryGetCompilation`/`TryGetProject` return structured error objects on failure
 - Use `ProjectPathDescription` constant for consistent parameter documentation
 - Tools that modify files must call `workspace.InvalidateFile(projectPath, fullPath)` after changes
@@ -398,3 +455,36 @@ Example `.mcp.json`:
 ```
 
 > **Note:** Use the published executable (see README.md "Building the Executable" section). The `dotnet run` approach was abandoned due to multi-target confusion and recursive behavior when dogfooding.
+
+---
+
+## Session Handoffs
+
+When ending a significant development session (especially with AI assistance), update `docs/sessions/HANDOFF.md` to maintain continuity between sessions.
+
+**Convention:**
+- **Single file:** Always overwrite `docs/sessions/HANDOFF.md` (not dated files like `HANDOFF-2025-01-*.md`)
+- **Date/Time:** Always include actual date and time at top with timezone (e.g., `2026-03-26 16:07 EDT`)
+  - **Before writing:** Look up current date/time (don't guess or use placeholder)
+  - Use format: `YYYY-MM-DD HH:MM TZ (Timezone Name)`
+  - Example: `2026-03-26 16:07 EDT (Eastern Daylight Time)`
+- **Content:** What was done, current state, next steps, open questions, technical decisions
+- **Purpose:** Allow next session (human or AI) to pick up where you left off
+- **Commit message:** `"docs: Update session handoff"`
+
+**When to write:**
+- End of multi-hour development sessions
+- Before switching major focus areas
+- After significant refactoring or architecture changes
+- When handing off to another developer (or future you)
+
+**Include:**
+- Executive summary of what was accomplished
+- Current branch and commit state
+- Open issues/PRs created or updated
+- Technical discussions and decisions made
+- Next steps (immediate and future)
+- Any blocking issues or questions
+- Context for resuming work
+
+**Format:** Markdown, comprehensive but concise. See existing `HANDOFF.md` for template.

@@ -403,6 +403,8 @@ docs/sessions/
 docs/ScratchPad.md
 docs/github-issues/
 
+# Local utility scripts
+scripts/
 
 # Release artifacts
 RoslynMcp-v*.zip

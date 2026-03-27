@@ -17,8 +17,6 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 
-// Optional: Pre-warm cache with specified projects (args).
-// If no args provided, projects are loaded on-demand when tools are called.
 var projectsToPreload = args;
 
 // Log unhandled exceptions before the host/DI is available.
@@ -26,7 +24,7 @@ var projectsToPreload = args;
 AppDomain.CurrentDomain.UnhandledException += (_, e) => {
 	var path = Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH")
 		?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RoslynMcp", "logs", "roslynmcp.log");
-
+	
 	if(!string.IsNullOrEmpty(path)) {
 		try {
 			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -63,23 +61,24 @@ builder.Services
 
 var host = builder.Build();
 
-var logger   = host.Services.GetRequiredService<FileLogger>();
-var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+var logger      = host.Services.GetRequiredService<FileLogger>();
+var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 lifetime.ApplicationStarted.Register(() => logger.LogStart());
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
+
 
 // Pre-warm cache if projects specified.
 if(projectsToPreload.Length > 0) {
 
 	var resolver = host.Services.GetRequiredService<WorkspaceResolver>();
-
+	
 	Console.Error.WriteLine($"Pre-loading {projectsToPreload.Length} project(s)...");
-
+	
 	foreach(var path in projectsToPreload) {
 
 		try {
-			// Pre-load into cache.
+
 			resolver.GetCompilation(path);
 			Console.Error.WriteLine($"✓ Loaded: {path}");
 		}
