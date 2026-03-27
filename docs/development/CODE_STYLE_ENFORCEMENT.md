@@ -57,27 +57,46 @@ RoslynMcp includes automated style auditing and fixing to ensure all quirky rule
    - ✅ `// TODO: How should this handle null values?`
    - ❌ `// TODO: fix`
 
-8. **CommentPunctuation** (Info)
-   - Comments should be complete sentences with proper punctuation
-   - End with period for substantial comments (>10 chars)
-   - ✅ `// Process all items in the collection.`
-   - ❌ `// Process all items in the collection`
-
-9. **CommentPronouns** (Info)
+8. **CommentPronouns** (Info)
    - No personal pronouns (we/I/our/my/us) in code comments
    - Describe code objectively, not subjectively
    - ✅ `// The method processes input asynchronously.`
    - ❌ `// We process input asynchronously here.`
 
-10. **CommentSpacing** (Info)
-    - One space after a period in comments, never two
-    - ✅ `// First step. Second step.`
-    - ❌ `// First step.  Second step.`
+9. **CommentSpacing** (Info)
+   - One space after a period in comments, never two
+   - ✅ `// First step. Second step.`
+   - ❌ `// First step.  Second step.`
 
-11. **SemicolonPlacement** (Info, Experimental)
+10. **SemicolonPlacement** (Info, Experimental)
     - Semicolons on their own line for multi-line expressions
     - Applies to: fluent chains, LINQ, ternaries, arrow bodies
     - **Experimental:** "Just recently started test-driving this one"
+
+### Comments That Can't Be Checked (Manual Review)
+
+**The "Obvious Comment" Problem:**
+
+The script **cannot** detect obvious comments (comments that just restate what the code does). These require semantic understanding and should be **deleted during code review**, not "fixed":
+
+```csharp
+// BAD: Obvious comment (delete it!)
+// Do the thing
+DoTheThing();
+
+// GOOD: Explains WHY, not WHAT
+// Retry connection because network may be temporarily unavailable
+DoTheThing();
+
+// ALSO GOOD: Short label/annotation (no punctuation needed)
+// Retry logic
+DoTheThing();
+```
+
+**Per AGENTS.md:**
+> **Comments:** explain *why*, not *what* — after any edit, re-evaluate nearby comments and update or remove stale ones
+
+**AI agents and humans:** When you see obvious comments during code review, **delete them**. Don't add punctuation, don't fix spacing — just remove the noise.
 
 ## Integration Points
 
