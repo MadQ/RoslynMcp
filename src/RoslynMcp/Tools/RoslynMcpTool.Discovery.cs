@@ -66,12 +66,13 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     private static object ListSyntaxKinds()
     {
-        var all = Enum.GetValues(typeof(SyntaxKind))
-            .Cast<SyntaxKind>()
-            .Where(k => k != SyntaxKind.None && k != SyntaxKind.List)
-            .Select(k => k.ToString())
-            .OrderBy(s => s)
-            .ToArray();
+        string[] all = [..
+            Enum.GetValues(typeof(SyntaxKind))
+                .Cast<SyntaxKind>()
+                .Where(k => k != SyntaxKind.None && k != SyntaxKind.List)
+                .Select(k => k.ToString())
+                .OrderBy(s => s)
+        ];
 
         return new {
 
@@ -116,12 +117,13 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     private static object ListTriviaKinds()
     {
-        var all = Enum.GetValues(typeof(SyntaxKind))
-            .Cast<SyntaxKind>()
-            .Where(k => k.ToString().EndsWith("Trivia"))
-            .Select(k => k.ToString())
-            .OrderBy(s => s)
-            .ToArray();
+        string[] all = [..
+            Enum.GetValues(typeof(SyntaxKind))
+                .Cast<SyntaxKind>()
+                .Where(k => k.ToString().EndsWith("Trivia"))
+                .Select(k => k.ToString())
+                .OrderBy(s => s)
+        ];
 
         return new {
 

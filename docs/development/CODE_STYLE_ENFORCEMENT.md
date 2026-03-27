@@ -73,6 +73,22 @@ RoslynMcp includes automated style auditing and fixing to ensure all quirky rule
     - Applies to: fluent chains, LINQ, ternaries, arrow bodies
     - **Experimental:** "Just recently started test-driving this one"
 
+11. **ColumnAlignment** (Info)
+    - Consecutive assignment groups and field declaration groups should be column-aligned
+    - Reports lines where `=` or the identifier column deviates from the group majority
+    - Assignment group example (aligned — good):
+      ```csharp
+      error   = "foo",
+      message = "bar",
+      hint    = "baz"
+      ```
+    - Field declaration group example (aligned — good):
+      ```csharp
+      readonly string? logPath;
+      readonly object  writeLock = new();
+      ```
+    - Not auto-fixable — requires intent to determine the correct column
+
 ### Comments That Can't Be Checked (Manual Review)
 
 **The "Obvious Comment" Problem:**

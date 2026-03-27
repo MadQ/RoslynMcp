@@ -28,21 +28,21 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		IEnumerable<Diagnostic> diagnostics = compilation.GetDiagnostics();
 		
 		if(filePath is not null) {
-			var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
+			var normalized = NormalizePath(filePath);
 			diagnostics = diagnostics
 				.Where(d => d.Location.SourceTree?.FilePath
 					.EndsWith(normalized, StringComparison.OrdinalIgnoreCase) == true)
 			;
 		}
 		
-		var results = diagnostics
-			.Where(d => d.Severity >= DiagnosticSeverity.Warning)
-			.OrderBy(d => d.Severity)
-			.ThenBy(d => d.Location.SourceTree?.FilePath)
-			.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
-			.Select(Format)
-			.ToArray()
-		;
+		string[] results = [..
+			diagnostics
+				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
+				.OrderBy(d => d.Severity)
+				.ThenBy(d => d.Location.SourceTree?.FilePath)
+				.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
+				.Select(Format)
+		];
 		
 		return results.Length > 0
 			? scope.Outcome($"{results.Length} diagnostic(s)", results)

@@ -10,11 +10,6 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 {
 	public GetSymbolsInScopeTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 	
-	[McpServerTool(Name = "roslyn_get_symbols_in_scope", ReadOnly = true)]
-	[Description(
-		"Returns all symbols accessible at a specific file location: local variables, parameters, fields, properties, methods, types. " +
-		"Use this when generating code to understand what's available in scope at that point. " +
-		"Helps agents write correct code without guessing variable names or available members.")]
 	public async Task<object> GetSymbolsInScope(
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description("1-based line number.")] int line,
@@ -26,7 +21,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 			return error;
 		
 		
-		var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
+		var normalized = NormalizePath(filePath);
 		var tree = compilation.SyntaxTrees
 			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
 		;
@@ -85,18 +80,26 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		}
 		
 		var rootPath = workspace.GetRootPath(projectPath);
-		
+
+		SymbolInfo[] localsArr     = [.. locals];
+		SymbolInfo[] parametersArr = [.. parameters];
+		SymbolInfo[] fieldsArr     = [.. fields];
+		SymbolInfo[] propertiesArr = [.. properties];
+		SymbolInfo[] methodsArr    = [.. methods];
+		SymbolInfo[] typesArr      = [.. types];
+		SymbolInfo[] otherArr      = [.. other];
+
 		return new {
 			file       = Path.GetRelativePath(rootPath, tree.FilePath),
 			line,
 			column,
-			locals     = locals.ToArray(),
-			parameters = parameters.ToArray(),
-			fields     = fields.ToArray(),
-			properties = properties.ToArray(),
-			methods    = methods.ToArray(),
-			types      = types.ToArray(),
-			other      = other.ToArray(),
+			locals     = localsArr,
+			parameters = parametersArr,
+			fields     = fieldsArr,
+			properties = propertiesArr,
+			methods    = methodsArr,
+			types      = typesArr,
+			other      = otherArr,
 			_caution   = AdhocCaution(projectPath)
 		};
 	}

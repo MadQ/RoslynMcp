@@ -142,7 +142,8 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			}
 		
 		var totalMatches = allMatches.Count;
-		var pagedMatches = allMatches.Skip(skip).Take(take).ToArray();
+		SemanticMatchResult[] pagedMatches = [.. allMatches.Skip(skip).Take(take)]
+		;
 		
 		scope.Outcome($"{totalMatches} match(es)");
 		

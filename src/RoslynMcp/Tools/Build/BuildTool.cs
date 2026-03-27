@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -61,7 +61,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			if(roslynErrors.Length > 0) {
 				
-				var roslynWarnings = roslynDiagnostics.Where(d => d.Severity == "warning").ToArray();
+				BuildDiagnostic[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
 				
 				return new {
 					
@@ -92,8 +92,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			return new {
 				
 				succeeded     = false,
-				errors        = Array.Empty<BuildDiagnostic>(),
-				warnings      = Array.Empty<BuildDiagnostic>(),
+				errors        = (BuildDiagnostic[]) [],
+				warnings      = (BuildDiagnostic[]) [],
 				source        = "msbuild",
 				build_skipped = true,
 				skip_reason   = ex.Message,
@@ -105,12 +105,14 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
 		var succeeded   = exitCode == 0;
-		
+		BuildDiagnostic[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
+		BuildDiagnostic[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
+
 		return new {
-			
+
 			succeeded,
-			errors        = diagnostics.Where(d => d.Severity == "error")  .ToArray(),
-			warnings      = diagnostics.Where(d => d.Severity == "warning").ToArray(),
+			errors,
+			warnings,
 			source        = "msbuild",
 			build_skipped = false,
 			skip_reason   = (string?) null,
@@ -205,14 +207,12 @@ internal sealed class BuildTool : RoslynMcpTool
 	
 	private static BuildDiagnostic[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
 	{
-		var diagnostics = compilation.GetDiagnostics()
-			.Where(d => d.Severity >= DiagnosticSeverity.Warning)
-			.Where(d => !IgnoredDiagnostics.Contains(d.Id))
-			.Select(d => ConvertRoslynDiagnostic(d, rootPath))
-			.ToArray()
-		;
-		
-		return diagnostics;
+		return [..
+			compilation.GetDiagnostics()
+				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
+				.Where(d => !IgnoredDiagnostics.Contains(d.Id))
+				.Select(d => ConvertRoslynDiagnostic(d, rootPath))
+		];
 	}
 	
 	private static BuildDiagnostic ConvertRoslynDiagnostic(Diagnostic diagnostic, string rootPath)

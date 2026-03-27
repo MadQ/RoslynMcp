@@ -45,8 +45,8 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         if(take <= 0 || take > 500)
             return new { error = "invalid_parameter", message = "take must be between 1 and 500" };
 
-        var normalizedPath = filePath.Replace('/', Path.DirectorySeparatorChar);
-        var tree = compilation.SyntaxTrees.FirstOrDefault(t => 
+        var normalizedPath = NormalizePath(filePath);
+        var tree = compilation.SyntaxTrees.FirstOrDefault(t =>
             t.FilePath.EndsWith(normalizedPath, StringComparison.OrdinalIgnoreCase)
         );
 
@@ -72,9 +72,12 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             span = root.FullSpan;
         }
 
-        var nodesInSpan = root.DescendantNodes(span, descendIntoTrivia: false)
+        // ToList() is intentional — nodesInSpan may be reassigned in-place below when filtering by syntaxKind.
+        var nodesInSpan = root
+            .DescendantNodes(span, descendIntoTrivia: false)
             .Where(n => span.Contains(n.Span))
-            .ToList();
+            .ToList()
+        ;
 
         if(!string.IsNullOrEmpty(syntaxKind)) {
 
@@ -98,13 +101,12 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
         foreach(var node in nodesInSpan.Take(take)) {
 
-            var leadingTriviaList = includeLeading 
-                ? FilterTrivia(node.GetLeadingTrivia(), triviaKind) 
-                : Array.Empty<object>();
-
-            var trailingTriviaList = includeTrailing 
-                ? FilterTrivia(node.GetTrailingTrivia(), triviaKind) 
-                : Array.Empty<object>();
+            var leadingTriviaList  = includeLeading
+                ? FilterTrivia(node.GetLeadingTrivia(), triviaKind)
+                : [];
+            var trailingTriviaList = includeTrailing
+                ? FilterTrivia(node.GetTrailingTrivia(), triviaKind)
+                : [];
 
             // Skip nodes with no trivia after filtering
             if(leadingTriviaList.Length == 0 && trailingTriviaList.Length == 0)
@@ -128,12 +130,14 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             });
         }
 
+        object[] resultArr = [.. results];
+
         return new {
 
-            file = filePath,
+            file          = filePath,
             totalNodes,
             filteredNodes = results.Count,
-            results = results.ToArray()
+            results       = resultArr
         };
     }
 
@@ -143,15 +147,15 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             ? triviaList.Where(t => t.Kind().ToString() == kindFilter)
             : triviaList;
 
-        return filtered
-            .Select(t => new {
+        return [..
+            filtered.Select(t => new {
 
                 kind = t.Kind().ToString(),
                 text = t.ToString(),
                 span = new { start = t.Span.Start, end = t.Span.End }
             })
             .Cast<object>()
-            .ToArray();
+        ];
     }
 
     private static string TruncateText(string text, int maxLength)

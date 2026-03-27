@@ -23,15 +23,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"Replaces C# syntax nodes matching a kind and optional text pattern. " +
 		"Uses Roslyn for semantic understanding. Works on C# files only. " +
 		"For text/config files or non-C# content, use replace_in_file instead. " +
-		"Node kinds: MethodDeclaration, FieldDeclaration, PropertyDeclaration, ClassDeclaration, IdentifierName, etc."
+		"Node kinds: MethodDeclaration, FieldDeclaration, PropertyDeclaration, ClassDeclaration, IdentifierName, etc. " +
+		"textPattern matches the DECLARED NAME of declaration nodes (method/property/field/class/etc.) — not body content. " +
+		"If multiple nodes match and force is false (default), the tool returns the matches without applying."
 	)]
 	public async Task<object> ReplaceInCode(
 		[Description("Relative path to the C# file from workspace root.")] string filePath,
 		[Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'FieldDeclaration', 'IdentifierName').")] string nodeKind,
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Optional text pattern to filter matched nodes. Only nodes containing this text are replaced.")] string? textPattern = null,
+		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Property/Field/Class etc.) matches the DECLARED NAME. For other nodes matches full text.")] string? textPattern = null,
 		[Description("Replacement text for the matched node. Must produce valid C# syntax.")] string replacement = "",
-		[Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false
+		[Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false,
+		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false
 	)
 	{
 		using var scope = BeginTool("roslyn_replace_in_code", filePath);
@@ -72,22 +75,27 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		// Filter by text pattern if provided
+		// Filter by text pattern if provided.
+		// For declaration nodes, match against the declared name only — not the full body.
+		// This prevents "ParseDocumentation" from matching every method that *calls* it.
 		if(!string.IsNullOrWhiteSpace(textPattern)) {
-		
+
 			matchedNodes = matchedNodes
-				.Where(n => n.ToString().Contains(textPattern, StringComparison.OrdinalIgnoreCase))
+				.Where(n => {
+					var name = GetDeclaredName(n);
+					return name.Contains(textPattern, StringComparison.OrdinalIgnoreCase);
+				})
 				.ToArray()
 			;
 		}
-		
+
 		if(matchedNodes.Length == 0) {
-		
+
 			return new {
-				applied = false,
-				changeCount = 0,
+				applied      = false,
+				changeCount  = 0,
 				changedNodes = Array.Empty<object>(),
-				message = "No matching nodes found."
+				message      = "No matching nodes found."
 			};
 		}
 		
@@ -142,12 +150,23 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		;
 		
 		if(dryRun) {
-		
+
 			return new {
-				applied = false,
-				changeCount = matchedNodes.Length,
+				applied      = false,
+				changeCount  = matchedNodes.Length,
 				changedNodes = changedNodeInfo,
-				message = $"Dry run: {matchedNodes.Length} node(s) would be replaced."
+				message      = $"Dry run: {matchedNodes.Length} node(s) would be replaced."
+			};
+		}
+
+		// Safety guard: multiple matches require explicit opt-in via force=true.
+		if(matchedNodes.Length > 1 && !force) {
+
+			return new {
+				applied      = false,
+				changeCount  = matchedNodes.Length,
+				changedNodes = changedNodeInfo,
+				message      = $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one."
 			};
 		}
 		
@@ -198,6 +217,23 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		};
 	}
 	
+	/// <summary>
+	///     Returns the declared identifier name for declaration nodes so textPattern
+	///     matches the name only — not body content that may contain the pattern as a call site.
+	///     Falls back to full node text for non-declaration nodes (e.g. IdentifierName).
+	/// </summary>
+	private static string GetDeclaredName(SyntaxNode node) => node switch {
+		MethodDeclarationSyntax     m => m.Identifier.Text,
+		PropertyDeclarationSyntax   p => p.Identifier.Text,
+		FieldDeclarationSyntax      f => f.Declaration.Variables.FirstOrDefault()?.Identifier.Text ?? string.Empty,
+		ClassDeclarationSyntax      c => c.Identifier.Text,
+		InterfaceDeclarationSyntax  i => i.Identifier.Text,
+		StructDeclarationSyntax     s => s.Identifier.Text,
+		EnumDeclarationSyntax       e => e.Identifier.Text,
+		RecordDeclarationSyntax     r => r.Identifier.Text,
+		_                             => node.ToString()
+	};
+
 	private static bool TryParseSyntaxKind(string kindName, out SyntaxKind kind)
 	{
 		// Try exact match first

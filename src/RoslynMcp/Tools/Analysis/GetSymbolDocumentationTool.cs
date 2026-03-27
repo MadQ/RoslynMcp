@@ -100,13 +100,13 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			var returns    = GetElementText(root, "returns");
 			var remarks    = GetElementText(root, "remarks");
 			var example    = GetElementText(root, "example");
-			var parameters = root.Elements("param")
-				.Select(e => new ParameterDoc(
-					Name: e.Attribute("name")?.Value ?? "?",
-					Description: e.Value.Trim()
-				))
-				.ToArray()
-			;
+			ParameterDoc[] parameters = [..
+					root.Elements("param")
+						.Select(e => new ParameterDoc(
+							Name: e.Attribute("name")?.Value ?? "?",
+							Description: e.Value.Trim()
+						))
+				];
 			
 			return new DocumentationComment(summary, parameters, returns, remarks, example);
 		}

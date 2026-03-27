@@ -78,19 +78,19 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var lines        = originalContent.Split('\n');
 		var lineStarts   = BuildLineStartMap(lines);
 		var matches      = regex.Matches(originalContent);
-		var changedLines = matches
-			.Select(m => GetLineNumber(lineStarts, m.Index))
-			.Distinct()
-			.Order()
-			.ToArray()
-		;
+		int[] changedLines = [..
+			matches
+				.Select(m => GetLineNumber(lineStarts, m.Index))
+				.Distinct()
+				.Order()
+		];
 		
 		if(matches.Count == 0) {
 		
 			return new {
 				applied      = false,
 				matchCount   = 0,
-				changedLines = Array.Empty<int>(),
+				changedLines = (int[]) [],
 				message      = "No matches found."
 			};
 		}

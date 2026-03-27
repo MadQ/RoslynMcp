@@ -36,7 +36,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 			.Order()
 		;
 		
-		var results = filtered.ToArray();
+		string[] results = [.. filtered];
 		
 		return results.Length > 0
 			? scope.Outcome($"{results.Length} type(s)", results)

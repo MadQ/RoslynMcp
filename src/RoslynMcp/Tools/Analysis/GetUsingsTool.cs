@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -10,10 +10,6 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 {
 	public GetUsingsTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 	
-	[McpServerTool(Name = "roslyn_get_usings", ReadOnly = true)]
-	[Description(
-		"Returns all 'using' directives in a file (namespaces and aliases), plus implicit global usings from the project. " +
-		"Use this to understand what's in scope when generating or analyzing code.")]
 	public async Task<object> GetUsings(
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description(ProjectPathDescription)] string projectPath)
@@ -23,7 +19,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 			return error;
 		
 		var rootPath   = workspace.GetRootPath(projectPath);
-		var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
+		var normalized = NormalizePath(filePath);
 		
 		var tree = compilation.SyntaxTrees
 			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
@@ -35,15 +31,15 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		var root = await tree.GetRootAsync();
 		
 		// Extract using directives from the file.
-		var usings = root.DescendantNodes()
-			.OfType<UsingDirectiveSyntax>()
-			.Select(u => new UsingDirective(
-				Namespace: u.Name?.ToString(),
-				Alias:     u.Alias?.Name.ToString()
-			))
-			.Where(u => u.Namespace is not null || u.Alias is not null)
-			.ToArray()
-		;
+		UsingDirective[] usings = [..
+			root.DescendantNodes()
+				.OfType<UsingDirectiveSyntax>()
+				.Select(u => new UsingDirective(
+					Namespace: u.Name?.ToString(),
+					Alias:     u.Alias?.Name.ToString()
+				))
+				.Where(u => u.Namespace is not null || u.Alias is not null)
+		];
 		
 		// Extract global usings from compilation options.
 		var globalUsings = compilation.Options.SyntaxTreeOptionsProvider is { } provider
@@ -51,10 +47,10 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 			: [];
 		
 		return new {
-			file            = Path.GetRelativePath(rootPath, tree.FilePath),
-			usings          = usings,
-			global_usings   = globalUsings,
-			_caution        = AdhocCaution(projectPath)
+			file          = Path.GetRelativePath(rootPath, tree.FilePath),
+			usings        = usings,
+			global_usings = globalUsings,
+			_caution      = AdhocCaution(projectPath)
 		};
 	}
 	

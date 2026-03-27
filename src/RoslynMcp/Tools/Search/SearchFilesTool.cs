@@ -10,13 +10,6 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 {
 	public SearchFilesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 	
-	[
-		McpServerTool(Name = "roslyn_search_files", ReadOnly = true), Description(
-			"Searches files in the workspace for lines matching a regex pattern. " +
-			"Returns file paths, line numbers, and matching text. " +
-			"Use this to discover code locations before applying Roslyn tools for detailed analysis."
-		)
-	]
 	public object SearchFiles(
 		[Description("Regex pattern to search for (e.g., 'class.*Tool', 'TODO.*performance').")] string pattern,
 		[Description(ProjectPathDescription)] string projectPath,
@@ -65,7 +58,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				if(!MatchesGlob(fileName, filePattern))
 					continue;
 				
-				var text = document.GetTextAsync().GetAwaiter().GetResult();
+				var text  = document.GetTextAsync().GetAwaiter().GetResult();
 				var lines = text.Lines;
 				
 				for(int i = 0; i < lines.Count; i++) {
@@ -83,9 +76,9 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				}
 			}
 		
-		
 		var totalMatches = allMatches.Count;
-		var pagedMatches = allMatches.Skip(skip).Take(take).ToArray();
+		MatchResult[] pagedMatches = [.. allMatches.Skip(skip).Take(take)]
+		;
 		
 		scope.Outcome($"{totalMatches} match(es)");
 		

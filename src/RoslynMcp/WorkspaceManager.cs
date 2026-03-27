@@ -444,23 +444,43 @@ internal sealed class WorkspaceManager : IDisposable
 		public void InvalidateFile(string fullPath)
 		{
 			if(isMSBuild) {
-			
-				// MSBuildWorkspace tracks files internally — just invalidate the cache.
+
+				// MSBuildWorkspace tracks files via Solution — push the new on-disk text in
+				// so that read_file / get_file_outline etc. see fresh content immediately,
+				// without waiting for the FSW debounce cycle.
+				var docIds = workspace.CurrentSolution.GetDocumentIdsWithFilePath(fullPath);
+
+				if(docIds.Length > 0) {
+
+					try {
+
+						var newText    = SourceText.From(File.ReadAllText(fullPath));
+						var newSolution = workspace.CurrentSolution;
+
+						foreach(var id in docIds)
+							newSolution = newSolution.WithDocumentText(id, newText);
+
+						workspace.TryApplyChanges(newSolution);
+					}
+					catch(IOException) { }
+					catch(UnauthorizedAccessException) { }
+				}
+
 				InvalidateCompilation();
 			}
 			else if(workspace is AdhocWorkspace adhoc) {
-			
+
 				// AdhocWorkspace requires manual reload.
 				try {
-				
+
 					AddOrUpdateDocument(adhoc, projectId, fullPath);
 				}
 				catch(IOException) {
-				
+
 					// File may be locked — watcher will retry on next event.
 				}
 				catch(UnauthorizedAccessException) {
-				
+
 					// Insufficient permissions — ignore.
 				}
 			}

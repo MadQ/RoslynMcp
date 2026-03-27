@@ -259,14 +259,18 @@ internal abstract partial class RoslynMcpTool
 		};
 	
 	private static object MultipleProjectsError(MultipleProjectsFoundException ex)
-		=> new {
-			
+	{
+		string[] foundProjects = [.. ex.ProjectFiles.Select(Path.GetFileName).Where(f => f is not null)!];
+
+		return new {
+
 			error          = "multiple_projects_found",
 			message        = ex.Message,
 			directory      = ex.Directory,
-			found_projects = ex.ProjectFiles.Select(Path.GetFileName).ToArray(),
+			found_projects = foundProjects,
 			hint           = "Specify the exact .csproj file path instead of the directory."
 		};
+	}
 	
 	private static object AmbiguousFileError(AmbiguousFileException ex)
 		=> new {
@@ -313,4 +317,12 @@ internal abstract partial class RoslynMcpTool
 		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj. " +
 		"NOTE: a directory or file path that cannot locate a .csproj falls back to AdhocWorkspace (no MSBuild, " +
 		"reduced functionality). Prefer passing the .csproj path directly for full MSBuild support.";
+
+	/// <summary>
+	///     Normalizes a file path for cross-platform compatibility by converting forward slashes
+	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
+	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.
+	/// </summary>
+	protected static string NormalizePath(string filePath)
+		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 }

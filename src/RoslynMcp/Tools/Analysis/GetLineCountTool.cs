@@ -10,71 +10,66 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 {
     public GetLineCountTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
 
-    [McpServerTool(Name = "roslyn_get_line_count", ReadOnly = true)]
-    [Description(
-        "Returns line counts for one or more files. " +
-        "For .cs files, counts lines from the in-memory Roslyn workspace (no disk I/O). " +
-        "For all other file types, counts from disk. " +
-        "Accepts a single file path or a comma-separated list for bulk queries.")]
     public async Task<object> GetLineCount(
-        [Description("Relative file path or comma-separated list of paths, e.g. 'WorkspaceManager.cs' or 'Foo.cs,Bar.cs,appsettings.json'.")] string filePaths,
-        [Description(ProjectPathDescription)] string projectPath)
-    {
-        using var scope = BeginTool("roslyn_get_line_count", filePaths);
-        if(!TryGetCompilation(projectPath, out var compilation, out var error))
-            return error;
+		[Description("Relative file path or comma-separated list of paths, e.g. 'WorkspaceManager.cs' or 'Foo.cs,Bar.cs,appsettings.json'.")] string filePaths,
+		[Description(ProjectPathDescription)] string projectPath)
+	{
+		using var scope = BeginTool("roslyn_get_line_count", filePaths);
+		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			return error;
 
-        var rootPath = workspace.GetRootPath(projectPath);
-        var paths    = filePaths
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-        ;
+		var rootPath = workspace.GetRootPath(projectPath);
+		var paths    = filePaths
+			.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+		;
 
-        var results = new List<object>(paths.Length);
+		var results = new List<object>(paths.Length);
 
-        foreach(var filePath in paths) {
+		foreach(var filePath in paths) {
 
-            var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
-            var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+			var normalized = NormalizePath(filePath);
+			var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 
-            if(isCs) {
+			if(isCs) {
 
-                var tree = compilation.SyntaxTrees
-                    .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
-                ;
+				var tree = compilation.SyntaxTrees
+					.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
+				;
 
-                if(tree is null) {
-                    results.Add(new { file = filePath, line_count = (int?) null, error = "not found in compilation" });
-                    continue;
-                }
+				if(tree is null) {
+					results.Add(new { file = filePath, line_count = (int?) null, error = "not found in compilation" });
+					continue;
+				}
 
-                var text = await tree.GetTextAsync();
-                results.Add(new { file = Path.GetRelativePath(rootPath, tree.FilePath), line_count = (int?) text.Lines.Count, error = (string?) null });
-            }
-            else {
+				var text = await tree.GetTextAsync();
+				results.Add(new { file = Path.GetRelativePath(rootPath, tree.FilePath), line_count = (int?) text.Lines.Count, error = (string?) null });
+			}
+			else {
 
-                var fullPath = Path.IsPathRooted(filePath)
-                    ? filePath
-                    : Path.GetFullPath(Path.Combine(rootPath, normalized))
-                ;
+				var fullPath = Path.IsPathRooted(filePath)
+					? filePath
+					: Path.GetFullPath(Path.Combine(rootPath, normalized))
+				;
 
-                if(!File.Exists(fullPath)) {
-                    results.Add(new { file = filePath, line_count = (int?) null, error = "file not found on disk" });
-                    continue;
-                }
+				if(!File.Exists(fullPath)) {
+					results.Add(new { file = filePath, line_count = (int?) null, error = "file not found on disk" });
+					continue;
+				}
 
-                // Count lines without loading entire content into a string.
-                var lineCount = await CountLinesAsync(fullPath);
-                results.Add(new { file = Path.GetRelativePath(rootPath, fullPath), line_count = (int?) lineCount, error = (string?) null });
-            }
-        }
+				// Count lines without loading entire content into a string.
+				var lineCount = await CountLinesAsync(fullPath);
+				results.Add(new { file = Path.GetRelativePath(rootPath, fullPath), line_count = (int?) lineCount, error = (string?) null });
+			}
+		}
 
-        var total = results.Count;
+		var total      = results.Count;
+		var filesArr   = results.ToArray();
 
-        return scope.Outcome($"{total} file(s)", new {
-            files    = results.ToArray(),
-            _caution = AdhocCaution(projectPath)
-        });
-    }
+		return scope.Outcome($"{total} file(s)", new {
+			files    = filesArr,
+			_caution = AdhocCaution(projectPath)
+		});
+	}
 
     /// <summary>
     ///     Counts lines by scanning for newline chars without allocating a full string per line.

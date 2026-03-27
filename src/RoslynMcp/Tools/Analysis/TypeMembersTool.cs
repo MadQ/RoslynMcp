@@ -38,13 +38,13 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		if(type is null)
 			return scope.Failed("type not found", new { error = $"Type '{typeName}' not found in the project." });
 		
-		var allMembers = type.GetMembers()
-			.Where(m => !m.IsImplicitlyDeclared)
-			.Where(m => memberKind is null || MatchesKind(m, memberKind))
-			.Select(FormatMember)
-			.Where(m => m is not null)
-			.ToArray()
-		;
+		var allMembers = (object?[]) [..
+			type.GetMembers()
+				.Where(m => !m.IsImplicitlyDeclared)
+				.Where(m => memberKind is null || MatchesKind(m, memberKind))
+				.Select(FormatMember)
+				.Where(m => m is not null)
+		];
 		
 		var page = allMembers.AsSpan(skip, Math.Min(take, allMembers.Length - skip)).ToArray();
 		

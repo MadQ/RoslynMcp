@@ -34,19 +34,19 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 			return scope.Failed("type not found", new { error = $"Type '{typeName}' not found in the project." });
 		
 		var baseTypes   = GetBaseTypeChain(type);
-		var allInterfaces = type.AllInterfaces
-			.Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
-			.Order()
-			.ToArray()
-		;
+		string[] allInterfaces = [..
+			type.AllInterfaces
+				.Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
+				.Order()
+		];
 		
 		var solution    = workspace.GetSolution(projectPath);
 		var derivedRefs = await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution);
-		var allDerived = derivedRefs
-			.Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
-			.Order()
-			.ToArray()
-		;
+		string[] allDerived = [..
+			derivedRefs
+				.Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
+				.Order()
+		];
 		
 		// Page both interfaces
 		var combined = allInterfaces.Concat(allDerived).ToArray()

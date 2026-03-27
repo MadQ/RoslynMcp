@@ -25,7 +25,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
         using var scope = BeginTool("roslyn_read_file", filePath);
 
         var rootPath   = workspace.GetRootPath(projectPath);
-        var normalized = filePath.Replace('/', Path.DirectorySeparatorChar);
+        var normalized = NormalizePath(filePath);
         var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 
         SourceText sourceText;

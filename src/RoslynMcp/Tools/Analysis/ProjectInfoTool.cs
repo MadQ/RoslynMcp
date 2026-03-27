@@ -39,11 +39,11 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		var nullable     = compOpts?.NullableContextOptions.ToString() ?? "Unknown";
 		var langVersion  = parseOpts?.LanguageVersion.ToDisplayString() ?? "Unknown";
 		var packages     = ExtractPackages(project.MetadataReferences);
-		var extraFiles   = project.AdditionalDocuments
-			.Select(d => Path.GetRelativePath(rootPath, d.FilePath ?? d.Name))
-			.Order()
-			.ToArray()
-		;
+		string[] extraFiles = [..
+			project.AdditionalDocuments
+				.Select(d => Path.GetRelativePath(rootPath, d.FilePath ?? d.Name))
+				.Order()
+		];
 		
 		return new {
 			name            = project.Name,
@@ -92,22 +92,22 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 	{
 		// NuGet packages end up in the global packages cache — parse name+version from the path.
 		// Framework assemblies (from dotnet/shared/...) are not NuGet packages and are skipped.
-		return references
-			.Select(r => r.Display)
-			.Where(p => p is not null)
-			.Select(p => {
-				var m = NuGetPattern.Match(p!);
-				
-				return m.Success
-					? new PackageRef(m.Groups[1].Value, m.Groups[2].Value)
-					: null;
-			})
-			.Where(p => p is not null)
-			.Select(p => p!)
-			.DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-			.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-			.ToArray()
-		;
+		return [..
+			references
+				.Select(r => r.Display)
+				.Where(p => p is not null)
+				.Select(p => {
+					var m = NuGetPattern.Match(p!);
+
+					return m.Success
+						? new PackageRef(m.Groups[1].Value, m.Groups[2].Value)
+						: null;
+				})
+				.Where(p => p is not null)
+				.Select(p => p!)
+				.DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+				.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+		];
 	}
 	
 	private sealed record PackageRef(string Name, string Version);
