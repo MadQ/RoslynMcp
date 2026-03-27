@@ -80,6 +80,13 @@ internal abstract partial class RoslynMcpTool
 
 			return false;
 		}
+		catch(AmbiguousFileException ex) {
+
+			error = AmbiguousFileError(ex);
+			logger.LogError("TryGetCompilation", ex.Message);
+
+			return false;
+		}
 		catch(ArgumentException ex) {
 
 			error = new {
@@ -139,6 +146,13 @@ internal abstract partial class RoslynMcpTool
 
 			return false;
 		}
+		catch(AmbiguousFileException ex) {
+
+			error = AmbiguousFileError(ex);
+			logger.LogError("TryGetProject", ex.Message);
+
+			return false;
+		}
 		catch(ArgumentException ex) {
 
 			error = new {
@@ -174,6 +188,15 @@ internal abstract partial class RoslynMcpTool
 			directory      = ex.Directory,
 			found_projects = ex.ProjectFiles.Select(Path.GetFileName).ToArray(),
 			hint           = "Specify the exact .csproj file path instead of the directory."
+		};
+
+	private static object AmbiguousFileError(AmbiguousFileException ex)
+		=> new {
+			error          = "ambiguous_file",
+			message        = ex.Message,
+			file_name      = ex.FileName,
+			found_in       = ex.CsprojPaths,
+			hint           = "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
 		};
 	
 	private static object InvalidPathError(InvalidProjectPathException ex)

@@ -199,10 +199,64 @@ internal sealed class WorkspaceManager : IDisposable
 		// File path - walk up to find .csproj
 		if(File.Exists(fullPath))
 			return FindProjectFileUpwards(fullPath);
-		
+
+		// Last resort: the agent may have passed just a filename (e.g. 'WorkspaceManager.cs').
+		// Scan all cached MSBuild workspaces for a SyntaxTree whose path ends with this name.
+		var inferred = TryInferWorkspaceFromFileName(Path.GetFileName(fullPath));
+
+		if(inferred is not null)
+			return inferred;
+
 		throw new InvalidProjectPathException(fullPath, "Path does not exist");
 	}
 	
+	/// <summary>
+	///     Scans all cached MSBuild workspaces for a SyntaxTree whose file path ends with
+	///     <paramref name="fileName"/>. Returns the .csproj path if exactly one workspace matches.
+	///     Throws <see cref="AmbiguousFileException"/> if multiple workspaces contain the file.
+	///     Returns null if no cached workspace contains the file (cold cache or AdhocWorkspace only).
+	/// </summary>
+	string? TryInferWorkspaceFromFileName(string fileName)
+	{
+		if(string.IsNullOrEmpty(fileName))
+			return null;
+
+		var suffix = Path.DirectorySeparatorChar + fileName;
+
+		List<string>? matches = null;
+
+		lock(cacheLock) {
+
+			foreach(var (_, entry) in cache) {
+
+				// Only MSBuild workspaces are worth inferring — Adhoc has no .csproj to return.
+				if(!entry.Instance.IsMSBuild)
+					continue;
+
+				// Validate membership via the live SyntaxTree set — not just a file index.
+				var compilation = entry.Instance.GetCompilation();
+				var hasFile = compilation.SyntaxTrees.Any(t =>
+					t.FilePath.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+					|| string.Equals(Path.GetFileName(t.FilePath), fileName, StringComparison.OrdinalIgnoreCase)
+				);
+
+				if(!hasFile)
+					continue;
+
+				matches ??= [];
+				matches.Add(entry.Instance.CsprojPath!);
+			}
+		}
+
+		if(matches is null)
+			return null;
+
+		if(matches.Count == 1)
+			return matches[0];
+
+		throw new AmbiguousFileException(fileName, matches.ToArray());
+	}
+
 	string? FindProjectInDirectory(string directory)
 	{
 		var csprojFiles = Directory.GetFiles(directory, "*.csproj");
