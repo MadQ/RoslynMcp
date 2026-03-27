@@ -57,6 +57,16 @@ internal abstract partial class RoslynMcpTool
 			compilation = workspace.GetCompilation(projectPath);
 			activeScope?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 
+			// Annotate when non-obvious resolution occurred.
+			var kind = workspace.GetResolutionKind(projectPath);
+			activeScope?.Record(kind switch {
+				ResolutionKind.Directory          => "dir→.csproj",
+				ResolutionKind.FileWalkUp         => "file→.csproj",
+				ResolutionKind.InferredFromCache  => $"inferred from '{Path.GetFileName(projectPath)}'",
+				ResolutionKind.Adhoc              => "adhoc (no .csproj)",
+				_                                 => null
+			});
+
 			return true;
 		}
 		catch(ProjectNotFoundException ex) {
@@ -122,6 +132,16 @@ internal abstract partial class RoslynMcpTool
 
 			project = workspace.GetProject(projectPath);
 			activeScope?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+
+			// Annotate when non-obvious resolution occurred.
+			var kind = workspace.GetResolutionKind(projectPath);
+			activeScope?.Record(kind switch {
+				ResolutionKind.Directory          => "dir→.csproj",
+				ResolutionKind.FileWalkUp         => "file→.csproj",
+				ResolutionKind.InferredFromCache  => $"inferred from '{Path.GetFileName(projectPath)}'",
+				ResolutionKind.Adhoc              => "adhoc (no .csproj)",
+				_                                 => null
+			});
 
 			return true;
 		}

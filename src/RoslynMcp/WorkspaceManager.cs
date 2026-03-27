@@ -7,6 +7,21 @@ using RoslynMcp.Tools;
 
 namespace RoslynMcp;
 
+/// <summary>How a projectPath argument was resolved to a .csproj or directory.</summary>
+enum ResolutionKind
+{
+	/// <summary>Agent passed a .csproj path directly — ideal path, no inference needed.</summary>
+	Explicit,
+	/// <summary>Agent passed a directory; a single .csproj was found inside it.</summary>
+	Directory,
+	/// <summary>Agent passed a source file; walked up the tree to find the .csproj.</summary>
+	FileWalkUp,
+	/// <summary>Agent passed a bare filename; matched to a cached MSBuild workspace by SyntaxTree scan.</summary>
+	InferredFromCache,
+	/// <summary>No .csproj found — running in AdhocWorkspace with reduced functionality.</summary>
+	Adhoc,
+}
+
 /// <summary>
 ///     Manages multiple Roslyn workspaces with LRU caching. Supports smart project path resolution
 ///     (directory, file, or .csproj). Thread-safe for parallel agent access.
@@ -166,46 +181,45 @@ internal sealed class WorkspaceManager : IDisposable
 	///     - .csproj file → use directly
 	///     - directory → search for .csproj
 	///     - source file → walk up to find .csproj
+	///     - bare filename → scan cached MSBuild workspaces
 	/// </summary>
-	public string ResolveProjectPath(string inputPath)
+	public (string Path, ResolutionKind Kind) ResolveProjectPath(string inputPath)
 	{
 		if(string.IsNullOrWhiteSpace(inputPath))
 			throw new ArgumentException("Project path is required and cannot be empty. The agent must explicitly specify which project to operate on.", nameof(inputPath));
 
 		var fullPath = Path.GetFullPath(inputPath);
-		
-		// Already a .csproj file
+
+		// Already a .csproj file — explicit, no inference needed.
 		if(fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
-		
+
 			if(!File.Exists(fullPath))
 				throw new InvalidProjectPathException(fullPath, "File does not exist");
-			
-			return fullPath;
+
+			return (fullPath, ResolutionKind.Explicit);
 		}
-		
+
 		// Directory - search for .csproj
 		if(Directory.Exists(fullPath)) {
-		
+
 			var csprojPath = FindProjectInDirectory(fullPath);
-			
-			// Found .csproj — use MSBuildWorkspace
+
 			if(csprojPath is not null)
-				return csprojPath;
-			
-			// No .csproj — return directory path for AdhocWorkspace
-			return fullPath;
+				return (csprojPath, ResolutionKind.Directory);
+
+			// No .csproj — AdhocWorkspace.
+			return (fullPath, ResolutionKind.Adhoc);
 		}
-		
+
 		// File path - walk up to find .csproj
 		if(File.Exists(fullPath))
-			return FindProjectFileUpwards(fullPath);
+			return (FindProjectFileUpwards(fullPath), ResolutionKind.FileWalkUp);
 
-		// Last resort: the agent may have passed just a filename (e.g. 'WorkspaceManager.cs').
-		// Scan all cached MSBuild workspaces for a SyntaxTree whose path ends with this name.
+		// Last resort: bare filename — scan cached MSBuild workspaces.
 		var inferred = TryInferWorkspaceFromFileName(Path.GetFileName(fullPath));
 
 		if(inferred is not null)
-			return inferred;
+			return (inferred, ResolutionKind.InferredFromCache);
 
 		throw new InvalidProjectPathException(fullPath, "Path does not exist");
 	}

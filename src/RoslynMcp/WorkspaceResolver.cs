@@ -9,10 +9,28 @@ namespace RoslynMcp;
 internal sealed class WorkspaceResolver
 {
 	readonly WorkspaceManager manager;
-	
+
 	public WorkspaceResolver(WorkspaceManager manager)
 	{
 		this.manager = manager;
+	}
+
+	/// <summary>
+	///     Resolves a project path and returns both the resolved path and how it was resolved.
+	/// </summary>
+	private (string Resolved, ResolutionKind Kind) ResolveWithKind(string projectPath)
+	{
+		return manager.ResolveProjectPath(projectPath);
+	}
+
+	/// <summary>
+	///     Returns how the given projectPath would be resolved (explicit, directory, file walk-up, inferred, or adhoc).
+	///     Tools use this to annotate log entries when non-obvious resolution occurred.
+	/// </summary>
+	public ResolutionKind GetResolutionKind(string projectPath)
+	{
+		var (_, kind) = ResolveWithKind(projectPath);
+		return kind;
 	}
 	
 	/// <summary>
@@ -20,8 +38,8 @@ internal sealed class WorkspaceResolver
 	/// </summary>
 	public Compilation GetCompilation(string projectPath)
 	{
-		var resolved = manager.ResolveProjectPath(projectPath);
-		
+		var (resolved, _) = ResolveWithKind(projectPath);
+
 		return manager.GetCompilation(resolved);
 	}
 	
@@ -30,8 +48,8 @@ internal sealed class WorkspaceResolver
 	/// </summary>
 	public Solution GetSolution(string projectPath)
 	{
-		var resolved = manager.ResolveProjectPath(projectPath);
-		
+		var (resolved, _) = ResolveWithKind(projectPath);
+
 		return manager.GetSolution(resolved);
 	}
 	
@@ -41,8 +59,8 @@ internal sealed class WorkspaceResolver
 	/// </summary>
 	public string GetRootPath(string projectPath)
 	{
-		var resolved = manager.ResolveProjectPath(projectPath);
-		
+		var (resolved, _) = ResolveWithKind(projectPath);
+
 		// Root path is the directory containing the .csproj
 		return Path.GetDirectoryName(resolved)!;
 	}
@@ -52,8 +70,8 @@ internal sealed class WorkspaceResolver
 	/// </summary>
 	public Project GetProject(string projectPath)
 	{
-		var resolved = manager.ResolveProjectPath(projectPath);
-		
+		var (resolved, _) = ResolveWithKind(projectPath);
+
 		return manager.GetProject(resolved);
 	}
 	
@@ -62,8 +80,8 @@ internal sealed class WorkspaceResolver
 	/// </summary>
 	public (string RootPath, bool IsMSBuild, string? CsprojPath) GetWorkspaceInfo(string projectPath)
 	{
-		var resolved = manager.ResolveProjectPath(projectPath);
-		
+		var (resolved, _) = ResolveWithKind(projectPath);
+
 		return manager.GetWorkspaceInfo(resolved);
 	}
 	
@@ -84,8 +102,8 @@ internal sealed class WorkspaceResolver
 	/// </summary>
 	public void InvalidateFile(string projectPath, string fullPath)
 	{
-		var resolved = manager.ResolveProjectPath(projectPath);
-		
+		var (resolved, _) = ResolveWithKind(projectPath);
+
 		manager.InvalidateFile(resolved, fullPath);
 	}
 }
