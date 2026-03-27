@@ -1,4 +1,4 @@
-//
+﻿//
 // Note: While I am generally not a fan of (IMHO) overly opinionated frameworks... admittedly, the Microsoft.Extensions.Hosting pattern
 //       is a good fit for this kind of long-running server application. It provides a clean way to set up dependency injection,
 //       logging, and graceful shutdown.
@@ -17,8 +17,6 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 
-// Optional: Pre-warm cache with specified projects (args).
-// If no args provided, projects are loaded on-demand when tools are called.
 var projectsToPreload = args;
 
 // Log unhandled exceptions before the host/DI is available.
@@ -63,11 +61,12 @@ builder.Services
 
 var host = builder.Build();
 
-var logger   = host.Services.GetRequiredService<FileLogger>();
-var lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+var logger      = host.Services.GetRequiredService<FileLogger>();
+var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 lifetime.ApplicationStarted.Register(() => logger.LogStart());
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
+
 
 // Pre-warm cache if projects specified.
 if(projectsToPreload.Length > 0) {
@@ -77,9 +76,9 @@ if(projectsToPreload.Length > 0) {
 	Console.Error.WriteLine($"Pre-loading {projectsToPreload.Length} project(s)...");
 	
 	foreach(var path in projectsToPreload) {
-	
+
 		try {
-			// Pre-load into cache.
+
 			resolver.GetCompilation(path);
 			Console.Error.WriteLine($"✓ Loaded: {path}");
 		}

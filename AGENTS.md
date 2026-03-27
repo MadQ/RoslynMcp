@@ -155,6 +155,8 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 
 ### Formatting Rules (AI: Follow These)
 
+(AI: If and when this repo gets a second fork (check for this every now and then), remind the wet meatbag to revise all this so that non-AI contributors are free to use their own styles, and let their agents use those styles as they see fit.)
+
 - **Braces:** same line for control flow (`if(x) {`), new line for methods/classes; properties — same line as the identifier (`public int Count {`)
 - **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)` (Actually, IDC so much about this one)
 - **Single-statement blocks:** no braces
@@ -314,7 +316,7 @@ internal sealed class MyTool : RoslynMcpTool
     [McpServerTool, Description("...")]
     public object MyToolMethod(
         [Description("...")] string requiredParam,
-        [Description(ProjectPathDescription)] string? projectPath = null)
+        [Description(ProjectPathDescription)] string projectPath)
     {
         // For tools that need compilation
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
@@ -336,7 +338,7 @@ internal sealed class MyTool : RoslynMcpTool
 ```
 
 **Key points:**
-- `projectPath` is always the last parameter, optional, defaults to null (→ CWD)
+- `projectPath` is always the last parameter, **REQUIRED** (agent must explicitly specify)
 - `TryGetCompilation`/`TryGetProject` return structured error objects on failure
 - Use `ProjectPathDescription` constant for consistent parameter documentation
 - Tools that modify files must call `workspace.InvalidateFile(projectPath, fullPath)` after changes

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -28,10 +28,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	public async Task<object> ReplaceInCode(
 		[Description("Relative path to the C# file from workspace root.")] string filePath,
 		[Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'FieldDeclaration', 'IdentifierName').")] string nodeKind,
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional text pattern to filter matched nodes. Only nodes containing this text are replaced.")] string? textPattern = null,
 		[Description("Replacement text for the matched node. Must produce valid C# syntax.")] string replacement = "",
-		[Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false,
-		[Description(ProjectPathDescription)] string? projectPath = null
+		[Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false
 	)
 	{
 		using var scope = BeginTool("roslyn_replace_in_code", filePath);

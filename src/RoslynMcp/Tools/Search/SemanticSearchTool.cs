@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -24,7 +24,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	public object SemanticSearch(
 		[Description("Regex pattern to search for (e.g., 'TODO.*performance', 'UserName').")]
 		string pattern,
-		
+
+		[Description(ProjectPathDescription)]
+		string projectPath,
+
 		[Description("Syntax context to search within: 'comments', 'strings', 'identifiers', 'code', 'xmldocs', 'all'. Default: 'all'.")]
 		string? context = null,
 		
@@ -41,10 +44,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		int skip = 0,
 		
 		[Description("Maximum number of results to return. Default: 50, max: 200.")]
-		int take = 50,
-		
-		[Description(ProjectPathDescription)]
-		string? projectPath = null
+		int take = 50
 	)
 	{
 		using var scope = BeginTool("roslyn_semantic_search", pattern);

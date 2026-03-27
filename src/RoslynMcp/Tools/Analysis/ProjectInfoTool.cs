@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -22,7 +22,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		"output kind, nullable setting, NuGet package references, and additional files. " +
 		"Use this to understand project configuration without reading the .csproj directly.")]
 	public object GetProjectInfo(
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_get_project_info");
 		if(!TryGetProject(projectPath, out var project, out var error))

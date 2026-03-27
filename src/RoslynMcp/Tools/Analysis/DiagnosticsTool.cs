@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -15,8 +15,8 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		"Returns compiler diagnostics (errors and warnings) for the project or a single file. " +
 		"Faster than running dotnet build — uses the in-process Roslyn compilation.")]
 	public object GetDiagnostics(
-		[Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath,
+		[Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null)
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

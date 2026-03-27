@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -17,10 +17,10 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		"Useful before renaming or refactoring to see every call site. Results are paged; use skip/take for large result sets.")]
 	public async Task<object> FindReferences(
 		[Description("The symbol name to find, e.g. 'WindowKey', 'RestoreFromPlacements', 'trackedWindows'.")] string symbolName,
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional type name to narrow the search, e.g. 'WindowTracker'.")] string? containingType = null,
 		[Description("Number of references to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50)
 	{
 		using var scope = BeginTool("roslyn_find_references", symbolName);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

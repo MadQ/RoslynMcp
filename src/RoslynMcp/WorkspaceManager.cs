@@ -1,4 +1,4 @@
-using Microsoft.Build.Locator;
+﻿using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
@@ -163,19 +163,16 @@ internal sealed class WorkspaceManager : IDisposable
 	
 	/// <summary>
 	///     Resolves a project path using smart inference:
-	///     - null or empty → CWD
 	///     - .csproj file → use directly
 	///     - directory → search for .csproj
 	///     - source file → walk up to find .csproj
 	/// </summary>
-	public string ResolveProjectPath(string? inputPath)
+	public string ResolveProjectPath(string inputPath)
 	{
-		// Use CWD if no path provided
-		var basePath = string.IsNullOrWhiteSpace(inputPath)
-			? Environment.CurrentDirectory
-			: inputPath;
-		
-		var fullPath = Path.GetFullPath(basePath);
+		if(string.IsNullOrWhiteSpace(inputPath))
+			throw new ArgumentException("Project path is required and cannot be empty. The agent must explicitly specify which project to operate on.", nameof(inputPath));
+
+		var fullPath = Path.GetFullPath(inputPath);
 		
 		// Already a .csproj file
 		if(fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {

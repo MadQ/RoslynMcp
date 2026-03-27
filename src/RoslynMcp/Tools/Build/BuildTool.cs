@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -33,9 +33,9 @@ internal sealed class BuildTool : RoslynMcpTool
 		"run dotnet build — use sparingly, only when you suspect MSBuild-specific issues (restore, SDK, targets) " +
 		"that Roslyn cannot detect. Requires a .csproj to be present.")]
 	public async Task<object> BuildProject(
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
-		[Description("If true, skip Roslyn check and always run dotnet build. Use sparingly — only for MSBuild-specific validation.")] bool forceBuild = false,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description("If true, skip Roslyn check and always run dotnet build. Use sparingly — only for MSBuild-specific validation.")] bool forceBuild = false)
 	{
 		using var scope = BeginTool("roslyn_build_project");
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);

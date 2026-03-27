@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
 
@@ -17,9 +17,8 @@ internal sealed class WorkspaceResolver
 	
 	/// <summary>
 	///     Resolves the project path and returns the compilation.
-	///     If projectPath is null, uses current working directory.
 	/// </summary>
-	public Compilation GetCompilation(string? projectPath)
+	public Compilation GetCompilation(string projectPath)
 	{
 		var resolved = manager.ResolveProjectPath(projectPath);
 		
@@ -28,9 +27,8 @@ internal sealed class WorkspaceResolver
 	
 	/// <summary>
 	///     Resolves the project path and returns the solution.
-	///     If projectPath is null, uses current working directory.
 	/// </summary>
-	public Solution GetSolution(string? projectPath)
+	public Solution GetSolution(string projectPath)
 	{
 		var resolved = manager.ResolveProjectPath(projectPath);
 		
@@ -41,7 +39,7 @@ internal sealed class WorkspaceResolver
 	///     Gets the root path for a resolved project.
 	///     Used for computing relative paths in tool responses.
 	/// </summary>
-	public string GetRootPath(string? projectPath)
+	public string GetRootPath(string projectPath)
 	{
 		var resolved = manager.ResolveProjectPath(projectPath);
 		
@@ -51,9 +49,8 @@ internal sealed class WorkspaceResolver
 	
 	/// <summary>
 	///     Resolves the project path and returns the project.
-	///     If projectPath is null, uses current working directory.
 	/// </summary>
-	public Project GetProject(string? projectPath)
+	public Project GetProject(string projectPath)
 	{
 		var resolved = manager.ResolveProjectPath(projectPath);
 		
@@ -63,7 +60,7 @@ internal sealed class WorkspaceResolver
 	/// <summary>
 	///     Gets workspace metadata for the resolved project (root path, MSBuild flag, .csproj path).
 	/// </summary>
-	public (string RootPath, bool IsMSBuild, string? CsprojPath) GetWorkspaceInfo(string? projectPath)
+	public (string RootPath, bool IsMSBuild, string? CsprojPath) GetWorkspaceInfo(string projectPath)
 	{
 		var resolved = manager.ResolveProjectPath(projectPath);
 		
@@ -74,7 +71,7 @@ internal sealed class WorkspaceResolver
 	///     Invalidates the cached compilation for a file after edits.
 	///     Tools that modify files should call this to ensure fresh diagnostics on subsequent queries.
 	/// </summary>
-	public void InvalidateFile(string? projectPath, string fullPath)
+	public void InvalidateFile(string projectPath, string fullPath)
 	{
 		var resolved = manager.ResolveProjectPath(projectPath);
 		

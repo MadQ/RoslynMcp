@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.Extensions.FileSystemGlobbing;
 using ModelContextProtocol.Server;
 
@@ -16,10 +16,10 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		"Complements search_files (content search) with fast file enumeration."
 	)]
 	public object ListFiles(
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Glob pattern (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json'). Default: '**/*'.")] string? pattern = null,
 		[Description("Include subdirectories. Default: true.")] bool recursive = true,
-		[Description("Maximum number of results. Default: 100, max: 500.")] int take = 100,
-		[Description(ProjectPathDescription)] string? projectPath = null
+		[Description("Maximum number of results. Default: 100, max: 500.")] int take = 100
 	)
 	{
 		using var scope = BeginTool("roslyn_list_files", pattern);

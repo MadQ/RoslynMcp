@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
@@ -15,7 +15,7 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 		"Use this after adding package references or when packages are missing. " +
 		"Does not run dotnet build — just downloads and restores dependencies.")]
 	public async Task<RestoreResult> RestorePackages(
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_restore_packages");
 		var rootPath = workspace.GetRootPath(projectPath);

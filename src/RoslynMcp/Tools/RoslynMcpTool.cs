@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp.Tools;
@@ -29,12 +29,12 @@ internal abstract partial class RoslynMcpTool
 	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
 	/// </summary>
-	/// <param name="projectPath">Optional project path (directory, .csproj, or source file).</param>
+	/// <param name="projectPath">Project path (directory, .csproj, or source file). REQUIRED.</param>
 	/// <param name="compilation">The resolved compilation if successful.</param>
 	/// <param name="error">Structured error response if resolution failed.</param>
 	/// <returns>True if compilation was successfully resolved; false otherwise.</returns>
 	protected bool TryGetCompilation(
-		string? projectPath,
+		string projectPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Compilation? compilation,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out object? error)
 	{
@@ -81,7 +81,7 @@ internal abstract partial class RoslynMcpTool
 	///     Use this for tools that need Project-level metadata (ProjectInfoTool, etc.).
 	/// </summary>
 	protected bool TryGetProject(
-		string? projectPath,
+		string projectPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Project? project,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out object? error)
 	{
@@ -160,7 +160,6 @@ internal abstract partial class RoslynMcpTool
 	///     Common parameter description for projectPath across all tools.
 	/// </summary>
 	protected const string ProjectPathDescription =
-		"Optional path to project directory, .csproj file, or source file. " +
-		"If omitted, uses current working directory. " +
+		"Path to project directory, .csproj file, or source file. REQUIRED - must be explicitly specified. " +
 		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj.";
 }

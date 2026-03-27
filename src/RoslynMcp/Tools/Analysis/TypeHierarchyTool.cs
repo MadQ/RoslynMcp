@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -18,9 +18,9 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		"Derived types and interfaces are paged; use skip/take for large hierarchies.")]
 	public async Task<object> GetTypeHierarchy(
 		[Description("The type name, e.g. 'WindowTracker' or 'RoslynMcp.WorkspaceManager'.")] string typeName,
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Number of derived types/interfaces to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of derived types/interfaces to return. Default: 50, max: 200.")] int take = 50,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description("Maximum number of derived types/interfaces to return. Default: 50, max: 200.")] int take = 50)
 	{
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using System.ComponentModel;
 using System.Xml;
 using Microsoft.CodeAnalysis;
@@ -18,8 +18,8 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		"Use this to understand API contracts without reading source files.")]
 	public object GetSymbolDocumentation(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
-		[Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath,
+		[Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

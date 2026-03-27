@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -21,7 +21,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 	public async Task<string> ApplyRename(
 		[Description("The confirmation token returned by preview_rename."								)] string token,
 		[Description("'y' to apply, 'session' to apply and remember for this session, 'n' to reject."	)] string approval,
-		[Description(ProjectPathDescription)] string? projectPath = null
+		[Description(ProjectPathDescription)] string projectPath
 	)
 	{
 		using var scope = BeginTool("roslyn_apply_rename", token);

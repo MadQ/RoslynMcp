@@ -62,8 +62,7 @@ Add to `.mcp.json` at your workspace root:
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["."]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
@@ -71,8 +70,7 @@ Add to `.mcp.json` at your workspace root:
 
 **Notes:**
 - Use absolute path to `RoslynMcp.exe`
-- `.` means analyze the current workspace root
-- Or specify absolute path to a different project
+- Do NOT pass project paths as `args` — the agent must specify `projectPath` parameter in each tool invocation
 
 **Restart:** Reload window or restart GitHub Copilot extension after editing `.mcp.json`.
 
@@ -92,17 +90,16 @@ Add to your Claude Desktop MCP settings file:
 {
   "mcpServers": {
     "roslyn": {
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["/absolute/path/to/your/project/src"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
 ```
 
 **Path notes:**
-- Use **absolute paths** for both the executable and target source directory
+- Use **absolute path** for the executable
 - Replace `/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe` with the full path to the published executable
-- Replace `/absolute/path/to/your/project/src` with the directory you want to analyze
+- Do NOT pass project paths as `args` — the agent must specify `projectPath` parameter in each tool invocation
 
 **Restart:** Quit and relaunch Claude Desktop.
 
@@ -118,12 +115,13 @@ Add to `.cursor/mcp.json` in your project root:
 {
   "mcpServers": {
     "roslyn": {
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
 ```
+
+**Note:** Do NOT pass project paths as command-line `args`. The agent must specify `projectPath` parameter in each tool invocation.
 
 **Option 2: Global config**
 
@@ -150,12 +148,13 @@ Add to `.windsurf/mcp_config.json` in your project root:
 {
   "mcpServers": {
     "roslyn": {
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
 ```
+
+**Note:** Do NOT pass project paths as command-line `args`. The agent must specify `projectPath` parameter in each tool invocation.
 
 **Option 2: Global config**
 
@@ -183,11 +182,12 @@ Add to `.windsurf/mcp_config.json` in your project root:
 ```json
 {
   "roslyn": {
-    "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-    "args": ["${workspaceFolder}"]
+    "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
   }
 }
 ```
+
+**Note:** Do NOT pass project paths as command-line `args`. The agent must specify `projectPath` parameter in each tool invocation.
 
 **Option 2: Workspace config**
 
@@ -197,8 +197,7 @@ Add to `.vscode/mcp.json` or `.cline/mcp_settings.json` in your project root (ex
 {
   "mcpServers": {
     "roslyn": {
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }

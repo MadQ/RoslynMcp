@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -14,9 +14,9 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		"Lists all types (classes, interfaces, enums, structs, records) in the project. " +
 		"Optionally filter by namespace or type kind. Use this to discover what's available in the codebase.")]
 	public object ListTypes(
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional namespace filter, e.g. 'RoslynMcp.Tools'. Types in this namespace and its sub-namespaces are returned.")] string? namespaceFilter = null,
-		[Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null)
 	{
 		using var scope = BeginTool("roslyn_list_types", namespaceFilter);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

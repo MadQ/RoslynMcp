@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
 using ModelContextProtocol.Server;
@@ -23,8 +23,8 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 	public async Task<PreviewRenameResult> PreviewRename(
 		[Description("Current symbol name, e.g. 'WindowKey'.")] string symbolName,
 		[Description("New name, e.g. 'WindowIdentity'.")] string newName,
-		[Description("Optional containing type to disambiguate, e.g. 'WindowTracker'.")] string? containingType = null,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath,
+		[Description("Optional containing type to disambiguate, e.g. 'WindowTracker'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}");
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

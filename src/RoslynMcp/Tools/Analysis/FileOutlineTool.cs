@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -17,9 +17,9 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		"Results are paged by type; use skip/take to navigate large files.")]
 	public async Task<object> GetFileOutline(
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Number of types to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20)
 	{
 		using var scope = BeginTool("roslyn_get_file_outline", filePath);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

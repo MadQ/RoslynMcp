@@ -27,21 +27,20 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["."]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
 ```
 
-See [Configuration](#configuration) below for argument details and [INSTALLATION.md](INSTALLATION.md) for client-specific setup.
+See [INSTALLATION.md](INSTALLATION.md) for client-specific setup.
 
 ---
 
 ## Key Features
 
 - **24 Roslyn-powered tools** — semantic code understanding, navigation, refactoring, and validation
-- **Multi-project support** — all tools accept an optional `projectPath` parameter to work across multiple projects in a single session
+- **Multi-project support** — all tools require an explicit `projectPath` parameter; switch projects mid-session without restarting
 - **Live compilation** — in-memory Roslyn workspace with incremental updates via FileSystemWatcher
 - **No external processes** — all analysis happens in-process using Roslyn APIs (except `roslyn_build_project` which calls `dotnet build`)
 - **Structured error handling** — tools return actionable error objects with hints when paths are invalid or symbols aren't found
@@ -61,12 +60,13 @@ RoslynMcp runs as a standalone executable. Configuration goes in your MCP client
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["/path/to/your/project"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
 ```
+
+No `args` needed — the agent specifies `projectPath` in each tool invocation.
 
 **See [INSTALLATION.md](INSTALLATION.md) for complete setup instructions** including client-specific examples and troubleshooting.
 
@@ -79,53 +79,12 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 
 Supports `net8.0`, `net10.0`, or `net11.0` (auto-detected if SDK is installed).
 
-### Configuration Examples
-
-**Analyze current workspace:**
-```json
-{
-  "servers": {
-    "roslyn": {
-      "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["."]
-    }
-  }
-}
-```
-
-**Analyze specific project:**
-```json
-{
-  "servers": {
-    "roslyn": {
-      "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["C:/my-workspace/MyApp.Web"]
-    }
-  }
-}
-```
-
-**Using published NuGet tool (future):**
-```json
-{
-  "servers": {
-    "roslyn": {
-      "type": "stdio",
-      "command": "roslyn-mcp",
-      "args": ["."]
-    }
-  }
-}
-```
-*Requires: `dotnet tool install --global RoslynMcp` (coming soon)*
-
 ### Troubleshooting
 
 **Server doesn't load target project:**
-- Check that the target path contains a `.csproj` file (or `.cs` files for AdhocWorkspace fallback)
-- Check server stderr logs for "Target: ..." to see what path was detected
+- Ensure the agent is specifying `projectPath` in every tool invocation
+- `projectPath` supports smart resolution: directory, `.csproj` file, or source file
+- Check server stderr logs for errors
 
 **VS Publish UI errors (`WebToolsException`):**
 - Visual Studio's "Publish" UI may incorrectly treat the console app as a web app

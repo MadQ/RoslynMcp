@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -17,10 +17,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		"Use this to discover concrete implementations of abstractions. Results are paged; use skip/take for large result sets.")]
 	public async Task<object> FindImplementations(
 		[Description("The symbol name, e.g. 'IDisposable', 'SymbolVisitor', 'Accept'.")] string symbolName,
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
 		[Description("Number of implementations to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50)
 	{
 		using var scope = BeginTool("roslyn_find_implementations", symbolName);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

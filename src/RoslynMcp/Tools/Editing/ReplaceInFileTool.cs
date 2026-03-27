@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 
@@ -23,12 +23,12 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	)]
 	public object ReplaceInFile(
 		[Description("Relative path to the file from the workspace root.")                                                ] string  filePath,
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("The pattern to find. Literal string by default; regex when useRegex=true.")                         ] string  pattern,
 		[Description("The replacement text. Supports $1/$2 backreferences when useRegex=true.")                           ] string  replacement,
 		[Description("Treat pattern as a regular expression. Default: false.")                                            ] bool    useRegex  = false,
 		[Description("Preview replacements without writing the file. Returns what would change. Default: false.")         ] bool    dryRun    = false,
-		[Description("Case-sensitive matching. Default: true.")                                                           ] bool    caseSensitive = true,
-		[Description(ProjectPathDescription)] string? projectPath = null
+		[Description("Case-sensitive matching. Default: true.")                                                           ] bool    caseSensitive = true
 	)
 	{
 		using var scope = BeginTool("roslyn_replace_in_file", filePath);

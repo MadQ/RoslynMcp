@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -16,7 +16,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		"Use this to understand what's in scope when generating or analyzing code.")]
 	public async Task<object> GetUsings(
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_get_usings", filePath);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -19,11 +19,11 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	]
 	public object SearchFiles(
 		[Description("Regex pattern to search for (e.g., 'class.*Tool', 'TODO.*performance').")] string pattern,
+		[Description(ProjectPathDescription)] string projectPath,
 		[Description("File glob pattern (e.g., '*.cs', '*.csproj'). Default: '*.cs'.")] string? filePattern = null,
 		[Description("Case-sensitive matching. Default: false.")] bool caseSensitive = false,
 		[Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of results to return. Default: 50, max: 200.")] int take = 50,
-		[Description(ProjectPathDescription)] string? projectPath = null
+		[Description("Maximum number of results to return. Default: 50, max: 200.")] int take = 50
 	)
 	{
 		using var scope = BeginTool("roslyn_search_files", pattern);

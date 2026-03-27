@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -16,8 +16,8 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		"Use this to navigate to a symbol's definition without reading multiple files.")]
 	public object GetSymbolDefinition(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
-		[Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath,
+		[Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_definition", symbolName);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

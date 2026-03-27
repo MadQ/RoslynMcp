@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -17,15 +17,15 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 	public object GetTypeMembers(
 		[Description("The simple or fully-qualified type name, e.g. 'ShowWindowCommand' or 'ScreenMon.RuleMode'.")]
 		string typeName,
-		
+
+		[Description(ProjectPathDescription)]
+		string projectPath,
+
 		[Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")]
 		string? memberKind = null,
-		
+
 		[Description("Number of members to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of members to return. Default: 50, max: 200.")] int take = 50,
-		
-		[Description(ProjectPathDescription)]
-		string? projectPath = null)
+		[Description("Maximum number of members to return. Default: 50, max: 200.")] int take = 50)
 	{
 		using var scope = BeginTool("roslyn_get_type_members", typeName);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

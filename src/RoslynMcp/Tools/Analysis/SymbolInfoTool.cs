@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -19,7 +19,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description("1-based line number.")] int line,
 		[Description("1-based column number.")] int column,
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_info", $"{filePath}:{line}");
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))

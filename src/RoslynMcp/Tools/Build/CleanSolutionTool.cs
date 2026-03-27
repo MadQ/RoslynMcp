@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
@@ -15,7 +15,7 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 		"Use this when the build is in a bad state or before a fresh rebuild. " +
 		"Does not run dotnet build — just removes compiled output.")]
 	public async Task<CleanResult> CleanSolution(
-		[Description(ProjectPathDescription)] string? projectPath = null)
+		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_clean_solution");
 		var rootPath = workspace.GetRootPath(projectPath);
