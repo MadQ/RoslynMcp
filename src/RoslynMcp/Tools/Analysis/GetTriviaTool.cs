@@ -34,7 +34,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         using var scope = BeginTool("roslyn_get_trivia", filePath);
 
         // Handle discovery requests
-        if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, false, false, false, out var discovery))
+        if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds:  false, listTypeKinds:  false, listSearchContexts:  false, out var discovery))
             return discovery;
 
         // Normal trivia analysis mode

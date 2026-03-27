@@ -36,7 +36,7 @@ RoslynMcp includes automated style auditing and fixing to ensure all quirky rule
    - ✅ `if(condition)` 
    - ❌ `if (condition)`
 
-### Manual Fix Required
+### Manual Fix Required (Info/Warning)
 
 4. **BlankLineBeforeReturn** (Info)
    - Return statements should have a blank line before them
@@ -56,6 +56,28 @@ RoslynMcp includes automated style auditing and fixing to ensure all quirky rule
    - TODO comments must include the actual concern, not just "fix"
    - ✅ `// TODO: How should this handle null values?`
    - ❌ `// TODO: fix`
+
+8. **CommentPunctuation** (Info)
+   - Comments should be complete sentences with proper punctuation
+   - End with period for substantial comments (>10 chars)
+   - ✅ `// Process all items in the collection.`
+   - ❌ `// Process all items in the collection`
+
+9. **CommentPronouns** (Info)
+   - No personal pronouns (we/I/our/my/us) in code comments
+   - Describe code objectively, not subjectively
+   - ✅ `// The method processes input asynchronously.`
+   - ❌ `// We process input asynchronously here.`
+
+10. **CommentSpacing** (Info)
+    - One space after a period in comments, never two
+    - ✅ `// First step. Second step.`
+    - ❌ `// First step.  Second step.`
+
+11. **SemicolonPlacement** (Info, Experimental)
+    - Semicolons on their own line for multi-line expressions
+    - Applies to: fluent chains, LINQ, ternaries, arrow bodies
+    - **Experimental:** "Just recently started test-driving this one"
 
 ## Integration Points
 

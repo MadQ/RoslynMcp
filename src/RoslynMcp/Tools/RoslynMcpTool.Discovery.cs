@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis.CSharp;
+﻿using Microsoft.CodeAnalysis.CSharp;
 using System.Diagnostics.CodeAnalysis;
 
 namespace RoslynMcp.Tools;
@@ -88,7 +88,7 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     protected static string[] GetCommonSyntaxKinds()
     {
-        return new[] {
+        return [
             // Control flow
             "IfStatement", "ElseClause",
             "ForStatement", "ForEachStatement", "WhileStatement", "DoStatement",
@@ -105,7 +105,7 @@ internal abstract partial class RoslynMcpTool
             // Statements
             "UsingDirective", "LocalDeclarationStatement",
             "ReturnStatement", "ThrowStatement", "YieldReturnStatement"
-        };
+        ];
     }
 
     // ── Discovery: Trivia Kinds ──────────────────────────────────────────────────
@@ -138,7 +138,7 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     protected static string[] GetCommonTriviaKinds()
     {
-        return new[] {
+        return [
 
             "WhitespaceTrivia",
             "EndOfLineTrivia",
@@ -148,7 +148,7 @@ internal abstract partial class RoslynMcpTool
             "MultiLineDocumentationCommentTrivia",
             "DisabledTextTrivia",
             "PreprocessingMessageTrivia"
-        };
+        ];
     }
 
     // ── Discovery: Member Kinds ──────────────────────────────────────────────────
