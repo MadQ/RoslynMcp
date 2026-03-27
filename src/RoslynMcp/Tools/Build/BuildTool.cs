@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -52,7 +52,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true).
 		if(!forceBuild) {
-		
+			
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
 				return error;
 			
@@ -60,10 +60,11 @@ internal sealed class BuildTool : RoslynMcpTool
 			var roslynErrors      = roslynDiagnostics.Where(d => d.Severity == "error").ToArray();
 			
 			if(roslynErrors.Length > 0) {
-			
+				
 				var roslynWarnings = roslynDiagnostics.Where(d => d.Severity == "warning").ToArray();
 				
 				return new {
+					
 					succeeded     = false,
 					errors        = roslynErrors,
 					warnings      = roslynWarnings,
@@ -84,11 +85,12 @@ internal sealed class BuildTool : RoslynMcpTool
 		int exitCode;
 		
 		try {
-			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath);
+			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope);
 		}
 		catch(InvalidOperationException ex) {
-		
+			
 			return new {
+				
 				succeeded     = false,
 				errors        = Array.Empty<BuildDiagnostic>(),
 				warnings      = Array.Empty<BuildDiagnostic>(),
@@ -105,6 +107,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		var succeeded   = exitCode == 0;
 		
 		return new {
+			
 			succeeded,
 			errors        = diagnostics.Where(d => d.Severity == "error")  .ToArray(),
 			warnings      = diagnostics.Where(d => d.Severity == "warning").ToArray(),
@@ -124,9 +127,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		return $"build \"{csprojPath}\"{tfmArg} --no-restore /nologo /v:quiet";
 	}
 	
-	private static async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string args, string workingDirectory)
+	private async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string args, string workingDirectory, ToolScope scope)
 	{
 		var psi = new ProcessStartInfo("dotnet", args) {
+			
 			RedirectStandardOutput = true,
 			RedirectStandardError  = true,
 			UseShellExecute        = false,
@@ -134,47 +138,69 @@ internal sealed class BuildTool : RoslynMcpTool
 			WorkingDirectory       = workingDirectory
 		};
 		
-		Process process;
+		Process? process = null;
+		int exitCode = -1;
 		
 		try {
+			
+			scope.Record($"dotnet {args}");
+			scope.Record($"cwd={workingDirectory}");
+			
 			process = new Process { StartInfo = psi };
-			process.Start();
+			
+			if(!process.Start()) {
+				
+				throw new InvalidOperationException("Process.Start() returned false — process did not start.");
+			}
+			
+			scope.Record($"pid={process.Id}");
 		}
-		catch(Win32Exception ex) {
-		
+		catch(Exception ex) when(ex is Win32Exception or InvalidOperationException) {
+			
+			scope.Record($"start failed: {ex.GetType().Name}");
 			throw new InvalidOperationException("Failed to start dotnet process. Is dotnet installed and in PATH?", ex);
 		}
 		
 		var sw = Stopwatch.StartNew();
 		
-		// Read both streams concurrently to avoid deadlocks on large output.
-		var stdoutTask = process.StandardOutput.ReadToEndAsync();
-		var stderrTask = process.StandardError.ReadToEndAsync();
-		
-		await process.WaitForExitAsync();
-		sw.Stop();
-		
-		string stdout, stderr;
-		
 		try {
-			stdout = await stdoutTask;
-			stderr = await stderrTask;
-		}
-		catch(IOException ex) {
-		
-			throw new InvalidOperationException("Failed to read build output.", ex);
+			
+			// Read both streams concurrently to avoid deadlocks on large output.
+			var stdoutTask = process.StandardOutput.ReadToEndAsync();
+			var stderrTask = process.StandardError.ReadToEndAsync();
+			
+			await process.WaitForExitAsync();
+			sw.Stop();
+			
+			// Capture exit code BEFORE disposing.
+			exitCode = process.ExitCode;
+			scope.Record($"exit={exitCode} elapsed={sw.Elapsed.TotalSeconds:F1}s");
+			
+			string stdout, stderr;
+			
+			try {
+				
+				stdout = await stdoutTask;
+				stderr = await stderrTask;
+				scope.Record($"stdout={stdout.Length} stderr={stderr.Length} chars");
+			}
+			catch(IOException ex) {
+				
+				scope.Record($"read failed: {ex.Message}");
+				throw new InvalidOperationException("Failed to read build output.", ex);
+			}
+			
+			// MSBuild writes diagnostics to stdout; stderr is typically empty or SDK noise.
+			var combined = string.IsNullOrWhiteSpace(stderr)
+				? stdout
+				: stdout + stderr
+			;
+			
+			return (combined, sw.Elapsed, exitCode);
 		}
 		finally {
-			process.Dispose();
+			process?.Dispose();
 		}
-		
-		// MSBuild writes diagnostics to stdout; stderr is typically empty or SDK noise.
-		var combined = string.IsNullOrWhiteSpace(stderr)
-			? stdout
-			: stdout + stderr
-		;
-		
-		return (combined, sw.Elapsed, process.ExitCode);
 	}
 	
 	private static BuildDiagnostic[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
@@ -211,6 +237,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		var results = new List<BuildDiagnostic>();
 		
 		foreach(var raw in output.Split('\n')) {
+			
 			var line = raw.Trim();
 			
 			if(line.Length == 0)
@@ -248,7 +275,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			return Path.GetRelativePath(rootPath, path);
 		}
 		catch(ArgumentException) {
-		
+			
 			// Paths on different roots (e.g., different drives on Windows) — return absolute path.
 			return path;
 		}

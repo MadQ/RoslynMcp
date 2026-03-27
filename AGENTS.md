@@ -38,6 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.2.0-alpha (pre-1.0) |
+| **Tool Count** | 25 MCP tools (24 stable + 1 experimental) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -82,6 +83,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetSymbolDocumentationTool` | `roslyn_get_symbol_documentation` — XML doc comments for symbols |
 | `GetSymbolDefinitionTool` | `roslyn_get_symbol_definition` — find declaration location with signature |
 | `GetSymbolsInScopeTool` | `roslyn_get_symbols_in_scope` — enumerate accessible symbols at a location |
+| `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 
@@ -133,6 +135,22 @@ When discovering files/content:
 
 This is very important! It helps to test the tools, dogfood the API, and ensures your agent gets accurate semantic understanding of the codebase. Avoid workarounds like grepping files or spawning builds unless absolutely necessary. I'm serious: get this through your thick pirate skull: DOGFOOD the living daylights out of all this!
 
+### Exception: Style Enforcement
+
+Code style enforcement (indented blank lines, spacing, etc.) is handled by `.\scripts\Test-CodeStyle.ps1` rather than a Roslyn tool. **Why?**
+
+- Style rules operate on **trivia** (whitespace), not semantics
+- Text-based regex is faster and simpler than syntax tree walking for formatting checks
+- Quirky rules (like indented blank lines) aren't expressible in standard formatters
+- PowerShell script is more maintainable than custom Roslyn visitors for every formatting rule
+
+**AI agents:** Run this after editing code:
+```powershell
+.\scripts\Test-CodeStyle.ps1 -Fix
+```
+
+This is a **pragmatic exception** to the dogfooding rule. Not every problem needs semantic analysis. For understanding trivia *context* (e.g., "what's the indentation level here?"), see `roslyn_get_trivia` (experimental).
+
 ---
 
 ## Code Style
@@ -150,6 +168,12 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 > 3. Example: `// Experiment: using expression bodies for single-line getters. Thoughts?`
 >
 > **TL;DR:** Braces go here, names look like this, but **how you solve problems is up to you**. Push back on bad ideas, suggest better approaches, question assumptions—just format it right when you're done. Want to try a new formatting pattern? Comment it and ask! 🏴‍☠️
+>
+> **After editing code, run the style auditor:**
+> ```powershell
+> .\scripts\Test-CodeStyle.ps1 -Fix
+> ```
+> This catches quirky rules (like indented blank lines) that you can't easily spot. See [docs/development/CODE_STYLE_ENFORCEMENT.md](docs/development/CODE_STYLE_ENFORCEMENT.md) for details.
 >
 > **Human contributors:** These guidelines are strong recommendations but not strict requirements. Local style preferences are fine as long as they don't clash with project-wide patterns. See the "Consistency is overrated" note at the end of this section.
 
@@ -239,6 +263,8 @@ When you deviate from convention because you've *thought it through*, that's not
 > - Just don't go completely feral on us 🏴‍☠️
 >
 > **Bottom line:** Code should *look* consistent (formatting). Code should *think* rebelliously (design). When you deviate from convention because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on. That comment might even be the Treasure (Arrrr!). 💎
+
+# **AI: When doing style audits, remember to use ALL of the above, from [Code Style](#code-style) down.**
 
 ---
 

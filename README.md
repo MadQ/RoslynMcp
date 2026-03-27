@@ -39,7 +39,7 @@ See [INSTALLATION.md](INSTALLATION.md) for client-specific setup.
 
 ## Key Features
 
-- **24 Roslyn-powered tools** — semantic code understanding, navigation, refactoring, and validation
+- **25 Roslyn-powered tools** — semantic code understanding, navigation, refactoring, validation, and trivia analysis (24 stable + 1 experimental)
 - **Multi-project support** — all tools require an explicit `projectPath` parameter; switch projects mid-session without restarting
 - **Live compilation** — in-memory Roslyn workspace with incremental updates via FileSystemWatcher
 - **No external processes** — all analysis happens in-process using Roslyn APIs (except `roslyn_build_project` which calls `dotnet build`)
@@ -105,13 +105,13 @@ AI coding agents that work on C# via text-based tools (file reads, regex search,
 
 RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm and incrementally updated via `FileSystemWatcher`.
 
-**Yes, there are a lot of tools** (24 in total). That's not bloat — it's Roslyn's power surface. Each tool exposes a specific Roslyn capability that agents can't get any other way. Think of it as a curated API for semantic code understanding, not a grab bag of features.
+**Yes, there are a lot of tools** (25 in total). That's not bloat — it's Roslyn's power surface. Each tool exposes a specific Roslyn capability that agents can't get any other way. Think of it as a curated API for semantic code understanding, not a grab bag of features.
 
 ---
 
 ## Tools
 
-RoslynMcp provides 24 tools for code analysis and manipulation. **All tools work on the in-memory Roslyn compilation** — no external processes or file system dependencies beyond the initial load.
+RoslynMcp provides 25 tools for code analysis and manipulation (24 stable + 1 experimental). **All tools work on the in-memory Roslyn compilation** — no external processes or file system dependencies beyond the initial load.
 
 ### Guiding Your AI Agent
 
@@ -158,6 +158,7 @@ When discovering code:
 | `roslyn_get_symbol_documentation` | Returns XML documentation comments for a symbol: summary, parameter descriptions, return value description, remarks. Use to understand API contracts without reading source. |
 | `roslyn_get_symbol_definition` | Returns the definition location and signature of a symbol. Shows where the symbol is declared (file/line/column), its full signature, and doc summary. |
 | `roslyn_get_symbols_in_scope` | Returns all symbols accessible at a specific file location: locals, parameters, fields, properties, methods, types. Use when generating code to understand what's available in scope. |
+| `roslyn_get_trivia` | **EXPERIMENTAL:** Returns whitespace, comments, and formatting trivia from C# files. Filter by syntax kind, trivia kind, or line range. Useful for understanding indentation context. May be removed or changed in future releases. |
 | `roslyn_respawn` | **DEBUG ONLY:** Terminates the server process, forcing the MCP client to respawn it. Use this to reload code changes after rebuilding without restarting your IDE. |
 
 ---

@@ -1,4 +1,4 @@
-﻿namespace RoslynMcp;
+namespace RoslynMcp;
 
 /// <summary>
 ///     Lightweight file logger with rotation. All writes are thread-safe via a lock.
@@ -29,7 +29,7 @@ internal sealed class FileLogger : IDisposable
 		
 		// Explicitly set to empty → disabled.
 		if(envValue is not null && envValue.Length == 0) {
-		
+			
 			logPath = null;
 			
 			return;
@@ -68,13 +68,17 @@ internal sealed class FileLogger : IDisposable
 		var message       = detail is not null
 			? $"{workspaceMode} {toolName} {elapsedMs}ms {outcome} — {detail}"
 			: $"{workspaceMode} {toolName} {elapsedMs}ms {outcome}";
-
+		
 		Write("TOOL  ", message);
 	}
 	
 	/// <summary>Logs an error outside of a tool call (e.g. workspace load failure).</summary>
 	public void LogError(string context, string message)
 		=> Write("ERROR ", $"{context} — {message}");
+	
+	/// <summary>Logs informational diagnostic messages (verbose logging).</summary>
+	public void LogInfo(string context, string message)
+		=> Write("INFO  ", $"{context} — {message}");
 	
 	void Write(string level, string message)
 	{
@@ -84,8 +88,9 @@ internal sealed class FileLogger : IDisposable
 		var line = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z] [{level}] {message}{Environment.NewLine}";
 		
 		lock(writeLock) {
-		
+			
 			try {
+				
 				RotateIfNeeded();
 				File.AppendAllText(logPath, line);
 			}
@@ -105,12 +110,12 @@ internal sealed class FileLogger : IDisposable
 		
 		// Shift existing rotated files: .2 → .3, .1 → .2, (current) → .1
 		for(var i = MaxRotatedFiles - 1; i >= 1; i--) {
-		
+			
 			var older  = $"{logPath}.{i}";
 			var newer  = $"{logPath}.{i + 1}";
 			
 			if(File.Exists(older)) {
-			
+				
 				if(File.Exists(newer))
 					File.Delete(newer);
 				
