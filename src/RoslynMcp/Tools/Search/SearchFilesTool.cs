@@ -51,11 +51,12 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		var solution   = workspace.GetSolution(projectPath);
 		var rootPath   = workspace.GetRootPath(projectPath);
 		var allMatches = new List<MatchResult>();
-		
+		var seenPaths  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
 		foreach(var project in solution.Projects)
 			foreach(var document in project.Documents) {
-			
-				if(document.FilePath is null)
+
+				if(document.FilePath is null || !seenPaths.Add(document.FilePath))
 					continue;
 				
 				var fileName = Path.GetFileName(document.FilePath);
