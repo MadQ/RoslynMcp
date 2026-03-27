@@ -66,7 +66,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			total_references = allResults.Length,
 			skip,
 			take,
-			references = page
+			references = page,
+			_caution   = AdhocCaution(projectPath)
 		});
 	}
 	

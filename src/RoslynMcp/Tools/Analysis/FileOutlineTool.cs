@@ -47,7 +47,8 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 			total_types = allTypes.Length,
 			skip,
 			take,
-			types       = page
+			types       = page,
+			_caution    = AdhocCaution(projectPath)
 		});
 	}
 	

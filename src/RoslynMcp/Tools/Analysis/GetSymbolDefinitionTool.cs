@@ -53,7 +53,8 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			line        = span.StartLinePosition.Line + 1,
 			column      = span.StartLinePosition.Character + 1,
 			signature   = signature,
-			doc_summary = docSummary
+			doc_summary = docSummary,
+			_caution    = AdhocCaution(projectPath)
 		};
 	}
 	

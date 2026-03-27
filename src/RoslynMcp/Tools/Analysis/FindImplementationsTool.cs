@@ -66,7 +66,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					total_implementations = allResults.Length,
 					skip,
 					take,
-					implementations = page
+					implementations = page,
+					_caution        = AdhocCaution(projectPath)
 				});
 			}
 			
@@ -106,7 +107,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					total_overrides = allResults.Length,
 					skip,
 					take,
-					overrides = page
+					overrides = page,
+					_caution  = AdhocCaution(projectPath)
 				});
 			}
 			

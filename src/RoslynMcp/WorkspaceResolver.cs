@@ -68,6 +68,17 @@ internal sealed class WorkspaceResolver
 	}
 	
 	/// <summary>
+	///     Returns true when the resolved workspace is an AdhocWorkspace (no .csproj found).
+	///     Tools use this to attach a caution to success responses.
+	/// </summary>
+	public bool IsAdhoc(string projectPath)
+	{
+		var (_, isMSBuild, _) = GetWorkspaceInfo(projectPath);
+
+		return !isMSBuild;
+	}
+
+	/// <summary>
 	///     Invalidates the cached compilation for a file after edits.
 	///     Tools that modify files should call this to ensure fresh diagnostics on subsequent queries.
 	/// </summary>

@@ -69,9 +69,10 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		var truncated = matchedFiles.Count == take && allFiles.Skip(take).Any();
 		
 		return new {
-			files = matchedFiles.ToArray(),
-			count = matchedFiles.Count,
-			truncated
+			files    = matchedFiles.ToArray(),
+			count    = matchedFiles.Count,
+			truncated,
+			_caution = AdhocCaution(projectPath)
 		};
 	}
 }

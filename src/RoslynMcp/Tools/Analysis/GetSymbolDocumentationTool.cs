@@ -49,7 +49,8 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			parameters    = parsed.Parameters,
 			returns       = parsed.Returns,
 			remarks       = parsed.Remarks,
-			example       = parsed.Example
+			example       = parsed.Example,
+			_caution      = AdhocCaution(projectPath)
 		};
 	}
 	

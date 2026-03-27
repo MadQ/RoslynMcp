@@ -96,7 +96,8 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 			properties = properties.ToArray(),
 			methods    = methods.ToArray(),
 			types      = types.ToArray(),
-			other      = other.ToArray()
+			other      = other.ToArray(),
+			_caution   = AdhocCaution(projectPath)
 		};
 	}
 	

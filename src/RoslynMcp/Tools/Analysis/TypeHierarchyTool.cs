@@ -61,7 +61,8 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 			total_derived_types = allDerived.Length,
 			skip,
 			take,
-			interfaces_and_derived = page
+			interfaces_and_derived = page,
+			_caution            = AdhocCaution(projectPath)
 		});
 	}
 	

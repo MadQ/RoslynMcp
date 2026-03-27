@@ -151,7 +151,8 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			total_matches = totalMatches,
 			returned	  = pagedMatches.Length,
 			has_more	  = skip + pagedMatches.Length < totalMatches,
-			context		  = context
+			context		  = context,
+			_caution	  = AdhocCaution(projectPath)
 		};
 	}
 	

@@ -179,6 +179,16 @@ internal abstract partial class RoslynMcpTool
 		};
 	
 	/// <summary>
+	///     Returns a caution string when the resolved workspace is AdhocWorkspace (no .csproj).
+	///     Include in success responses so agents know to re-invoke with a .csproj path for full functionality.
+	///     Returns null for MSBuildWorkspace — callers can use null-conditional to omit cleanly.
+	/// </summary>
+	protected string? AdhocCaution(string projectPath)
+		=> workspace.IsAdhoc(projectPath)
+			? "AdhocWorkspace in use — pass the .csproj path directly for full MSBuild support (complete type info, references, diagnostics)."
+			: null;
+
+	/// <summary>
 	///     Common parameter description for projectPath across all tools.
 	/// </summary>
 	protected const string ProjectPathDescription =

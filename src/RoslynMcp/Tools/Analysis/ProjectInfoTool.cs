@@ -57,7 +57,8 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			nullable            = nullable,
 			is_msbuild_workspace = isMSBuild,
 			package_references  = packages,
-			additional_files    = extraFiles
+			additional_files    = extraFiles,
+			_caution            = AdhocCaution(projectPath)
 		};
 	}
 	

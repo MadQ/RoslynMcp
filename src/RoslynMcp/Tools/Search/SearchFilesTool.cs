@@ -93,7 +93,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			matches		  = pagedMatches,
 			total_matches = totalMatches,
 			returned	  = pagedMatches.Length,
-			has_more	  = skip + pagedMatches.Length < totalMatches
+			has_more	  = skip + pagedMatches.Length < totalMatches,
+			_caution	  = AdhocCaution(projectPath)
 		};
 	}
 	

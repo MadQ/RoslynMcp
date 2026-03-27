@@ -54,7 +54,8 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 			total_members = allMembers.Length,
 			skip,
 			take,
-			members   = page
+			members   = page,
+			_caution  = AdhocCaution(projectPath)
 		});
 	}
 	

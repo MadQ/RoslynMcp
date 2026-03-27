@@ -53,7 +53,8 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		return new {
 			file            = Path.GetRelativePath(rootPath, tree.FilePath),
 			usings          = usings,
-			global_usings   = globalUsings
+			global_usings   = globalUsings,
+			_caution        = AdhocCaution(projectPath)
 		};
 	}
 	
