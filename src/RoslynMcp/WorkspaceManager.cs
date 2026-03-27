@@ -303,7 +303,14 @@ internal sealed class WorkspaceManager : IDisposable
 		private readonly bool                 isMSBuild;
 		private readonly ReaderWriterLockSlim rwLock = new();
 		private readonly FileSystemWatcher?   watcher;
-		
+
+		// Debounce: accumulate FSW events for 300ms before processing — avoids hammering
+		// Roslyn on every keystroke during active editing.
+		private readonly object           debounceLock   = new();
+		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
+		private          Timer?           debounceTimer;
+		private const    int              DebounceMs     = 300;
+
 		// The current compilation — replaced atomically on each file change.
 		private Compilation? compilation;
 		
@@ -410,6 +417,10 @@ internal sealed class WorkspaceManager : IDisposable
 		public void Dispose()
 		{
 			watcher?.Dispose();
+
+			lock(debounceLock)
+				debounceTimer?.Dispose();
+
 			rwLock.Dispose();
 			workspace.Dispose();
 		}
@@ -507,6 +518,10 @@ internal sealed class WorkspaceManager : IDisposable
 		
 		private void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
 		{
+			// Skip temp files (editor atomic-save artifacts) and non-C# files.
+			if(!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+				return;
+
 			var text = SourceText.From(File.ReadAllText(path));
 			var name = Path.GetRelativePath(rootPath, path);
 			
@@ -541,39 +556,77 @@ internal sealed class WorkspaceManager : IDisposable
 		
 		private void OnFileChanged(object sender, FileSystemEventArgs e)
 		{
-			if(isMSBuild || workspace is not AdhocWorkspace adhoc)
+			if(isMSBuild)
 				return;
-			
-			try {
-			
-				AddOrUpdateDocument(adhoc, projectId, e.FullPath);
-			}
-			catch(IOException) {
-			
-				// File may be locked mid-write by editor/build process.
-				// Non-fatal: FileSystemWatcher will fire another event when write completes.
-			}
-			catch(UnauthorizedAccessException) {
-			
-				// Insufficient permissions — ignore.
-			}
+
+			ScheduleDebounced(e.FullPath);
 		}
-		
+
 		private void OnFileDeleted(object sender, FileSystemEventArgs e)
 		{
 			if(isMSBuild || workspace is not AdhocWorkspace adhoc)
 				return;
-			
+
 			RemoveDocument(adhoc, projectId, e.FullPath);
 		}
-		
+
 		private void OnFileRenamed(object sender, RenamedEventArgs e)
 		{
 			if(isMSBuild || workspace is not AdhocWorkspace adhoc)
 				return;
-			
+
 			RemoveDocument(adhoc, projectId, e.OldFullPath);
-			AddOrUpdateDocument(adhoc, projectId, e.FullPath);
+			ScheduleDebounced(e.FullPath);
+		}
+
+		private void ScheduleDebounced(string fullPath)
+		{
+			lock(debounceLock) {
+
+				// Accumulate the changed path — duplicates collapsed by HashSet.
+				pendingChanges.Add(fullPath);
+
+				// Reset the timer — extends the quiet window on rapid events.
+				if(debounceTimer is null)
+					debounceTimer = new Timer(FlushPendingChanges, null, DebounceMs, Timeout.Infinite);
+				else
+					debounceTimer.Change(DebounceMs, Timeout.Infinite);
+			}
+		}
+
+		private void FlushPendingChanges(object? _)
+		{
+			string[] paths;
+
+			lock(debounceLock) {
+
+				paths = [.. pendingChanges];
+				pendingChanges.Clear();
+			}
+
+			if(workspace is not AdhocWorkspace adhoc)
+				return;
+
+			foreach(var path in paths) {
+
+				try {
+
+					AddOrUpdateDocument(adhoc, projectId, path);
+				}
+				catch(FileNotFoundException) {
+
+					// File gone by the time we processed it — remove from workspace.
+					RemoveDocument(adhoc, projectId, path);
+				}
+				catch(IOException) {
+
+					// File locked mid-write — next FSW event will retry.
+				}
+				catch(UnauthorizedAccessException) {
+
+					// Insufficient permissions — ignore.
+				}
+			}
 		}
 		
 		private Compilation RebuildCompilation()
