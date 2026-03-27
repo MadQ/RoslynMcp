@@ -61,8 +61,8 @@ internal static class SolutionDiff
 	
 	private static string BuildHunks(string oldText, string newText)
 	{
-		var oldLines = oldText.Split('\n');
-		var newLines = newText.Split('\n');
+		var oldLines = oldText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+		var newLines = newText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
 		var sb       = new System.Text.StringBuilder();
 		
 		// Simple greedy diff: find changed regions with 3-line context.

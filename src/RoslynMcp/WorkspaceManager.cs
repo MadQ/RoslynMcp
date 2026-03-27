@@ -396,7 +396,8 @@ internal sealed class WorkspaceManager : IDisposable
 			(workspace, projectId) = LoadMSBuildWorkspace(csprojPath);
 			isMSBuild = true;
 			
-			// MSBuildWorkspace watches files via Roslyn's internal mechanisms — no manual watcher needed.
+			// MSBuildWorkspace is a snapshot — it does NOT auto-detect file changes.
+			// External edits are picked up only when InvalidateFile is explicitly called by a tool.
 		}
 		
 		/// <summary>
