@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp.Tools;
@@ -61,8 +61,7 @@ internal abstract partial class RoslynMcpTool
 	{
 		error = null;
 		compilation = null;
-		
-		// Check path cache first if enabled.
+
 		if(pathCacheEnabled && !Path.IsPathRooted(projectPath)) {
 			
 			lock(pathCacheLock) {
@@ -106,8 +105,7 @@ internal abstract partial class RoslynMcpTool
 				ResolutionKind.Adhoc              => "adhoc (no .csproj)",
 				_                                 => null!
 			});
-			
-			// Cache the association if this was a relative/bare path and we resolved it successfully.
+
 			if(pathCacheEnabled && !Path.IsPathRooted(originalPath)) {
 				
 				var resolvedFull = workspace.GetWorkspaceInfo(projectPath).RootPath;

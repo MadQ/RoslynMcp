@@ -33,12 +33,10 @@ internal sealed class GetTriviaTool : RoslynMcpTool
     {
         using var scope = BeginTool("roslyn_get_trivia", filePath);
 
-        // Handle discovery requests
-        if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds:  false, listTypeKinds:  false, listSearchContexts:  false, out var discovery))
-            return discovery;
+            if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds:  false, listTypeKinds:  false, listSearchContexts:  false, out var discovery))
+                return discovery;
 
-        // Normal trivia analysis mode
-        if(string.IsNullOrEmpty(filePath))
+            if(string.IsNullOrEmpty(filePath))
             return new { error = "invalid_parameter", message = "filePath is required unless using listSyntaxKinds or listTriviaKinds" };
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
@@ -47,7 +45,6 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         if(take <= 0 || take > 500)
             return new { error = "invalid_parameter", message = "take must be between 1 and 500" };
 
-        // Find syntax tree for file
         var normalizedPath = filePath.Replace('/', Path.DirectorySeparatorChar);
         var tree = compilation.SyntaxTrees.FirstOrDefault(t => 
             t.FilePath.EndsWith(normalizedPath, StringComparison.OrdinalIgnoreCase)
@@ -59,7 +56,6 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         var root = tree.GetRoot();
         var sourceText = tree.GetText();
 
-        // Determine span to analyze
         TextSpan span;
         if(startLine.HasValue || endLine.HasValue) {
 
@@ -76,17 +72,14 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             span = root.FullSpan;
         }
 
-        // Collect nodes in span
         var nodesInSpan = root.DescendantNodes(span, descendIntoTrivia: false)
             .Where(n => span.Contains(n.Span))
             .ToList();
 
-        // Filter by syntax kind if specified
         if(!string.IsNullOrEmpty(syntaxKind)) {
 
             nodesInSpan = nodesInSpan.Where(n => n.Kind().ToString() == syntaxKind).ToList();
 
-            // Helpful error if no matches
             if(nodesInSpan.Count == 0) {
 
                 return new {
