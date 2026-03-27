@@ -62,17 +62,28 @@ internal abstract partial class RoslynMcpTool
 			return false;
 		}
 		catch(InvalidProjectPathException ex) {
-		
+
 			error = InvalidPathError(ex);
 			logger.LogError("TryGetCompilation", ex.Message);
-			
+
+			return false;
+		}
+		catch(ArgumentException ex) {
+
+			error = new {
+				error   = "missing_project_path",
+				message = ex.Message,
+				hint    = "projectPath is required. Pass the .csproj file path or a directory containing one."
+			};
+			logger.LogError("TryGetCompilation", ex.Message);
+
 			return false;
 		}
 		catch(Exception ex) {
-		
+
 			error = UnexpectedError(ex);
 			logger.LogError("TryGetCompilation", $"{ex.GetType().Name}: {ex.Message}");
-			
+
 			return false;
 		}
 	}
@@ -109,17 +120,28 @@ internal abstract partial class RoslynMcpTool
 			return false;
 		}
 		catch(InvalidProjectPathException ex) {
-		
+
 			error = InvalidPathError(ex);
 			logger.LogError("TryGetProject", ex.Message);
-			
+
+			return false;
+		}
+		catch(ArgumentException ex) {
+
+			error = new {
+				error   = "missing_project_path",
+				message = ex.Message,
+				hint    = "projectPath is required. Pass the .csproj file path or a directory containing one."
+			};
+			logger.LogError("TryGetProject", ex.Message);
+
 			return false;
 		}
 		catch(Exception ex) {
-		
+
 			error = UnexpectedError(ex);
 			logger.LogError("TryGetProject", $"{ex.GetType().Name}: {ex.Message}");
-			
+
 			return false;
 		}
 	}
@@ -161,5 +183,7 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected const string ProjectPathDescription =
 		"Path to project directory, .csproj file, or source file. REQUIRED - must be explicitly specified. " +
-		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj.";
+		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj. " +
+		"NOTE: a directory or file path that cannot locate a .csproj falls back to AdhocWorkspace (no MSBuild, " +
+		"reduced functionality). Prefer passing the .csproj path directly for full MSBuild support.";
 }
