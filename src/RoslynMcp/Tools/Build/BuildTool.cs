@@ -27,15 +27,22 @@ internal sealed class BuildTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_build_project", ReadOnly = true)]
 	[Description(
-		"Builds the project and returns structured diagnostics. By default, checks Roslyn diagnostics first " +
-		"and skips the build if errors are found (fast path). If Roslyn reports no errors, proceeds with " +
-		"'dotnet build' to validate MSBuild configuration. Set forceBuild=true to bypass Roslyn and always " +
-		"run dotnet build — use sparingly, only when you suspect MSBuild-specific issues (restore, SDK, targets) " +
-		"that Roslyn cannot detect. Requires a .csproj to be present.")]
+		"Validates the project in two tiers. " +
+		"Tier 1 (always): Roslyn in-process — instant C# type/symbol errors, zero process spawn. " +
+		"Tier 2 (only when Roslyn is clean): 'dotnet build' — validates what Roslyn cannot see: " +
+		"NuGet restore, MSBuild targets/props, SDK version, and source generators. " +
+		"Prefer roslyn_get_diagnostics for fast C#-only checks during editing. " +
+		"Use this tool when you need confidence the project fully builds (e.g. before committing). " +
+		"Requires a .csproj to be present.")]
 	public async Task<object> BuildProject(
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
-		[Description("If true, skip Roslyn check and always run dotnet build. Use sparingly — only for MSBuild-specific validation.")] bool forceBuild = false)
+		[Description(
+			"Default false: Roslyn errors short-circuit — dotnet build only runs when C# is clean, " +
+			"validating NuGet restore, MSBuild targets, SDK props, and source generators. " +
+			"Set true only when you suspect an MSBuild-specific failure Roslyn cannot see " +
+			"(broken .targets file, generator crash, restore failure) — skips the Roslyn fast-path entirely."
+		)] bool forceBuild = false)
 	{
 		using var scope = BeginTool("roslyn_build_project");
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);

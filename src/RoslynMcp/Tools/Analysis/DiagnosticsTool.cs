@@ -13,7 +13,9 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_get_diagnostics", ReadOnly = true)]
 	[Description(
 		"Returns compiler diagnostics (errors and warnings) for the project or a single file. " +
-		"Faster than running dotnet build — uses the in-process Roslyn compilation.")]
+		"Uses the in-process Roslyn compilation — instant, no process spawn. " +
+		"Covers C# type/symbol errors only. Does NOT validate NuGet restore, MSBuild targets, " +
+		"SDK props, or source generators — use roslyn_build_project for those.")]
 	public object GetDiagnostics(
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null)
