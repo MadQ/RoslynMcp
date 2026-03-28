@@ -38,7 +38,9 @@ internal sealed partial class WorkspaceManager : IDisposable
 	readonly int    maxCachedWorkspaces;
 
 	// Deferred MSBuild registration — only attempted on first MSBuildWorkspace use.
-	static bool           msbuildRegistered;
+	// volatile: read outside lock in double-checked pattern; .NET memory model (ECMA-335)
+	// doesn't guarantee visibility on ARM without it. See CONTRIBUTING.md "Right Code Principle".
+	static volatile bool  msbuildRegistered;
 	static readonly object msbuildLock = new();
 
 	public WorkspaceManager()
@@ -61,9 +63,9 @@ internal sealed partial class WorkspaceManager : IDisposable
 	{
 		var normalizedPath = Path.GetFullPath(resolvedPath);
 
+		// Fast path: cache hit under short lock — doesn't block on workspace loading.
 		lock(cacheLock) {
 
-			// Check secondary index (handles .csproj → solution mapping).
 			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var mappedEntry)) {
 
@@ -76,41 +78,59 @@ internal sealed partial class WorkspaceManager : IDisposable
 				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
 				return entry.Instance;
 			}
+		}
 
-			WorkspaceInstance instance;
-			string cacheKey;
+		// Slow path: load outside lock so other tool calls can still hit the cache.
+		WorkspaceInstance instance;
+		string cacheKey;
 
-			if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
+		if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
 
-				var solutionPath = FindSolutionFileUpwards(Path.GetDirectoryName(normalizedPath)!);
+			var solutionPath = FindSolutionFileUpwards(Path.GetDirectoryName(normalizedPath)!);
 
-				if(solutionPath is not null) {
+			if(solutionPath is not null) {
 
-					instance = WorkspaceInstance.ForSolution(solutionPath);
-					cacheKey = Path.GetFullPath(solutionPath);
-				}
-				else {
-
-					instance = WorkspaceInstance.ForProject(normalizedPath);
-					cacheKey = normalizedPath;
-				}
-
-				// Map all project paths to this cache key for future lookups.
-				foreach(var csproj in instance.ProjectPaths)
-					projectToCacheKey[csproj] = cacheKey;
+				instance = WorkspaceInstance.ForSolution(solutionPath);
+				cacheKey = Path.GetFullPath(solutionPath);
 			}
 			else {
 
-				instance = WorkspaceInstance.ForDirectory(normalizedPath);
+				instance = WorkspaceInstance.ForProject(normalizedPath);
 				cacheKey = normalizedPath;
 			}
+		}
+		else {
+
+			instance = WorkspaceInstance.ForDirectory(normalizedPath);
+			cacheKey = normalizedPath;
+		}
+
+		// Re-acquire lock to insert. Another thread may have loaded the same workspace.
+		lock(cacheLock) {
+
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var raceKey)
+				&& cache.TryGetValue(raceKey, out var raceEntry)) {
+
+				instance.Dispose();
+				cache[raceKey] = raceEntry with { LastAccess = DateTime.UtcNow };
+				return raceEntry.Instance;
+			}
+
+			if(cache.TryGetValue(cacheKey, out var existing)) {
+
+				instance.Dispose();
+				cache[cacheKey] = existing with { LastAccess = DateTime.UtcNow };
+				return existing.Instance;
+			}
+
+			foreach(var csproj in instance.ProjectPaths)
+				projectToCacheKey[csproj] = cacheKey;
 
 			if(cache.Count >= maxCachedWorkspaces) {
 
 				var lru = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
 				cache.Remove(lru.Key);
 
-				// Clean secondary index entries pointing to evicted workspace.
 				var staleKeys = projectToCacheKey
 					.Where(kvp => string.Equals(kvp.Value, lru.Key, StringComparison.OrdinalIgnoreCase))
 					.Select(kvp => kvp.Key)
