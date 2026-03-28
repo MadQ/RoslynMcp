@@ -16,9 +16,18 @@ internal sealed class ListTypesTool : RoslynMcpTool
 	public object ListTypes(
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional namespace filter, e.g. 'RoslynMcp.Tools'. Types in this namespace and its sub-namespaces are returned.")] string? namespaceFilter = null,
-		[Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null)
+		[Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null,
+		[Description("Number of types to skip (for paging). Default: 0.")] int skip = 0,
+		[Description("Maximum number of types to return. Default: 100, max: 500.")] int take = 100,
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_list_types", namespaceFilter);
+
+
+		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 500);
+		if(cachedPage is not null)
+			return cachedPage;
+
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
 
@@ -26,7 +35,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 
 		CollectTypes(compilation.GlobalNamespace, allTypes);
 
-		var filtered = allTypes
+		var allResults = allTypes
 			.Where(t => !t.IsImplicitlyDeclared)
 			// Without a namespace filter, only return types defined in source — not the
 			// thousands of types from referenced assemblies (the context-window bomb).
@@ -35,13 +44,22 @@ internal sealed class ListTypesTool : RoslynMcpTool
 			.Where(t => MatchesKind(t, kindFilter))
 			.Select(t => SymbolFormatter.FormatType(t))
 			.Order()
+			.ToArray()
 		;
 
-		string[] results = [.. filtered];
+		if(allResults.Length == 0)
+			return new[] { "No types found matching the filters." };
 
-		return results.Length > 0
-			? scope.Outcome($"{results.Length} type(s)", results)
-			: (object) new[] { "No types found matching the filters." };
+		var result = PaginateAndStore(allResults, ref skip, take);
+
+		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new {
+			total_types = result.Total,
+			skip, take,
+			types      = result.Items,
+			page_token = result.PageToken,
+			has_more   = result.HasMore,
+			_caution   = AdhocCaution(projectPath)
+		});
 	}
 	
 	private static void CollectTypes(INamespaceSymbol ns, List<INamedTypeSymbol> collector)

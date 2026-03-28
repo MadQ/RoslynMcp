@@ -56,10 +56,8 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_semantic_search", pattern);
 		context     ??= "all";
 		filePattern ??= "*.cs";
-		take          = Math.Clamp(take, 1, 200);
-		skip          = Math.Max(0, skip);
 
-		var cachedPage = TryServeCachedPage<SemanticMatchResult>(scope, page_token, ref skip, take);
+		var cachedPage = TryServeCachedPage<SemanticMatchResult>(scope, page_token, ref skip, ref take, 200);
 		if(cachedPage is not null)
 			return cachedPage;
 
