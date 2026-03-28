@@ -144,8 +144,6 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Agent Instructions
 
-AI agents need to be told to prefer RoslynMcp tools over their built-in file tools. Without this, they default to grep and file reads even when better options exist.
-
 ### For Claude Code (CLAUDE.md)
 
 Add to your project's `CLAUDE.md`:
@@ -178,10 +176,6 @@ When working with C# code, prefer roslyn_* MCP tools:
 - `roslyn_get_file_outline` for file structure (don't read the whole file)
 - `roslyn_get_diagnostics` with `severity: "errors"` for fast error checks
 ```
-
-### Why this matters
-
-Without explicit instructions, agents default to their built-in file tools. They will grep for symbol names instead of using `roslyn_find_references`. They will read 600-line files instead of calling `roslyn_get_member_body`. The instructions above ensure your agent uses the most accurate tool for the job.
 
 For complete instructions covering every tool, see [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) — includes both a full version and a compact version.
 
