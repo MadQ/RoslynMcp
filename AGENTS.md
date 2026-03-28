@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.6.0-alpha (pre-1.0) |
-| **Tool Count** | 25 MCP tools (24 stable + 1 experimental) |
+| **Tool Count** | 26 MCP tools (25 stable + 1 experimental) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -83,6 +83,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetSymbolDocumentationTool` | `roslyn_get_symbol_documentation` — XML doc comments for symbols |
 | `GetSymbolDefinitionTool` | `roslyn_get_symbol_definition` — find declaration location with signature |
 | `GetSymbolsInScopeTool` | `roslyn_get_symbols_in_scope` — enumerate accessible symbols at a location |
+| `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name; handles partial types |
 | `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
@@ -128,6 +129,14 @@ When discovering files/content:
 - `roslyn_search_files` — content search (find lines matching regex pattern)
 - `roslyn_semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs, code)
 - `roslyn_find_references` — semantic symbol search (Roslyn-based, finds usage across project)
+
+**Tool tips:**
+- `roslyn_get_member_body` — use this to read a single method/property instead of `roslyn_read_file` on the whole file
+- `roslyn_find_references` — without `containingType`, searches ALL symbols matching the name (union of results). Use `containingType` to narrow.
+- `roslyn_list_types` — without `namespaceFilter`, returns only project-defined types (not framework). Use `namespaceFilter` for sub-namespace scoping.
+- `roslyn_get_diagnostics` — use `severity: "errors"` for fast error-only checks during editing
+- `roslyn_build_project` — checks Roslyn diagnostics first (~17ms). Only runs `dotnet build` if Roslyn is clean.
+- Paginated tools return `page_token` + `has_more` — pass the token back to get subsequent pages without re-executing the query.
 
 ---
 
@@ -322,8 +331,8 @@ var references = await SymbolFinder.FindReferencesAsync(
 var newSolution = await Renamer.RenameSymbolAsync(
     solution,
     symbol,
-    newName,
-    solution.Options
+    new SymbolRenameOptions(),
+    newName
 );
 ```
 
@@ -337,9 +346,10 @@ All tools inherit from `RoslynMcpTool` base class and follow a consistent patter
 [McpServerToolType]
 internal sealed class MyTool : RoslynMcpTool
 {
-    public MyTool(WorkspaceResolver workspace) : base(workspace) { }
+    public MyTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
+        : base(workspace, logger, paginationCache) { }
 
-    [McpServerTool, Description("...")]
+    [McpServerTool(Name = "roslyn_my_tool", ReadOnly = true), Description("...")]
     public object MyToolMethod(
         [Description("...")] string requiredParam,
         [Description(ProjectPathDescription)] string projectPath)
