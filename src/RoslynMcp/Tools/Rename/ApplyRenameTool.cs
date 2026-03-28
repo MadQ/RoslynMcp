@@ -24,7 +24,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath
 	)
 	{
-		using var scope = BeginTool("roslyn_apply_rename", token);
+		using var scope = BeginTool("roslyn_apply_rename", $"{token} ({approval})");
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			approvals.Reject(token);
 			return scope.Failed("rejected", "Rename rejected. No files were changed.");

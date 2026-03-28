@@ -65,7 +65,10 @@ var host = builder.Build();
 var logger      = host.Services.GetRequiredService<FileLogger>();
 var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
-lifetime.ApplicationStarted.Register(() => logger.LogStart());
+lifetime.ApplicationStarted.Register(() => {
+	logger.LogStart();
+	logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+});
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
 
 
