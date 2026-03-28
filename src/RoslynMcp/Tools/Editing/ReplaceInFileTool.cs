@@ -64,8 +64,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		try {
 			originalContent = File.ReadAllText(fullPath);
 		}
-		catch(IOException ex) {
-		
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+
 			return new {
 				error   = "Failed to read file",
 				details = ex.Message
@@ -108,8 +108,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		try {
 			File.WriteAllText(fullPath, newContent);
 		}
-		catch(IOException ex) {
-		
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+
 			return new {
 				error   = "Failed to write file",
 				details = ex.Message

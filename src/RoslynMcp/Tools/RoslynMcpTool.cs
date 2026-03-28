@@ -336,20 +336,20 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected static string? ResolveFilePath(string filePath, string rootPath)
 	{
-		if(Path.IsPathRooted(filePath))
-			return File.Exists(filePath) ? filePath : null;
-
-		var normalized = NormalizePath(filePath);
-		var direct     = Path.GetFullPath(Path.Combine(rootPath, normalized));
-
-		if(File.Exists(direct))
-			return direct;
-
-		// Fallback: suffix match — handles agents passing project-relative paths
-		// when rootPath is the solution directory.
-		var suffix = Path.DirectorySeparatorChar + normalized;
-
 		try {
+
+			if(Path.IsPathRooted(filePath))
+				return File.Exists(filePath) ? filePath : null;
+
+			var normalized = NormalizePath(filePath);
+			var direct     = Path.GetFullPath(Path.Combine(rootPath, normalized));
+
+			if(File.Exists(direct))
+				return direct;
+
+			// Fallback: suffix match — handles agents passing project-relative paths
+			// when rootPath is the solution directory.
+			var suffix = Path.DirectorySeparatorChar + normalized;
 
 			foreach(var candidate in Directory.EnumerateFiles(rootPath, Path.GetFileName(normalized), SearchOption.AllDirectories)) {
 
@@ -358,7 +358,7 @@ internal abstract partial class RoslynMcpTool
 					return candidate;
 			}
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) { }
 
 		return null;
 	}

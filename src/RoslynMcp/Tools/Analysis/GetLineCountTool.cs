@@ -49,19 +49,21 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			}
 			else {
 
-				var fullPath = Path.IsPathRooted(filePath)
-					? filePath
-					: Path.GetFullPath(Path.Combine(rootPath, normalized))
-				;
+				var fullPath = ResolveFilePath(filePath, rootPath);
 
-				if(!File.Exists(fullPath)) {
+				if(fullPath is null) {
 					results.Add(new { file = filePath, line_count = (int?) null, error = "file not found on disk" });
 					continue;
 				}
 
-				// Count lines without loading entire content into a string.
-				var lineCount = await CountLinesAsync(fullPath);
-				results.Add(new { file = Path.GetRelativePath(rootPath, fullPath), line_count = (int?) lineCount, error = (string?) null });
+				try {
+
+					var lineCount = await CountLinesAsync(fullPath);
+					results.Add(new { file = Path.GetRelativePath(rootPath, fullPath), line_count = (int?) lineCount, error = (string?) null });
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					results.Add(new { file = filePath, line_count = (int?) null, error = ex.Message });
+				}
 			}
 		}
 
