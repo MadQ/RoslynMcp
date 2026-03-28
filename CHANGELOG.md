@@ -101,7 +101,7 @@ Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) 
 
 ---
 
-## [0.2.0-alpha] - 2026-01-XX
+## [0.2.0-alpha] - 2026-01-XX (releases removed — broken builds)
 
 ### Added
 - **23 MCP tools** covering all core agent workflows:
@@ -134,7 +134,7 @@ Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) 
 
 ---
 
-## [0.1.0-alpha] - 2026-01-XX (Initial Development)
+## [0.1.0-alpha] - 2026-01-XX (Initial Development — release removed)
 
 ### Added
 - Core MCP server infrastructure
@@ -176,9 +176,8 @@ Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) 
 
 ---
 
-[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.6.0-alpha...HEAD
+[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.7.0-alpha...HEAD
+[0.7.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.6.0-alpha...v0.7.0-alpha
 [0.6.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.5.0-alpha...v0.6.0-alpha
 [0.5.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.4.0-alpha...v0.5.0-alpha
-[0.4.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.2.0-alpha...v0.4.0-alpha
-[0.2.0-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/v0.2.0-alpha
-[0.1.0-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/v0.1.0-alpha
+[0.4.0-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/v0.4.0-alpha
