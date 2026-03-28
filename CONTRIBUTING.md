@@ -1,4 +1,4 @@
-﻿# Contributing to RoslynMcp
+# Contributing to RoslynMcp
 
 Thank you for your interest in contributing to RoslynMcp! This document provides guidelines and instructions for contributing.
 
