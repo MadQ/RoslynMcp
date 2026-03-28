@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -31,13 +31,13 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		;
 		
 		if(tree is null)
-			return scope.Failed("file not found", new { error = $"File '{filePath}' not found in the compilation." });
+			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var text     = await tree.GetTextAsync();
 		var position = GetPosition(text, line, column);
 		
 		if(position < 0)
-			return new { error = $"Line {line}, column {column} is out of range." };
+			return new ErrorResult($"Line {line}, column {column} is out of range.");
 		
 		var model   = compilation.GetSemanticModel(tree);
 		var symbols = model.LookupSymbols(position);

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -44,13 +44,13 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             return cachedPage;
 
         if(string.IsNullOrEmpty(filePath))
-            return new { error = "invalid_parameter", message = "filePath is required unless using listSyntaxKinds or listTriviaKinds" };
+            return new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds");
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
         if(take <= 0 || take > 500)
-            return new { error = "invalid_parameter", message = "take must be between 1 and 500" };
+            return new ErrorResult("take must be between 1 and 500");
 
         var normalizedPath = NormalizePath(filePath);
         var tree = compilation.SyntaxTrees.FirstOrDefault(t =>
@@ -58,7 +58,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         );
 
         if(tree is null)
-            return new { error = "file_not_found", message = $"File '{filePath}' not found in compilation" };
+            return new ErrorResult($"File '{filePath}' not found in the compilation.");
 
         var root = tree.GetRoot();
         var sourceText = tree.GetText();

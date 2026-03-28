@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -54,7 +54,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		}
 
 		if(symbols.Length == 0)
-			return scope.Failed("symbol not found", new { error = $"Symbol '{symbolName}' not found." });
+			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 
 		var allLocations = new List<string>();
 

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -88,10 +88,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		}
 		catch(ArgumentException ex) {
 		
-			return new {
-				error = "Invalid regex pattern",
-				details = ex.Message
-			};
+			return new ErrorResult($"Invalid regex pattern: {ex.Message}");
 		}
 		
 		var solution   = workspace.GetSolution(projectPath);

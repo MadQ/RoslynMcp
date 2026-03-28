@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -43,13 +43,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		var fullPath = ResolveFilePath(filePath, rootPath);
 
 		if(fullPath is null)
-			return scope.Failed("file not found", new { error = $"File not found: {filePath}" });
+			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-			return new { error = "File must be a C# source file (.cs)" };
+			return new ErrorResult("File must be a C# source file (.cs)");
 		
 		if(!TryParseSyntaxKind(nodeKind, out var kind))
-			return new { error = $"Unknown node kind: {nodeKind}. Examples: MethodDeclaration, FieldDeclaration, IdentifierName." };
+			return new ErrorResult($"Unknown node kind: {nodeKind}.", Hint: "Examples: MethodDeclaration, FieldDeclaration, IdentifierName.");
 		
 		SourceText sourceText;
 		
@@ -58,10 +58,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 		
-			return new {
-				error = "Failed to read file",
-				details = ex.Message
-			};
+			return new ErrorResult($"Failed to read file: {ex.Message}");
 		}
 		
 		var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
@@ -125,7 +122,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			};
 			
 			if(replacementNode is null)
-				return new { error = "Failed to parse replacement text — parser returned null" };
+				return new ErrorResult("Failed to parse replacement text — parser returned null");
 			
 			if(replacementNode.ContainsDiagnostics) {
 			
@@ -206,10 +203,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 		
-			return new {
-				error = "Failed to write file",
-				details = ex.Message
-			};
+			return new ErrorResult($"Failed to write file: {ex.Message}");
 		}
 		
 		// Invalidate workspace cache

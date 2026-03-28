@@ -27,19 +27,19 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		var tree = FindSyntaxTree(compilation, filePath);
 
 		if(tree is null)
-			return scope.Failed("file not found", new { error = $"File '{filePath}' not found in the compilation." });
+			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 
 		var text     = await tree.GetTextAsync();
 		var position = GetPosition(text, line, column);
 
 		if(position < 0)
-			return new { error = $"Line {line}, column {column} is out of range." };
+			return new ErrorResult($"Line {line}, column {column} is out of range.");
 
 		var model = compilation.GetSemanticModel(tree);
 		var node  = (await tree.GetRootAsync()).FindToken(position).Parent;
 
 		if(node is null)
-			return new { error = "No node at that position." };
+			return new ErrorResult("No node at that position.");
 
 		var info   = model.GetSymbolInfo(node);
 		var symbol = info.Symbol ?? info.CandidateSymbols.FirstOrDefault();
@@ -56,7 +56,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 					type_or_return  = (string?) null
 				};
 
-			return new { error = "No symbol resolved at that position." };
+			return new ErrorResult("No symbol resolved at that position.");
 		}
 
 		return new {
