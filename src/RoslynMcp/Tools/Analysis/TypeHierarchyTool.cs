@@ -41,7 +41,12 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		];
 		
 		var solution    = workspace.GetSolution(projectPath);
-		var derivedRefs = await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution);
+
+		// FindDerivedClassesAsync only finds subclasses — for interfaces, use FindImplementationsAsync.
+		var derivedRefs = type.TypeKind == TypeKind.Interface
+			? (await RoslynSymbolFinder.FindImplementationsAsync(type, solution)).OfType<INamedTypeSymbol>()
+			: await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution)
+		;
 		string[] allDerived = [..
 			derivedRefs
 				.Select(d => d.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
