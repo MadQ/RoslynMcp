@@ -144,8 +144,6 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Agent Instructions
 
-AI agents need to be told to prefer RoslynMcp tools over their built-in file tools. Without this, they default to grep and file reads even when better options exist.
-
 ### For Claude Code (CLAUDE.md)
 
 Add to your project's `CLAUDE.md`:
@@ -179,10 +177,6 @@ When working with C# code, prefer roslyn_* MCP tools:
 - `roslyn_get_diagnostics` with `severity: "errors"` for fast error checks
 ```
 
-### Why this matters
-
-Without explicit instructions, agents default to their built-in file tools. They will grep for symbol names instead of using `roslyn_find_references`. They will read 600-line files instead of calling `roslyn_get_member_body`. The instructions above ensure your agent uses the most accurate tool for the job.
-
 For complete instructions covering every tool, see [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) — includes both a full version and a compact version.
 
 ---
@@ -205,7 +199,7 @@ See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for details.
 
 RoslynMcp works. We use it daily for C# development with AI agents. But it is alpha software and there are areas where outside perspectives would make a real difference.
 
-**First-call latency.** Loading an MSBuild workspace takes ~10 seconds on first tool call as the solution is parsed and compiled. Subsequent calls are fast (the workspace is cached and incrementally updated). If you have ideas for improving cold-start time -- lazy compilation, workspace preloading, partial loading strategies -- we would like to hear them.
+**First-call latency.** Loading an MSBuild workspace takes ~10 seconds on first tool call as the solution is parsed and compiled. Subsequent calls are fast (the workspace is cached and incrementally updated). Adding a new `.cs` file also triggers a full workspace reload (~8-10 seconds on next tool call) because Roslyn's `MSBuildWorkspace` doesn't support in-place document addition for SDK-style projects ([dotnet/roslyn#36781](https://github.com/dotnet/roslyn/issues/36781)). If you have ideas for improving cold-start or reload time -- lazy compilation, workspace preloading, partial loading strategies -- we would like to hear them.
 
 **Platform testing.** RoslynMcp is developed and tested on Windows. It should work on Linux and macOS (Roslyn and MSBuild are cross-platform), but it has not been validated. If you run it on a non-Windows platform, your experience report is valuable whether it works perfectly or fails completely.
 
