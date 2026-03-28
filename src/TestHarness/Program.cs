@@ -399,7 +399,7 @@ tests.Add(await RunTestAsync(
 	data => data?["succeeded"] is not null && data?["source"] is not null
 ));
 
-Console.WriteLine("\nRefactoring Tools (1 test)");
+Console.WriteLine("\nRefactoring Tools (2 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
@@ -407,6 +407,22 @@ tests.Add(await RunTestAsync(
 	"roslyn_preview_rename",
 	new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceInstance", projectPath = targetPath },
 	data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
+));
+
+// Test change_signature against an existing method — temp files aren't visible
+// to MSBuild workspace (new files require server restart).
+tests.Add(await RunTestAsync(
+	"roslyn_change_signature: preview adding parameter",
+	"roslyn_change_signature",
+	new {
+		methodName     = "NormalizePath",
+		containingType = "RoslynMcpTool",
+		addParameters  = "[{\"name\":\"toLower\",\"type\":\"bool\",\"defaultValue\":\"false\"}]",
+		projectPath    = targetPath
+	},
+	data => data?["token"] is not null
+		 && data?["diff"]?.GetValue<string>().Contains("Obsolete") == true
+		 && data?["parameters_added"]?.AsArray().Count == 1
 ));
 
 Console.WriteLine("\nFile Editing Tools (5 tests)");
