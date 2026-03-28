@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
 using ModelContextProtocol.Server;
@@ -30,7 +31,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return new PreviewRenameResult(
 				null, null,
-				error.ToString()!,
+				JsonSerializer.Serialize(error),
 				false
 			);
 		
