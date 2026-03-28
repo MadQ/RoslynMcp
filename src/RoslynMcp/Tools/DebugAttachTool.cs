@@ -20,7 +20,7 @@ internal sealed class DebugAttachTool
 	public object DebugAttach()
 	{
 		var pid = Environment.ProcessId;
-		logger.LogTool("roslyn_debug_attach", 0, true, $"launching debugger for PID {pid}");
+		logger.LogTool("roslyn_debug_attach", 0, true, detail: $"launching debugger for PID {pid}");
 
 		if(Debugger.IsAttached)
 			return new { already_attached = true, pid, message = "A debugger is already attached." };

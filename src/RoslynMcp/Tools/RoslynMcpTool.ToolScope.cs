@@ -18,7 +18,8 @@ internal abstract partial class RoslynMcpTool
 
 		bool    failed;
 		string? detail;
-		bool?   isMSBuild;
+		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
+		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
 
 		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose)
 		{
@@ -28,8 +29,11 @@ internal abstract partial class RoslynMcpTool
 			this.onDispose = onDispose;
 		}
 
-		/// <summary>Records the workspace mode so the log line can show ◆/◇.</summary>
+		/// <summary>Records the workspace mode so the log line can show MSB/ADH.</summary>
 		internal void SetWorkspaceMode(bool isMSBuild) => this.isMSBuild = isMSBuild;
+
+		/// <summary>Records whether a pagination cache hit or miss occurred.</summary>
+		internal void SetCacheTag(bool hit) => cacheTag = hit ? "HIT" : "MISS";
 
 		/// <summary>Records a success detail appended to the log line on dispose.</summary>
 		public void Outcome(string detail) => this.detail = detail;
@@ -48,8 +52,7 @@ internal abstract partial class RoslynMcpTool
 
 		public void Dispose()
 		{
-			var label = subject is null ? name : $"{name}({subject})";
-			log.LogTool(label, sw.ElapsedMilliseconds, !failed, detail, isMSBuild);
+			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag);
 			onDispose();
 		}
 	}
