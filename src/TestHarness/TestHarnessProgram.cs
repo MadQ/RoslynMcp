@@ -1,12 +1,16 @@
-﻿/// <summary>
-///     Comprehensive test harness for RoslynMcp MVP. Tests all 24 tools against RoslynMcp itself (dogfooding).
-///     Usage: dotnet run --project TestHarness/TestHarness.csproj
-/// </summary>
-
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+
+/// <summary>
+///     Comprehensive test harness for RoslynMcp. Tests all tools against RoslynMcp itself (dogfooding).
+///     Usage: dotnet run --project TestHarness/TestHarness.csproj
+/// </summary>
+class Program
+{
+	static async Task<int> Main(string[] args)
+	{
 
 var repoRoot   = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 var serverProj = Path.Combine(repoRoot, "src", "RoslynMcp", "RoslynMcp.csproj");
@@ -559,3 +563,6 @@ if(!proc.HasExited)
 	proc.Kill();
 
 return failed == 0 ? 0 : 1;
+
+	}
+}

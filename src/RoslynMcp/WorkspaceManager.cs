@@ -33,12 +33,15 @@ internal sealed partial class WorkspaceManager : IDisposable
 	// Enables O(1) lookup when a tool passes a .csproj that's part of an already-loaded solution.
 	readonly Dictionary<string, string> projectToCacheKey = new(StringComparer.OrdinalIgnoreCase);
 
-	readonly object cacheLock = new();
-	readonly int    maxCachedWorkspaces;
+	readonly object     cacheLock = new();
+	readonly int        maxCachedWorkspaces;
+	readonly FileLogger logger;
 
 
-	public WorkspaceManager()
+	public WorkspaceManager(FileLogger logger)
 	{
+		this.logger = logger;
+
 		maxCachedWorkspaces = int.TryParse(
 			Environment.GetEnvironmentVariable("ROSLYNMCP_MAX_CACHED_WORKSPACES"),
 			out var val
@@ -84,18 +87,18 @@ internal sealed partial class WorkspaceManager : IDisposable
 
 			if(solutionPath is not null) {
 
-				instance = WorkspaceInstance.ForSolution(solutionPath);
+				instance = WorkspaceInstance.ForSolution(solutionPath, logger);
 				cacheKey = Path.GetFullPath(solutionPath);
 			}
 			else {
 
-				instance = WorkspaceInstance.ForProject(normalizedPath);
+				instance = WorkspaceInstance.ForProject(normalizedPath, logger);
 				cacheKey = normalizedPath;
 			}
 		}
 		else {
 
-			instance = WorkspaceInstance.ForDirectory(normalizedPath);
+			instance = WorkspaceInstance.ForDirectory(normalizedPath, logger);
 			cacheKey = normalizedPath;
 		}
 

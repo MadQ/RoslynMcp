@@ -42,7 +42,7 @@ internal static class MSBuildBootstrap
 			// 1. Try MSBuildLocator directly — works when .NET SDK is on PATH.
 			if(TryRegister()) {
 
-				discoveryMethod = "PATH (.NET SDK on PATH)";
+				discoveryMethod = "resolved via PATH (.NET SDK found on PATH)";
 				return null;
 			}
 
@@ -71,7 +71,7 @@ internal static class MSBuildBootstrap
 
 					if(TryRegister()) {
 
-						discoveryMethod = $"vswhere ({msbuildDir})";
+						discoveryMethod = $"resolved via vswhere ({msbuildDir})";
 						return null;
 					}
 				}
@@ -105,7 +105,7 @@ internal static class MSBuildBootstrap
 		var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
 
 		if(dotnetRoot is not null && Directory.Exists(dotnetRoot))
-			return (dotnetRoot, "DOTNET_ROOT env var");
+			return (dotnetRoot, "resolved via DOTNET_ROOT env var");
 
 		// DOTNET_ROOT(x86) — official env var for x86 SDK on Windows (yes, parens in the name).
 		if(OperatingSystem.IsWindows()) {
@@ -113,14 +113,14 @@ internal static class MSBuildBootstrap
 			var dotnetRootX86 = Environment.GetEnvironmentVariable("DOTNET_ROOT(x86)");
 
 			if(dotnetRootX86 is not null && Directory.Exists(dotnetRootX86))
-				return (dotnetRootX86, "DOTNET_ROOT(x86) env var");
+				return (dotnetRootX86, "resolved via DOTNET_ROOT(x86) env var");
 		}
 
 		// DOTNET_HOST_PATH — set by some .NET hosting scenarios.
 		var hostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
 
 		if(hostPath is not null && File.Exists(hostPath))
-			return (Path.GetDirectoryName(hostPath), "DOTNET_HOST_PATH env var");
+			return (Path.GetDirectoryName(hostPath), "resolved via DOTNET_HOST_PATH env var");
 
 		// Windows: check registry for SDK install location.
 		if(OperatingSystem.IsWindows()) {
@@ -128,7 +128,7 @@ internal static class MSBuildBootstrap
 			var regPath = TryDotnetFromRegistry();
 
 			if(regPath is not null)
-				return (regPath, "Windows registry");
+				return (regPath, "resolved via Windows registry");
 		}
 
 		// Well-known install paths per platform.
@@ -154,7 +154,7 @@ internal static class MSBuildBootstrap
 				continue;
 
 			if(File.Exists(Path.Combine(dir, exeName)))
-				return (dir, $"well-known path ({dir})");
+				return (dir, $"resolved via well-known path ({dir})");
 		}
 
 		return (null, null);

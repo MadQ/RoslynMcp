@@ -67,7 +67,6 @@ var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 lifetime.ApplicationStarted.Register(() => {
 	logger.LogStart();
-	logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
 });
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
 
@@ -78,7 +77,7 @@ if(projectsToPreload.Length > 0) {
 	var resolver = host.Services.GetRequiredService<WorkspaceResolver>();
 	
 	Console.Error.WriteLine($"Pre-loading {projectsToPreload.Length} project(s)...");
-	
+
 	foreach(var path in projectsToPreload) {
 
 		try {

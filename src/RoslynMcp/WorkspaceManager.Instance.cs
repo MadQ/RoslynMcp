@@ -16,10 +16,10 @@ internal sealed partial class WorkspaceManager
 	{
 		enum LoadMode { Solution, Project, Adhoc }
 
-		private readonly Workspace            workspace;
-		private readonly string               rootPath;
-		private readonly bool                 isMSBuild;
-		private readonly ProjectId            defaultProjectId;
+		private Workspace            workspace;
+		private readonly string      rootPath;
+		private readonly bool        isMSBuild;
+		private ProjectId            defaultProjectId;
 		private readonly ReaderWriterLockSlim rwLock = new();
 		private          FileSystemWatcher?   watcher;
 
@@ -28,6 +28,14 @@ internal sealed partial class WorkspaceManager
 
 		// Per-project compilation cache — cleared on any file change.
 		private readonly Dictionary<ProjectId, Compilation> compilationCache = new();
+
+		// Set when a new file is detected that requires a full workspace reload.
+		private volatile bool reloadNeeded;
+
+		// The path used to load this workspace (solution or csproj), for reloading.
+		private readonly string     loadPath;
+		private readonly LoadMode   loadMode;
+		private readonly FileLogger logger;
 
 		// Debounce: accumulate FSW events for 300ms before processing.
 		private readonly object           debounceLock   = new();
@@ -38,18 +46,23 @@ internal sealed partial class WorkspaceManager
 
 		// ── Factory methods ──────────────────────────────────────────────────
 
-		public static WorkspaceInstance ForSolution(string solutionPath) => new(solutionPath, LoadMode.Solution);
-		public static WorkspaceInstance ForProject(string csprojPath)    => new(csprojPath, LoadMode.Project);
-		public static WorkspaceInstance ForDirectory(string dir)         => new(dir, LoadMode.Adhoc);
+		public static WorkspaceInstance ForSolution(string solutionPath, FileLogger logger)  => new(solutionPath, LoadMode.Solution, logger);
+		public static WorkspaceInstance ForProject(string csprojPath, FileLogger logger)     => new(csprojPath, LoadMode.Project, logger);
+		public static WorkspaceInstance ForDirectory(string dir, FileLogger logger)           => new(dir, LoadMode.Adhoc, logger);
 
-		private WorkspaceInstance(string path, LoadMode mode)
+		private WorkspaceInstance(string path, LoadMode mode, FileLogger logger)
 		{
+			loadPath    = path;
+			loadMode    = mode;
+			this.logger = logger;
+
 			switch(mode) {
 
 				case LoadMode.Solution:
 
 					rootPath = Path.GetDirectoryName(path)!;
 					MSBuildBootstrap.EnsureReady();
+					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
 					workspace = LoadSolution(path);
 					isMSBuild = true;
 
@@ -65,6 +78,7 @@ internal sealed partial class WorkspaceManager
 
 					rootPath = Path.GetDirectoryName(path)!;
 					MSBuildBootstrap.EnsureReady();
+					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
 
 					var (msbuildWs, pid) = LoadMSBuildWorkspace(path);
 					workspace        = msbuildWs;
@@ -113,10 +127,15 @@ internal sealed partial class WorkspaceManager
 
 		// ── Queries ──────────────────────────────────────────────────────────
 
-		public Solution GetSolution() => workspace.CurrentSolution;
+		public Solution GetSolution()
+		{
+			ReloadIfNeeded();
+			return workspace.CurrentSolution;
+		}
 
 		public Compilation GetCompilation(string? csprojPath = null)
 		{
+			ReloadIfNeeded();
 			var pid = ResolveProjectId(csprojPath);
 
 			rwLock.EnterReadLock();
@@ -135,6 +154,7 @@ internal sealed partial class WorkspaceManager
 
 		public Project GetProject(string? csprojPath = null)
 		{
+			ReloadIfNeeded();
 			var pid = ResolveProjectId(csprojPath);
 			return workspace.CurrentSolution.GetProject(pid)!;
 		}
@@ -214,8 +234,10 @@ internal sealed partial class WorkspaceManager
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 				}
-				else
+				else {
+					reloadNeeded = true;
 					InvalidateCompilation();
+				}
 			}
 			else if(workspace is AdhocWorkspace adhoc) {
 
@@ -507,9 +529,11 @@ internal sealed partial class WorkspaceManager
 
 					// MSBuildWorkspace doesn't support AddDocument via TryApplyChanges —
 					// it modifies the .csproj, conflicting with SDK-style implicit includes.
-					// New files require a server restart to be visible.
-					if(docIds.Length == 0)
+					// Flag for full workspace reload on next tool call.
+					if(docIds.Length == 0) {
+						reloadNeeded = true;
 						continue;
+					}
 
 					var text = SourceText.From(File.ReadAllText(path));
 
@@ -545,7 +569,61 @@ internal sealed partial class WorkspaceManager
 		}
 
 
-		// ── Compilation cache ────────────────────────────────────────────────
+			// ── Workspace reload ────────────────────────────────────────────────
+
+		void ReloadIfNeeded()
+		{
+			if(!reloadNeeded)
+				return;
+
+			logger.LogInfo("Reload", $"Reloading workspace ({loadMode}: {loadPath})");
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+
+			rwLock.EnterWriteLock();
+
+			try {
+
+				if(!reloadNeeded)
+					return;
+
+				var oldWorkspace = workspace;
+
+				switch(loadMode) {
+
+					case LoadMode.Solution:
+						workspace = LoadSolution(loadPath);
+						projectMap.Clear();
+						BuildProjectMap();
+						defaultProjectId = workspace.CurrentSolution.Projects
+							.FirstOrDefault()?.Id
+							?? defaultProjectId;
+						break;
+
+					case LoadMode.Project:
+						var (ws, pid) = LoadMSBuildWorkspace(loadPath);
+						workspace        = ws;
+						defaultProjectId = pid;
+						projectMap.Clear();
+						BuildProjectMap();
+						break;
+
+					default:
+						reloadNeeded = false;
+						return;
+				}
+
+				compilationCache.Clear();
+				reloadNeeded = false;
+				oldWorkspace.Dispose();
+
+				logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({workspace.CurrentSolution.Projects.Count()} projects)");
+			}
+			finally {
+				rwLock.ExitWriteLock();
+			}
+		}
+
+	// ── Compilation cache ────────────────────────────────────────────────
 
 		Compilation RebuildCompilation(ProjectId pid)
 		{
