@@ -330,6 +330,40 @@ internal abstract partial class RoslynMcpTool
 	}
 
 	/// <summary>
+	///     Resolves a relative file path to a full path. Tries <paramref name="rootPath"/> first;
+	///     if the file isn't found there, walks subdirectories looking for a suffix match.
+	///     Returns null if the file can't be found.
+	/// </summary>
+	protected static string? ResolveFilePath(string filePath, string rootPath)
+	{
+		if(Path.IsPathRooted(filePath))
+			return File.Exists(filePath) ? filePath : null;
+
+		var normalized = NormalizePath(filePath);
+		var direct     = Path.GetFullPath(Path.Combine(rootPath, normalized));
+
+		if(File.Exists(direct))
+			return direct;
+
+		// Fallback: suffix match — handles agents passing project-relative paths
+		// when rootPath is the solution directory.
+		var suffix = Path.DirectorySeparatorChar + normalized;
+
+		try {
+
+			foreach(var candidate in Directory.EnumerateFiles(rootPath, Path.GetFileName(normalized), SearchOption.AllDirectories)) {
+
+				if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
+					|| string.Equals(Path.GetFileName(candidate), Path.GetFileName(normalized), StringComparison.OrdinalIgnoreCase))
+					return candidate;
+			}
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+
+		return null;
+	}
+
+	/// <summary>
 	///     Normalizes a file path for cross-platform compatibility by converting forward slashes
 	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
 	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.

@@ -50,12 +50,9 @@ internal sealed class ReadFileTool : RoslynMcpTool
         else {
 
             // Non-.cs: fall back to disk.
-            var fullPath = Path.IsPathRooted(filePath)
-                ? filePath
-                : Path.GetFullPath(Path.Combine(rootPath, normalized))
-            ;
+            var fullPath = ResolveFilePath(filePath, rootPath);
 
-            if(!File.Exists(fullPath))
+            if(fullPath is null)
                 return scope.Failed("file not found", new { error = $"File not found: {filePath}" });
 
             sourceText    = SourceText.From(await File.ReadAllTextAsync(fullPath));

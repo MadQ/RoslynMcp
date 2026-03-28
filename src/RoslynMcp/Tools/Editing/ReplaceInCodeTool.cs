@@ -40,11 +40,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_replace_in_code", filePath);
 		var rootPath = workspace.GetRootPath(projectPath);
 		
-		var fullPath = Path.IsPathRooted(filePath)
-			? filePath
-			: Path.GetFullPath(Path.Combine(rootPath, filePath));
-		
-		if(!File.Exists(fullPath))
+		var fullPath = ResolveFilePath(filePath, rootPath);
+
+		if(fullPath is null)
 			return scope.Failed("file not found", new { error = $"File not found: {filePath}" });
 		
 		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
