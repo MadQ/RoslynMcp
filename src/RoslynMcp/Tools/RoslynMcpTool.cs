@@ -452,6 +452,43 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
+
+	/// <summary>
+	///     Resolves a symbol by name from a compilation. When <paramref name="containingType"/> is
+	///     provided, searches that type's members. Otherwise tries type-first lookup (metadata name →
+	///     SimpleNameFinder) before falling back to AnySymbolFinder for members.
+	/// </summary>
+	protected static ISymbol? FindSymbol(Compilation compilation, string name, string? containingType)
+	{
+		if(containingType is not null) {
+
+			var type = compilation.GetTypeByMetadataName(containingType)
+				?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(containingType));
+
+			return type?.GetMembers(name).FirstOrDefault();
+		}
+
+		var typeSymbol = compilation.GetTypeByMetadataName(name)
+			?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(name));
+
+		if(typeSymbol is not null)
+			return typeSymbol;
+
+		return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
+	}
+
+	/// <summary>
+	///     Formats a symbol's display name: fully qualified for types, ContainingType.Name for members.
+	/// </summary>
+	protected static string FormatSymbolName(ISymbol symbol)
+	{
+		if(symbol is INamedTypeSymbol)
+			return symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+
+		var ct = symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+
+		return ct is not null ? $"{ct}.{symbol.Name}" : symbol.Name;
+	}
 }
 
 internal sealed record PaginatedResult<T>(

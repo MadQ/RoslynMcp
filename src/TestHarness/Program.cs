@@ -205,6 +205,26 @@ tests.Add(await RunTestAsync(
 	data => data?["usings"]?.AsArray().Count > 0
 ));
 
+Console.WriteLine("\nMember Body Tools (2 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+	"roslyn_get_member_body: single method",
+	"roslyn_get_member_body",
+	new { symbolName = "GetCompilation", containingType = "WorkspaceManager", projectPath = targetPath },
+	data => data?["body"]?.GetValue<string>().Contains("GetCompilation") == true
+		 && data?["start_line"]?.GetValue<int>() > 0
+		 && data?["symbol_kind"]?.GetValue<string>() == "method"
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_get_member_body: partial class (multiple parts)",
+	"roslyn_get_member_body",
+	new { symbolName = "WorkspaceManager", projectPath = targetPath },
+	data => data?["parts"]?.AsArray().Count > 1
+		 && data?["note"]?.GetValue<string>().Contains("Partial") == true
+));
+
 Console.WriteLine("\nType Understanding Tools (4 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 

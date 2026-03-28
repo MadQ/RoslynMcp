@@ -75,15 +75,4 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		});
 	}
 	
-	private static ISymbol? FindSymbol(Compilation compilation, string name, string? inType)
-	{
-		if(inType is not null) {
-			var type = compilation.GetTypeByMetadataName(inType)
-				?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(inType));
-			
-			return type?.GetMembers(name).FirstOrDefault();
-		}
-		
-		return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
-	}
 }
