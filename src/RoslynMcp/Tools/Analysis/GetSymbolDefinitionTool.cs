@@ -42,7 +42,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		var span      = location.GetLineSpan();
 		var filePath  = span.Path;
 		var relative  = string.IsNullOrEmpty(filePath) ? "?" : Path.GetRelativePath(rootPath, filePath);
-		var signature = FormatSignature(symbol);
+		var signature = SymbolFormatter.FormatSignature(symbol);
 		var docXml    = symbol.GetDocumentationCommentXml();
 		var docSummary = ExtractDocSummary(docXml);
 		
@@ -60,73 +60,11 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 	
 	
 	
-	private static string FormatSignature(ISymbol symbol)
-	{
-		return symbol switch {
-			IMethodSymbol m   => FormatMethod(m),
-			IPropertySymbol p => FormatProperty(p),
-			IFieldSymbol f    => FormatField(f),
-			IEventSymbol e    => FormatEvent(e),
-			INamedTypeSymbol t => FormatType(t),
-			_                 => symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
-		};
-	}
 	
-	private static string FormatMethod(IMethodSymbol method)
-	{
-		var returnType = method.ReturnsVoid
-			? "void"
-			: method.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		
-		var parameters = string.Join(", ", method.Parameters.Select(p =>
-			$"{p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {p.Name}"
-		));
-		
-		var modifiers = FormatModifiers(method);
-		
-		return $"{modifiers}{returnType} {method.Name}({parameters})";
-	}
 	
-	private static string FormatProperty(IPropertySymbol property)
-	{
-		var type      = property.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		var modifiers = FormatModifiers(property);
-		var accessors = new List<string>();
-		
-		if(property.GetMethod is not null)
-			accessors.Add("get");
-		if(property.SetMethod is not null)
-			accessors.Add("set");
-		
-		var accessorStr = accessors.Count > 0 ? $" {{ {string.Join("; ", accessors)}; }}" : string.Empty;
-		
-		return $"{modifiers}{type} {property.Name}{accessorStr}";
-	}
 	
-	private static string FormatField(IFieldSymbol field)
-	{
-		var type      = field.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		var modifiers = FormatModifiers(field);
-		
-		return $"{modifiers}{type} {field.Name}";
-	}
 	
-	private static string FormatEvent(IEventSymbol evt)
-	{
-		var type      = evt.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		var modifiers = FormatModifiers(evt);
-		
-		return $"{modifiers}event {type} {evt.Name}";
-	}
 	
-	private static string FormatType(INamedTypeSymbol type)
-	{
-		var kind      = type.TypeKind.ToString().ToLowerInvariant();
-		var modifiers = FormatModifiers(type);
-		var name      = type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		
-		return $"{modifiers}{kind} {name}";
-	}
 	
 	
 	private static string? ExtractDocSummary(string? xml)

@@ -39,12 +39,13 @@ See [INSTALLATION.md](INSTALLATION.md) for client-specific setup.
 
 ## Key Features
 
-- **25 Roslyn-powered tools** — semantic code understanding, navigation, refactoring, validation, and trivia analysis (24 stable + 1 experimental)
-- **Multi-project support** — all tools require an explicit `projectPath` parameter; switch projects mid-session without restarting
-- **Live compilation** — in-memory Roslyn workspace with incremental updates via FileSystemWatcher
+- **26 Roslyn-powered tools** — semantic code understanding, navigation, refactoring, validation, and trivia analysis (25 stable + 1 experimental)
+- **Solution-level loading** — automatically discovers `.sln`/`.slnx` files; cross-project references, rename, and find-implementations work across the entire solution
+- **Live compilation** — in-memory Roslyn workspace with FileSystemWatcher for real-time change detection (MSBuild and AdhocWorkspace)
+- **Token-based pagination** — paginated tools return a `page_token`; pass it back to get the next page without re-executing the query
+- **`roslyn_get_member_body`** — returns just the source of a single method/property/field. 20 lines instead of reading a 600-line file.
 - **No external processes** — all analysis happens in-process using Roslyn APIs (except `roslyn_build_project` which calls `dotnet build`)
-- **Structured error handling** — tools return actionable error objects with hints when paths are invalid or symbols aren't found
-- **Smart build** — `roslyn_build_project` checks Roslyn diagnostics first and skips MSBuild if errors exist (fast path)
+- **Smart build** — `roslyn_build_project` checks Roslyn diagnostics first and skips MSBuild if errors exist (17ms vs seconds)
 
 ---
 
@@ -269,13 +270,19 @@ Files are written directly to disk. `WorkspaceManager`'s `FileSystemWatcher` det
 
 ---
 
-## Future: refactoring tools
+## Roadmap
 
-`get_refactorings` / `apply_refactoring` are the natural next step. The `CodeRefactoringContext` constructor is public, the `ApprovalStore` + `SolutionDiff` infrastructure is already in place, and the two-phase token model extends directly. The blocker: all concrete `CodeRefactoringProvider` implementations in `Microsoft.CodeAnalysis.CSharp.Features` are internal — the XML docs list them as public but the compiler disagrees. Options when revisiting:
+Active development — see [ROADMAP.md](ROADMAP.md) for the full plan.
 
-- **OmniSharp HTTP API** — exposes refactorings over JSON; heavier but correct
-- **Roslyn source build** — compile Features with `InternalsVisibleTo`; fragile across updates
-- **Implement target refactorings directly** — reasonable for a short list (extract method, introduce variable, inline); correct but significant work
+**Coming soon (v0.7.0):**
+- Harden `roslyn_list_types` and `roslyn_find_references` defaults (context-window safety)
+- Add filtering parameters to existing tools (`includeInherited`, `directOnly`, `severity`)
+- `roslyn_change_signature` tool for semantic signature refactoring
+
+**Planned (v0.8.0–v0.9.0):**
+- **Call graph tools** — `roslyn_find_callers`, `roslyn_get_call_graph` (IOperation-based, impossible with text search)
+- **Dead code detection** — `roslyn_find_unused` for private/internal symbols with zero references
+- **Style-aware editing** — `roslyn_get_style_profile` infers formatting rules from trivia; `preserveStyle` flag on `replace_in_code` respects the author's style during edits
 
 ---
 

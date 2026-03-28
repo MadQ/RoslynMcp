@@ -409,40 +409,20 @@ internal abstract partial class RoslynMcpTool
 		return null;
 	}
 
-	/// <summary>
-	///     Formats a symbol's modifiers (access, static, abstract, virtual, override, sealed)
-	///     as a space-separated prefix string. Shared by FileOutlineTool, GetSymbolDefinitionTool,
-	///     and TypeMembersTool.
-	/// </summary>
 	protected static string FormatModifiers(ISymbol symbol)
+		=> SymbolFormatter.FormatModifiers(symbol);
+
+	/// <summary>
+	///     Finds a SyntaxTree in the compilation by relative file path suffix match.
+	///     Handles path normalization (forward slashes → platform separator).
+	/// </summary>
+	protected static SyntaxTree? FindSyntaxTree(Compilation compilation, string filePath)
 	{
-		var parts = new List<string>();
+		var normalized = NormalizePath(filePath);
 
-		if(symbol.IsStatic)
-			parts.Add("static");
-		if(symbol.IsAbstract && symbol.ContainingType?.TypeKind != TypeKind.Interface)
-			parts.Add("abstract");
-		if(symbol.IsVirtual)
-			parts.Add("virtual");
-		if(symbol.IsOverride)
-			parts.Add("override");
-		if(symbol.IsSealed && symbol.Kind != SymbolKind.NamedType)
-			parts.Add("sealed");
-
-		var access = symbol.DeclaredAccessibility switch {
-			Accessibility.Public               => "public",
-			Accessibility.Private              => "private",
-			Accessibility.Protected            => "protected",
-			Accessibility.Internal             => "internal",
-			Accessibility.ProtectedOrInternal  => "protected internal",
-			Accessibility.ProtectedAndInternal => "private protected",
-			_                                  => null
-		};
-
-		if(access is not null)
-			parts.Insert(0, access);
-
-		return parts.Count > 0 ? string.Join(" ", parts) + " " : string.Empty;
+		return compilation.SyntaxTrees
+			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
+		;
 	}
 
 	/// <summary>

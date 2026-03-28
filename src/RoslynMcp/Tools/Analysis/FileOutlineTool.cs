@@ -91,10 +91,10 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 			
 			var kind = member.Kind.ToString().ToLowerInvariant();
 			var signature = member switch {
-				IMethodSymbol m => FormatMethod(m),
-				IPropertySymbol p => FormatProperty(p),
-				IFieldSymbol f => FormatField(f),
-				IEventSymbol e => FormatEvent(e),
+				IMethodSymbol m => SymbolFormatter.FormatMethod(m),
+				IPropertySymbol p => SymbolFormatter.FormatProperty(p),
+				IFieldSymbol f => SymbolFormatter.FormatField(f),
+				IEventSymbol e => SymbolFormatter.FormatEvent(e),
 				_ => member.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
 			};
 			
@@ -104,57 +104,9 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		return [.. results];
 	}
 	
-	private static string FormatMethod(IMethodSymbol method)
-	{
-		// Skip special methods (property getters/setters, event add/remove).
-		if(method.MethodKind is MethodKind.PropertyGet or MethodKind.PropertySet
-			or MethodKind.EventAdd or MethodKind.EventRemove)
-			return string.Empty;
-		
-		var returnType = method.ReturnsVoid
-			? "void"
-			: method.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		
-		var parameters = string.Join(", ", method.Parameters.Select(p =>
-			$"{p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {p.Name}"
-		));
-		
-		var modifiers = FormatModifiers(method);
-		
-		return $"{modifiers}{returnType} {method.Name}({parameters})";
-	}
 	
-	private static string FormatProperty(IPropertySymbol property)
-	{
-		var type      = property.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		var modifiers = FormatModifiers(property);
-		var accessors = new List<string>();
-		
-		if(property.GetMethod is not null)
-			accessors.Add("get");
-		if(property.SetMethod is not null)
-			accessors.Add("set");
-		
-		var accessorStr = accessors.Count > 0 ? $" {{ {string.Join("; ", accessors)}; }}" : string.Empty;
-		
-		return $"{modifiers}{type} {property.Name}{accessorStr}";
-	}
 	
-	private static string FormatField(IFieldSymbol field)
-	{
-		var type      = field.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		var modifiers = FormatModifiers(field);
-		
-		return $"{modifiers}{type} {field.Name}";
-	}
 	
-	private static string FormatEvent(IEventSymbol evt)
-	{
-		var type      = evt.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-		var modifiers = FormatModifiers(evt);
-		
-		return $"{modifiers}event {type} {evt.Name}";
-	}
 	
 	
 	private sealed record TypeOutline(string Kind, string Name, MemberOutline[] Members);
