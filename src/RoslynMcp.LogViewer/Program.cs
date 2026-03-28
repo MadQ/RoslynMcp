@@ -96,6 +96,7 @@ await app.RunAsync(cts.Token);
 static class ViewerHtml
 {
 	public static string Page => """
+	<!-- Developer tool — not a production web app. Accessibility (WCAG) not targeted unless requested. -->
 	<!DOCTYPE html>
 	<html lang="en">
 	<head>
@@ -205,6 +206,47 @@ static class ViewerHtml
 		.tool-det  { color: rgb(80 75 45);  font-style: italic; }
 		
 		.hidden { display: none !important; }
+
+		/* ── Search bar ── */
+		#searchBar {
+		  padding: 5px 12px;
+		  background: rgb(196 193 150);
+		  border-bottom: 1px solid rgb(160 155 110);
+		  display: flex;
+		  gap: 8px;
+		  align-items: center;
+		  flex-shrink: 0;
+		}
+		#searchInput {
+		  flex: 1;
+		  padding: 3px 8px;
+		  border: 1px solid rgb(155 150 105);
+		  border-radius: 4px;
+		  font-family: inherit;
+		  font-size: 12px;
+		  background: rgb(230 228 200);
+		}
+		#searchInput:focus { outline: 2px solid rgb(50 70 150); }
+		#searchCount { font-size: 11px; color: rgb(90 85 55); white-space: nowrap; }
+		.entry.highlight { background: rgb(255 255 180) !important; }
+
+		/* ── Legend ── */
+		#legend {
+		  padding: 4px 12px;
+		  background: rgb(210 207 170);
+		  border-bottom: 1px solid rgb(160 155 110);
+		  font-size: 11px;
+		  color: rgb(70 65 35);
+		  flex-shrink: 0;
+		}
+		kbd {
+		  background: rgb(230 228 200);
+		  border: 1px solid rgb(160 155 110);
+		  border-radius: 3px;
+		  padding: 1px 4px;
+		  font-family: inherit;
+		  font-size: 10px;
+		}
 	  </style>
 	</head>
 	<body>
@@ -219,7 +261,15 @@ static class ViewerHtml
 		<label class="chk"><input type="checkbox" id="autoScroll" checked> Auto-scroll</label>
 		<button class="btn" id="clearBtn">Clear</button>
 		<button class="btn" id="shutdownBtn">Shutdown</button>
+		<button class="btn" id="helpBtn" title="Keyboard shortcuts">?</button>
 		<span id="status">Connecting…</span>
+	  </div>
+	  <div id="legend" class="hidden">
+		<kbd>1-5</kbd> Filters &nbsp; <kbd>S</kbd> Auto-scroll &nbsp; <kbd>Ctrl+F</kbd> Search &nbsp; <kbd>Ctrl+L</kbd> Clear &nbsp; <kbd>Esc</kbd> Close/Jump to end &nbsp; <kbd>Q</kbd> Shutdown
+	  </div>
+	  <div id="searchBar" class="hidden">
+		<input type="text" id="searchInput" placeholder="Search logs… (Esc to close)">
+		<span id="searchCount"></span>
 	  </div>
 	  <div id="log"><div id="empty">Waiting for log entries…</div></div>
 	  
@@ -371,6 +421,88 @@ static class ViewerHtml
 		  };
 		}
 		
+		// ── Help legend toggle ────────────────────────────────────────────
+		document.getElementById('helpBtn').addEventListener('click', () => {
+		  document.getElementById('legend').classList.toggle('hidden');
+		});
+
+		// ── Keyboard shortcuts ────────────────────────────────────────────
+		const searchBar   = document.getElementById('searchBar');
+		const searchInput = document.getElementById('searchInput');
+		const searchCount = document.getElementById('searchCount');
+		let   searching   = false;
+
+		function clearSearch() {
+		  searchInput.value = '';
+		  searchCount.textContent = '';
+		  document.querySelectorAll('.entry.highlight').forEach(el => el.classList.remove('highlight'));
+		  searchBar.classList.add('hidden');
+		  searching = false;
+		}
+
+		function doSearch() {
+		  const q = searchInput.value.toLowerCase().trim();
+		  document.querySelectorAll('.entry.highlight').forEach(el => el.classList.remove('highlight'));
+		  if(!q) { searchCount.textContent = ''; return; }
+		  let n = 0;
+		  document.querySelectorAll('.entry').forEach(el => {
+			if(el.textContent.toLowerCase().includes(q)) { el.classList.add('highlight'); n++; }
+		  });
+		  searchCount.textContent = `${n} match${n !== 1 ? 'es' : ''}`;
+		}
+
+		searchInput.addEventListener('input', doSearch);
+
+		function clickFilter(name) {
+		  const btn = document.querySelector(`[data-filter="${name}"]`);
+		  if(btn) btn.click();
+		}
+
+		document.addEventListener('keydown', e => {
+		  // Ctrl+L — clear log
+		  if(e.ctrlKey && e.key === 'l') {
+			e.preventDefault();
+			document.getElementById('clearBtn').click();
+			return;
+		  }
+
+		  // Ctrl+F — open search
+		  if(e.ctrlKey && e.key === 'f') {
+			e.preventDefault();
+			searchBar.classList.remove('hidden');
+			searching = true;
+			searchInput.focus();
+			searchInput.select();
+			return;
+		  }
+
+		  // Ctrl+C — copy selected entry text (let browser handle if text is selected)
+		  // (browser default handles this — no override needed)
+
+		  // Esc — close search, clear selection, or jump to end
+		  if(e.key === 'Escape') {
+			if(searching) { clearSearch(); return; }
+			const sel = window.getSelection();
+			if(sel && sel.toString().length > 0) { sel.removeAllRanges(); return; }
+			logEl.scrollTop = logEl.scrollHeight;
+			scrolledUp = false;
+			return;
+		  }
+
+		  // 1-5 — filter shortcuts (only when not in search input)
+		  if(!searching && !e.ctrlKey && !e.altKey && !e.metaKey) {
+			switch(e.key) {
+			  case '1': clickFilter('ALL');   break;
+			  case '2': clickFilter('TOOL');  break;
+			  case '3': clickFilter('ERROR'); break;
+			  case '4': clickFilter('START'); break;
+			  case '5': clickFilter('STOP');  break;
+			  case 's': autoScroll.checked = !autoScroll.checked; break;
+			  case 'q': document.getElementById('shutdownBtn').click(); break;
+			}
+		  }
+		});
+
 		connect();
 	  </script>
 	</body>
