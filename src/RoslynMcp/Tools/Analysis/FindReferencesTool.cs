@@ -31,7 +31,6 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		var solution    = workspace.GetSolution(projectPath);
 		var rootPath    = workspace.GetRootPath(projectPath);
 		
-		// Find the symbol declaration.
 		var symbol = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)

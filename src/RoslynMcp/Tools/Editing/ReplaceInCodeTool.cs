@@ -48,7 +48,6 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
 			return new { error = "File must be a C# source file (.cs)" };
 		
-		// Map string to SyntaxKind
 		if(!TryParseSyntaxKind(nodeKind, out var kind))
 			return new { error = $"Unknown node kind: {nodeKind}. Examples: MethodDeclaration, FieldDeclaration, IdentifierName." };
 		
@@ -97,11 +96,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			};
 		}
 		
-		// Build replacement syntax
 		SyntaxNode? replacementNode;
-		
+
 		try {
-			// Parse based on what kind of node we're replacing
+
 			replacementNode = kind switch {
 				SyntaxKind.MethodDeclaration or
 				SyntaxKind.FieldDeclaration or
@@ -203,7 +201,6 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			};
 		}
 		
-		// Write the new source
 		try {
 			File.WriteAllText(fullPath, newRoot.ToFullString());
 		}

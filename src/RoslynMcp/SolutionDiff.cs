@@ -156,7 +156,6 @@ internal static class SolutionDiff
 		var lcsIdx  = 0;
 		
 		while(oi < oldLines.Length || ni < newLines.Length) {
-			// Skip unchanged context lines.
 			if(lcsIdx < inLcs.Length && inLcs[lcsIdx] && oi < oldLines.Length && ni < newLines.Length && oldLines[oi] == newLines[ni]) {
 				oi++;
 				ni++;
