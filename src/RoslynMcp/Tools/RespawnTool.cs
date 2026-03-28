@@ -18,7 +18,7 @@ internal sealed class RespawnTool
 		"The server will exit gracefully after responding.")]
 	public object Respawn()
 	{
-		logger.LogTool("roslyn_respawn", 0, true, "process terminating");
+		logger.LogTool("roslyn_respawn", 0, true, detail: "process terminating");
 		var pid = Environment.ProcessId;
 		
 		// Exit after a brief delay to let the response flush.

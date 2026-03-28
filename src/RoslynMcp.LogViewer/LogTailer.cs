@@ -11,20 +11,20 @@ namespace RoslynMcp.LogViewer;
 /// </summary>
 sealed class LogTailer
 {
-	// Format: [2026-03-26 14:30:45.123Z] [TOOL  ] ◆ roslyn_get_type_members(WorkspaceManager) 142ms OK    — 18/18 member(s)
+	// Format: [14:30:45.123] [TOOL  ] MSB OK      142ms get_type_members         WorkspaceManager — 18/18 member(s)
 	static readonly Regex LinePattern = new(
-		@"^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}Z)\] \[(.{6})\] (.*)$",
+		@"^\[(\d{2}:\d{2}:\d{2}\.\d{3})\] \[(.{6})\] (.*)$",
 		RegexOptions.Compiled
 	);
 
-	// Parses the TOOL message body: optional mode char, tool name, elapsed, outcome, optional detail
-	// Group 1: workspace mode char (◆, ◇, or space)
-	// Group 2: tool name (with optional subject in parens)
+	// Parses the TOOL message body:
+	// Group 1: workspace mode (MSB, ADH, ---)
+	// Group 2: OK or ERROR
 	// Group 3: elapsed ms
-	// Group 4: OK or ERROR
-	// Group 5: detail after ' — ' (optional)
+	// Group 4: tool name (short, without roslyn_ prefix)
+	// Group 5: rest — subject + optional detail after ' — '
 	static readonly Regex ToolPattern = new(
-		@"^([◆◇ ]) ([\w_]+(?:\([^)]*\))?) (\d+)ms (OK\s*|ERROR)(?: — (.*))?$",
+		@"^(MSB|ADH) (OK\s*|ERROR)\s+(\d+)ms (\S+)\s*(.*)?$",
 		RegexOptions.Compiled
 	);
 	
@@ -243,18 +243,23 @@ sealed class LogTailer
 
 			if(t.Success) {
 
-				var modeChar = t.Groups[1].Value.Trim(); // "◆", "◇", or ""
+				// Group 5 is "subject — detail" or just "subject" or just "— detail" or empty.
+				var rest    = t.Groups[5].Value.Trim();
+				var dashIdx = rest.IndexOf(" — ", StringComparison.Ordinal);
+				var subject = dashIdx >= 0 ? rest[..dashIdx].Trim() : rest;
+				var detail  = dashIdx >= 0 ? rest[(dashIdx + 3)..].Trim() : null;
 
 				return new LogEntry(
 					Timestamp:     timestamp,
 					Level:         level,
 					Message:       message,
 					Raw:           raw,
-					WorkspaceMode: modeChar.Length > 0 ? modeChar : null,
-					ToolName:      t.Groups[2].Value,
+					WorkspaceMode: t.Groups[1].Value,
+					ToolName:      t.Groups[4].Value,
 					ElapsedMs:     long.TryParse(t.Groups[3].Value, out var ms) ? ms : null,
-					Success:       t.Groups[4].Value.TrimEnd() == "OK",
-					Detail:        t.Groups[5].Value is { Length: > 0 } d ? d : null
+					Success:       t.Groups[2].Value.TrimEnd() == "OK",
+					Subject:       subject is { Length: > 0 } s ? s : null,
+					Detail:        detail is { Length: > 0 } d ? d : null
 				);
 			}
 		}

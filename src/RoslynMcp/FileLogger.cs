@@ -61,15 +61,28 @@ internal sealed class FileLogger : IDisposable
 	
 	/// <summary>Logs a tool invocation with outcome, elapsed time, and workspace mode indicator.</summary>
 	/// <param name="isMSBuild">True for MSBuildWorkspace (◆), false for AdhocWorkspace (◇), null when unknown.</param>
-	public void LogTool(string toolName, long elapsedMs, bool success, string? detail = null, bool? isMSBuild = null)
+	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null)
 	{
-		var outcome       = success ? "OK   " : "ERROR";
-		var workspaceMode = isMSBuild switch { true => "◆", false => "◇", null => " " };
-		var message       = detail is not null
-			? $"{workspaceMode} {toolName} {elapsedMs}ms {outcome} — {detail}"
-			: $"{workspaceMode} {toolName} {elapsedMs}ms {outcome}";
-		
-		Write("TOOL  ", message);
+		var outcome   = success ? "OK   " : "ERROR";
+		var ws        = isMSBuild ? "MSB" : "ADH";
+		var shortName = toolName.StartsWith("roslyn_", StringComparison.Ordinal)
+			? toolName[7..]
+			: toolName
+		;
+		var cache = cacheTag switch { "HIT" => " [HIT]", "MISS" => " [MISS]", _ => "" };
+
+		var sb = new System.Text.StringBuilder();
+		sb.Append($"{ws} {outcome} {elapsedMs,5}ms {shortName,-25}");
+
+		if(subject is not null)
+			sb.Append($" {subject}");
+
+		if(detail is not null)
+			sb.Append($" — {detail}");
+
+		sb.Append(cache);
+
+		Write("TOOL  ", sb.ToString());
 	}
 	
 	/// <summary>Logs an error outside of a tool call (e.g. workspace load failure).</summary>
@@ -85,7 +98,7 @@ internal sealed class FileLogger : IDisposable
 		if(logPath is null)
 			return;
 		
-		var line = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}Z] [{level}] {message}{Environment.NewLine}";
+		var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level}] {message}{Environment.NewLine}";
 		
 		lock(writeLock) {
 			

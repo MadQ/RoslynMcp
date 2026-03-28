@@ -352,6 +352,7 @@ internal abstract partial class RoslynMcpTool
 		if(pageToken is null || !paginationCache.TryGet<T>(pageToken, out var cached))
 			return null;
 
+		scope.SetCacheTag(hit: true);
 		var page = Paginate(cached, ref skip, take);
 
 		return scope.Outcome($"{page.Length}/{cached.Length}", new {
@@ -370,6 +371,7 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected PaginatedResult<T> PaginateAndStore<T>(T[] allResults, ref int skip, int take)
 	{
+		activeScope?.SetCacheTag(hit: false);
 		var token   = paginationCache.Store(allResults);
 		var page    = Paginate(allResults, ref skip, take);
 		var hasMore = skip + page.Length < allResults.Length;

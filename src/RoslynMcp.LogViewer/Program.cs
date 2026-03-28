@@ -142,11 +142,13 @@ static class ViewerHtml
 		  font-family: inherit;
 		  transition: background .1s;
 		}
+		[data-filter] { min-width: 52px; text-align: center; }
 		.btn:hover  { background: rgb(180 176 132); }
 		.btn.active { background: rgb(50 70 150); border-color: rgb(30 55 140); color: rgb(255 255 255); }
 		
 		.filter-ALL   { color: rgb(0 0 0); }
 		.filter-TOOL  { color: rgb(20 100 40); }
+		.filter-FAIL  { color: rgb(180 60 0); }
 		.filter-ERROR { color: rgb(160 0 0); }
 		.filter-START { color: rgb(30 55 140); }
 		.filter-STOP  { color: rgb(90 85 55); }
@@ -160,7 +162,7 @@ static class ViewerHtml
 		  user-select: none;
 		}
 		
-		#sep { width: 1px; height: 18px; background: rgb(160 155 110); margin: 0 2px; }
+		#sep, .sep-thin { width: 1px; height: 18px; background: rgb(160 155 110); margin: 0 2px; }
 		
 		#status { margin-left: auto; font-size: 11px; color: rgb(90 85 55); white-space: nowrap; }
 		#status.live { color: rgb(20 100 40); }
@@ -175,7 +177,7 @@ static class ViewerHtml
 		.entry {
 		  padding: 1px 12px;
 		  display: grid;
-		  grid-template-columns: 24ch 5ch 1fr;
+		  grid-template-columns: 12ch 5ch 1fr;
 		  gap: 10px;
 		  white-space: pre-wrap;
 		  word-break: break-all;
@@ -197,12 +199,14 @@ static class ViewerHtml
 		.entry[data-level="ERROR"] { border-left: 2px solid rgb(160 0 0); }
 
 		/* TOOL message sub-fields */
-		.ws-msb  { color: rgb(20 100 40);  font-weight: 700; }  /* ◆ MSBuild  */
-		.ws-adhc { color: rgb(170 100 0);  font-weight: 700; }  /* ◇ Adhoc    */
+		.ws-msb  { color: rgb(20 100 40);  font-weight: 700; cursor: help; }
+		.ws-adh  { color: rgb(170 100 0);  font-weight: 700; cursor: help; }
+		.ws-unk  { color: rgb(110 105 70); cursor: help; }
 		.tool-name { color: rgb(0 0 0); font-weight: 600; }
 		.tool-ms   { color: rgb(110 105 70); }
 		.tool-ok   { color: rgb(20 100 40); font-weight: 600; }
 		.tool-err  { color: rgb(160 0 0);   font-weight: 600; }
+		.tool-subj { color: rgb(60 55 30); }
 		.tool-det  { color: rgb(80 75 45);  font-style: italic; }
 		
 		.hidden { display: none !important; }
@@ -254,6 +258,8 @@ static class ViewerHtml
 		<h1>RoslynMcp Logs</h1>
 		<button class="btn filter-ALL   active" data-filter="ALL"  >ALL</button>
 		<button class="btn filter-TOOL  "       data-filter="TOOL" >TOOL</button>
+		<button class="btn filter-FAIL  "       data-filter="FAIL" >FAIL</button>
+		<div class="sep-thin"></div>
 		<button class="btn filter-ERROR "       data-filter="ERROR">ERROR</button>
 		<button class="btn filter-START "       data-filter="START">START</button>
 		<button class="btn filter-STOP  "       data-filter="STOP" >STOP</button>
@@ -265,7 +271,7 @@ static class ViewerHtml
 		<span id="status">Connecting…</span>
 	  </div>
 	  <div id="legend" class="hidden">
-		<kbd>1-5</kbd> Filters &nbsp; <kbd>S</kbd> Auto-scroll &nbsp; <kbd>Ctrl+F</kbd> Search &nbsp; <kbd>Ctrl+L</kbd> Clear &nbsp; <kbd>Esc</kbd> Close/Jump to end &nbsp; <kbd>Q</kbd> Shutdown
+		<kbd>1</kbd> ALL <kbd>2</kbd> TOOL <kbd>3</kbd> FAIL <kbd>4</kbd> ERROR <kbd>5</kbd> START <kbd>6</kbd> STOP &nbsp;|&nbsp; <kbd>S</kbd> Auto-scroll &nbsp; <kbd>Ctrl+F</kbd> Search &nbsp; <kbd>Ctrl+L</kbd> Clear &nbsp; <kbd>Esc</kbd> Close/Jump to end &nbsp; <kbd>Q</kbd> Shutdown &nbsp; <kbd>?</kbd> This legend
 	  </div>
 	  <div id="searchBar" class="hidden">
 		<input type="text" id="searchInput" placeholder="Search logs… (Esc to close)">
@@ -304,9 +310,12 @@ static class ViewerHtml
 			document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
 			btn.classList.add('active');
 			filter = btn.dataset.filter;
-			document.querySelectorAll('.entry').forEach(el =>
-			  el.classList.toggle('hidden', filter !== 'ALL' && el.dataset.level !== filter)
-			);
+			document.querySelectorAll('.entry').forEach(el => {
+			  if(filter === 'FAIL')
+				el.classList.toggle('hidden', el.dataset.fail !== 'true');
+			  else
+				el.classList.toggle('hidden', filter !== 'ALL' && el.dataset.level !== filter);
+			});
 		  });
 		});
 		
@@ -326,12 +335,14 @@ static class ViewerHtml
 		// ── Append entry ──────────────────────────────────────────────────────
 		function addEntry(e) {
 		  emptyEl.style.display = 'none';
-		  const level = e.Level || 'OTHER';
-		  const div   = document.createElement('div');
-		  div.className    = 'entry';
+		  const level  = e.Level || 'OTHER';
+		  const isFail = level === 'TOOL' && e.Success === false;
+		  const div    = document.createElement('div');
+		  div.className     = 'entry';
 		  div.dataset.level = level;
+		  if(isFail) div.dataset.fail = 'true';
 
-		  if(filter !== 'ALL' && level !== filter)
+		  if(filter === 'FAIL' ? !isFail : (filter !== 'ALL' && level !== filter))
 			div.classList.add('hidden');
 
 		  const ts  = document.createElement('span');
@@ -346,27 +357,37 @@ static class ViewerHtml
 		  msg.className = 'msg';
 
 		  if(level === 'TOOL' && e.ToolName) {
-			// Structured TOOL entry: ◆/◇  toolName  42ms  OK/ERROR  — detail
+			const wsHints = { MSB: 'MSBuildWorkspace (.csproj)', ADH: 'AdhocWorkspace (no .csproj)', '---': 'Workspace mode unknown' };
+
 			if(e.WorkspaceMode) {
 			  const ws = document.createElement('span');
-			  ws.className   = e.WorkspaceMode === '◆' ? 'ws-msb' : 'ws-adhc';
+			  ws.className = e.WorkspaceMode === 'MSB' ? 'ws-msb' : e.WorkspaceMode === 'ADH' ? 'ws-adh' : 'ws-unk';
 			  ws.textContent = e.WorkspaceMode + ' ';
+			  ws.title = wsHints[e.WorkspaceMode] || '';
 			  msg.appendChild(ws);
 			}
+
+			const ok = document.createElement('span');
+			ok.className   = e.Success ? 'tool-ok' : 'tool-err';
+			ok.textContent = (e.Success ? 'OK ' : 'ERR') + ' ';
+			msg.appendChild(ok);
+
+			const ms = document.createElement('span');
+			ms.className   = 'tool-ms';
+			ms.textContent = `${String(e.ElapsedMs).padStart(5)}ms `;
+			msg.appendChild(ms);
+
 			const tn = document.createElement('span');
 			tn.className   = 'tool-name';
 			tn.textContent = e.ToolName;
 			msg.appendChild(tn);
 
-			const ms = document.createElement('span');
-			ms.className   = 'tool-ms';
-			ms.textContent = ` ${e.ElapsedMs}ms `;
-			msg.appendChild(ms);
-
-			const ok = document.createElement('span');
-			ok.className   = e.Success ? 'tool-ok' : 'tool-err';
-			ok.textContent = e.Success ? 'OK' : 'ERROR';
-			msg.appendChild(ok);
+			if(e.Subject) {
+			  const subj = document.createElement('span');
+			  subj.className   = 'tool-subj';
+			  subj.textContent = ' ' + e.Subject;
+			  msg.appendChild(subj);
+			}
 
 			if(e.Detail) {
 			  const det = document.createElement('span');
@@ -489,16 +510,18 @@ static class ViewerHtml
 			return;
 		  }
 
-		  // 1-5 — filter shortcuts (only when not in search input)
+		  // 1-6 — filter shortcuts, ? — legend (only when not in search input)
 		  if(!searching && !e.ctrlKey && !e.altKey && !e.metaKey) {
 			switch(e.key) {
 			  case '1': clickFilter('ALL');   break;
 			  case '2': clickFilter('TOOL');  break;
-			  case '3': clickFilter('ERROR'); break;
-			  case '4': clickFilter('START'); break;
-			  case '5': clickFilter('STOP');  break;
+			  case '3': clickFilter('FAIL');  break;
+			  case '4': clickFilter('ERROR'); break;
+			  case '5': clickFilter('START'); break;
+			  case '6': clickFilter('STOP');  break;
 			  case 's': autoScroll.checked = !autoScroll.checked; break;
 			  case 'q': document.getElementById('shutdownBtn').click(); break;
+			  case '?': document.getElementById('legend').classList.toggle('hidden'); break;
 			}
 		  }
 		});
