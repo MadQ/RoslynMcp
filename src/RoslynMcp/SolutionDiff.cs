@@ -86,35 +86,62 @@ internal static class SolutionDiff
 		return sb.ToString();
 	}
 	
-	private static bool[] LongestCommonSubsequence(string[] a, string[] b)
+	/// <summary>
+	///     Greedy forward-matching of old lines into new lines. Returns a bool[] where
+	///     true = old line was matched (unchanged). O(n+m) space vs O(n*m) for full LCS DP.
+	///     Produces identical results for the common case (few scattered changes);
+	///     slightly noisier hunks when many identical lines exist in different positions.
+	/// </summary>
+	private static bool[] LongestCommonSubsequence(string[] oldLines, string[] newLines)
 	{
-		// Returns a bool[] of length a.Length: true = line is in LCS (unchanged).
-		var m   = a.Length;
-		var n   = b.Length;
-		var dp  = new int[m + 1, n + 1];
-		
-		for(var i = m - 1; i >= 0; i--)
-			for(var j = n - 1; j >= 0; j--)
-				dp[i, j] = a[i] == b[j]
-					? dp[i + 1, j + 1] + 1
-					: Math.Max(dp[i + 1, j], dp[i, j + 1])
-				;
-		
-		var inLcs = new bool[m];
-		var x = 0;
-		var y = 0;
-		
-		while(x < m && y < n) {
-			if(a[x] == b[y]) {
-				inLcs[x++] = true;
-				y++;
-			}
-			else if(dp[x + 1, y] >= dp[x, y + 1])
-				x++;
-			else
-				y++;
+		var inLcs = new bool[oldLines.Length];
+
+		// Map each line to its positions in the old file.
+		var oldPositions = new Dictionary<string, List<int>>();
+
+		for(var i = 0; i < oldLines.Length; i++) {
+
+			if(!oldPositions.TryGetValue(oldLines[i], out var list))
+				oldPositions[oldLines[i]] = list = [];
+
+			list.Add(i);
 		}
-		
+
+		// Walk the new file, greedily matching each line to the earliest
+		// unused position in the old file (preserving order).
+		var lastMatchedOld = -1;
+
+		foreach(var line in newLines) {
+
+			if(!oldPositions.TryGetValue(line, out var positions))
+				continue;
+
+			// Binary search for first position > lastMatchedOld.
+			var lo = 0;
+			var hi = positions.Count - 1;
+			var best = -1;
+
+			while(lo <= hi) {
+
+				var mid = lo + (hi - lo) / 2;
+
+				if(positions[mid] > lastMatchedOld) {
+
+					best = mid;
+					hi   = mid - 1;
+				}
+				else
+					lo = mid + 1;
+			}
+
+			if(best < 0)
+				continue;
+
+			var oldPos = positions[best];
+			inLcs[oldPos]  = true;
+			lastMatchedOld = oldPos;
+		}
+
 		return inLcs;
 	}
 	
