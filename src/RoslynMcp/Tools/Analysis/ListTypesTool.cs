@@ -20,23 +20,25 @@ internal sealed class ListTypesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_list_types", namespaceFilter);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			return new[] { error.ToString()! };
-		
-		
-		var allTypes    = new List<INamedTypeSymbol>();
-		
+			return error;
+
+		var allTypes = new List<INamedTypeSymbol>();
+
 		CollectTypes(compilation.GlobalNamespace, allTypes);
-		
+
 		var filtered = allTypes
 			.Where(t => !t.IsImplicitlyDeclared)
+			// Without a namespace filter, only return types defined in source — not the
+			// thousands of types from referenced assemblies (the context-window bomb).
+			.Where(t => namespaceFilter is not null || t.Locations.Any(l => l.IsInSource))
 			.Where(t => MatchesNamespace(t, namespaceFilter))
 			.Where(t => MatchesKind(t, kindFilter))
 			.Select(t => SymbolFormatter.FormatType(t))
 			.Order()
 		;
-		
+
 		string[] results = [.. filtered];
-		
+
 		return results.Length > 0
 			? scope.Outcome($"{results.Length} type(s)", results)
 			: (object) new[] { "No types found matching the filters." };
