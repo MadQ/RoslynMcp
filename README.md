@@ -55,6 +55,9 @@ For Claude Code, create `.mcp.json` in your project root:
 -> Returns just that method's source. 20 lines, not a 600-line file dump.
 ```
 
+> [!IMPORTANT]
+> **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool.
+
 See [INSTALLATION.md](INSTALLATION.md) for setup guides for GitHub Copilot, Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
 
 ---
@@ -179,6 +182,8 @@ When working with C# code, prefer roslyn_* MCP tools:
 ### Why this matters
 
 Without explicit instructions, agents default to their built-in file tools. They will grep for symbol names instead of using `roslyn_find_references`. They will read 600-line files instead of calling `roslyn_get_member_body`. The instructions above ensure your agent uses the most accurate tool for the job.
+
+For complete instructions covering every tool, see [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) — includes both a full version and a compact version.
 
 ---
 
