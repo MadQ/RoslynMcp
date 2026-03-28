@@ -119,9 +119,16 @@ RoslynMcp provides 25 tools for code analysis and manipulation (24 stable + 1 ex
 **Add these instructions to your agent's context** (e.g., in your project's `.github/copilot-instructions.md`, `AGENTS.md`, or custom instructions) to help it choose the right tools:
 
 ```markdown
+When building or checking for errors:
+- **ALWAYS use `roslyn_build_project`** — NEVER run `dotnet build` in a terminal.
+  It checks Roslyn diagnostics first (instant, ~17ms) and only spawns MSBuild if
+  the code is clean. This is faster, quieter, and returns structured JSON — not
+  terminal output you have to parse.
+
 When working with C# code:
 - **Prefer `roslyn_replace_in_code`** for editing C# files — it validates syntax, preserves formatting, and understands code structure
 - Use `roslyn_replace_in_file` only for non-C# files (JSON, markdown, etc.) or when literal text replacement is needed
+- Use `roslyn_get_member_body` to read a single method/property/field — don't read the entire file
 
 When discovering code:
 - `roslyn_search_files` — finds content (regex patterns across file contents)
