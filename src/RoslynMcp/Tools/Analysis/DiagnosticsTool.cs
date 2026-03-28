@@ -23,16 +23,24 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
-		
-		
-		IEnumerable<Diagnostic> diagnostics = compilation.GetDiagnostics();
-		
+
+		IEnumerable<Diagnostic> diagnostics;
+
 		if(filePath is not null) {
+
+			// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
 			var normalized = NormalizePath(filePath);
-			diagnostics = diagnostics
-				.Where(d => d.Location.SourceTree?.FilePath
-					.EndsWith(normalized, StringComparison.OrdinalIgnoreCase) == true)
+			var tree = compilation.SyntaxTrees
+				.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
 			;
+
+			diagnostics = tree is not null
+				? compilation.GetSemanticModel(tree).GetDiagnostics()
+				: [];
+		}
+		else {
+
+			diagnostics = compilation.GetDiagnostics();
 		}
 		
 		string[] results = [..

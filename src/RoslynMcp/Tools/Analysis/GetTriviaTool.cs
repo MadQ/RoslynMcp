@@ -59,12 +59,12 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         TextSpan span;
         if(startLine.HasValue || endLine.HasValue) {
 
-            var start = startLine.HasValue 
-                ? sourceText.Lines[startLine.Value - 1].Start 
-                : 0;
-            var end = endLine.HasValue 
-                ? sourceText.Lines[endLine.Value - 1].End 
-                : sourceText.Length;
+            var lineCount = sourceText.Lines.Count;
+            var sl = Math.Clamp(startLine ?? 1, 1, lineCount);
+            var el = Math.Clamp(endLine ?? lineCount, 1, lineCount);
+
+            var start = sourceText.Lines[sl - 1].Start;
+            var end   = sourceText.Lines[el - 1].End;
 
             span = TextSpan.FromBounds(start, end);
         }
