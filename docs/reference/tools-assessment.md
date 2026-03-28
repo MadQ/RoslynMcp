@@ -1,6 +1,6 @@
 # Roslyn MCP Tools: Honest Assessment
 
-> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.6.0-alpha.
+> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.0-alpha.
 
 ## Tools That Work Well
 

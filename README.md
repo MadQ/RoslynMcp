@@ -112,7 +112,7 @@ RoslynMcp fixes all four by keeping a live Roslyn `Compilation` in process, warm
 
 ## Tools
 
-RoslynMcp provides 25 tools for code analysis and manipulation (24 stable + 1 experimental). **All tools work on the in-memory Roslyn compilation** — no external processes or file system dependencies beyond the initial load.
+RoslynMcp provides 28 tools for code analysis and manipulation (25 stable + 2 refactoring + 1 experimental). Most tools work entirely in-process using the Roslyn compilation. Exceptions: `roslyn_build_project` calls `dotnet build`, `roslyn_clean_solution` and `roslyn_restore_packages` call `dotnet clean`/`dotnet restore`.
 
 ### Guiding Your AI Agent
 
@@ -178,7 +178,9 @@ When discovering code:
 - **MSBuildWorkspace** (if `.csproj` found) — full project resolution including NuGet packages, multi-project support, and .NET Framework compatibility. Requires MSBuild on PATH. Startup: 1-2 seconds.
 - **AdhocWorkspace** (fallback) — loads `.cs` files directly without MSBuild. Fast startup (<100 ms), but only resolves types defined in loaded source files.
 
-**Live compilation** — MSBuildWorkspace monitors files via Roslyn's internal mechanisms. AdhocWorkspace uses `FileSystemWatcher` to detect `.cs` changes and invalidates the compilation lazily on the next tool call. Thread-safe via `ReaderWriterLockSlim`.
+**Live compilation** — FileSystemWatcher detects `.cs` changes for both workspace types and invalidates the compilation on the next tool call. Thread-safe via `ReaderWriterLockSlim`.
+
+**See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for detailed comparison, troubleshooting, and FAQ.**
 
 **stdio transport** — the MCP protocol runs over stdin/stdout. All logging is suppressed or redirected to stderr so it never corrupts the protocol stream.
 
@@ -221,15 +223,6 @@ Add to `.mcp.json` at your workspace root:
 ```
 
 ---
-
-## Workspace Modes
-
-RoslynMcp automatically selects the best workspace mode for your project:
-
-- **MSBuildWorkspace** (when `.csproj` found) — Full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility. Startup: 1-2 seconds.
-- **AdhocWorkspace** (fallback) — Fast startup (<100 ms), source-only type resolution. Perfect for scripts or demos without project files.
-
-**See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for detailed comparison, troubleshooting, and FAQ.**
 
 ---
 

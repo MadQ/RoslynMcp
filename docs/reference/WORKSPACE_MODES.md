@@ -146,7 +146,7 @@ You don't manually "switch" modes—RoslynMcp detects the mode per project path.
 
 ### Multi-Project Workflows (v0.3.0+)
 
-All 25 tools require a `projectPath` parameter, so you can work with **both modes in a single session**:
+All 28 tools require a `projectPath` parameter, so you can work with **both modes in a single session**:
 
 ```json
 // Example: workspace with both project types
@@ -217,14 +217,15 @@ var project = workspace.AddProject("MyProject", LanguageNames.CSharp);
 - Uses `FileSystemWatcher` for change detection
 - No external dependency resolution
 
-### WorkspaceManager (v0.3.0)
+### WorkspaceManager
 
-RoslynMcp's `WorkspaceManager` caches workspace instances using an LRU (Least Recently Used) strategy:
+RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.cs`, `.Instance.cs`) loads the full solution when a `.sln`/`.slnx` is found, and caches workspace instances with LRU eviction:
 
-- **Cache key:** Resolved absolute path to project/directory
-- **Cache size:** Unlimited (relies on GC for cleanup)
-- **Thread-safety:** `ReaderWriterLockSlim` for concurrent access
-- **Invalidation:** Automatic via `FileSystemWatcher` + manual via `InvalidateFile()`
+- **Cache key:** Solution path (or .csproj/directory if no solution found)
+- **Cache size:** Configurable via `ROSLYNMCP_MAX_CACHED_WORKSPACES` (default 5)
+- **Thread-safety:** Lock-free cache lookups; loading outside lock to avoid contention
+- **Invalidation:** FileSystemWatcher (both MSBuild and Adhoc) + manual via `InvalidateFile()`
+- **Per-project compilation cache** — each project in a solution has its own cached compilation
 
 ---
 
@@ -275,4 +276,4 @@ Subsequent calls are instant because the workspace is cached.
 
 ---
 
-**Last Updated:** 2025-01-XX (v0.3.0)
+**Last Updated:** 2026-03-28 (v0.7.0-alpha)

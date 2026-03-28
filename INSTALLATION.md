@@ -11,7 +11,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 > **Configuration reference:** See [Configuration section in README.md](README.md#configuration) for detailed examples and troubleshooting.
 
-> All 25 tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
+> All 28 tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
 
 > **Quick start:** Most clients use one of two patterns:
 > - **Workspace config**: `.mcp.json` or similar file in your project root
@@ -344,7 +344,7 @@ RoslynMcp automatically falls back to AdhocWorkspace (source-only mode) if MSBui
 
 ### Multi-project workspaces
 
-All 25 tools require a `projectPath` parameter, enabling multi-project workflows without restarting the server.
+All 28 tools require a `projectPath` parameter, enabling multi-project workflows without restarting the server.
 
 RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point the command-line argument at the solution directory or primary project directory for pre-loading.
 
@@ -398,7 +398,7 @@ For large codebases (>100K LOC), consider:
 
 **Checklist:**
 1. Server process started successfully (check client logs)
-2. MCP session initialized (`tools/list` should return 25 tools)
+2. MCP session initialized (`tools/list` should return 28 tools)
 3. Target directory is correct (check server stderr for `Target: ...`)
 
 ---

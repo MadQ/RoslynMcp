@@ -70,7 +70,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (27 tests covering all 25 tools)
+# Run the comprehensive test suite (36 tests covering all 28 tools)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
