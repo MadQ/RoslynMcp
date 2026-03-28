@@ -23,9 +23,8 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_file_outline", filePath);
 
-		take = Math.Clamp(take, 1, 100);
 
-		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, take);
+		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 100);
 		if(cachedPage is not null)
 			return cachedPage;
 

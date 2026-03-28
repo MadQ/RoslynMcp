@@ -174,7 +174,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_list_types: enumerate types in RoslynMcp.Tools namespace",
 	"roslyn_list_types",
 	new { namespaceFilter = "RoslynMcp.Tools", projectPath = targetPath },
-	data => data?.AsArray().Count > 10
+	data => data?["types"]?.AsArray().Count > 10 && data?["page_token"] is not null
 ));
 
 tests.Add(await RunTestAsync(

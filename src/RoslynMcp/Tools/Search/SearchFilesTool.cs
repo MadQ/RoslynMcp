@@ -27,10 +27,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_search_files", pattern);
 		filePattern ??= "*.cs";
-		take          = Math.Clamp(take, 1, 200);
-		skip          = Math.Max(0, skip);
 
-		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, take);
+		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 200);
 		if(cachedPage is not null)
 			return cachedPage;
 		

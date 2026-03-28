@@ -345,8 +345,10 @@ internal abstract partial class RoslynMcpTool
 	///     Subsequent-page responses use a common shape (items/total/page_token/has_more);
 	///     tool-specific metadata is only included in the first-page response.
 	/// </summary>
-	protected object? TryServeCachedPage<T>(ToolScope scope, string? pageToken, ref int skip, int take)
+	protected object? TryServeCachedPage<T>(ToolScope scope, string? pageToken, ref int skip, ref int take, int maxTake)
 	{
+		take = Math.Clamp(take, 1, maxTake);
+
 		if(pageToken is null || !paginationCache.TryGet<T>(pageToken, out var cached))
 			return null;
 

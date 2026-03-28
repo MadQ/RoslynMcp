@@ -27,16 +27,23 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         [Description("Optional: Filter by trivia kind (e.g., 'WhitespaceTrivia', 'EndOfLineTrivia', 'SingleLineCommentTrivia', 'MultiLineCommentTrivia'). Use listTriviaKinds=true to see all options.")] string? triviaKind = null,
         [Description("Include leading trivia (whitespace/comments before nodes). Default: true.")] bool includeLeading = true,
         [Description("Include trailing trivia (whitespace/comments after nodes). Default: true.")] bool includeTrailing = true,
+        [Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
         [Description("Maximum number of results to return. Default: 100, max: 500.")] int take = 100,
+        [Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null,
         [Description("Set to true to list all available C# syntax kinds (IfStatement, ForEachStatement, etc.) instead of analyzing trivia.")] bool listSyntaxKinds = false,
         [Description("Set to true to list all available trivia kinds (WhitespaceTrivia, EndOfLineTrivia, etc.) instead of analyzing trivia.")] bool listTriviaKinds = false)
     {
         using var scope = BeginTool("roslyn_get_trivia", filePath);
 
-            if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds:  false, listTypeKinds:  false, listSearchContexts:  false, out var discovery))
-                return discovery;
 
-            if(string.IsNullOrEmpty(filePath))
+        if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds: false, listTypeKinds: false, listSearchContexts: false, out var discovery))
+            return discovery;
+
+        var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 500);
+        if(cachedPage is not null)
+            return cachedPage;
+
+        if(string.IsNullOrEmpty(filePath))
             return new { error = "invalid_parameter", message = "filePath is required unless using listSyntaxKinds or listTriviaKinds" };
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
@@ -99,7 +106,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         var totalNodes = nodesInSpan.Count;
         var results = new List<object>();
 
-        foreach(var node in nodesInSpan.Take(take)) {
+        foreach(var node in nodesInSpan) {
 
             var leadingTriviaList  = includeLeading
                 ? FilterTrivia(node.GetLeadingTrivia(), triviaKind)
@@ -130,14 +137,18 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             });
         }
 
-        object[] resultArr = [.. results];
+        object[] allResults = [.. results];
+        var result = PaginateAndStore(allResults, ref skip, take);
 
         return new {
 
             file          = filePath,
             totalNodes,
-            filteredNodes = results.Count,
-            results       = resultArr
+            filteredNodes = allResults.Length,
+            skip, take,
+            results    = result.Items,
+            page_token = result.PageToken,
+            has_more   = result.HasMore
         };
     }
 

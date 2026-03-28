@@ -25,9 +25,8 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName);
 
-		take = Math.Clamp(take, 1, 200);
 
-		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, take);
+		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
 		if(cachedPage is not null)
 			return cachedPage;
 
