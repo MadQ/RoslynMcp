@@ -49,7 +49,7 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Solution:
 
 					rootPath = Path.GetDirectoryName(path)!;
-					EnsureMSBuildRegistered();
+					MSBuildBootstrap.EnsureReady();
 					workspace = LoadSolution(path);
 					isMSBuild = true;
 
@@ -64,7 +64,7 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Project:
 
 					rootPath = Path.GetDirectoryName(path)!;
-					EnsureMSBuildRegistered();
+					MSBuildBootstrap.EnsureReady();
 
 					var (msbuildWs, pid) = LoadMSBuildWorkspace(path);
 					workspace        = msbuildWs;

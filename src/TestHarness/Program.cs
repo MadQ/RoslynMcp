@@ -4,6 +4,7 @@
 /// </summary>
 
 using System.Diagnostics;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -11,8 +12,10 @@ var repoRoot   = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "
 var serverProj = Path.Combine(repoRoot, "src", "RoslynMcp", "RoslynMcp.csproj");
 var targetPath = Path.Combine(repoRoot, "src", "RoslynMcp"); // Dogfood: analyze ourselves
 
+var version = typeof(Program).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
+
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
-Console.WriteLine("  RoslynMcp Test Harness — Testing 27 Tools");
+Console.WriteLine($"  RoslynMcp Test Harness v{version}");
 Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine($"Server:  {serverProj}");
 Console.WriteLine($"Target:  {targetPath}");

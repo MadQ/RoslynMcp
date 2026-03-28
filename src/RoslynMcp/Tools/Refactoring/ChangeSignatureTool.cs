@@ -33,7 +33,8 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		[Description("Optional containing type, e.g. 'OrderService'.")] string? containingType = null,
 		[Description("Parameters to add as JSON array: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]")] string? addParameters = null)
 	{
-		using var scope = BeginTool("roslyn_change_signature", $"{containingType}.{methodName}");
+		var subject = containingType is not null ? $"{containingType}.{methodName}" : methodName;
+		using var scope = BeginTool("roslyn_change_signature", subject);
 
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
@@ -81,7 +82,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})"
 		);
 
-		return scope.Outcome($"{result.ParametersAdded.Length} parameter(s) added", new {
+		return scope.Outcome($"+{result.ParametersAdded.Length} param ({string.Join(", ", result.ParametersAdded)})", new {
 			diff                = result.Diff,
 			token,
 			message             = $"Review the diff, then call apply_signature_change with token '{token}' and approval 'y' or 'session'.",

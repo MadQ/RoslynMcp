@@ -1,4 +1,3 @@
-using Microsoft.Build.Locator;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
@@ -37,11 +36,6 @@ internal sealed partial class WorkspaceManager : IDisposable
 	readonly object cacheLock = new();
 	readonly int    maxCachedWorkspaces;
 
-	// Deferred MSBuild registration — only attempted on first MSBuildWorkspace use.
-	// volatile: read outside lock in double-checked pattern; .NET memory model (ECMA-335)
-	// doesn't guarantee visibility on ARM without it. See CONTRIBUTING.md "Right Code Principle".
-	static volatile bool  msbuildRegistered;
-	static readonly object msbuildLock = new();
 
 	public WorkspaceManager()
 	{
@@ -206,28 +200,4 @@ internal sealed partial class WorkspaceManager : IDisposable
 		}
 	}
 
-	// ── MSBuild registration ─────────────────────────────────────────────────
-
-	static void EnsureMSBuildRegistered()
-	{
-		if(msbuildRegistered)
-			return;
-
-		lock(msbuildLock) {
-
-			if(msbuildRegistered)
-				return;
-
-			try {
-				if(MSBuildLocator.CanRegister)
-					MSBuildLocator.RegisterDefaults();
-			}
-			catch(Exception) {
-				// Intentionally swallowed — MSBuildWorkspace tools will fail gracefully per-call.
-			}
-			finally {
-				msbuildRegistered = true;
-			}
-		}
-	}
 }

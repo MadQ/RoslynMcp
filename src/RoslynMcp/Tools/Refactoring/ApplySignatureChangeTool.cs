@@ -23,7 +23,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		[Description("'y' to apply, 'session' to apply and remember, 'n' to reject.")] string approval,
 		[Description(ProjectPathDescription)] string projectPath)
 	{
-		using var scope = BeginTool("roslyn_apply_signature_change", token);
+		using var scope = BeginTool("roslyn_apply_signature_change", $"{token} ({approval})");
 
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 
