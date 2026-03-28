@@ -124,19 +124,6 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		return new { error = $"'{symbolName}' is not a type or method — cannot find implementations." };
 	}
 	
-	private static ISymbol? FindSymbol(Compilation compilation, string name, string? inType)
-	{
-		if(inType is not null) {
-		
-			var type = compilation.GetTypeByMetadataName(inType)
-				?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(inType));
-			
-			return type?.GetMembers(name).FirstOrDefault();
-		}
-		
-		// Global search for type or member.
-		return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
-	}
 	
 	private static string FormatMethod(IMethodSymbol method)
 	{
