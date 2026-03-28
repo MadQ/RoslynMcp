@@ -399,7 +399,7 @@ tests.Add(await RunTestAsync(
 	data => data?["succeeded"] is not null && data?["source"] is not null
 ));
 
-Console.WriteLine("\nRefactoring Tools (2 tests)");
+Console.WriteLine("\nRefactoring Tools (6 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 tests.Add(await RunTestAsync(
@@ -409,10 +409,11 @@ tests.Add(await RunTestAsync(
 	data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
 ));
 
-// Test change_signature against an existing method — temp files aren't visible
-// to MSBuild workspace (new files require server restart).
+// ── change_signature tests ──────────────────────────────────────────────
+
+// 1. Basic: add a parameter, verify diff has [Obsolete] and forwarding overload.
 tests.Add(await RunTestAsync(
-	"roslyn_change_signature: preview adding parameter",
+	"roslyn_change_signature: add parameter with default",
 	"roslyn_change_signature",
 	new {
 		methodName     = "NormalizePath",
@@ -423,6 +424,57 @@ tests.Add(await RunTestAsync(
 	data => data?["token"] is not null
 		 && data?["diff"]?.GetValue<string>().Contains("Obsolete") == true
 		 && data?["parameters_added"]?.AsArray().Count == 1
+		 && data?["deprecation_message"]?.GetValue<string>().Contains("NormalizePath") == true
+));
+
+// 2. Error: non-method symbol.
+tests.Add(await RunTestAsync(
+	"roslyn_change_signature: reject non-method symbol",
+	"roslyn_change_signature",
+	new {
+		methodName     = "WorkspaceManager",
+		addParameters  = "[{\"name\":\"x\",\"type\":\"int\"}]",
+		projectPath    = targetPath
+	},
+	data => data?["error"]?.GetValue<string>().Contains("not a method") == true
+));
+
+// 3. Error: no parameters provided.
+tests.Add(await RunTestAsync(
+	"roslyn_change_signature: reject empty addParameters",
+	"roslyn_change_signature",
+	new {
+		methodName     = "NormalizePath",
+		containingType = "RoslynMcpTool",
+		projectPath    = targetPath
+	},
+	data => data?["error"]?.GetValue<string>().Contains("No parameters") == true
+));
+
+// 4. Error: invalid JSON for addParameters.
+tests.Add(await RunTestAsync(
+	"roslyn_change_signature: reject invalid JSON",
+	"roslyn_change_signature",
+	new {
+		methodName     = "NormalizePath",
+		containingType = "RoslynMcpTool",
+		addParameters  = "not valid json",
+		projectPath    = targetPath
+	},
+	data => data?["error"]?.GetValue<string>().Contains("parse") == true
+));
+
+// 5. Error: duplicate parameter name.
+tests.Add(await RunTestAsync(
+	"roslyn_change_signature: reject duplicate parameter name",
+	"roslyn_change_signature",
+	new {
+		methodName     = "NormalizePath",
+		containingType = "RoslynMcpTool",
+		addParameters  = "[{\"name\":\"filePath\",\"type\":\"string\"}]",
+		projectPath    = targetPath
+	},
+	data => data?["error"]?.GetValue<string>().Contains("already exists") == true
 ));
 
 Console.WriteLine("\nFile Editing Tools (5 tests)");
