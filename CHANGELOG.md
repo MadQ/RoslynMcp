@@ -11,6 +11,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0-alpha] — 2026-03-28
+
+### Added
+- **`roslyn_get_member_body`** — returns the full source of a single method/property/field/type by name; handles partial types. The flagship token-reduction tool (#28)
+- **`roslyn_change_signature`** — adds parameters in non-breaking mode with forwarding overload + `[Obsolete]`. Strategy pattern architecture ready for Phase 2 (#7)
+- **`roslyn_apply_signature_change`** — applies or rejects signature changes via token (same workflow as rename)
+- **Token-based pagination cache** — `PaginationCache` with `ReadOnlyMemory<T>` mutation protection, sliding-window 60s TTL. Agents pass `page_token` to get subsequent pages without re-executing the query (#40)
+- **`AllSymbolsFinder`** — finds all symbols matching a name (not just the first), used by `find_references` for complete results
+- **`SymbolFormatter`** — shared static utility for method/property/field/event/type signature formatting
+- **LogViewer overhaul** — keyboard shortcuts (1-6 filters, S, Ctrl+F, Ctrl+L, Esc, Q, ?), search bar with live highlighting, FAIL filter (failed TOOL entries), legend toggle, equal-width buttons
+
+### Changed
+- **`roslyn_list_types`** — without `namespaceFilter`, returns only source-defined types (no more 829K character context-window bomb). Added skip/take/page_token (#29)
+- **`roslyn_find_references`** — without `containingType`, searches ALL matching symbols and unions results. Response includes `symbols_searched` field (#29)
+- **`roslyn_get_diagnostics`** — added `severity` filter ('errors', 'warnings', 'all') (#30)
+- **`roslyn_get_symbol_info`** — returns structured JSON instead of pipe-delimited string (#30)
+- **`roslyn_get_project_info`** — added `directOnly` parameter (default true) for direct NuGet references only (#30)
+- **`roslyn_get_type_members`** — added `includeInherited` parameter for base type members (#30)
+- **`roslyn_semantic_search`** — added `containingKind` filter for syntax-scoped search (#30)
+- **Complete pagination coverage** — `list_files`, `get_trivia`, `list_types` now have skip/take/page_token. All 10 paginated tools wired through `PaginateAndStore`/`TryServeCachedPage`
+- **DRY `Math.Clamp`** — moved into `TryServeCachedPage` with explicit `maxTake` parameter (no defaults)
+- **Log format redesign** — local time (no date), MSB/ADH workspace indicators (no more nullable `---`), tool name without `roslyn_` prefix, separate subject column, `[HIT]`/`[MISS]` cache tags, column-aligned output
+
+### DRY Extractions
+- `FindSymbol` → `RoslynMcpTool` base class (was duplicated 6x)
+- `FormatSymbolName` → `RoslynMcpTool` base class (was duplicated 3x)
+- `FormatModifiers` → `SymbolFormatter` (was duplicated 4x)
+- `FormatMethod`/`FormatProperty`/`FormatField`/`FormatEvent`/`FormatType` → `SymbolFormatter` (was duplicated 3x each)
+- `FindSyntaxTree` → `RoslynMcpTool` base class (normalizes + suffix matches, used by 8+ tools)
+
+### Docs
+- AGENTS.md updated: constructor pattern, rename API, tool tips section, tool count 26
+- README: highlights solution loading, pagination, get_member_body, smart build 17ms, active roadmap
+- `docs/plans/pagination-cache.md` — design doc for token-based pagination
+- `docs/plans/oop-dry-opportunities.md` — 7 refactoring opportunities in 3 phases
+
+---
+
 ## [0.6.0-alpha] — 2026-03-28
 
 ### Fixed

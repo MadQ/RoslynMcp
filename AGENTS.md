@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.7.0-alpha (pre-1.0) |
-| **Tool Count** | 26 MCP tools (25 stable + 1 experimental) |
+| **Tool Count** | 28 MCP tools (25 stable + 2 refactoring + 1 experimental) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
