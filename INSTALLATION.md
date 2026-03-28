@@ -398,7 +398,7 @@ For large codebases (>100K LOC), consider:
 
 **Checklist:**
 1. Server process started successfully (check client logs)
-2. MCP session initialized (`tools/list` should return 24 tools)
+2. MCP session initialized (`tools/list` should return 25 tools)
 3. Target directory is correct (check server stderr for `Target: ...`)
 
 ---

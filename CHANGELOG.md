@@ -1,4 +1,4 @@
-﻿# Changelog
+# Changelog
 
 All notable changes to RoslynMcp will be documented in this file.
 
@@ -7,10 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased] — v0.3.0-alpha
+## [Unreleased]
 
-### Added
-- **Multi-project support** — all 24 tools accept `projectPath` parameter; switch projects mid-session without restarting
+---
+
+## [0.4.0-alpha] — 2026-03-27
+
+Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) plus v0.4.0 bug fixes, solution-level loading, and comprehensive IO hardening.
+
+### Added (v0.3.0 — multi-project infrastructure)
+- **Multi-project support** — all 25 tools accept `projectPath` parameter; switch projects mid-session without restarting
 - **WorkspaceResolver** facade layer for consistent per-tool project resolution and structured error handling
 - **RoslynMcpTool** base class — `TryGetCompilation()` / `TryGetProject()` with `[NotNullWhen]` attributes; eliminates boilerplate from every tool
 - **AdhocWorkspace restored** — directories without `.csproj` now fully supported with FileSystemWatcher for incremental updates
@@ -18,47 +24,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`roslyn_semantic_search`** tool — Roslyn syntax-tree filtering by context (comments, strings, identifiers, xmldocs, code)
 - **Version centralization** — `Directory.Build.props` with `VersionPrefix`/`VersionSuffix`; Git commit SHA automatically appended to `InformationalVersion` for traceability
 
+### Added (v0.4.0)
+- **Solution-level workspace loading** — WorkspaceManager searches upward for .sln/.slnx and loads the full solution; cross-project references, rename, and find-implementations work across all projects
+- **`.slnx` support** — parses the new XML solution format and loads each project into the same MSBuildWorkspace
+- **`roslyn_debug_attach`** tool (DEBUG builds only) — launches JIT debugger dialog for mid-session VS attach
+- **`Paginate<T>` helper** in `RoslynMcpTool` base class — DRY pagination with bounds checking
+- **`ResolveFilePath` helper** — suffix-match fallback for file path resolution; preserves backward compat when rootPath is the solution directory
+- **`GetFilesSafe` helper** — `Directory.GetFiles` with exception guarding
+- **Comprehensive planning docs** — ROADMAP.md, code audit (23 bugs documented), tool assessment, style preservation plans
+
 ### Changed
-- **BREAKING: `projectPath` now REQUIRED** — all 24 tools require explicit project path; no CWD fallback (prevents catastrophic drive root enumeration, Issue #9 prerequisite)
-- All 24 tools migrated to `RoslynMcpTool` base class pattern
-- All 24 tools renamed with `roslyn_` prefix (e.g. `get_type_members` → `roslyn_get_type_members`) for unambiguous identification in agent tool lists
+- **BREAKING: `projectPath` now REQUIRED** — all 25 tools require explicit project path; no CWD fallback (prevents catastrophic drive root enumeration, Issue #9 prerequisite)
+- All tools migrated to `RoslynMcpTool` base class pattern
+- All tools renamed with `roslyn_` prefix (e.g. `get_type_members` → `roslyn_get_type_members`) for unambiguous identification in agent tool lists
 - All tools annotated with `ReadOnly`, `Destructive`, or `Idempotent` hints via `McpServerToolAttribute`
-- **File logging** — every tool invocation, server start/stop, and workspace error logged to a rotating file; controlled via `ROSLYNMCP_LOG_PATH` env var (default `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`, set to empty string to disable)
-- **`ToolScope`** — `BeginTool(name, subject?)` returns a disposable scope with `Failed<T>()`, `Outcome<T>()`, `Record()` for fluent per-tool logging; extracted into `RoslynMcpTool.ToolScope.cs` via `partial` class
-- **Tools reorganized** into semantic subfolders: `Analysis/` (13), `Search/` (3), `Editing/` (2), `Rename/` (2), `Build/` (3) — all remain in `RoslynMcp.Tools` namespace
-- WorkspaceManager: LRU workspace cache; `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()` added
-- TestHarness: path calculation fixed (5 levels up); `projectPath` added to all 23 tests
-- **LINQ optimization** — tools use materialize-once pattern when enumerating multiple times (count + paging); avoids double enumeration
+- **File logging** — every tool invocation, server start/stop, and workspace error logged to a rotating file; controlled via `ROSLYNMCP_LOG_PATH` env var
+- **`ToolScope`** — `BeginTool(name, subject?)` returns a disposable scope with `Failed<T>()`, `Outcome<T>()`, `Record()` for fluent per-tool logging
+- **Tools reorganized** into semantic subfolders: `Analysis/` (16), `Search/` (3), `Editing/` (2), `Rename/` (2), `Build/` (3)
+- **WorkspaceManager split** into partial classes: `WorkspaceManager.cs` (cache + API), `WorkspaceManager.Resolution.cs` (path resolution), `WorkspaceManager.Instance.cs` (workspace lifecycle)
+- **Per-project compilation cache** replaces single `Compilation` field (supports multi-project solutions)
+- **`GetRootPath`** returns solution directory when loaded from a solution; project directory otherwise
+- **LINQ optimization** — tools use materialize-once pattern when enumerating multiple times
+
+### Fixed (v0.3.0)
+- **AdhocWorkspace safety** — protected directory enumeration with try/catch for `UnauthorizedAccessException`; skips system/hidden directories and common large folders
+- **Root directory protection** — fail-fast check prevents accidental scanning of drive roots
+- **stdout contamination** — server startup messages use `Console.Error.WriteLine()` to avoid corrupting MCP protocol stream
+- **Server crash on startup** — `MSBuildLocator.RegisterDefaults()` moved into deferred `EnsureMSBuildRegistered()` with double-checked locking
+- **`LoadMSBuildWorkspace` unhandled exception** — wrapped in try/catch with context
+- **`ListTypesTool` / `DiagnosticsTool` return type** — changed `string[]` → `object` for correct MCP SDK serialization
+- **`AppDomain.UnhandledException` handler** — fatal crashes now write `[FATAL]` to log file
+
+### Fixed (v0.4.0)
+- **5 unregistered tools** — FileOutlineTool, GetSymbolsInScopeTool, GetUsingsTool, GetLineCountTool, SearchFilesTool were missing `[McpServerTool]` attributes; 20% of tools were silently invisible (#15)
+- **Pagination crash** — `AsSpan(skip, ...)` threw `ArgumentOutOfRangeException` when `skip >= results.Length` in 5 tools (#16)
+- **AdhocWorkspace root path** — `GetRootPath` returned parent directory instead of the directory itself (#17)
+- **Semantic search duplicate results** — multi-TFM projects produced duplicate matches; deduplicated by `FilePath` (#18)
+- **SolutionDiff `\r\n` splitting** — diff output had spurious `\r` on Windows (#19)
+- **MSBuildWorkspace comment** — corrected misleading comment claiming auto file watching (#19)
+- **LRU eviction gap** — `GetSolution`/`GetProject`/`GetWorkspaceInfo` were missing eviction on cache miss
+- **IO exception audit** — guarded all unprotected filesystem calls with exception filters; added `UnauthorizedAccessException` to `ReplaceInFileTool` catch blocks; guarded `SolutionDiff.ApplyToDiskAsync`, `RestorePackagesTool.FindProjectFile`, `CleanSolutionTool.FindProjectFile`
 
 ### Security
-- **Removed CWD fallback** — prevents server started from drive roots (`J:\`, `C:\`) from enumerating entire drives and accessing system directories
+- **Removed CWD fallback** — prevents server started from drive roots from enumerating entire drives
 - **ArgumentException on missing projectPath** — clear error message when agent fails to specify project
 
-### Fixed
-- **AdhocWorkspace safety** — protected directory enumeration with try/catch for `UnauthorizedAccessException`; skips system/hidden directories and common large folders (`node_modules`, `bin`, `obj`, `.git`)
-- **Root directory protection** — fail-fast check prevents accidental scanning of drive roots (e.g., `C:\`, `D:\`, `/`)
-- **stdout contamination** — server startup messages use `Console.Error.WriteLine()` to avoid corrupting MCP protocol stream
-- **Server crash on startup** — `MSBuildLocator.RegisterDefaults()` moved out of static constructor into deferred `EnsureMSBuildRegistered()` with double-checked locking; a `TypeInitializationException` from a static ctor is unrecoverable, so failure is now silently swallowed and the server stays alive
-- **`LoadMSBuildWorkspace` unhandled exception** — wrapped in try/catch; exceptions now surface as `InvalidOperationException` with context instead of crashing the process
-- **`ListTypesTool` / `DiagnosticsTool` return type** — changed `string[]` → `object`; MCP SDK serializes `string[]` as multiple content blocks rather than a JSON array, breaking TestHarness JSON parsing
-- **`AppDomain.UnhandledException` handler** — fatal crashes before DI/hosting is up now write a `[FATAL]` entry to the log file; previously startup crashes were completely silent
-- **TestHarness `ReceiveAsync`** — catches `OperationCanceledException` and `IOException` instead of crashing; pipe-closed and timeout both return `null` gracefully
-- **TestHarness initialization** — aborts with a useful message and flushes stderr if server exits before responding to `initialize`
-- **TestHarness stale field references** — `containingType` updated from `WorkspaceManager` → `WorkspaceInstance` for `compilation` field (moved during LRU refactor); `interfaces` → `interfaces_and_derived` in hierarchy test
-- **TestHarness timeout** — `ReceiveAsync` default increased from 15s → 30s to cover `dotnet run` cold-start time
-
-### Security
-
-⚠️ **Known Issue:** RoslynMcp currently has unrestricted filesystem access. Only use with trusted agents and on projects you control. Filesystem security boundaries (project root enforcement, symlink blocking, path traversal prevention) are planned for v0.4.0. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
-
-### Planned
-- Filesystem security boundaries (see Issue #9)
-- `undo_last_edit` — revert most recent Roslyn-generated edit (rename, refactoring) from in-memory snapshot
-- NuGet package publication
-- CI/CD pipeline (GitHub Actions)
-- Performance optimizations for large projects
-- Additional tool: `get_nullable_flow_state`
-- Additional tool: `get_call_info` (resolve method call targets)
+⚠️ **Known Issue:** RoslynMcp currently has unrestricted filesystem access. Only use with trusted agents and on projects you control. Filesystem security boundaries are planned for a future release. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
 
 ---
 
@@ -78,11 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Enhanced
 - **`roslyn_get_type_members`**: Now returns full signatures with parameter types, return types, modifiers, and XML doc summaries (was just names)
-- **`roslyn_build_project`**: Smart Roslyn-first behavior — checks diagnostics before running MSBuild, skips build if errors exist (huge performance win)
+- **`roslyn_build_project`**: Smart Roslyn-first behavior — checks diagnostics before running MSBuild, skips build if errors exist
 - **Diagnostic filtering**: NETSDK1209 and other non-actionable SDK warnings automatically filtered from output
 
 ### Added (Infrastructure)
-- Comprehensive test suite: 23 tests covering all 24 tools (100% pass rate)
+- Comprehensive test suite: 23 tests covering all tools (100% pass rate)
 - TestHarness project for dogfooding (RoslynMcp tests itself)
 - GitHub-ready documentation: README, CONTRIBUTING, INSTALLATION
 - MIT License
@@ -137,6 +148,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.2.0-alpha...HEAD
+[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.4.0-alpha...HEAD
+[0.4.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.2.0-alpha...v0.4.0-alpha
 [0.2.0-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/v0.2.0-alpha
 [0.1.0-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/v0.1.0-alpha

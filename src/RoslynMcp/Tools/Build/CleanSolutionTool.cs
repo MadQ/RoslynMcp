@@ -82,9 +82,13 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 	
 	private static string? FindProjectFile(string directory)
 	{
-		var csprojFiles = Directory.GetFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly);
-		
-		return csprojFiles.Length > 0 ? csprojFiles[0] : null;
+		try {
+			var csprojFiles = Directory.GetFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly);
+			return csprojFiles.Length > 0 ? csprojFiles[0] : null;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or DirectoryNotFoundException) {
+			return null;
+		}
 	}
 }
 

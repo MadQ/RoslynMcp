@@ -52,7 +52,13 @@ internal static class SolutionDiff
 					continue;
 				
 				var text = (await newDoc.GetTextAsync()).ToString();
-				await File.WriteAllTextAsync(newDoc.FilePath, text);
+
+				try {
+					await File.WriteAllTextAsync(newDoc.FilePath, text);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					throw new InvalidOperationException($"Failed to write '{newDoc.FilePath}': {ex.Message}", ex);
+				}
 			}
 		}
 	}

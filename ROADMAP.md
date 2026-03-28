@@ -63,7 +63,7 @@ The highest-value new tool, hardened defaults for existing tools, and updated co
 | 14 | feature | Implement `roslyn_get_member_body` | Returns source of a single method/property/field — the biggest token reduction win | — |
 | 15 | enhancement | Harden `roslyn_list_types` and `roslyn_find_references` defaults | list_types: default namespace filter to project types (audit #12); find_references: search all matching symbols when no containingType given | #12 |
 | 16 | enhancement | Add filtering/output parameters to existing tools | get_type_members: includeInherited; get_project_info: directOnly; get_diagnostics: severity filter; semantic_search: containingKind; get_symbol_info: structured JSON output | — |
-| 17 | docs | Update AGENTS.md | Fix stale version (0.2.0→current); fix constructor pattern (missing FileLogger); fix Rename pattern (SymbolRenameOptions); incorporate tool gotchas from assessment | — |
+| 17 | docs | Update AGENTS.md | Fix constructor pattern (missing FileLogger); fix Rename pattern (SymbolRenameOptions); incorporate tool gotchas from assessment. Version already updated to 0.4.0-alpha. | — |
 
 **Theme:** Quality of life. This is where someone trying RoslynMcp says "oh, this is actually good."
 
