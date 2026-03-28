@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetTriviaTool : RoslynMcpTool
 {
-    public GetTriviaTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+    public GetTriviaTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
     [McpServerTool(Name = "roslyn_get_trivia", ReadOnly = true)]
     [Description(

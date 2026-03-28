@@ -8,11 +8,13 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class WorkspaceResolver
 {
-	readonly WorkspaceManager manager;
+	readonly WorkspaceManager  manager;
+	readonly PaginationCache   paginationCache;
 
-	public WorkspaceResolver(WorkspaceManager manager)
+	public WorkspaceResolver(WorkspaceManager manager, PaginationCache paginationCache)
 	{
-		this.manager = manager;
+		this.manager         = manager;
+		this.paginationCache = paginationCache;
 	}
 
 	/// <summary>
@@ -103,5 +105,6 @@ internal sealed class WorkspaceResolver
 		var (resolved, _) = ResolveWithKind(projectPath);
 
 		manager.InvalidateFile(resolved, fullPath);
+		paginationCache.InvalidateAll();
 	}
 }

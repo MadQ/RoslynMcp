@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ProjectInfoTool : RoslynMcpTool
 {
-	public ProjectInfoTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public ProjectInfoTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	// Matches a TFM segment in a path like ...\net8.0\... or .../net11.0/...
 	private static readonly Regex TfmPattern = new(@"[/\\](net\d+\.\d+(?:-\w+)?)[/\\]", RegexOptions.Compiled);

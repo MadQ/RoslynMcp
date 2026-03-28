@@ -11,7 +11,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class SemanticSearchTool : RoslynMcpTool
 {
-	public SemanticSearchTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public SemanticSearchTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[
 		McpServerTool(Name = "roslyn_semantic_search", ReadOnly = true), Description(
@@ -44,15 +44,22 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		int skip = 0,
 		
 		[Description("Maximum number of results to return. Default: 50, max: 200.")]
-		int take = 50
+		int take = 50,
+
+		[Description("Token from a previous response to get the next page without re-executing the query.")]
+		string? page_token = null
 	)
 	{
 		using var scope = BeginTool("roslyn_semantic_search", pattern);
-		context		??= "all";
-		filePattern	??= "*.cs";
-		take		  = Math.Clamp(take, 1, 200);
-		skip		  = Math.Max(0, skip);
-		
+		context     ??= "all";
+		filePattern ??= "*.cs";
+		take          = Math.Clamp(take, 1, 200);
+		skip          = Math.Max(0, skip);
+
+		var cachedPage = TryServeCachedPage<SemanticMatchResult>(scope, page_token, ref skip, take);
+		if(cachedPage is not null)
+			return cachedPage;
+
 		// Validate context parameter
 		var validContexts = new[] { "comments", "strings", "identifiers", "code", "xmldocs", "all" };
 		
@@ -142,17 +149,17 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				}
 			}
 		
-		var totalMatches = allMatches.Count;
-		SemanticMatchResult[] pagedMatches = [.. allMatches.Skip(skip).Take(take)]
-		;
-		
-		scope.Outcome($"{totalMatches} match(es)");
-		
+		var allResults = allMatches.ToArray();
+		var result     = PaginateAndStore(allResults, ref skip, take);
+
+		scope.Outcome($"{result.Total} match(es)");
+
 		return new {
-			matches		  = pagedMatches,
-			total_matches = totalMatches,
-			returned	  = pagedMatches.Length,
-			has_more	  = skip + pagedMatches.Length < totalMatches,
+			matches       = result.Items,
+			total_matches = result.Total,
+			returned      = result.Items.Length,
+			page_token    = result.PageToken,
+			has_more      = result.HasMore,
 			context		  = context,
 			_caution	  = AdhocCaution(projectPath)
 		};

@@ -11,7 +11,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 {
 	readonly ApprovalStore approvals;
 	
-	public PreviewRenameTool(WorkspaceResolver workspace, ApprovalStore approvals, FileLogger logger) : base(workspace, logger)
+	public PreviewRenameTool(WorkspaceResolver workspace, ApprovalStore approvals, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache)
 	{
 		this.approvals = approvals;
 	}

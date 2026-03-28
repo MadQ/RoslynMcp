@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetUsingsTool : RoslynMcpTool
 {
-	public GetUsingsTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public GetUsingsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_get_usings", ReadOnly = true)]
 	[Description(

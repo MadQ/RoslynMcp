@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class RestorePackagesTool : RoslynMcpTool
 {
-	public RestorePackagesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public RestorePackagesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_restore_packages", Idempotent = true)]
 	[Description(

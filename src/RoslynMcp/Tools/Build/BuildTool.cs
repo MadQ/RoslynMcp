@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class BuildTool : RoslynMcpTool
 {
-	public BuildTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public BuildTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	// Diagnostic codes to ignore (non-actionable SDK/tooling warnings).
 	private static readonly HashSet<string> IgnoredDiagnostics = new(StringComparer.OrdinalIgnoreCase) {

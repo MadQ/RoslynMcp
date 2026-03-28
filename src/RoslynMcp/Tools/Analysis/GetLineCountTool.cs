@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetLineCountTool : RoslynMcpTool
 {
-    public GetLineCountTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+    public GetLineCountTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
     [McpServerTool(Name = "roslyn_get_line_count", ReadOnly = true)]
     [Description(

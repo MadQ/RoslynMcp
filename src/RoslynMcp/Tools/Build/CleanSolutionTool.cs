@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class CleanSolutionTool : RoslynMcpTool
 {
-	public CleanSolutionTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public CleanSolutionTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_clean_solution", Destructive = true)]
 	[Description(

@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ReadFileTool : RoslynMcpTool
 {
-    public ReadFileTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+    public ReadFileTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
     [McpServerTool(Name = "roslyn_read_file", ReadOnly = true)]
     [Description(

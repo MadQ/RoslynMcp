@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class TypeMembersTool : RoslynMcpTool
 {
-	public TypeMembersTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public TypeMembersTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_get_type_members", ReadOnly = true)]
 	[Description(
@@ -25,13 +25,19 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		string? memberKind = null,
 
 		[Description("Number of members to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of members to return. Default: 50, max: 200.")] int take = 50)
+		[Description("Maximum number of members to return. Default: 50, max: 200.")] int take = 50,
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_type_members", typeName);
+
+		take = Math.Clamp(take, 1, 200);
+
+		var cachedPage = TryServeCachedPage<object?>(scope, page_token, ref skip, take);
+		if(cachedPage is not null)
+			return cachedPage;
+
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
-		
-		take = Math.Clamp(take, 1, 200);
 		
 		var type = FindType(compilation, typeName);
 		
@@ -46,16 +52,17 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 				.Where(m => m is not null)
 		];
 		
-		var page = Paginate(allMembers, ref skip, take);
-		
-		return scope.Outcome($"{page.Length}/{allMembers.Length} member(s)", new {
-			type_name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-			type_kind = type.TypeKind.ToString().ToLowerInvariant(),
-			total_members = allMembers.Length,
-			skip,
-			take,
-			members   = page,
-			_caution  = AdhocCaution(projectPath)
+		var result = PaginateAndStore(allMembers, ref skip, take);
+
+		return scope.Outcome($"{result.Items.Length}/{result.Total} member(s)", new {
+			type_name     = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+			type_kind     = type.TypeKind.ToString().ToLowerInvariant(),
+			total_members = result.Total,
+			skip, take,
+			members    = result.Items,
+			page_token = result.PageToken,
+			has_more   = result.HasMore,
+			_caution   = AdhocCaution(projectPath)
 		});
 	}
 	

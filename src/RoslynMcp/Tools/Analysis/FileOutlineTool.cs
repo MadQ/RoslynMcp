@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class FileOutlineTool : RoslynMcpTool
 {
-	public FileOutlineTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public FileOutlineTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true)]
 	[Description(
@@ -18,13 +18,19 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Number of types to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20)
+		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_file_outline", filePath);
+
+		take = Math.Clamp(take, 1, 100);
+
+		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, take);
+		if(cachedPage is not null)
+			return cachedPage;
+
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
-		
-		take = Math.Clamp(take, 1, 100);
 		
 		var rootPath   = workspace.GetRootPath(projectPath);
 		var normalized = NormalizePath(filePath);
@@ -39,15 +45,16 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		var root     = await tree.GetRootAsync();
 		var model    = compilation.GetSemanticModel(tree);
 		var allTypes = ExtractTypes(root, model);
-		var page     = Paginate(allTypes, ref skip, take);
-		
-		return scope.Outcome($"{page.Length}/{allTypes.Length} type(s)", new {
+		var result   = PaginateAndStore(allTypes, ref skip, take);
+
+		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new {
 			file        = Path.GetRelativePath(rootPath, tree.FilePath),
-			total_types = allTypes.Length,
-			skip,
-			take,
-			types       = page.ToArray(),
-			_caution    = AdhocCaution(projectPath)
+			total_types = result.Total,
+			skip, take,
+			types      = result.Items,
+			page_token = result.PageToken,
+			has_more   = result.HasMore,
+			_caution   = AdhocCaution(projectPath)
 		});
 	}
 	
