@@ -80,7 +80,9 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			insertIndex = matchIndex;
 		}
 
-		var newLines    = text.Split('\n');
+		// Split on both \r\n and \n to avoid trailing \r in lines.
+		// WriteAllLines uses Environment.NewLine on output, matching platform convention.
+		var newLines    = text.Split(["\r\n", "\n"], StringSplitOptions.None);
 		var resultLines = new List<string>(lines.Length + newLines.Length);
 
 		resultLines.AddRange(lines[..insertIndex]);
