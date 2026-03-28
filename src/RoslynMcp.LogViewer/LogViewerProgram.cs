@@ -2,6 +2,8 @@
 using System.Text.Json;
 using RoslynMcp.LogViewer;
 
+static string GetVersion() => typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown";
+
 var envLogPath = Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH");
 
 string logPath;
@@ -27,7 +29,7 @@ else {
 	);
 }
 
-Console.Error.WriteLine("RoslynMcp Log Viewer");
+Console.Error.WriteLine($"RoslynMcp Log Viewer {GetVersion()}");
 Console.Error.WriteLine($"Watching : {logPath}");
 Console.Error.WriteLine($"Open     : http://localhost:5123");
 
