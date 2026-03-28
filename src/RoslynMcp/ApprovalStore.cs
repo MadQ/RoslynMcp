@@ -8,32 +8,33 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class ApprovalStore
 {
-	// Pending previews: token → (solution with edits applied, human-readable diff, symbol key)
 	private readonly Dictionary<string, PendingOperation> pending = new();
-	
-	// Session-approved symbol keys: once a rename of a given symbol is approved with "session",
-	// future previews of the same symbol are auto-confirmed without a new token exchange.
-	private readonly HashSet<string> sessionApproved = new(StringComparer.Ordinal);
-	
-	// Lock object for thread-safe access to pending and sessionApproved.
-	// Note: System.Threading.Lock (introduced .NET 9) would be preferable for performance and safety,
-	// but we target .NET 8/10/11 and need compatibility with .NET 8. Once .NET 8 support is dropped,
-	// consider upgrading to Lock for better lock semantics and reduced allocations.
-	private readonly object syncRoot = new();
-	
-	/// <summary>
-	///     Registers a pending operation and returns its confirmation token.
-	///     If the symbol key is already session-approved, marks the token as pre-confirmed.
-	/// </summary>
+	private readonly LinkedList<string>                   insertionOrder = new();
+	private readonly HashSet<string>                      sessionApproved = new(StringComparer.Ordinal);
+	private readonly object                               syncRoot = new();
+
+	// Each PendingOperation holds two Solution snapshots — cap to prevent unbounded memory growth.
+	private const int MaxPending = 10;
+
 	public string Register(Solution baseSolution, Solution newSolution, string diff, string symbolKey)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
 
 		lock(syncRoot) {
+
+			// Evict oldest if at capacity.
+			while(pending.Count >= MaxPending && insertionOrder.First is not null) {
+
+				var oldest = insertionOrder.First.Value;
+				insertionOrder.RemoveFirst();
+				pending.Remove(oldest);
+			}
+
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-			pending[token]   = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed);
+			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed);
+			insertionOrder.AddLast(token);
 		}
-		
+
 		return token;
 	}
 	
@@ -54,21 +55,26 @@ internal sealed class ApprovalStore
 	public PendingOperation? Consume(string token, bool approveForSession)
 	{
 		lock(syncRoot) {
+
 			if(!pending.Remove(token, out var op))
 				return null;
-			
+
+			insertionOrder.Remove(token);
+
 			if(approveForSession)
 				sessionApproved.Add(op.SymbolKey);
-			
+
 			return op;
 		}
 	}
-	
-	/// <summary>Discards a token without applying anything.</summary>
+
 	public bool Reject(string token)
 	{
-		lock(syncRoot)
+		lock(syncRoot) {
+
+			insertionOrder.Remove(token);
 			return pending.Remove(token);
+		}
 	}
 	
 	public bool IsSessionApproved(string symbolKey)
