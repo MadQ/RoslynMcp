@@ -63,7 +63,7 @@ The highest-value new tool, hardened defaults for existing tools, and updated co
 | 14 | feature | Implement `roslyn_get_member_body` | Returns source of a single method/property/field — the biggest token reduction win | — |
 | 15 | enhancement | Harden `roslyn_list_types` and `roslyn_find_references` defaults | list_types: default namespace filter to project types (audit #12); find_references: search all matching symbols when no containingType given | #12 |
 | 16 | enhancement | Add filtering/output parameters to existing tools | get_type_members: includeInherited; get_project_info: directOnly; get_diagnostics: severity filter; semantic_search: containingKind; get_symbol_info: structured JSON output | — |
-| 17 | docs | Update AGENTS.md | Fix constructor pattern (missing FileLogger); fix Rename pattern (SymbolRenameOptions); incorporate tool gotchas from assessment. Version already updated to 0.4.0-alpha. | — |
+| 17 | docs | Update AGENTS.md | Fix constructor pattern (missing FileLogger); fix Rename pattern (SymbolRenameOptions); incorporate tool gotchas from assessment. Version tracked via `Directory.build.props`. | — |
 
 **Theme:** Quality of life. This is where someone trying RoslynMcp says "oh, this is actually good."
 
@@ -166,9 +166,13 @@ All 23 items from `docs/plans/code-audit.md` are mapped to issues above. Cross-r
 | 21 | DiagnosticsTool error.ToString() | 6 | v0.5.0 |
 | 22 | SemanticSearch token-level matching | 10 | v0.5.0 |
 | 23 | ApprovalStore no eviction | 13 | v0.6.0 |
+| 24 | FSW feedback loop (TryApplyChanges writes) | 49 | v0.6.0 |
 
-The semantic_search duplicate results (multi-TFM) was discovered during tool testing and is not in the audit — it's issue #4.
-The DiagnosticsTool ordering (warnings before errors) was in the original analysis but not the audit — it's folded into issue #6.
+The semantic_search duplicate results (multi-TFM) was discovered during tool testing and is not in the audit — it's issue #18.
+The DiagnosticsTool ordering (warnings before errors) was in the original analysis but not the audit — it's folded into issue #20.
+The PreviewRenameTool error.ToString() was found during v0.5.0 work — issue #46.
+The MSBuild FSW (external changes invisible) was found during v0.5.0 testing — issue #47.
+The FSW feedback loop (TryApplyChanges re-triggers FSW) was found during v0.6.0 work — audit item #24, issue #49.
 
 ---
 

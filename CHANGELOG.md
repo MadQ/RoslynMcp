@@ -11,6 +11,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.0-alpha] — 2026-03-28
+
+### Fixed
+- **cacheLock contention** — workspace loading (multi-second MSBuild) no longer holds the cache lock; other tool calls can still hit cached workspaces during loading. Double-checked pattern handles concurrent loads.
+- **`msbuildRegistered` volatile** — double-checked locking read outside lock needs `volatile` for correctness on ARM (.NET ECMA-335 memory model)
+- **FSW feedback loop** — `MSBuildWorkspace.TryApplyChanges` writes text back to disk, re-triggering the FSW. New `ApplyChangesWithFswSuppressed` method disables FSW during writes (#49)
+- **SolutionDiff O(n*m) LCS memory** — replaced full DP table (~400 MB for 10K-line files) with O(n+m) greedy line matching using dictionary + binary search (#26)
+- **GetTriviaTool bounds checking** — clamp `startLine`/`endLine` to valid range instead of crashing on out-of-range input
+- **DiagnosticsTool single-file performance** — use `GetSemanticModel(tree).GetDiagnostics()` instead of full-project compilation for single-file queries
+- **ApprovalStore eviction** — cap pending operations at 10, evict oldest. Each holds two `Solution` snapshots; previously accumulated without bound (#27)
+
+---
+
+## [0.5.0-alpha] — 2026-03-27
+
+### Fixed
+- **FormatModifiers** — `protected internal` and `private protected` were silently dropped in FileOutlineTool, GetSymbolDefinitionTool, TypeMembersTool. Extracted to shared `FormatModifiers` in `RoslynMcpTool` base class.
+- **DiagnosticsTool** — errors now sorted before warnings (`OrderByDescending`); error path returns structured object instead of `.ToString()` on anonymous type
+- **TypeHierarchyTool** — `FindDerivedClassesAsync` replaced with `FindImplementationsAsync` for interface types (was returning nothing for interfaces)
+- **Rename workflow** — store base solution in `PendingOperation` so apply uses the same snapshot as preview; `SymbolKey` includes parameter types to distinguish overloaded methods (#22)
+- **ReplaceInCodeTool** — added `ParseStatement` fallback for statement/directive syntax kinds; added `RecordDeclaration` to member arm
+- **SimpleNameFinder** — verify namespace qualification for dotted names instead of silently discarding the prefix
+- **SemanticSearchTool** — replaced per-token regex with line-level matching so multi-token patterns work in `code` context; comments/strings excluded via `DetermineContext`
+- **PreviewRenameTool** — error path uses `JsonSerializer.Serialize` instead of `.ToString()` on anonymous object (#46)
+- **MSBuild FileSystemWatcher** — added FSW for MSBuild workspaces; external file changes (IDE edits, `rm`, non-Roslyn agent tools) now detected. Handles modify (push SourceText) and delete (clear text). New files require server restart (#47)
+
+---
+
 ## [0.4.0-alpha] — 2026-03-27
 
 Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) plus v0.4.0 bug fixes, solution-level loading, and comprehensive IO hardening.
@@ -148,7 +176,9 @@ Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) 
 
 ---
 
-[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.4.0-alpha...HEAD
+[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.6.0-alpha...HEAD
+[0.6.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.5.0-alpha...v0.6.0-alpha
+[0.5.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.4.0-alpha...v0.5.0-alpha
 [0.4.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.2.0-alpha...v0.4.0-alpha
 [0.2.0-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/v0.2.0-alpha
 [0.1.0-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/v0.1.0-alpha

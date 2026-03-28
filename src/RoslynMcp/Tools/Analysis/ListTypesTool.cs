@@ -25,7 +25,6 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		
 		var allTypes    = new List<INamedTypeSymbol>();
 		
-		// Walk namespace tree.
 		CollectTypes(compilation.GlobalNamespace, allTypes);
 		
 		var filtered = allTypes
