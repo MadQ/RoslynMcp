@@ -263,8 +263,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_get_symbol_info: resolve symbol at location",
 	"roslyn_get_symbol_info",
 	new { filePath = "Program.cs", line = 10, column = 10, projectPath = targetPath },
-	data => data?.GetValue<string>().Contains("Kind:") == true,
-	expectJson: false
+	data => data?["kind"] is not null && data?["name"] is not null
 ));
 
 tests.Add(await RunTestAsync(
