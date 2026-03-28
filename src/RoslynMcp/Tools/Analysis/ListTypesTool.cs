@@ -52,14 +52,14 @@ internal sealed class ListTypesTool : RoslynMcpTool
 
 		var result = PaginateAndStore(allResults, ref skip, take);
 
-		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new {
-			total_types = result.Total,
-			skip, take,
-			types      = result.Items,
-			page_token = result.PageToken,
-			has_more   = result.HasMore,
-			_caution   = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new ListTypesResult(
+			Total_types: result.Total,
+			Skip: skip, Take: take,
+			Types:      result.Items,
+			Page_token: result.PageToken,
+			Has_more:   result.HasMore,
+			_caution:   AdhocCaution(projectPath)
+		));
 	}
 	
 	private static void CollectTypes(INamespaceSymbol ns, List<INamedTypeSymbol> collector)

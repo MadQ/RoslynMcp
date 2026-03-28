@@ -46,15 +46,15 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		var allTypes = ExtractTypes(root, model);
 		var result   = PaginateAndStore(allTypes, ref skip, take);
 
-		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new {
-			file        = Path.GetRelativePath(rootPath, tree.FilePath),
-			total_types = result.Total,
-			skip, take,
-			types      = result.Items,
-			page_token = result.PageToken,
-			has_more   = result.HasMore,
-			_caution   = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new FileOutlineResult(
+			File:        Path.GetRelativePath(rootPath, tree.FilePath),
+			Total_types: result.Total,
+			Skip: skip, Take: take,
+			Types:      result.Items,
+			Page_token: result.PageToken,
+			Has_more:   result.HasMore,
+			_caution:   AdhocCaution(projectPath)
+		));
 	}
 	
 	private static TypeOutline[] ExtractTypes(SyntaxNode root, SemanticModel model)

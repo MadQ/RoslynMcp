@@ -69,16 +69,16 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		
 		var result = PaginateAndStore(allMembers, ref skip, take);
 
-		return scope.Outcome($"{result.Items.Length}/{result.Total} member(s)", new {
-			type_name     = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-			type_kind     = type.TypeKind.ToString().ToLowerInvariant(),
-			total_members = result.Total,
-			skip, take,
-			members    = result.Items,
-			page_token = result.PageToken,
-			has_more   = result.HasMore,
-			_caution   = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} member(s)", new TypeMembersResult(
+			Type_name:     type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+			Type_kind:     type.TypeKind.ToString().ToLowerInvariant(),
+			Total_members: result.Total,
+			Skip: skip, Take: take,
+			Members:    result.Items,
+			Page_token: result.PageToken,
+			Has_more:   result.HasMore,
+			_caution:   AdhocCaution(projectPath)
+		));
 	}
 	
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)

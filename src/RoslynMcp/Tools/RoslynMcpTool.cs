@@ -355,14 +355,14 @@ internal abstract partial class RoslynMcpTool
 		scope.SetCacheTag(hit: true);
 		var page = Paginate(cached, ref skip, take);
 
-		return scope.Outcome($"{page.Length}/{cached.Length}", new {
-			items      = page,
-			total      = cached.Length,
-			skip,
-			take,
-			page_token = pageToken,
-			has_more   = skip + page.Length < cached.Length
-		});
+		return scope.Outcome($"{page.Length}/{cached.Length}", new CachedPageResult<T>(
+			Items:      page,
+			Total:      cached.Length,
+			Skip:       skip,
+			Take:       take,
+			Page_token: pageToken!,
+			Has_more:   skip + page.Length < cached.Length
+		));
 	}
 
 	/// <summary>

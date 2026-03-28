@@ -83,21 +83,21 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		;
 
 		if(allResults.Length == 0)
-			return new { total_references = 0, skip, take, references = new[] { $"No references found for '{symbolName}'." } };
+			return new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], "", false, AdhocCaution(projectPath));
 
 		string[] symbolsSearched = [.. symbols.Select(s => FormatSymbolName(s)).Distinct()];
 
 		var result = PaginateAndStore(allResults, ref skip, take);
 
-		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", new {
-			total_references = result.Total,
-			symbols_searched = symbolsSearched,
-			skip, take,
-			references = result.Items,
-			page_token = result.PageToken,
-			has_more   = result.HasMore,
-			_caution   = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", new FindReferencesResult(
+			Total_references: result.Total,
+			Symbols_searched: symbolsSearched,
+			Skip: skip, Take: take,
+			References: result.Items,
+			Page_token: result.PageToken,
+			Has_more:   result.HasMore,
+			_caution:   AdhocCaution(projectPath)
+		));
 	}
 	
 }

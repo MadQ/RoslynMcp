@@ -76,14 +76,14 @@ internal sealed class ReadFileTool : RoslynMcpTool
 
         var relative = Path.GetRelativePath(rootPath, canonicalPath);
 
-        return scope.Outcome($"{result.Length}/{totalLines} line(s)", new {
-            file        = relative,
-            source      = isCs ? "roslyn" : "disk",
-            total_lines = totalLines,
-            start_line  = first,
-            end_line    = last,
-            lines       = result,
-            _caution    = AdhocCaution(projectPath)
-        });
+        return scope.Outcome($"{result.Length}/{totalLines} line(s)", new ReadFileResult(
+            File:        relative,
+            Source:      isCs ? "roslyn" : "disk",
+            Total_lines: totalLines,
+            Start_line:  first,
+            End_line:    last,
+            Lines:       result,
+            _caution:    AdhocCaution(projectPath)
+        ));
     }
 }
