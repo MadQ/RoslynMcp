@@ -40,10 +40,9 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		if(op is null)
 			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run preview_rename again.");
 		
-		var oldSolution = workspace.GetSolution(projectPath);
-		await SolutionDiff.ApplyToDiskAsync(oldSolution, op.NewSolution);
-		
-		var filesChanged = op.NewSolution.GetChanges(oldSolution)
+		await SolutionDiff.ApplyToDiskAsync(op.BaseSolution, op.NewSolution);
+
+		var filesChanged = op.NewSolution.GetChanges(op.BaseSolution)
 			.GetProjectChanges()
 			.SelectMany(p => p.GetChangedDocuments())
 			.Count()
