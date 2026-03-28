@@ -24,6 +24,8 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		[Description("Optional filter: 'field', 'property', 'method', 'enum', 'event', or omit for all.")]
 		string? memberKind = null,
 
+		[Description("Include inherited members from base types. Default: false (declared only).")] bool includeInherited = false,
+
 		[Description("Number of members to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of members to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
@@ -44,8 +46,22 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		if(type is null)
 			return scope.Failed("type not found", new { error = $"Type '{typeName}' not found in the project." });
 		
+		IEnumerable<ISymbol> members = type.GetMembers();
+
+		if(includeInherited) {
+
+			// Walk the base type chain and collect inherited members.
+			var current = type.BaseType;
+
+			while(current is not null && current.SpecialType != SpecialType.System_Object) {
+
+				members = members.Concat(current.GetMembers());
+				current = current.BaseType;
+			}
+		}
+
 		var allMembers = (object?[]) [..
-			type.GetMembers()
+			members
 				.Where(m => !m.IsImplicitlyDeclared)
 				.Where(m => memberKind is null || MatchesKind(m, memberKind))
 				.Select(FormatMember)

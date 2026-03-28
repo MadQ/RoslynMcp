@@ -22,7 +22,8 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		"output kind, nullable setting, NuGet package references, and additional files. " +
 		"Use this to understand project configuration without reading the .csproj directly.")]
 	public object GetProjectInfo(
-		[Description(ProjectPathDescription)] string projectPath)
+		[Description(ProjectPathDescription)] string projectPath,
+		[Description("When true, only returns direct package references from the .csproj (not transitive). Default: true.")] bool directOnly = true)
 	{
 		using var scope = BeginTool("roslyn_get_project_info");
 		if(!TryGetProject(projectPath, out var project, out var error))
@@ -38,7 +39,10 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		var outputKind   = compOpts?.OutputKind.ToString() ?? "Unknown";
 		var nullable     = compOpts?.NullableContextOptions.ToString() ?? "Unknown";
 		var langVersion  = parseOpts?.LanguageVersion.ToDisplayString() ?? "Unknown";
-		var packages     = ExtractPackages(project.MetadataReferences);
+		var packages     = directOnly && project.FilePath is not null
+			? ExtractDirectPackages(project.FilePath)
+			: ExtractPackages(project.MetadataReferences)
+		;
 		string[] extraFiles = [..
 			project.AdditionalDocuments
 				.Select(d => Path.GetRelativePath(rootPath, d.FilePath ?? d.Name))
@@ -110,5 +114,27 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		];
 	}
 	
+	private static PackageRef[] ExtractDirectPackages(string csprojPath)
+	{
+		try {
+
+			var doc = System.Xml.Linq.XDocument.Load(csprojPath);
+
+			return [..
+				doc.Descendants("PackageReference")
+					.Select(e => new PackageRef(
+						e.Attribute("Include")?.Value ?? "?",
+						e.Attribute("Version")?.Value ?? "*"
+					))
+					.DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+					.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
+			];
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) {
+
+			return [];
+		}
+	}
+
 	private sealed record PackageRef(string Name, string Version);
 }

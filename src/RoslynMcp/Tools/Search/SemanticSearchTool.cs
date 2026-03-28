@@ -39,6 +39,9 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		
 		[Description("File glob pattern (e.g., '*.cs'). Default: '*.cs'.")]
 		string? filePattern = null,
+
+		[Description("Only match within nodes of this syntax kind (e.g., 'MethodDeclaration', 'ClassDeclaration', 'IfStatement'). Omit to search everywhere.")]
+		string? containingKind = null,
 		
 		[Description("Number of results to skip (for paging). Default: 0.")]
 		int skip = 0,
@@ -139,11 +142,30 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 					_			  => Array.Empty<SemanticMatchResult>()
 				};
 				
-				// Add file path to each match
+				// Filter by containing syntax kind if specified.
+				if(containingKind is not null && Enum.TryParse<SyntaxKind>(containingKind, ignoreCase: true, out var requiredKind)) {
+
+					matches = matches.Where(m => {
+
+						var pos  = text.Lines[m.Line - 1].Start;
+						var node = root.FindToken(pos).Parent;
+
+						while(node is not null) {
+
+							if(node.IsKind(requiredKind))
+								return true;
+
+							node = node.Parent;
+						}
+
+						return false;
+					});
+				}
+
 				var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
-				
+
 				foreach(var match in matches) {
-				
+
 					match.File = relativePath;
 					allMatches.Add(match);
 				}

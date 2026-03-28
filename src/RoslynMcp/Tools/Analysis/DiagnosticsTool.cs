@@ -18,7 +18,8 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		"SDK props, or source generators — use roslyn_build_project for those.")]
 	public object GetDiagnostics(
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null)
+		[Description("Optional relative file path to scope diagnostics, e.g. 'Core/WindowTracker.cs'. Omit for all files.")] string? filePath = null,
+		[Description("Severity filter: 'errors', 'warnings', or 'all'. Default: 'all' (errors and warnings).")] string? severity = null)
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
@@ -43,9 +44,15 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 			diagnostics = compilation.GetDiagnostics();
 		}
 		
+		Func<Diagnostic, bool> severityFilter = severity?.ToLowerInvariant() switch {
+			"errors"   => d => d.Severity == DiagnosticSeverity.Error,
+			"warnings" => d => d.Severity == DiagnosticSeverity.Warning,
+			_          => d => d.Severity >= DiagnosticSeverity.Warning
+		};
+
 		string[] results = [..
 			diagnostics
-				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
+				.Where(severityFilter)
 				.OrderByDescending(d => d.Severity)
 				.ThenBy(d => d.Location.SourceTree?.FilePath)
 				.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
