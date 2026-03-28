@@ -78,23 +78,14 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		];
 		
 		if(matches.Count == 0) {
-		
-			return new {
-				applied      = false,
-				matchCount   = 0,
-				changedLines = (int[]) [],
-				message      = "No matches found."
-			};
+
+			return new ReplaceInFileResult(false, 0, [], "No matches found.");
 		}
 		
 		if(dryRun) {
-		
-			return new {
-				applied      = false,
-				matchCount   = matches.Count,
-				changedLines,
-				message      = $"Dry run: {matches.Count} replacement(s) would be made."
-			};
+
+			return new ReplaceInFileResult(false, matches.Count, changedLines,
+				$"Dry run: {matches.Count} replacement(s) would be made.");
 		}
 		
 		var newContent = regex.Replace(originalContent, replacement);
@@ -110,11 +101,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		// Invalidate the workspace so subsequent Roslyn tools see the updated source.
 		workspace.InvalidateFile(projectPath, fullPath);
 		
-		return new {
-			applied      = true,
-			matchCount   = matches.Count,
-			changedLines,
-		};
+		return new ReplaceInFileResult(true, matches.Count, changedLines);
 	}
 	
 	// Builds a sorted array of character offsets where each line starts.

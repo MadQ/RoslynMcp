@@ -92,13 +92,8 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 
 		if(dryRun) {
 
-			return new {
-				applied       = false,
-				insertedAt    = insertIndex + 1,
-				lineCount     = newLines.Length,
-				insertedLines,
-				message       = $"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."
-			};
+			return new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
+				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}.");
 		}
 
 		try {
@@ -111,11 +106,6 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 
 		workspace.InvalidateFile(projectPath, fullPath);
 
-		return new {
-			applied       = true,
-			insertedAt    = insertIndex + 1,
-			lineCount     = newLines.Length,
-			insertedLines,
-		};
+		return new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines);
 	}
 }

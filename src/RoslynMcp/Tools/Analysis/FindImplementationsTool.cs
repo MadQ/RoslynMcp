@@ -42,9 +42,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		// Handle type symbols (interface or abstract class).
 		if(symbol is INamedTypeSymbol typeSymbol) {
-		
+
 			if(typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class && typeSymbol.IsAbstract) {
-			
+
 					var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution);
 				var allResults = impls
 					.OfType<INamedTypeSymbol>()
@@ -52,29 +52,25 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					.Order()
 					.ToArray()
 				;
-				
+
+				var typeKind = typeSymbol.TypeKind.ToString().ToLowerInvariant();
+				var typeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
+
 				if(allResults.Length == 0)
-					return new {
-						symbol_type = typeSymbol.TypeKind.ToString().ToLowerInvariant(),
-						symbol_name = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-						total_implementations = 0,
-						skip,
-						take,
-						implementations = new[] { "No implementations found." }
-					};
-				
+					return new FindImplementationsResult(typeKind, typeName, 0, skip, take, ["No implementations found."]);
+
 				var result = PaginateAndStore(allResults, ref skip, take);
 
-				return scope.Outcome($"{result.Items.Length}/{result.Total} implementation(s)", new {
-					symbol_type  = typeSymbol.TypeKind.ToString().ToLowerInvariant(),
-					symbol_name  = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-					total_implementations = result.Total,
-					skip, take,
-					implementations = result.Items,
-					page_token      = result.PageToken,
-					has_more        = result.HasMore,
-					_caution        = AdhocCaution(projectPath)
-				});
+				return scope.Outcome($"{result.Items.Length}/{result.Total} implementation(s)", new FindImplementationsResult(
+					Symbol_type:  typeKind,
+					Symbol_name:  typeName,
+					Total_implementations: result.Total,
+					Skip: skip, Take: take,
+					Implementations: result.Items,
+					Page_token:      result.PageToken,
+					Has_more:        result.HasMore,
+					_caution:        AdhocCaution(projectPath)
+				));
 			}
 			
 			return new ErrorResult($"'{symbolName}' is not an interface or abstract class.");
@@ -82,9 +78,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		// Handle method symbols (abstract or virtual).
 		if(symbol is IMethodSymbol methodSymbol) {
-		
+
 			if(methodSymbol.IsAbstract || methodSymbol.IsVirtual || methodSymbol.IsOverride) {
-			
+
 					var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution);
 				var allResults = overrides
 					.OfType<IMethodSymbol>()
@@ -92,29 +88,24 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					.Order()
 					.ToArray()
 				;
-				
+
+				var methodDisplay = FormatMethod(methodSymbol);
+
 				if(allResults.Length == 0)
-					return new {
-						symbol_type = "method",
-						symbol_name = FormatMethod(methodSymbol),
-						total_overrides = 0,
-						skip,
-						take,
-						overrides = new[] { "No overrides found." }
-					};
-				
+					return new FindOverridesResult("method", methodDisplay, 0, skip, take, ["No overrides found."]);
+
 				var result = PaginateAndStore(allResults, ref skip, take);
 
-				return scope.Outcome($"{result.Items.Length}/{result.Total} override(s)", new {
-					symbol_type = "method",
-					symbol_name = FormatMethod(methodSymbol),
-					total_overrides = result.Total,
-					skip, take,
-					overrides  = result.Items,
-					page_token = result.PageToken,
-					has_more   = result.HasMore,
-					_caution  = AdhocCaution(projectPath)
-				});
+				return scope.Outcome($"{result.Items.Length}/{result.Total} override(s)", new FindOverridesResult(
+					Symbol_type: "method",
+					Symbol_name: methodDisplay,
+					Total_overrides: result.Total,
+					Skip: skip, Take: take,
+					Overrides:  result.Items,
+					Page_token: result.PageToken,
+					Has_more:   result.HasMore,
+					_caution:   AdhocCaution(projectPath)
+				));
 			}
 			
 			return new ErrorResult($"'{symbolName}' is not an abstract, virtual, or override method.");

@@ -78,14 +78,14 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})"
 		);
 
-		return scope.Outcome($"+{result.ParametersAdded.Length} param ({string.Join(", ", result.ParametersAdded)})", new {
-			diff                = result.Diff,
-			token,
-			message             = $"Review the diff, then call apply_signature_change with token '{token}' and approval 'y' or 'session'.",
-			parameters_added    = result.ParametersAdded,
-			deprecation_message = result.DeprecationMessage,
-			files_affected      = result.FilesAffected,
-			_caution            = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"+{result.ParametersAdded.Length} param ({string.Join(", ", result.ParametersAdded)})", new ChangeSignatureResult(
+			Diff:                result.Diff!,
+			Token:               token,
+			Message:             $"Review the diff, then call apply_signature_change with token '{token}' and approval 'y' or 'session'.",
+			Parameters_added:    result.ParametersAdded,
+			Deprecation_message: result.DeprecationMessage,
+			Files_affected:      result.FilesAffected,
+			_caution:            AdhocCaution(projectPath)
+		));
 	}
 }

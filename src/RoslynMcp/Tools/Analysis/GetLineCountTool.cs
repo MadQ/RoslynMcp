@@ -40,29 +40,29 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 				;
 
 				if(tree is null) {
-					results.Add(new { file = filePath, line_count = (int?) null, error = "not found in compilation" });
+					results.Add(new LineCountEntry(filePath, null, "not found in compilation"));
 					continue;
 				}
 
 				var text = await tree.GetTextAsync();
-				results.Add(new { file = Path.GetRelativePath(rootPath, tree.FilePath), line_count = (int?) text.Lines.Count, error = (string?) null });
+				results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, tree.FilePath), text.Lines.Count, null));
 			}
 			else {
 
 				var fullPath = ResolveFilePath(filePath, rootPath);
 
 				if(fullPath is null) {
-					results.Add(new { file = filePath, line_count = (int?) null, error = "file not found on disk" });
+					results.Add(new LineCountEntry(filePath, null, "file not found on disk"));
 					continue;
 				}
 
 				try {
 
 					var lineCount = await CountLinesAsync(fullPath);
-					results.Add(new { file = Path.GetRelativePath(rootPath, fullPath), line_count = (int?) lineCount, error = (string?) null });
+					results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, fullPath), lineCount, null));
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					results.Add(new { file = filePath, line_count = (int?) null, error = ex.Message });
+					results.Add(new LineCountEntry(filePath, null, ex.Message));
 				}
 			}
 		}
@@ -70,10 +70,10 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		var total      = results.Count;
 		var filesArr   = results.ToArray();
 
-		return scope.Outcome($"{total} file(s)", new {
-			files    = filesArr,
-			_caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{total} file(s)", new LineCountResult(
+			Files:    filesArr,
+			_caution: AdhocCaution(projectPath)
+		));
 	}
 
     /// <summary>
