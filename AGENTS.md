@@ -89,7 +89,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 
 **Data flow:** stdio MCP request → tool → `WorkspaceResolver.TryGetCompilation(projectPath, ...)` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
-**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` (multi-workspace caching), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` (base class), `FileLogger.cs` (file logging).
+**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging).
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
 - `Tools/Analysis/` — 13 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)

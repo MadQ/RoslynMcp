@@ -70,7 +70,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (23 tests covering all 24 tools)
+# Run the comprehensive test suite (27 tests covering all 25 tools)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
@@ -276,7 +276,7 @@ RoslynMcp/
 │   ├── RoslynMcp/              # Main MCP server project
 │   │   ├── Tools/              # Tool implementations
 │   │   ├── Program.cs          # MCP protocol + DI setup
-│   │   ├── WorkspaceManager.cs # Compilation management
+│   │   ├── WorkspaceManager*.cs # Workspace caching (partial: .cs, .Resolution.cs, .Instance.cs)
 │   │   ├── ApprovalStore.cs    # Rename approval state
 │   │   └── SolutionDiff.cs     # Unified diff generation
 │   └── TestHarness/            # Test suite
