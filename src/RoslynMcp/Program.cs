@@ -47,6 +47,7 @@ builder.Services
 	.AddSingleton<WorkspaceManager>()
 	.AddSingleton<WorkspaceResolver>()
 	.AddSingleton<ApprovalStore>()
+	.AddSingleton<PaginationCache>()
 	.AddSingleton<FileLogger>()
 	.AddMcpServer()
 	.WithStdioServerTransport()

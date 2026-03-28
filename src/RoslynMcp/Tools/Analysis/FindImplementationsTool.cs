@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class FindImplementationsTool : RoslynMcpTool
 {
-	public FindImplementationsTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public FindImplementationsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_find_implementations", ReadOnly = true)]
 	[Description(
@@ -20,9 +20,17 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
 		[Description("Number of implementations to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50)
+		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50,
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_find_implementations", symbolName);
+
+		take = Math.Clamp(take, 1, 200);
+
+		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, take);
+		if(cachedPage is not null)
+			return cachedPage;
+
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
 		
@@ -38,9 +46,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 			if(typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class && typeSymbol.IsAbstract) {
 			
-				take = Math.Clamp(take, 1, 200);
-				
-				var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution);
+					var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution);
 				var allResults = impls
 					.OfType<INamedTypeSymbol>()
 					.Select(t => t.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
@@ -58,15 +64,16 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 						implementations = new[] { "No implementations found." }
 					};
 				
-				var page = Paginate(allResults, ref skip, take);
-				
-				return scope.Outcome($"{page.Length}/{allResults.Length} implementation(s)", new {
+				var result = PaginateAndStore(allResults, ref skip, take);
+
+				return scope.Outcome($"{result.Items.Length}/{result.Total} implementation(s)", new {
 					symbol_type  = typeSymbol.TypeKind.ToString().ToLowerInvariant(),
 					symbol_name  = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-					total_implementations = allResults.Length,
-					skip,
-					take,
-					implementations = page,
+					total_implementations = result.Total,
+					skip, take,
+					implementations = result.Items,
+					page_token      = result.PageToken,
+					has_more        = result.HasMore,
 					_caution        = AdhocCaution(projectPath)
 				});
 			}
@@ -79,9 +86,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 			if(methodSymbol.IsAbstract || methodSymbol.IsVirtual || methodSymbol.IsOverride) {
 			
-				take = Math.Clamp(take, 1, 200);
-				
-				var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution);
+					var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution);
 				var allResults = overrides
 					.OfType<IMethodSymbol>()
 					.Select(m => FormatMethod(m))
@@ -99,15 +104,16 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 						overrides = new[] { "No overrides found." }
 					};
 				
-				var page = Paginate(allResults, ref skip, take);
-				
-				return scope.Outcome($"{page.Length}/{allResults.Length} override(s)", new {
+				var result = PaginateAndStore(allResults, ref skip, take);
+
+				return scope.Outcome($"{result.Items.Length}/{result.Total} override(s)", new {
 					symbol_type = "method",
 					symbol_name = FormatMethod(methodSymbol),
-					total_overrides = allResults.Length,
-					skip,
-					take,
-					overrides = page,
+					total_overrides = result.Total,
+					skip, take,
+					overrides  = result.Items,
+					page_token = result.PageToken,
+					has_more   = result.HasMore,
 					_caution  = AdhocCaution(projectPath)
 				});
 			}

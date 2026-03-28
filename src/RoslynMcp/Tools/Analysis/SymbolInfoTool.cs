@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class SymbolInfoTool : RoslynMcpTool
 {
-	public SymbolInfoTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public SymbolInfoTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_get_symbol_info", ReadOnly = true)]
 	[Description(

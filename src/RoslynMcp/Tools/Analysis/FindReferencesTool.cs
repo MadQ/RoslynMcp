@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class FindReferencesTool : RoslynMcpTool
 {
-	public FindReferencesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public FindReferencesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_find_references", ReadOnly = true)]
 	[Description(
@@ -20,52 +20,57 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional type name to narrow the search, e.g. 'WindowTracker'.")] string? containingType = null,
 		[Description("Number of references to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50)
+		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_find_references", symbolName);
+
+		take = Math.Clamp(take, 1, 200);
+
+		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, take);
+		if(cachedPage is not null)
+			return cachedPage;
+
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
-		
-		take = Math.Clamp(take, 1, 200);
-		
-		var solution    = workspace.GetSolution(projectPath);
-		var rootPath    = workspace.GetRootPath(projectPath);
-		
-		var symbol = FindSymbol(compilation, symbolName, containingType);
-		
+
+		var solution = workspace.GetSolution(projectPath);
+		var rootPath = workspace.GetRootPath(projectPath);
+		var symbol   = FindSymbol(compilation, symbolName, containingType);
+
 		if(symbol is null)
 			return scope.Failed("symbol not found", new { error = $"Symbol '{symbolName}' not found." });
-		
+
 		var refs = await RoslynSymbolFinder.FindReferencesAsync(symbol, solution);
-		
+
 		var allResults = refs
 			.SelectMany(r => r.Locations)
 			.OrderBy(l => l.Location.SourceTree?.FilePath)
 			.ThenBy(l => l.Location.GetLineSpan().StartLinePosition.Line)
 			.Select(l => {
+
 				var span = l.Location.GetLineSpan();
 				var file = span.Path is { Length: > 0 } p
 					? Path.GetRelativePath(rootPath, p)
 					: "?";
-				
-				var line = span.StartLinePosition.Line + 1;
-				
-				return $"{file}:{line}";
+
+				return $"{file}:{span.StartLinePosition.Line + 1}";
 			})
 			.Distinct()
 			.ToArray()
 		;
-		
+
 		if(allResults.Length == 0)
 			return new { total_references = 0, skip, take, references = new[] { $"No references found for '{symbolName}'." } };
-		
-		var page = Paginate(allResults, ref skip, take);
-		
-		return scope.Outcome($"{page.Length}/{allResults.Length} reference(s)", new {
-			total_references = allResults.Length,
-			skip,
-			take,
-			references = page,
+
+		var result = PaginateAndStore(allResults, ref skip, take);
+
+		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s)", new {
+			total_references = result.Total,
+			skip, take,
+			references = result.Items,
+			page_token = result.PageToken,
+			has_more   = result.HasMore,
 			_caution   = AdhocCaution(projectPath)
 		});
 	}

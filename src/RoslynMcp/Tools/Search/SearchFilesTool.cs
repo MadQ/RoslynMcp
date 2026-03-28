@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class SearchFilesTool : RoslynMcpTool
 {
-	public SearchFilesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public SearchFilesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_search_files", ReadOnly = true)]
 	[Description(
@@ -21,13 +21,18 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description("File glob pattern (e.g., '*.cs', '*.csproj'). Default: '*.cs'.")] string? filePattern = null,
 		[Description("Case-sensitive matching. Default: false.")] bool caseSensitive = false,
 		[Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of results to return. Default: 50, max: 200.")] int take = 50
+		[Description("Maximum number of results to return. Default: 50, max: 200.")] int take = 50,
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
 	)
 	{
 		using var scope = BeginTool("roslyn_search_files", pattern);
 		filePattern ??= "*.cs";
-		take		  = Math.Clamp(take, 1, 200);
-		skip		  = Math.Max(0, skip);
+		take          = Math.Clamp(take, 1, 200);
+		skip          = Math.Max(0, skip);
+
+		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, take);
+		if(cachedPage is not null)
+			return cachedPage;
 		
 		Regex regex;
 		
@@ -82,18 +87,18 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				}
 			}
 		
-		var totalMatches = allMatches.Count;
-		MatchResult[] pagedMatches = [.. allMatches.Skip(skip).Take(take)]
-		;
-		
-		scope.Outcome($"{totalMatches} match(es)");
-		
+		var allResults = allMatches.ToArray();
+		var result     = PaginateAndStore(allResults, ref skip, take);
+
+		scope.Outcome($"{result.Total} match(es)");
+
 		return new {
-			matches		  = pagedMatches,
-			total_matches = totalMatches,
-			returned	  = pagedMatches.Length,
-			has_more	  = skip + pagedMatches.Length < totalMatches,
-			_caution	  = AdhocCaution(projectPath)
+			matches       = result.Items,
+			total_matches = result.Total,
+			returned      = result.Items.Length,
+			page_token    = result.PageToken,
+			has_more      = result.HasMore,
+			_caution      = AdhocCaution(projectPath)
 		};
 	}
 	

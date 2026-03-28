@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 {
-	public GetSymbolDefinitionTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public GetSymbolDefinitionTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_get_symbol_definition", ReadOnly = true)]
 	[Description(

@@ -12,7 +12,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ReplaceInFileTool : RoslynMcpTool
 {
-	public ReplaceInFileTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public ReplaceInFileTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_replace_in_file", Destructive = true)]
 	[Description(

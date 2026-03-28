@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class TypeHierarchyTool : RoslynMcpTool
 {
-	public TypeHierarchyTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public TypeHierarchyTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_get_type_hierarchy", ReadOnly = true)]
 	[Description(
@@ -20,13 +20,19 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		[Description("The type name, e.g. 'WindowTracker' or 'RoslynMcp.WorkspaceManager'.")] string typeName,
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Number of derived types/interfaces to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of derived types/interfaces to return. Default: 50, max: 200.")] int take = 50)
+		[Description("Maximum number of derived types/interfaces to return. Default: 50, max: 200.")] int take = 50,
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName);
+
+		take = Math.Clamp(take, 1, 200);
+
+		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, take);
+		if(cachedPage is not null)
+			return cachedPage;
+
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return error;
-		
-		take = Math.Clamp(take, 1, 200);
 		
 		var type        = FindType(compilation, typeName);
 		
@@ -56,9 +62,9 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		// Page both interfaces
 		var combined = allInterfaces.Concat(allDerived).ToArray()
 		;
-		var page     = Paginate(combined, ref skip, take);
-		
-		return scope.Outcome($"{page.Length} interface(s)/derived", new {
+		var result   = PaginateAndStore(combined, ref skip, take);
+
+		return scope.Outcome($"{result.Items.Length} interface(s)/derived", new {
 			type_name           = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
 			type_kind           = type.TypeKind.ToString().ToLowerInvariant(),
 			base_types          = baseTypes,
@@ -66,7 +72,9 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 			total_derived_types = allDerived.Length,
 			skip,
 			take,
-			interfaces_and_derived = page,
+			interfaces_and_derived = result.Items,
+			page_token          = result.PageToken,
+			has_more            = result.HasMore,
 			_caution            = AdhocCaution(projectPath)
 		});
 	}

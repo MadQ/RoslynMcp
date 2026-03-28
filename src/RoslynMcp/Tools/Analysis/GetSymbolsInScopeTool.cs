@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 {
-	public GetSymbolsInScopeTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public GetSymbolsInScopeTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_get_symbols_in_scope", ReadOnly = true)]
 	[Description(

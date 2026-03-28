@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ListTypesTool : RoslynMcpTool
 {
-	public ListTypesTool(WorkspaceResolver workspace, FileLogger logger) : base(workspace, logger) { }
+	public ListTypesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_list_types", ReadOnly = true)]
 	[Description(

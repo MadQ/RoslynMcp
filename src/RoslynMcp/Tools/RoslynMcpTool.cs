@@ -11,16 +11,18 @@ internal abstract partial class RoslynMcpTool
 {
 	protected readonly WorkspaceResolver workspace;
 	protected readonly FileLogger         logger;
-	
+	protected readonly PaginationCache    paginationCache;
+
 	// Tracks the in-flight scope so TryGetCompilation/TryGetProject can set workspace mode without
 	// requiring callers to thread the scope through as a parameter.
 	[ThreadStatic]
 	private static ToolScope? activeScope;
-	
-	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger)
+
+	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
 	{
-		this.workspace = workspace;
-		this.logger    = logger;
+		this.workspace       = workspace;
+		this.logger          = logger;
+		this.paginationCache = paginationCache;
 	}
 	
 	/// <summary>
@@ -329,6 +331,50 @@ internal abstract partial class RoslynMcpTool
 		return items.AsSpan(skip, Math.Min(take, items.Length - skip)).ToArray();
 	}
 
+	/// <summary>ReadOnlyMemory overload — zero-copy slice from cache.</summary>
+	protected static T[] Paginate<T>(ReadOnlyMemory<T> items, ref int skip, int take)
+	{
+		skip = Math.Clamp(skip, 0, items.Length);
+
+		return items.Slice(skip, Math.Min(take, items.Length - skip)).ToArray();
+	}
+
+	/// <summary>
+	///     Cache-hit path: if the token is valid, returns a standardized paged response directly.
+	///     Returns null on miss — caller should compute results and call <see cref="PaginateAndStore{T}"/>.
+	///     Subsequent-page responses use a common shape (items/total/page_token/has_more);
+	///     tool-specific metadata is only included in the first-page response.
+	/// </summary>
+	protected object? TryServeCachedPage<T>(ToolScope scope, string? pageToken, ref int skip, int take)
+	{
+		if(pageToken is null || !paginationCache.TryGet<T>(pageToken, out var cached))
+			return null;
+
+		var page = Paginate(cached, ref skip, take);
+
+		return scope.Outcome($"{page.Length}/{cached.Length}", new {
+			items      = page,
+			total      = cached.Length,
+			skip,
+			take,
+			page_token = pageToken,
+			has_more   = skip + page.Length < cached.Length
+		});
+	}
+
+	/// <summary>
+	///     Cache-miss path: stores <paramref name="allResults"/> in the pagination cache and
+	///     returns a paginated slice with token for subsequent pages.
+	/// </summary>
+	protected PaginatedResult<T> PaginateAndStore<T>(T[] allResults, ref int skip, int take)
+	{
+		var token   = paginationCache.Store(allResults);
+		var page    = Paginate(allResults, ref skip, take);
+		var hasMore = skip + page.Length < allResults.Length;
+
+		return new PaginatedResult<T>(page, allResults.Length, skip, take, token, hasMore);
+	}
+
 	/// <summary>
 	///     Resolves a relative file path to a full path. Tries <paramref name="rootPath"/> first;
 	///     if the file isn't found there, walks subdirectories looking for a suffix match.
@@ -407,3 +453,12 @@ internal abstract partial class RoslynMcpTool
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 }
+
+internal sealed record PaginatedResult<T>(
+	T[]    Items,
+	int    Total,
+	int    Skip,
+	int    Take,
+	string PageToken,
+	bool   HasMore
+);

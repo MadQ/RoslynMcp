@@ -8,7 +8,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 {
 	readonly ApprovalStore approvals;
 	
-	public ApplyRenameTool(WorkspaceResolver workspace, ApprovalStore approvals, FileLogger logger) : base(workspace, logger)
+	public ApplyRenameTool(WorkspaceResolver workspace, ApprovalStore approvals, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache)
 	{
 		this.approvals = approvals;
 	}
