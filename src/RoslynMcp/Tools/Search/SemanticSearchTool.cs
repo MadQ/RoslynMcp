@@ -272,33 +272,30 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	
 	IEnumerable<SemanticMatchResult> SearchInCode(SyntaxNode root, SourceText text, Regex regex)
 	{
-		// Search in all tokens that are not in comments or strings
-		foreach(var token in root.DescendantTokens()) {
-		
-			// Skip comments
-			if(token.IsKind(SyntaxKind.SingleLineCommentTrivia) ||
-			   token.IsKind(SyntaxKind.MultiLineCommentTrivia))
+		// Search line-by-line (supports multi-token patterns like "new List"),
+		// but skip lines whose primary content is a comment or string literal.
+		var lines    = text.Lines;
+		var reported = new HashSet<int>();
+
+		for(int i = 0; i < lines.Count; i++) {
+
+			var lineText = lines[i].ToString();
+
+			if(!regex.IsMatch(lineText))
 				continue;
-			
-			// Skip strings
-			if(token.IsKind(SyntaxKind.StringLiteralToken) ||
-			   token.IsKind(SyntaxKind.InterpolatedStringTextToken))
+
+			// Determine whether this line is primarily a comment or string.
+			var context = DetermineContext(root, lines[i].Span);
+
+			if(context is "comment" or "xmldoc" or "string")
 				continue;
-			
-			var span	 = token.Span;
-			var lineSpan = text.Lines.GetLinePositionSpan(span);
-			var tokenText = token.ToString();
-			
-			if(regex.IsMatch(tokenText)) {
-			
-				// Get the containing line for context
-				var line	 = text.Lines[lineSpan.Start.Line];
-				var lineText = line.ToString().Trim();
-				
+
+			if(reported.Add(i)) {
+
 				yield return new SemanticMatchResult {
-					Line	= lineSpan.Start.Line + 1,
-					Text	= lineText,
-					Context	= "code"
+					Line    = i + 1,
+					Text    = lineText.Trim(),
+					Context = "code"
 				};
 			}
 		}

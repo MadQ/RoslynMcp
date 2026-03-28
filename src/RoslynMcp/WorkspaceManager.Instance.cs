@@ -21,7 +21,7 @@ internal sealed partial class WorkspaceManager
 		private readonly bool                 isMSBuild;
 		private readonly ProjectId            defaultProjectId;
 		private readonly ReaderWriterLockSlim rwLock = new();
-		private readonly FileSystemWatcher?   watcher;
+		private          FileSystemWatcher?   watcher;
 
 		// Maps normalized .csproj paths → ProjectIds for all projects in the workspace.
 		private readonly Dictionary<string, ProjectId> projectMap = new(StringComparer.OrdinalIgnoreCase);
@@ -32,6 +32,7 @@ internal sealed partial class WorkspaceManager
 		// Debounce: accumulate FSW events for 300ms before processing.
 		private readonly object           debounceLock   = new();
 		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
+		private readonly HashSet<string>  pendingDeletes = new(StringComparer.OrdinalIgnoreCase);
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
 
@@ -57,6 +58,7 @@ internal sealed partial class WorkspaceManager
 						.FirstOrDefault()?.Id
 						?? throw new InvalidOperationException($"Solution '{path}' contains no projects.")
 					;
+					StartWatcher();
 					break;
 
 				case LoadMode.Project:
@@ -71,6 +73,7 @@ internal sealed partial class WorkspaceManager
 
 					// OpenProjectAsync also loads referenced projects — map them all.
 					BuildProjectMap();
+					StartWatcher();
 					break;
 
 				case LoadMode.Adhoc:
@@ -87,18 +90,7 @@ internal sealed partial class WorkspaceManager
 					isMSBuild        = false;
 
 					LoadAllFiles((AdhocWorkspace) workspace, defaultProjectId);
-
-					watcher = new FileSystemWatcher(rootPath, "*.cs")
-					{
-						IncludeSubdirectories = true,
-						NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
-					};
-
-					watcher.Changed += OnFileChanged;
-					watcher.Created += OnFileChanged;
-					watcher.Deleted += OnFileDeleted;
-					watcher.Renamed += OnFileRenamed;
-					watcher.EnableRaisingEvents = true;
+					StartWatcher();
 					break;
 
 				default:
@@ -401,38 +393,36 @@ internal sealed partial class WorkspaceManager
 			InvalidateCompilation();
 		}
 
-		// ── FileSystemWatcher handlers ───────────────────────────────────────
+		// ── FileSystemWatcher ────────────────────────────────────────────────
 
-		void OnFileChanged(object sender, FileSystemEventArgs e)
+		void StartWatcher()
 		{
-			if(isMSBuild)
-				return;
+			watcher = new FileSystemWatcher(rootPath, "*.cs")
+			{
+				IncludeSubdirectories = true,
+				NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
+			};
 
-			ScheduleDebounced(e.FullPath);
+			watcher.Changed += (_, e) => ScheduleDebounced(e.FullPath);
+			watcher.Created += (_, e) => ScheduleDebounced(e.FullPath);
+			watcher.Deleted += (_, e) => ScheduleDebounced(e.FullPath, deleted: true);
+			watcher.Renamed += (_, e) => {
+
+				ScheduleDebounced(e.OldFullPath, deleted: true);
+				ScheduleDebounced(e.FullPath);
+			};
+
+			watcher.EnableRaisingEvents = true;
 		}
 
-		void OnFileDeleted(object sender, FileSystemEventArgs e)
-		{
-			if(isMSBuild || workspace is not AdhocWorkspace adhoc)
-				return;
-
-			RemoveDocument(adhoc, defaultProjectId, e.FullPath);
-		}
-
-		void OnFileRenamed(object sender, RenamedEventArgs e)
-		{
-			if(isMSBuild || workspace is not AdhocWorkspace adhoc)
-				return;
-
-			RemoveDocument(adhoc, defaultProjectId, e.OldFullPath);
-			ScheduleDebounced(e.FullPath);
-		}
-
-		void ScheduleDebounced(string fullPath)
+		void ScheduleDebounced(string fullPath, bool deleted = false)
 		{
 			lock(debounceLock) {
 
-				pendingChanges.Add(fullPath);
+				if(deleted)
+					pendingDeletes.Add(fullPath);
+				else
+					pendingChanges.Add(fullPath);
 
 				if(debounceTimer is null)
 					debounceTimer = new Timer(FlushPendingChanges, null, DebounceMs, Timeout.Infinite);
@@ -443,18 +433,84 @@ internal sealed partial class WorkspaceManager
 
 		void FlushPendingChanges(object? _)
 		{
-			string[] paths;
+			// Timer callbacks must never throw — unhandled exceptions crash the process.
+			try {
 
-			lock(debounceLock) {
+				string[] changed;
+				string[] deleted;
 
-				paths = [.. pendingChanges];
-				pendingChanges.Clear();
+				lock(debounceLock) {
+
+					changed = [.. pendingChanges];
+					deleted = [.. pendingDeletes];
+					pendingChanges.Clear();
+					pendingDeletes.Clear();
+				}
+
+				if(isMSBuild)
+					FlushMSBuild(changed, deleted);
+				else if(workspace is AdhocWorkspace adhoc)
+					FlushAdhoc(adhoc, changed, deleted);
+			}
+			catch(Exception) {
+
+				// Swallow — best effort. Next FSW event or explicit InvalidateFile will retry.
+			}
+		}
+
+		void FlushMSBuild(string[] changed, string[] deleted)
+		{
+			var newSolution = workspace.CurrentSolution;
+			var modified    = false;
+
+			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument.
+			// Clear the text instead — an empty file produces no diagnostics or types.
+			foreach(var path in deleted) {
+
+				var docIds = newSolution.GetDocumentIdsWithFilePath(path);
+
+				foreach(var id in docIds) {
+
+					newSolution = newSolution.WithDocumentText(id, SourceText.From(""));
+					modified    = true;
+				}
 			}
 
-			if(workspace is not AdhocWorkspace adhoc)
-				return;
+			foreach(var path in changed) {
 
-			foreach(var path in paths) {
+				try {
+
+					var docIds = newSolution.GetDocumentIdsWithFilePath(path);
+
+					// MSBuildWorkspace doesn't support AddDocument via TryApplyChanges —
+					// it modifies the .csproj, conflicting with SDK-style implicit includes.
+					// New files require a server restart to be visible.
+					if(docIds.Length == 0)
+						continue;
+
+					var text = SourceText.From(File.ReadAllText(path));
+
+					foreach(var id in docIds)
+						newSolution = newSolution.WithDocumentText(id, text);
+
+					modified = true;
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			}
+
+			if(modified) {
+
+				workspace.TryApplyChanges(newSolution);
+				InvalidateCompilation();
+			}
+		}
+
+		void FlushAdhoc(AdhocWorkspace adhoc, string[] changed, string[] deleted)
+		{
+			foreach(var path in deleted)
+				RemoveDocument(adhoc, defaultProjectId, path);
+
+			foreach(var path in changed) {
 
 				try {
 
@@ -467,6 +523,7 @@ internal sealed partial class WorkspaceManager
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			}
 		}
+
 
 		// ── Compilation cache ────────────────────────────────────────────────
 

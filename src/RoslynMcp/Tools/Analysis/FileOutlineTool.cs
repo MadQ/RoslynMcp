@@ -149,35 +149,6 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		return $"{modifiers}event {type} {evt.Name}";
 	}
 	
-	private static string FormatModifiers(ISymbol symbol)
-	{
-		var parts = new List<string>();
-		
-		if(symbol.IsStatic)
-			parts.Add("static");
-		if(symbol.IsAbstract && symbol.ContainingType?.TypeKind != TypeKind.Interface)
-			parts.Add("abstract");
-		if(symbol.IsVirtual)
-			parts.Add("virtual");
-		if(symbol.IsOverride)
-			parts.Add("override");
-		if(symbol.IsSealed && symbol.Kind != SymbolKind.NamedType)
-			parts.Add("sealed");
-		
-		// Accessibility
-		var access = symbol.DeclaredAccessibility switch {
-			Accessibility.Public    => "public",
-			Accessibility.Private   => "private",
-			Accessibility.Protected => "protected",
-			Accessibility.Internal  => "internal",
-			_                       => null
-		};
-		
-		if(access is not null)
-			parts.Insert(0, access);
-		
-		return parts.Count > 0 ? string.Join(" ", parts) + " " : string.Empty;
-	}
 	
 	private sealed record TypeOutline(string Kind, string Name, MemberOutline[] Members);
 	private sealed record MemberOutline(string Kind, string Signature);

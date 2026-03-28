@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel;
+using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
 using ModelContextProtocol.Server;
@@ -30,7 +31,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return new PreviewRenameResult(
 				null, null,
-				error.ToString()!,
+				JsonSerializer.Serialize(error),
 				false
 			);
 		
@@ -47,7 +48,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		var symbolKey   = SymbolKey(symbol);
 		var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions(), newName);
 		var diff        = await SolutionDiff.BuildAsync(solution, newSolution);
-		var token       = approvals.Register(newSolution, diff, symbolKey);
+		var token       = approvals.Register(solution, newSolution, diff, symbolKey);
 		var preConfirmed = approvals.IsSessionApproved(symbolKey);
 		
 		return new PreviewRenameResult(token, diff,
@@ -71,7 +72,17 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 	}
 	
 	private static string SymbolKey(ISymbol symbol)
-		=> $"{symbol.ContainingType?.ToDisplayString() ?? symbol.ContainingNamespace?.ToDisplayString()}::{symbol.Name}";
+	{
+		var container = symbol.ContainingType?.ToDisplayString() ?? symbol.ContainingNamespace?.ToDisplayString();
+
+		if(symbol is IMethodSymbol method) {
+
+			var parameters = string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()));
+			return $"{container}::{method.Name}({parameters})";
+		}
+
+		return $"{container}::{symbol.Name}";
+	}
 }
 
 internal sealed record PreviewRenameResult(

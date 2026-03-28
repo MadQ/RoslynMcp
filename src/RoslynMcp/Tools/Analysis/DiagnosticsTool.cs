@@ -22,7 +22,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			return new[] { error.ToString()! };
+			return error;
 		
 		
 		IEnumerable<Diagnostic> diagnostics = compilation.GetDiagnostics();
@@ -38,7 +38,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		string[] results = [..
 			diagnostics
 				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
-				.OrderBy(d => d.Severity)
+				.OrderByDescending(d => d.Severity)
 				.ThenBy(d => d.Location.SourceTree?.FilePath)
 				.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
 				.Select(Format)

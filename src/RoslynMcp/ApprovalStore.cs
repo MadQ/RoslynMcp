@@ -25,13 +25,13 @@ internal sealed class ApprovalStore
 	///     Registers a pending operation and returns its confirmation token.
 	///     If the symbol key is already session-approved, marks the token as pre-confirmed.
 	/// </summary>
-	public string Register(Solution newSolution, string diff, string symbolKey)
+	public string Register(Solution baseSolution, Solution newSolution, string diff, string symbolKey)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
-		
+
 		lock(syncRoot) {
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-			pending[token]   = new PendingOperation(newSolution, diff, symbolKey, preConfirmed);
+			pending[token]   = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed);
 		}
 		
 		return token;
@@ -79,6 +79,7 @@ internal sealed class ApprovalStore
 }
 
 internal sealed record PendingOperation(
+	Solution BaseSolution,
 	Solution NewSolution,
 	string   Diff,
 	string   SymbolKey,

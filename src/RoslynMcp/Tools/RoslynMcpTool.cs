@@ -364,6 +364,42 @@ internal abstract partial class RoslynMcpTool
 	}
 
 	/// <summary>
+	///     Formats a symbol's modifiers (access, static, abstract, virtual, override, sealed)
+	///     as a space-separated prefix string. Shared by FileOutlineTool, GetSymbolDefinitionTool,
+	///     and TypeMembersTool.
+	/// </summary>
+	protected static string FormatModifiers(ISymbol symbol)
+	{
+		var parts = new List<string>();
+
+		if(symbol.IsStatic)
+			parts.Add("static");
+		if(symbol.IsAbstract && symbol.ContainingType?.TypeKind != TypeKind.Interface)
+			parts.Add("abstract");
+		if(symbol.IsVirtual)
+			parts.Add("virtual");
+		if(symbol.IsOverride)
+			parts.Add("override");
+		if(symbol.IsSealed && symbol.Kind != SymbolKind.NamedType)
+			parts.Add("sealed");
+
+		var access = symbol.DeclaredAccessibility switch {
+			Accessibility.Public               => "public",
+			Accessibility.Private              => "private",
+			Accessibility.Protected            => "protected",
+			Accessibility.Internal             => "internal",
+			Accessibility.ProtectedOrInternal  => "protected internal",
+			Accessibility.ProtectedAndInternal => "private protected",
+			_                                  => null
+		};
+
+		if(access is not null)
+			parts.Insert(0, access);
+
+		return parts.Count > 0 ? string.Join(" ", parts) + " " : string.Empty;
+	}
+
+	/// <summary>
 	///     Normalizes a file path for cross-platform compatibility by converting forward slashes
 	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
 	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.
