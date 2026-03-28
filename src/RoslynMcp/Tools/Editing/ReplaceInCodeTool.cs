@@ -109,9 +109,20 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				SyntaxKind.ClassDeclaration or
 				SyntaxKind.InterfaceDeclaration or
 				SyntaxKind.StructDeclaration or
+				SyntaxKind.RecordDeclaration or
 				SyntaxKind.EnumDeclaration
 					=> (SyntaxNode?) SyntaxFactory.ParseMemberDeclaration(replacement),
-				
+
+				SyntaxKind.UsingDirective or
+				SyntaxKind.LocalDeclarationStatement or
+				SyntaxKind.ExpressionStatement or
+				SyntaxKind.ReturnStatement or
+				SyntaxKind.IfStatement or
+				SyntaxKind.ForEachStatement or
+				SyntaxKind.WhileStatement or
+				SyntaxKind.ThrowStatement
+					=> SyntaxFactory.ParseStatement(replacement),
+
 				_ => (SyntaxNode?) SyntaxFactory.ParseExpression(replacement)
 			};
 			

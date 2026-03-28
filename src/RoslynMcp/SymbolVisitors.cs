@@ -6,11 +6,12 @@ namespace RoslynMcp;
 internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 	where T : class, ISymbol
 {
+	private readonly bool   isDotted   = name.Contains('.');
 	private readonly string simpleName = name.Contains('.')
 		? name[(name.LastIndexOf('.') + 1)..]
 		: name
 	;
-	
+
 	public override T? VisitNamespace(INamespaceSymbol symbol)
 	{
 		foreach(var m in symbol.GetMembers()) {
@@ -18,21 +19,25 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 			if(r is not null)
 				return r;
 		}
-		
+
 		return null;
 	}
-	
+
 	public override T? VisitNamedType(INamedTypeSymbol symbol)
 	{
-		if(symbol is T t && symbol.Name == simpleName)
-			return t;
-		
+		if(symbol is T t && symbol.Name == simpleName) {
+
+			// When a dotted name was provided, verify the full qualification matches.
+			if(!isDotted || symbol.ToDisplayString().EndsWith(name, StringComparison.Ordinal))
+				return t;
+		}
+
 		foreach(var n in symbol.GetTypeMembers()) {
 			var r = n.Accept(this);
 			if(r is not null)
 				return r;
 		}
-		
+
 		return null;
 	}
 }
