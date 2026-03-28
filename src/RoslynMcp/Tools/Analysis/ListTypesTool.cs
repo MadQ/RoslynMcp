@@ -31,7 +31,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 			.Where(t => !t.IsImplicitlyDeclared)
 			.Where(t => MatchesNamespace(t, namespaceFilter))
 			.Where(t => MatchesKind(t, kindFilter))
-			.Select(t => FormatType(t))
+			.Select(t => SymbolFormatter.FormatType(t))
 			.Order()
 		;
 		
@@ -83,11 +83,4 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		};
 	}
 	
-	private static string FormatType(INamedTypeSymbol type)
-	{
-		var kind = type.TypeKind.ToString().ToLowerInvariant();
-		var name = type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-		
-		return $"{kind}: {name}";
-	}
 }

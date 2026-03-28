@@ -54,37 +54,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		};
 	}
 	
-	private static ISymbol? FindSymbol(Compilation compilation, string name, string? inType)
-	{
-		if(inType is not null) {
-		
-			var type = compilation.GetTypeByMetadataName(inType)
-				?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(inType));
-			
-			return type?.GetMembers(name).FirstOrDefault();
-		}
-		
-		// Global search: try as type first, then as member.
-		var typeSymbol = compilation.GetTypeByMetadataName(name)
-			?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(name));
-		
-		if(typeSymbol is not null)
-			return typeSymbol;
-		
-		return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
-	}
 	
-	private static string FormatSymbolName(ISymbol symbol)
-	{
-		if(symbol is INamedTypeSymbol)
-			return symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-		
-		var containingType = symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-		
-		return containingType is not null
-			? $"{containingType}.{symbol.Name}"
-			: symbol.Name;
-	}
 	
 	private static DocumentationComment ParseDocumentation(string xml)
 	{
