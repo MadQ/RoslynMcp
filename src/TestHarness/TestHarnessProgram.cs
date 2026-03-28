@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -484,7 +484,7 @@ tests.Add(await RunTestAsync(
 	data => data?["error"]?.GetValue<string>().Contains("already exists") == true
 ));
 
-Console.WriteLine("\nFile Editing Tools (5 tests)");
+Console.WriteLine("\nFile Editing Tools (10 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
 // Create temp files for editing tool tests
@@ -529,6 +529,48 @@ tests.Add(await RunTestAsync(
 	data => data?["error"] is null && data?["applied"] is not null
 ));
 
+
+// ── insert_lines tests ──────────────────────────────────────────────────
+
+var tempInsertFile = Path.Combine(targetPath, ".test_insert_temp.txt");
+await File.WriteAllTextAsync(tempInsertFile, "line one\nline two\nline three\n");
+
+tests.Add(await RunTestAsync(
+	"roslyn_insert_lines: dry run insertAfter",
+	"roslyn_insert_lines",
+	new { filePath = ".test_insert_temp.txt", text = "inserted line", insertAfter = "line one", dryRun = true, projectPath = targetPath },
+	data => data?["applied"]?.GetValue<bool>() == false && data?["insertedAt"]?.GetValue<int>() == 2 && data?["lineCount"]?.GetValue<int>() == 1
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_insert_lines: apply insertAfter",
+	"roslyn_insert_lines",
+	new { filePath = ".test_insert_temp.txt", text = "after one", insertAfter = "line one", projectPath = targetPath },
+	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 2
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_insert_lines: apply insertBefore",
+	"roslyn_insert_lines",
+	new { filePath = ".test_insert_temp.txt", text = "before three", insertBefore = "line three", projectPath = targetPath },
+	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 4
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_insert_lines: apply atLine",
+	"roslyn_insert_lines",
+	new { filePath = ".test_insert_temp.txt", text = "at line 1", atLine = 1, projectPath = targetPath },
+	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 1
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_insert_lines: error when no location specified",
+	"roslyn_insert_lines",
+	new { filePath = ".test_insert_temp.txt", text = "oops", projectPath = targetPath },
+	data => data?["error"]?.GetValue<string>().Contains("exactly one") == true
+));
+
+try { File.Delete(tempInsertFile); } catch { }
 // Clean up temp files
 try { File.Delete(tempTextFile); } catch { }
 try { File.Delete(tempCodeFile); } catch { }
