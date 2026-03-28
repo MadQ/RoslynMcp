@@ -42,6 +42,37 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 	}
 }
 
+/// <summary>Walks all types to collect ALL symbols (types and members) matching a simple name.</summary>
+internal sealed class AllSymbolsFinder(string name)
+{
+	readonly List<ISymbol> results = [];
+
+	public IReadOnlyList<ISymbol> Results => results;
+
+	public void Visit(INamespaceSymbol ns)
+	{
+		foreach(var m in ns.GetMembers()) {
+
+			if(m is INamespaceSymbol childNs)
+				Visit(childNs);
+			else if(m is INamedTypeSymbol type)
+				VisitType(type);
+		}
+	}
+
+	void VisitType(INamedTypeSymbol type)
+	{
+		if(type.Name == name)
+			results.Add(type);
+
+		foreach(var member in type.GetMembers(name))
+			results.Add(member);
+
+		foreach(var nested in type.GetTypeMembers())
+			VisitType(nested);
+	}
+}
+
 /// <summary>Walks all types to find the first symbol (type or member) matching a simple name.</summary>
 internal sealed class AnySymbolFinder(string name) : SymbolVisitor<ISymbol?>
 {

@@ -36,37 +36,63 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 
 		var solution = workspace.GetSolution(projectPath);
 		var rootPath = workspace.GetRootPath(projectPath);
-		var symbol   = FindSymbol(compilation, symbolName, containingType);
 
-		if(symbol is null)
+		// When containingType is specified, search one symbol. Otherwise search ALL
+		// symbols matching the name — prevents silently incomplete results when
+		// multiple types have members with the same name.
+		ISymbol[] symbols;
+
+		if(containingType is not null) {
+
+			var symbol = FindSymbol(compilation, symbolName, containingType);
+			symbols = symbol is not null ? [symbol] : [];
+		}
+		else {
+
+			var finder = new AllSymbolsFinder(symbolName);
+			finder.Visit(compilation.GlobalNamespace);
+			symbols = [.. finder.Results];
+		}
+
+		if(symbols.Length == 0)
 			return scope.Failed("symbol not found", new { error = $"Symbol '{symbolName}' not found." });
 
-		var refs = await RoslynSymbolFinder.FindReferencesAsync(symbol, solution);
+		var allLocations = new List<string>();
 
-		var allResults = refs
-			.SelectMany(r => r.Locations)
-			.OrderBy(l => l.Location.SourceTree?.FilePath)
-			.ThenBy(l => l.Location.GetLineSpan().StartLinePosition.Line)
-			.Select(l => {
+		foreach(var sym in symbols) {
 
-				var span = l.Location.GetLineSpan();
-				var file = span.Path is { Length: > 0 } p
-					? Path.GetRelativePath(rootPath, p)
-					: "?";
+			var refs = await RoslynSymbolFinder.FindReferencesAsync(sym, solution);
 
-				return $"{file}:{span.StartLinePosition.Line + 1}";
-			})
+			allLocations.AddRange(
+				refs.SelectMany(r => r.Locations)
+					.Select(l => {
+
+						var span = l.Location.GetLineSpan();
+						var file = span.Path is { Length: > 0 } p
+							? Path.GetRelativePath(rootPath, p)
+							: "?";
+
+						return $"{file}:{span.StartLinePosition.Line + 1}";
+					})
+			);
+		}
+
+		var allResults = allLocations
 			.Distinct()
+			.Order()
 			.ToArray()
 		;
 
 		if(allResults.Length == 0)
 			return new { total_references = 0, skip, take, references = new[] { $"No references found for '{symbolName}'." } };
 
+		string[] symbolsSearched = [.. symbols.Select(s => FormatSymbolName(s)).Distinct()];
+
 		var result = PaginateAndStore(allResults, ref skip, take);
 
-		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s)", new {
+		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", new {
 			total_references = result.Total,
+			symbols_searched = symbolsSearched,
 			skip, take,
 			references = result.Items,
 			page_token = result.PageToken,
