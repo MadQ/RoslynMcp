@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -48,7 +48,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 		
 		if(csprojPath is null)
-			return new { error = "No .csproj found — build is only available in MSBuildWorkspace mode." };
+			return new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode.");
 		
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true).
 		if(!forceBuild) {

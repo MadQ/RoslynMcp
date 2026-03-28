@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 
@@ -36,7 +36,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var fullPath = ResolveFilePath(filePath, rootPath);
 
 		if(fullPath is null)
-			return scope.Failed("file not found", new { error = $"File not found: {filePath}" });
+			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		Regex regex;
 		
@@ -53,10 +53,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		}
 		catch(ArgumentException ex) {
 		
-			return new {
-				error   = "Invalid regex pattern",
-				details = ex.Message
-			};
+			return new ErrorResult($"Invalid regex pattern: {ex.Message}");
 		}
 		
 		string originalContent;
@@ -66,10 +63,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new {
-				error   = "Failed to read file",
-				details = ex.Message
-			};
+			return new ErrorResult($"Failed to read file: {ex.Message}");
 		}
 		
 		// Split into lines to compute 1-based line numbers for each match position.
@@ -110,10 +104,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new {
-				error   = "Failed to write file",
-				details = ex.Message
-			};
+			return new ErrorResult($"Failed to write file: {ex.Message}");
 		}
 		
 		// Invalidate the workspace so subsequent Roslyn tools see the updated source.

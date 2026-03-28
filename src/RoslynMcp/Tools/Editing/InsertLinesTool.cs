@@ -32,16 +32,16 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		var fullPath = ResolveFilePath(filePath, rootPath);
 
 		if(fullPath is null)
-			return scope.Failed("file not found", new { error = $"File not found: {filePath}" });
+			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 
 		// Exactly one location specifier required.
 		var specCount = (atLine.HasValue ? 1 : 0) + (insertAfter is not null ? 1 : 0) + (insertBefore is not null ? 1 : 0);
 
 		if(specCount == 0)
-			return scope.Failed("no location", new { error = "Specify exactly one of: atLine, insertAfter, or insertBefore." });
+			return scope.Failed("no location", new ErrorResult("Specify exactly one of: atLine, insertAfter, or insertBefore."));
 
 		if(specCount > 1)
-			return scope.Failed("multiple locations", new { error = "Specify only one of: atLine, insertAfter, or insertBefore." });
+			return scope.Failed("multiple locations", new ErrorResult("Specify only one of: atLine, insertAfter, or insertBefore."));
 
 		string[] lines;
 
@@ -50,10 +50,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new {
-				error   = "Failed to read file",
-				details = ex.Message
-			};
+			return new ErrorResult($"Failed to read file: {ex.Message}");
 		}
 
 		// Resolve insertion index (0-based, insert BEFORE this index).
@@ -69,7 +66,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			var matchIndex = Array.FindIndex(lines, l => l.Contains(insertAfter, StringComparison.Ordinal));
 
 			if(matchIndex < 0)
-				return scope.Failed("anchor not found", new { error = $"insertAfter pattern not found: {insertAfter}" });
+				return scope.Failed("anchor not found", new ErrorResult($"insertAfter pattern not found: {insertAfter}"));
 
 			insertIndex = matchIndex + 1;
 		}
@@ -78,7 +75,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			var matchIndex = Array.FindIndex(lines, l => l.Contains(insertBefore!, StringComparison.Ordinal));
 
 			if(matchIndex < 0)
-				return scope.Failed("anchor not found", new { error = $"insertBefore pattern not found: {insertBefore}" });
+				return scope.Failed("anchor not found", new ErrorResult($"insertBefore pattern not found: {insertBefore}"));
 
 			insertIndex = matchIndex;
 		}
@@ -109,10 +106,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new {
-				error   = "Failed to write file",
-				details = ex.Message
-			};
+			return new ErrorResult($"Failed to write file: {ex.Message}");
 		}
 
 		workspace.InvalidateFile(projectPath, fullPath);

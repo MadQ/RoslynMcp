@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -43,7 +43,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		var type = FindType(compilation, typeName);
 		
 		if(type is null)
-			return scope.Failed("type not found", new { error = $"Type '{typeName}' not found in the project." });
+			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
 		
 		IEnumerable<ISymbol> members = type.GetMembers();
 

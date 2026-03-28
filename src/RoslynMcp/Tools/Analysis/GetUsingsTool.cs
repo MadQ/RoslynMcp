@@ -29,7 +29,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		;
 		
 		if(tree is null)
-			return scope.Failed("file not found", new { error = $"File '{filePath}' not found in the compilation." });
+			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var root = await tree.GetRootAsync();
 		

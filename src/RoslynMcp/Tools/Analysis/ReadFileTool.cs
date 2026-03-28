@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -42,7 +42,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
             ;
 
             if(tree is null)
-                return scope.Failed("file not found", new { error = $"File '{filePath}' not found in the compilation." });
+                return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 
             sourceText    = await tree.GetTextAsync();
             canonicalPath = tree.FilePath;
@@ -53,7 +53,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
             var fullPath = ResolveFilePath(filePath, rootPath);
 
             if(fullPath is null)
-                return scope.Failed("file not found", new { error = $"File not found: {filePath}" });
+                return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 
             sourceText    = SourceText.From(await File.ReadAllTextAsync(fullPath));
             canonicalPath = fullPath;
@@ -67,7 +67,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
         var last  = Math.Clamp(endLine,   1, totalLines);
 
         if(first > last)
-            return scope.Failed("invalid range", new { error = $"startLine ({startLine}) must be ≤ endLine ({endLine})." });
+            return scope.Failed("invalid range", new ErrorResult($"startLine ({startLine}) must be ≤ endLine ({endLine})."));
 
         var result = new string[last - first + 1];
 

@@ -1,4 +1,4 @@
-﻿using System.Xml.Linq;
+using System.Xml.Linq;
 using System.ComponentModel;
 using System.Xml;
 using Microsoft.CodeAnalysis;
@@ -28,7 +28,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			return scope.Failed("symbol not found", new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." });
+			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var xml = symbol.GetDocumentationCommentXml();
 		

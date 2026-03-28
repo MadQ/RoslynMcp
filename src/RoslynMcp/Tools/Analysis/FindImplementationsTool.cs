@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -36,7 +36,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			return scope.Failed("symbol not found", new { error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name." });
+			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var solution = workspace.GetSolution(projectPath);
 		
@@ -77,7 +77,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				});
 			}
 			
-			return new { error = $"'{symbolName}' is not an interface or abstract class." };
+			return new ErrorResult($"'{symbolName}' is not an interface or abstract class.");
 		}
 		
 		// Handle method symbols (abstract or virtual).
@@ -117,10 +117,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				});
 			}
 			
-			return new { error = $"'{symbolName}' is not an abstract, virtual, or override method." };
+			return new ErrorResult($"'{symbolName}' is not an abstract, virtual, or override method.");
 		}
 		
-		return new { error = $"'{symbolName}' is not a type or method — cannot find implementations." };
+		return new ErrorResult($"'{symbolName}' is not a type or method — cannot find implementations.");
 	}
 	
 	

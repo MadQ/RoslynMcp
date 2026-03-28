@@ -25,8 +25,23 @@ Console.WriteLine($"Server:  {serverProj}");
 Console.WriteLine($"Target:  {targetPath}");
 Console.WriteLine();
 
+// Build the server first — dotnet run's build output goes to stdout and breaks the MCP stdio protocol.
+Console.Write("Building server... ");
+var buildProc = Process.Start(new ProcessStartInfo("dotnet") {
+	Arguments       = $"build \"{serverProj}\" -f net10.0 --nologo -v q",
+	UseShellExecute = false,
+})!;
+buildProc.WaitForExit();
+
+if(buildProc.ExitCode != 0) {
+	Console.Error.WriteLine($"Server build failed (exit code {buildProc.ExitCode}).");
+	return 1;
+}
+
+Console.WriteLine("done.");
+
 var psi = new ProcessStartInfo("dotnet") {
-	Arguments              = $"run --project \"{serverProj}\" -f net10.0",
+	Arguments              = $"run --no-build --project \"{serverProj}\" -f net10.0",
 	RedirectStandardInput  = true,
 	RedirectStandardOutput = true,
 	RedirectStandardError  = true,

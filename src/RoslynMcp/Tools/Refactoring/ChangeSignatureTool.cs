@@ -42,11 +42,9 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		var symbol = FindSymbol(compilation, methodName, containingType);
 
 		if(symbol is not IMethodSymbol method)
-			return scope.Failed("not a method", new {
-				error = symbol is null
-					? $"Symbol '{methodName}' not found."
-					: $"'{methodName}' is a {symbol.Kind}, not a method."
-			});
+			return scope.Failed("not a method", symbol is null
+				? new ErrorResult($"Symbol '{methodName}' not found.", Hint: "Use get_type_members or find_references to verify the name.")
+				: new ErrorResult($"'{methodName}' is a {symbol.Kind}, not a method."));
 
 		// Parse the parameters to add.
 		NewParameter[] paramsToAdd;
@@ -60,11 +58,9 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		}
 		catch(JsonException ex) {
 
-			return scope.Failed("invalid parameters", new {
-				error   = "Failed to parse addParameters JSON.",
-				details = ex.Message,
-				hint    = "Expected: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]"
-			});
+			return scope.Failed("invalid parameters", new ErrorResult(
+				$"Failed to parse addParameters JSON: {ex.Message}",
+				Hint: "Expected: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]"));
 		}
 
 		// Delegate to orchestrator.
@@ -76,7 +72,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		}, solution, compilation);
 
 		if(!result.Success)
-			return scope.Failed("change failed", new { error = result.Error });
+			return scope.Failed("change failed", new ErrorResult(result.Error!));
 
 		var token = approvals.Register(result.BaseSolution, result.NewSolution, result.Diff!,
 			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})"
