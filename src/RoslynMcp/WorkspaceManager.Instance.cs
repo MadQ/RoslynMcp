@@ -210,12 +210,12 @@ internal sealed partial class WorkspaceManager
 						foreach(var id in docIds)
 							newSolution = newSolution.WithDocumentText(id, newText);
 
-						workspace.TryApplyChanges(newSolution);
+						ApplyChangesWithFswSuppressed(newSolution);
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 				}
-
-				InvalidateCompilation();
+				else
+					InvalidateCompilation();
 			}
 			else if(workspace is AdhocWorkspace adhoc) {
 
@@ -395,6 +395,29 @@ internal sealed partial class WorkspaceManager
 
 		// ── FileSystemWatcher ────────────────────────────────────────────────
 
+		/// <summary>
+		///     Applies solution changes with FSW suppressed to prevent a feedback loop.
+		///     MSBuildWorkspace.TryApplyChanges writes text back to disk, which would
+		///     re-trigger the FSW. See issue #49.
+		/// </summary>
+		void ApplyChangesWithFswSuppressed(Solution newSolution)
+		{
+			if(watcher is not null)
+				watcher.EnableRaisingEvents = false;
+
+			try {
+
+				workspace.TryApplyChanges(newSolution);
+			}
+			finally {
+
+				if(watcher is not null)
+					watcher.EnableRaisingEvents = true;
+			}
+
+			InvalidateCompilation();
+		}
+
 		void StartWatcher()
 		{
 			watcher = new FileSystemWatcher(rootPath, "*.cs")
@@ -498,11 +521,8 @@ internal sealed partial class WorkspaceManager
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			}
 
-			if(modified) {
-
-				workspace.TryApplyChanges(newSolution);
-				InvalidateCompilation();
-			}
+			if(modified)
+				ApplyChangesWithFswSuppressed(newSolution);
 		}
 
 		void FlushAdhoc(AdhocWorkspace adhoc, string[] changed, string[] deleted)
