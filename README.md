@@ -57,7 +57,8 @@ For Claude Code, create `.mcp.json` in your project root:
 ```
 
 > [!IMPORTANT]
-> **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool.
+> **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
+> Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
 
 See [INSTALLATION.md](INSTALLATION.md) for setup guides for GitHub Copilot, Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
 
@@ -206,7 +207,7 @@ RoslynMcp works. We use it daily for C# development with AI agents. But it is al
 
 **Large solution testing.** The tool catalog has been tested against small and medium projects. If you have a large real-world codebase (50+ projects, 500K+ lines), we want to know how it performs: load times, memory usage, pagination behavior, anything that breaks.
 
-**Tool description refinements.** The one-line descriptions that agents see determine whether they pick the right tool. If you notice an agent making poor tool choices, a PR that improves a description is a genuinely useful contribution.
+**Making agents choose the right tools.** Agents default to built-in file tools even when roslyn_* tools are available and better. We're working on enforcement hooks, better tool descriptions, and per-client instruction templates — for Claude Code, GitHub Copilot, Cursor, Windsurf, and others. See [#99](https://github.com/MadQ/RoslynMcp/issues/99) for the full wishlist and how to help.
 
 **Multi-agent resource usage.** Each subagent spawns its own MCP server process with its own Roslyn workspace (~100MB+ RAM, ~10s load time). Parallel subagents multiply this cost. We're designing a shared Workspace Service via named pipes — one workspace per solution, shared across all agents. See [#86](https://github.com/MadQ/RoslynMcp/issues/86) and the [design doc](docs/plans/multi-instance-architecture.md).
 
