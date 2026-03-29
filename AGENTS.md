@@ -144,6 +144,30 @@ When discovering files/content:
 
 This is very important! It helps to test the tools, dogfood the API, and ensures your agent gets accurate semantic understanding of the codebase. Avoid workarounds like grepping files or spawning builds unless absolutely necessary. I'm serious: get this through your thick pirate skull: DOGFOOD the living daylights out of all this!
 
+### Subagents Don't Inherit Instructions
+
+If you spawn subagents (Claude Code Agent tool, background workers, task delegation), they **do not see this file**. They will default to Read/Grep/Edit unless explicitly told otherwise. When delegating C# work, include this in the subagent prompt:
+
+```
+Use roslyn_* MCP tools for ALL C# file operations — do NOT use built-in
+Read/Grep/Edit/Glob/Bash tools for C# code:
+
+Reading:     roslyn_get_member_body (single method/property) or roslyn_read_file (whole file)
+Structure:   roslyn_get_file_outline (types + signatures, no bodies)
+Search:      roslyn_search_files or roslyn_semantic_search (not Grep)
+Files:       roslyn_list_files (not Glob)
+References:  roslyn_find_references (semantic, cross-project)
+Impls:       roslyn_find_implementations (interfaces, overrides)
+Definition:  roslyn_get_symbol_definition (file + line + signature)
+Types:       roslyn_get_type_members, roslyn_get_type_hierarchy
+Editing:     roslyn_replace_in_code (C#) or roslyn_replace_in_file (any file)
+Inserting:   roslyn_insert_lines (by line number or anchor pattern)
+Renaming:    roslyn_preview_rename + roslyn_apply_rename
+Signatures:  roslyn_change_signature + roslyn_apply_signature_change
+Building:    roslyn_build_project (NEVER run dotnet build in terminal)
+Diagnostics: roslyn_get_diagnostics for fast error checks
+```
+
 ### Exception: Style Enforcement
 
 Code style enforcement (indented blank lines, spacing, etc.) is handled by `.\scripts\Test-CodeStyle.ps1` rather than a Roslyn tool. **Why?**
