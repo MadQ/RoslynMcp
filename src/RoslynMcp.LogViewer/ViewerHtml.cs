@@ -13,10 +13,177 @@ static class ViewerHtml
 	  <title>RoslynMcp Logs</title>
 	  <style>
 		*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-		
+
+		/* ── Theme variables ── */
+		:root {
+		  --bg:           #1e1e1e;
+		  --bg-toolbar:   #2d2d2d;
+		  --bg-hover:     #333;
+		  --bg-input:     #3c3c3c;
+		  --bg-kbd:       #3c3c3c;
+		  --border:       #555;
+		  --text:         #d4d4d4;
+		  --text-dim:     #999;
+		  --text-heading: #569cd6;
+		  --btn-bg:       #3c3c3c;
+		  --btn-hover:    #505050;
+		  --btn-active:   #264f78;
+		  --btn-active-border: #569cd6;
+		  --highlight:    #4a4a00;
+		  --error-border: #f44747;
+		  --lvl-start:    #569cd6;
+		  --lvl-stop:     #999;
+		  --lvl-tool:     #6a9955;
+		  --lvl-error:    #f44747;
+		  --ws-msb:       #6a9955;
+		  --ws-adh:       #ce9178;
+		  --tool-name:    #d4d4d4;
+		  --tool-ms:      #999;
+		  --tool-ok:      #6a9955;
+		  --tool-err:     #f44747;
+		  --tool-subj:    #9cdcfe;
+		  --tool-det:     #b0b0b0;
+		  --filter-all:   #d4d4d4;
+		  --filter-tool:  #6a9955;
+		  --filter-fail:  #ce9178;
+		  --filter-error: #f44747;
+		  --filter-start: #569cd6;
+		  --filter-stop:  #999;
+		  --legend-bg:    #252525;
+		  --legend-text:  #999;
+		  --status-live:  #6a9955;
+		  --status-err:   #f44747;
+		  --focus:        #569cd6;
+		}
+
+		[data-theme="light"] {
+		  --bg:           #ffffff;
+		  --bg-toolbar:   #f3f3f3;
+		  --bg-hover:     #e8e8e8;
+		  --bg-input:     #ffffff;
+		  --bg-kbd:       #e8e8e8;
+		  --border:       #d0d0d0;
+		  --text:         #1e1e1e;
+		  --text-dim:     #666;
+		  --text-heading: #0066b8;
+		  --btn-bg:       #e8e8e8;
+		  --btn-hover:    #d0d0d0;
+		  --btn-active:   #0066b8;
+		  --btn-active-border: #005a9e;
+		  --highlight:    #fff3b0;
+		  --error-border: #c00;
+		  --lvl-start:    #0066b8;
+		  --lvl-stop:     #666;
+		  --lvl-tool:     #008000;
+		  --lvl-error:    #c00;
+		  --ws-msb:       #008000;
+		  --ws-adh:       #b85c00;
+		  --tool-name:    #1e1e1e;
+		  --tool-ms:      #666;
+		  --tool-ok:      #008000;
+		  --tool-err:     #c00;
+		  --tool-subj:    #1e1e1e;
+		  --tool-det:     #666;
+		  --filter-all:   #1e1e1e;
+		  --filter-tool:  #008000;
+		  --filter-fail:  #b85c00;
+		  --filter-error: #c00;
+		  --filter-start: #0066b8;
+		  --filter-stop:  #666;
+		  --legend-bg:    #f0f0f0;
+		  --legend-text:  #666;
+		  --status-live:  #008000;
+		  --status-err:   #c00;
+		  --focus:        #0066b8;
+		}
+
+		[data-theme="parchment"] {
+		  --bg:           rgb(214 211 171);
+		  --bg-toolbar:   rgb(196 193 150);
+		  --bg-hover:     rgb(200 197 156);
+		  --bg-input:     rgb(230 228 200);
+		  --bg-kbd:       rgb(230 228 200);
+		  --border:       rgb(160 155 110);
+		  --text:         rgb(30 25 10);
+		  --text-dim:     rgb(95 90 55);
+		  --text-heading: rgb(30 55 140);
+		  --btn-bg:       rgb(200 197 156);
+		  --btn-hover:    rgb(180 176 132);
+		  --btn-active:   rgb(50 70 150);
+		  --btn-active-border: rgb(30 55 140);
+		  --highlight:    rgb(255 255 180);
+		  --error-border: rgb(160 0 0);
+		  --lvl-start:    rgb(30 55 140);
+		  --lvl-stop:     rgb(95 90 55);
+		  --lvl-tool:     rgb(20 100 40);
+		  --lvl-error:    rgb(160 0 0);
+		  --ws-msb:       rgb(20 100 40);
+		  --ws-adh:       rgb(170 100 0);
+		  --tool-name:    rgb(30 25 10);
+		  --tool-ms:      rgb(95 90 55);
+		  --tool-ok:      rgb(20 100 40);
+		  --tool-err:     rgb(160 0 0);
+		  --tool-subj:    rgb(45 40 15);
+		  --tool-det:     rgb(100 95 60);
+		  --filter-all:   rgb(30 25 10);
+		  --filter-tool:  rgb(20 100 40);
+		  --filter-fail:  rgb(180 60 0);
+		  --filter-error: rgb(160 0 0);
+		  --filter-start: rgb(30 55 140);
+		  --filter-stop:  rgb(80 75 45);
+		  --legend-bg:    rgb(210 207 170);
+		  --legend-text:  rgb(60 55 30);
+		  --status-live:  rgb(20 100 40);
+		  --status-err:   rgb(160 0 0);
+		  --focus:        rgb(50 70 150);
+		}
+
+		@media (prefers-color-scheme: light) {
+		  :root:not([data-theme]) {
+			--bg:           #ffffff;
+			--bg-toolbar:   #f3f3f3;
+			--bg-hover:     #e8e8e8;
+			--bg-input:     #ffffff;
+			--bg-kbd:       #e8e8e8;
+			--border:       #d0d0d0;
+			--text:         #1e1e1e;
+			--text-dim:     #666;
+			--text-heading: #0066b8;
+			--btn-bg:       #e8e8e8;
+			--btn-hover:    #d0d0d0;
+			--btn-active:   #0066b8;
+			--btn-active-border: #005a9e;
+			--highlight:    #fff3b0;
+			--error-border: #c00;
+			--lvl-start:    #0066b8;
+			--lvl-stop:     #666;
+			--lvl-tool:     #008000;
+			--lvl-error:    #c00;
+			--ws-msb:       #008000;
+			--ws-adh:       #b85c00;
+			--tool-name:    #1e1e1e;
+			--tool-ms:      #666;
+			--tool-ok:      #008000;
+			--tool-err:     #c00;
+			--tool-subj:    #1e1e1e;
+			--tool-det:     #666;
+			--filter-all:   #1e1e1e;
+			--filter-tool:  #008000;
+			--filter-fail:  #b85c00;
+			--filter-error: #c00;
+			--filter-start: #0066b8;
+			--filter-stop:  #666;
+			--legend-bg:    #f0f0f0;
+			--legend-text:  #666;
+			--status-live:  #008000;
+			--status-err:   #c00;
+			--focus:        #0066b8;
+		  }
+		}
+
 		body {
-		  background: rgb(214 211 171);
-		  color: rgb(0 0 0);
+		  background: var(--bg);
+		  color: var(--text);
 		  font-family: 'Cascadia Code', 'Consolas', 'Courier New', monospace;
 		  font-size: 13px;
 		  display: flex;
@@ -24,26 +191,26 @@ static class ViewerHtml
 		  height: 100vh;
 		  overflow: hidden;
 		}
-		
+
 		/* ── Toolbar ── */
 		#toolbar {
 		  padding: 7px 12px;
-		  background: rgb(196 193 150);
-		  border-bottom: 1px solid rgb(160 155 110);
+		  background: var(--bg-toolbar);
+		  border-bottom: 1px solid var(--border);
 		  display: flex;
 		  gap: 6px;
 		  align-items: center;
 		  flex-shrink: 0;
 		  flex-wrap: wrap;
 		}
-		
-		#toolbar h1 { font-size: 13px; color: rgb(30 55 140); margin-right: 4px; letter-spacing: .02em; }
-		
+
+		#toolbar h1 { font-size: 13px; color: var(--text-heading); margin-right: 4px; letter-spacing: .02em; }
+
 		.btn {
 		  padding: 3px 9px;
-		  border: 1px solid rgb(155 150 105);
-		  background: rgb(200 197 156);
-		  color: rgb(0 0 0);
+		  border: 1px solid var(--border);
+		  background: var(--btn-bg);
+		  color: var(--text);
 		  cursor: pointer;
 		  border-radius: 4px;
 		  font-size: 12px;
@@ -51,16 +218,16 @@ static class ViewerHtml
 		  transition: background .1s;
 		}
 		[data-filter] { min-width: 52px; text-align: center; }
-		.btn:hover  { background: rgb(180 176 132); }
-		.btn.active { background: rgb(50 70 150); border-color: rgb(30 55 140); color: rgb(255 255 255); }
-		
-		.filter-ALL   { color: rgb(0 0 0); }
-		.filter-TOOL  { color: rgb(20 100 40); }
-		.filter-FAIL  { color: rgb(180 60 0); }
-		.filter-ERROR { color: rgb(160 0 0); }
-		.filter-START { color: rgb(30 55 140); }
-		.filter-STOP  { color: rgb(90 85 55); }
-		
+		.btn:hover  { background: var(--btn-hover); }
+		.btn.active { background: var(--btn-active); border-color: var(--btn-active-border); color: #fff; }
+
+		.filter-ALL   { color: var(--filter-all); }
+		.filter-TOOL  { color: var(--filter-tool); }
+		.filter-FAIL  { color: var(--filter-fail); }
+		.filter-ERROR { color: var(--filter-error); }
+		.filter-START { color: var(--filter-start); }
+		.filter-STOP  { color: var(--filter-stop); }
+
 		label.chk {
 		  display: flex;
 		  align-items: center;
@@ -69,18 +236,29 @@ static class ViewerHtml
 		  font-size: 12px;
 		  user-select: none;
 		}
-		
-		#sep, .sep-thin { width: 1px; height: 18px; background: rgb(160 155 110); margin: 0 2px; }
-		
-		#status { margin-left: auto; font-size: 11px; color: rgb(90 85 55); white-space: nowrap; }
-		#status.live { color: rgb(20 100 40); }
-		#status.err  { color: rgb(160 0 0); }
-		
+
+		#sep, .sep-thin { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+
+		#status { margin-left: auto; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+		#status.live { color: var(--status-live); }
+		#status.err  { color: var(--status-err); }
+
+		#themeSelect {
+		  padding: 2px 6px;
+		  border: 1px solid var(--border);
+		  background: var(--btn-bg);
+		  color: var(--text);
+		  border-radius: 4px;
+		  font-size: 11px;
+		  font-family: inherit;
+		  cursor: pointer;
+		}
+
 		/* ── Log area ── */
 		#log { flex: 1; overflow-y: scroll; padding: 2px 0; }
-		
-		#empty { padding: 16px 12px; color: rgb(110 105 70); font-style: italic; }
-		
+
+		#empty { padding: 16px 12px; color: var(--text-dim); font-style: italic; }
+
 		/* ── Entries ── */
 		.entry {
 		  padding: 1px 12px;
@@ -91,39 +269,37 @@ static class ViewerHtml
 		  word-break: break-all;
 		  border-bottom: 1px solid transparent;
 		}
-		.entry:hover { background: rgb(200 197 156); }
-		
-		.ts  { color: rgb(110 105 70); }
+		.entry:hover { background: var(--bg-hover); }
+
+		.ts  { color: var(--text-dim); }
 		.lvl { font-weight: 600; }
-		.msg { color: rgb(0 0 0); }
-		
-		.lvl-START { color: rgb(30 55 140); }
-		.lvl-STOP  { color: rgb(110 105 70); }
-		.lvl-TOOL  { color: rgb(20 100 40); }
-		.lvl-ERROR { color: rgb(160 0 0); }
-		.lvl-OTHER { color: rgb(110 105 70); }
+		.msg { color: var(--text); }
 
-		/* ERROR rows get a subtle left border */
-		.entry[data-level="ERROR"] { border-left: 2px solid rgb(160 0 0); }
+		.lvl-START { color: var(--lvl-start); }
+		.lvl-STOP  { color: var(--lvl-stop); }
+		.lvl-TOOL  { color: var(--lvl-tool); }
+		.lvl-ERROR { color: var(--lvl-error); }
+		.lvl-OTHER { color: var(--text-dim); }
 
-		/* TOOL message sub-fields */
-		.ws-msb  { color: rgb(20 100 40);  font-weight: 700; cursor: help; }
-		.ws-adh  { color: rgb(170 100 0);  font-weight: 700; cursor: help; }
-		.ws-unk  { color: rgb(110 105 70); cursor: help; }
-		.tool-name { color: rgb(0 0 0); font-weight: 600; }
-		.tool-ms   { color: rgb(110 105 70); }
-		.tool-ok   { color: rgb(20 100 40); font-weight: 600; }
-		.tool-err  { color: rgb(160 0 0);   font-weight: 600; }
-		.tool-subj { color: rgb(60 55 30); }
-		.tool-det  { color: rgb(80 75 45);  font-style: italic; }
-		
+		.entry[data-level="ERROR"] { border-left: 2px solid var(--error-border); }
+
+		.ws-msb  { color: var(--ws-msb);  font-weight: 700; cursor: help; }
+		.ws-adh  { color: var(--ws-adh);  font-weight: 700; cursor: help; }
+		.ws-unk  { color: var(--text-dim); cursor: help; }
+		.tool-name { color: var(--tool-name); font-weight: 600; }
+		.tool-ms   { color: var(--tool-ms); }
+		.tool-ok   { color: var(--tool-ok); font-weight: 600; }
+		.tool-err  { color: var(--tool-err); font-weight: 600; }
+		.tool-subj { color: var(--tool-subj); }
+		.tool-det  { color: var(--tool-det); font-style: italic; }
+
 		.hidden { display: none !important; }
 
 		/* ── Search bar ── */
 		#searchBar {
 		  padding: 5px 12px;
-		  background: rgb(196 193 150);
-		  border-bottom: 1px solid rgb(160 155 110);
+		  background: var(--bg-toolbar);
+		  border-bottom: 1px solid var(--border);
 		  display: flex;
 		  gap: 8px;
 		  align-items: center;
@@ -132,28 +308,29 @@ static class ViewerHtml
 		#searchInput {
 		  flex: 1;
 		  padding: 3px 8px;
-		  border: 1px solid rgb(155 150 105);
+		  border: 1px solid var(--border);
 		  border-radius: 4px;
 		  font-family: inherit;
 		  font-size: 12px;
-		  background: rgb(230 228 200);
+		  background: var(--bg-input);
+		  color: var(--text);
 		}
-		#searchInput:focus { outline: 2px solid rgb(50 70 150); }
-		#searchCount { font-size: 11px; color: rgb(90 85 55); white-space: nowrap; }
-		.entry.highlight { background: rgb(255 255 180) !important; }
+		#searchInput:focus { outline: 2px solid var(--focus); }
+		#searchCount { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+		.entry.highlight { background: var(--highlight) !important; }
 
 		/* ── Legend ── */
 		#legend {
 		  padding: 4px 12px;
-		  background: rgb(210 207 170);
-		  border-bottom: 1px solid rgb(160 155 110);
+		  background: var(--legend-bg);
+		  border-bottom: 1px solid var(--border);
 		  font-size: 11px;
-		  color: rgb(70 65 35);
+		  color: var(--legend-text);
 		  flex-shrink: 0;
 		}
 		kbd {
-		  background: rgb(230 228 200);
-		  border: 1px solid rgb(160 155 110);
+		  background: var(--bg-kbd);
+		  border: 1px solid var(--border);
 		  border-radius: 3px;
 		  padding: 1px 4px;
 		  font-family: inherit;
@@ -176,17 +353,19 @@ static class ViewerHtml
 		<button class="btn" id="clearBtn">Clear</button>
 		<button class="btn" id="shutdownBtn">Shutdown</button>
 		<button class="btn" id="helpBtn" title="Keyboard shortcuts">?</button>
+		<div class="sep-thin"></div>
+		<select id="themeSelect" title="Theme (T to cycle)"></select>
 		<span id="status">Connecting…</span>
 	  </div>
 	  <div id="legend" class="hidden">
-		<kbd>1</kbd> ALL <kbd>2</kbd> TOOL <kbd>3</kbd> FAIL <kbd>4</kbd> ERROR <kbd>5</kbd> START <kbd>6</kbd> STOP &nbsp;|&nbsp; <kbd>S</kbd> Auto-scroll &nbsp; <kbd>Ctrl+F</kbd> Search &nbsp; <kbd>Ctrl+L</kbd> Clear &nbsp; <kbd>Esc</kbd> Close/Jump to end &nbsp; <kbd>Q</kbd> Shutdown &nbsp; <kbd>?</kbd> This legend
+		<kbd>1</kbd> ALL <kbd>2</kbd> TOOL <kbd>3</kbd> FAIL <kbd>4</kbd> ERROR <kbd>5</kbd> START <kbd>6</kbd> STOP &nbsp;|&nbsp; <kbd>S</kbd> Auto-scroll &nbsp; <kbd>T</kbd> Theme &nbsp; <kbd>Ctrl+F</kbd> Search &nbsp; <kbd>Ctrl+L</kbd> Clear &nbsp; <kbd>Esc</kbd> Close/Jump to end &nbsp; <kbd>Q</kbd> Shutdown &nbsp; <kbd>?</kbd> This legend
 	  </div>
 	  <div id="searchBar" class="hidden">
 		<input type="text" id="searchInput" placeholder="Search logs… (Esc to close)">
 		<span id="searchCount"></span>
 	  </div>
 	  <div id="log"><div id="empty">Waiting for log entries…</div></div>
-	  
+
 	  <script>
 		const logEl      = document.getElementById('log');
 		const statusEl   = document.getElementById('status');
@@ -194,24 +373,94 @@ static class ViewerHtml
 		const emptyEl    = document.getElementById('empty');
 		let   filter       = 'ALL';
 		let   count        = 0;
-		let   scrolledUp   = false;  // true when user has scrolled away from bottom
-		let   hasSelection = false;  // true while text is selected in the log
-		
+		let   scrolledUp   = false;
+		let   hasSelection = false;
+
+		// ── Theme ────────────────────────────────────────────────────────────
+		const themeSelect = document.getElementById('themeSelect');
+		const themeIcons  = { dark: '\u{1F319}', light: '\u{2600}\u{FE0F}', parchment: '\u{1F4DC}', system: '\u{1F5A5}\u{FE0F}' };
+		const themes      = ['', 'dark', 'light', 'parchment'];
+		let   currentSetting = '';  // '' = system
+
+		function getSystemTheme() {
+		  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+		}
+
+		function getResolvedTheme(setting) {
+		  return setting || getSystemTheme();
+		}
+
+		function buildThemeOptions() {
+		  const sys = getSystemTheme();
+		  const sysLabel = `${themeIcons.system} System (${sys.charAt(0).toUpperCase() + sys.slice(1)})`;
+		  themeSelect.innerHTML = '';
+		  [
+			['', sysLabel],
+			['dark', `${themeIcons.dark} Dark`],
+			['light', `${themeIcons.light} Light`],
+			['parchment', `${themeIcons.parchment} Parchment`],
+		  ].forEach(([val, label]) => {
+			const opt = document.createElement('option');
+			opt.value = val;
+			opt.textContent = label;
+			themeSelect.appendChild(opt);
+		  });
+		  themeSelect.value = currentSetting;
+		}
+
+		function applyTheme(setting) {
+		  currentSetting = setting;
+		  const resolved = getResolvedTheme(setting);
+		  if(resolved)
+			document.documentElement.setAttribute('data-theme', resolved);
+		  else
+			document.documentElement.removeAttribute('data-theme');
+		  themeSelect.value = setting;
+		  try { localStorage.setItem('roslynmcp-theme', setting); } catch {}
+		}
+
+		function cycleTheme() {
+		  // Skip themes that would look identical to the current resolved appearance
+		  const currentResolved = getResolvedTheme(currentSetting);
+		  let idx = themes.indexOf(currentSetting);
+		  let next, nextResolved;
+		  do {
+			idx  = (idx + 1) % themes.length;
+			next = themes[idx];
+			nextResolved = getResolvedTheme(next);
+		  } while(nextResolved === currentResolved && next !== currentSetting);
+		  applyTheme(next);
+		}
+
+		themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
+
+		// Rebuild dropdown labels when system theme changes
+		window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+		  buildThemeOptions();
+		  if(currentSetting === '') applyTheme('');
+		});
+
+		// Restore saved theme
+		try {
+		  const saved = localStorage.getItem('roslynmcp-theme');
+		  if(saved !== null) currentSetting = saved;
+		} catch {}
+		buildThemeOptions();
+		applyTheme(currentSetting);
+
 		// ── Smart scroll tracking ─────────────────────────────────────────────
-		// Mark scrolledUp when user leaves the bottom; clear it when they return.
 		logEl.addEventListener('scroll', () => {
 		  scrolledUp = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight > 4;
 		}, { passive: true });
-		
-		// Pause while text is selected; resume (if at bottom) once cleared.
+
 		document.addEventListener('selectionchange', () => {
 		  hasSelection = (window.getSelection()?.toString().length ?? 0) > 0;
 		});
-		
+
 		function shouldScroll() {
 		  return autoScroll.checked && !scrolledUp && !hasSelection;
 		}
-		
+
 		// ── Filters ──────────────────────────────────────────────────────────
 		document.querySelectorAll('[data-filter]').forEach(btn => {
 		  btn.addEventListener('click', () => {
@@ -226,12 +475,12 @@ static class ViewerHtml
 			});
 		  });
 		});
-		
+
 		// ── Shutdown ──────────────────────────────────────────────────────────
 		document.getElementById('shutdownBtn').addEventListener('click', () => {
 		  fetch('/shutdown', { method: 'POST' }).catch(() => {});
 		});
-		
+
 		// ── Clear ─────────────────────────────────────────────────────────────
 		document.getElementById('clearBtn').addEventListener('click', () => {
 		  document.querySelectorAll('.entry').forEach(el => el.remove());
@@ -239,7 +488,7 @@ static class ViewerHtml
 		  count = 0;
 		  updateStatus();
 		});
-		
+
 		// ── Append entry ──────────────────────────────────────────────────────
 		function addEntry(e) {
 		  emptyEl.style.display = 'none';
@@ -314,33 +563,33 @@ static class ViewerHtml
 
 		  count++;
 		  updateStatus();
-		  
+
 		  if(shouldScroll())
 			logEl.scrollTop = logEl.scrollHeight;
 		}
-		
+
 		function updateStatus() {
 		  const base = `${count} entr${count === 1 ? 'y' : 'ies'}`;
 		  statusEl.textContent = connected ? `${base} (live)` : base;
 		}
-		
+
 		// ── SSE connection ────────────────────────────────────────────────────
 		let connected = false;
-		
+
 		function connect() {
 		  const es = new EventSource('/logs/stream');
-		  
+
 		  es.onopen = () => {
 			connected = true;
 			statusEl.className = 'live';
 			updateStatus();
 		  };
-		  
+
 		  es.onmessage = e => {
 			try { addEntry(JSON.parse(e.data)); }
 			catch { /* malformed entry — skip */ }
 		  };
-		  
+
 		  es.onerror = () => {
 			connected = false;
 			statusEl.className = 'err';
@@ -349,7 +598,7 @@ static class ViewerHtml
 			setTimeout(connect, 3000);
 		  };
 		}
-		
+
 		// ── Help legend toggle ────────────────────────────────────────────
 		document.getElementById('helpBtn').addEventListener('click', () => {
 		  document.getElementById('legend').classList.toggle('hidden');
@@ -388,14 +637,12 @@ static class ViewerHtml
 		}
 
 		document.addEventListener('keydown', e => {
-		  // Ctrl+L — clear log
 		  if(e.ctrlKey && e.key === 'l') {
 			e.preventDefault();
 			document.getElementById('clearBtn').click();
 			return;
 		  }
 
-		  // Ctrl+F — open search
 		  if(e.ctrlKey && e.key === 'f') {
 			e.preventDefault();
 			searchBar.classList.remove('hidden');
@@ -405,10 +652,6 @@ static class ViewerHtml
 			return;
 		  }
 
-		  // Ctrl+C — copy selected entry text (let browser handle if text is selected)
-		  // (browser default handles this — no override needed)
-
-		  // Esc — close search, clear selection, or jump to end
 		  if(e.key === 'Escape') {
 			if(searching) { clearSearch(); return; }
 			const sel = window.getSelection();
@@ -418,7 +661,6 @@ static class ViewerHtml
 			return;
 		  }
 
-		  // 1-6 — filter shortcuts, ? — legend (only when not in search input)
 		  if(!searching && !e.ctrlKey && !e.altKey && !e.metaKey) {
 			switch(e.key) {
 			  case '1': clickFilter('ALL');   break;
@@ -428,6 +670,7 @@ static class ViewerHtml
 			  case '5': clickFilter('START'); break;
 			  case '6': clickFilter('STOP');  break;
 			  case 's': autoScroll.checked = !autoScroll.checked; break;
+			  case 't': cycleTheme(); break;
 			  case 'q': document.getElementById('shutdownBtn').click(); break;
 			  case '?': document.getElementById('legend').classList.toggle('hidden'); break;
 			}

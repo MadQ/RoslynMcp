@@ -60,7 +60,12 @@ class Program
 
 		var app = builder.Build();
 
-		app.MapGet("/", () => Results.Content(ViewerHtml.Page, "text/html; charset=utf-8"));
+		app.MapGet("/", (HttpContext ctx) => {
+			ctx.Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+			ctx.Response.Headers.Pragma       = "no-cache";
+			ctx.Response.Headers.Expires      = "0";
+			return Results.Content(ViewerHtml.Page, "text/html; charset=utf-8");
+		});
 
 		app.MapPost("/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) => {
 
