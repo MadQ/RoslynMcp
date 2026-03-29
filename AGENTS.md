@@ -151,26 +151,31 @@ This is very important! It helps to test the tools, dogfood the API, and ensures
 
 ### Subagents Don't Inherit Instructions
 
-If you spawn subagents (Claude Code Agent tool, background workers, task delegation), they **do not see this file**. They will default to Read/Grep/Edit unless explicitly told otherwise. When delegating C# work, include this in the subagent prompt:
+If you spawn subagents (Claude Code Agent tool, background workers, task delegation), they **do not see this file**. They will default to Bash `find`/`grep`/`sed` chains that trigger permission prompts and waste resources. Every subagent prompt **MUST** include this block verbatim:
 
 ```
-Use roslyn_* MCP tools for ALL C# file operations — do NOT use built-in
-Read/Grep/Edit/Glob/Bash tools for C# code:
+MANDATORY TOOL CONSTRAINTS — do NOT violate these:
+- You MUST use roslyn_* MCP tools for ALL C# file operations.
+- Do NOT use Bash find, grep, cat, sed, awk, xargs, or wc on .cs files.
+- Do NOT use cd — the CWD is already correct.
+- Do NOT use the Read tool for .cs files — use roslyn_read_file instead.
+- Do NOT use the Grep tool for .cs files — use roslyn_search_files instead.
+- Do NOT use the Glob tool — use roslyn_list_files instead.
 
-Reading:     roslyn_get_member_body (single method/property) or roslyn_read_file (whole file)
-Structure:   roslyn_get_file_outline (types + signatures, no bodies)
-Search:      roslyn_search_files or roslyn_semantic_search (not Grep)
-Files:       roslyn_list_files (not Glob)
-References:  roslyn_find_references (semantic, cross-project)
-Impls:       roslyn_find_implementations (interfaces, overrides)
-Definition:  roslyn_get_symbol_definition (file + line + signature)
-Types:       roslyn_get_type_members, roslyn_get_type_hierarchy
-Editing:     roslyn_replace_in_code (C#) or roslyn_replace_in_file (any file)
-Inserting:   roslyn_insert_lines (by line number or anchor pattern)
-Renaming:    roslyn_preview_rename + roslyn_apply_rename
-Signatures:  roslyn_change_signature + roslyn_apply_signature_change
-Building:    roslyn_build_project (NEVER run dotnet build in terminal)
-Diagnostics: roslyn_get_diagnostics for fast error checks
+Specific alternatives for common tasks:
+- Count tools:    roslyn_search_files with pattern 'Name = "roslyn_'
+- Read .cs file:  roslyn_read_file (not Read, not cat)
+- Search code:    roslyn_search_files or roslyn_semantic_search (not Grep, not grep)
+- File structure: roslyn_get_file_outline (not Read on the whole file)
+- List files:     roslyn_list_files (not Glob, not find)
+- Read method:    roslyn_get_member_body (not Read on the whole file)
+- Find usages:    roslyn_find_references (not Grep)
+- Edit C#:        roslyn_replace_in_code or roslyn_replace_in_file (not Edit)
+- Insert lines:   roslyn_insert_lines (not Edit)
+- Build:          roslyn_build_project (NEVER dotnet build in terminal)
+- Diagnostics:    roslyn_get_diagnostics
+
+Violation triggers permission prompts that block the user.
 ```
 
 ### Exception: Style Enforcement
