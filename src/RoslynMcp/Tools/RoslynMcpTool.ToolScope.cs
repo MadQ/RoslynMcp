@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Text.Json;
 
 namespace RoslynMcp.Tools;
 
@@ -20,6 +21,7 @@ internal abstract partial class RoslynMcpTool
 		string? detail;
 		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
 		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
+		int     estimatedTokens;
 
 		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose)
 		{
@@ -39,7 +41,12 @@ internal abstract partial class RoslynMcpTool
 		public void Outcome(string detail) => this.detail = detail;
 
 		/// <summary>Records a success detail and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
-		public T Outcome<T>(string detail, T returnValue) { this.detail = detail; return returnValue; }
+		public T Outcome<T>(string detail, T returnValue)
+		{
+			this.detail     = detail;
+			estimatedTokens = EstimateTokens(returnValue);
+			return returnValue;
+		}
 
 		/// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
 		public void Failed(string reason) { failed = true; detail = reason; }
@@ -52,8 +59,20 @@ internal abstract partial class RoslynMcpTool
 
 		public void Dispose()
 		{
-			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag);
+			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag, estimatedTokens);
 			onDispose();
+		}
+
+		/// <summary>Rough token estimate: serialize to JSON, divide chars by 4.</summary>
+		static int EstimateTokens<T>(T value)
+		{
+			try {
+				var json = JsonSerializer.Serialize(value);
+				return json.Length / 4;
+			}
+			catch {
+				return 0;
+			}
 		}
 	}
 }

@@ -20,7 +20,8 @@ internal sealed class FileLogger : IDisposable
 	
 	readonly string? logPath;
 	readonly object  writeLock = new();
-	
+	long             sessionTokens;
+
 	public bool IsEnabled => logPath is not null;
 	
 	public FileLogger()
@@ -61,7 +62,7 @@ internal sealed class FileLogger : IDisposable
 	
 	/// <summary>Logs a tool invocation with outcome, elapsed time, and workspace mode indicator.</summary>
 	/// <param name="isMSBuild">True for MSBuildWorkspace (◆), false for AdhocWorkspace (◇), null when unknown.</param>
-	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null)
+	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0)
 	{
 		var outcome   = success ? "OK   " : "ERROR";
 		var ws        = isMSBuild ? "MSB" : "ADH";
@@ -71,6 +72,9 @@ internal sealed class FileLogger : IDisposable
 		;
 		var cache = cacheTag switch { "HIT" => " [HIT]", "MISS" => " [MISS]", _ => "" };
 
+		if(estimatedTokens > 0)
+			Interlocked.Add(ref sessionTokens, estimatedTokens);
+
 		var sb = new System.Text.StringBuilder();
 		sb.Append($"{ws} {outcome} {elapsedMs,5}ms {shortName,-25}");
 
@@ -79,6 +83,9 @@ internal sealed class FileLogger : IDisposable
 
 		if(detail is not null)
 			sb.Append($" — {detail}");
+
+		if(estimatedTokens > 0)
+			sb.Append($" ~{estimatedTokens}tok ({Interlocked.Read(ref sessionTokens)}tot)");
 
 		sb.Append(cache);
 
