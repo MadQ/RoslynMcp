@@ -154,3 +154,5 @@ Diagnostics: roslyn_get_diagnostics for fast error checks
 ```
 
 This is easy to forget — the main agent follows the instructions perfectly, then delegates to a subagent that reverts to grep and file reads. If you notice a subagent using built-in tools on C# files, that's the cause.
+
+**Resource note:** Each subagent spawns its own MCP server process with its own Roslyn workspace (~100MB+ RAM, ~10s load time). Limit parallel subagents on large solutions to avoid resource exhaustion. See [#85](https://github.com/MadQ/RoslynMcp/issues/85) for ongoing work on shared workspaces and subagent specialization.
