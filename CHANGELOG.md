@@ -42,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FindSyntaxTree` → `RoslynMcpTool` base class (normalizes + suffix matches, used by 8+ tools)
 
 ### Docs
-- AGENTS.md updated: constructor pattern, rename API, tool tips section, tool count 26
+- AGENTS.md updated: constructor pattern, rename API, tool tips section, tool count 33
 - README: highlights solution loading, pagination, get_member_body, smart build 17ms, active roadmap
 - `docs/plans/pagination-cache.md` — design doc for token-based pagination
 - `docs/plans/oop-dry-opportunities.md` — 7 refactoring opportunities in 3 phases
