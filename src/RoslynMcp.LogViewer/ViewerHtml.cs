@@ -586,7 +586,13 @@ static class ViewerHtml
 		  };
 
 		  es.onmessage = e => {
-			try { addEntry(JSON.parse(e.data)); }
+			try {
+			  const entry = JSON.parse(e.data);
+			  if(entry.Level === 'INFO' && entry.Message?.toLowerCase().includes('clear'))
+				document.getElementById('clearBtn').click();
+			  else
+				addEntry(entry);
+			}
 			catch { /* malformed entry — skip */ }
 		  };
 
