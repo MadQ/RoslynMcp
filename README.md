@@ -6,6 +6,7 @@
 [![Alpha](https://img.shields.io/badge/status-alpha-orange)]()
 
 **Give your AI agent a C# compiler instead of grep.**
+([benchmarks coming](docs/plans/token-benchmark.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
 RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 30+ more tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
