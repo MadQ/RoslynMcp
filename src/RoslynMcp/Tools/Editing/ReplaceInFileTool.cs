@@ -28,7 +28,12 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		[Description("The replacement text. Supports $1/$2 backreferences when useRegex=true.")                           ] string  replacement,
 		[Description("Treat pattern as a regular expression. Default: false.")                                            ] bool    useRegex  = false,
 		[Description("Preview replacements without writing the file. Returns what would change. Default: false.")         ] bool    dryRun    = false,
-		[Description("Case-sensitive matching. Default: true.")                                                           ] bool    caseSensitive = true
+		[Description("Case-sensitive matching. Default: true.")                                                           ] bool    caseSensitive = true,
+		[Description(
+			"Match line endings in the replacement text to the file's existing style (CRLF or LF). " +
+			"Default: true — prevents mixed line endings in the file. " +
+			"Set false only if your replacement text already has the correct line endings."
+		)] bool normalizeLineEndings = true
 	)
 	{
 		using var scope = BeginTool("roslyn_replace_in_file", filePath);
@@ -37,22 +42,26 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 
 		if(fullPath is null)
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
-		
+
 		Regex regex;
-		
+
 		try {
-		
-			var options = RegexOptions.Compiled;
-			
-			if(!caseSensitive)
-				options |= RegexOptions.IgnoreCase;
-			
-			// Escape literal patterns so special characters match as-is.
-			var regexPattern = useRegex ? pattern : Regex.Escape(pattern);
-			regex            = new Regex(regexPattern, options);
+
+			if(useRegex) {
+
+				var options = RegexOptions.Compiled;
+
+				if(!caseSensitive)
+					options |= RegexOptions.IgnoreCase;
+
+				regex = new Regex(pattern, options);
+			}
+			else {
+				regex = BuildLiteralRegex(pattern, caseSensitive);
+			}
 		}
 		catch(ArgumentException ex) {
-		
+
 			return new ErrorResult($"Invalid regex pattern: {ex.Message}");
 		}
 		
@@ -88,7 +97,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 				$"Dry run: {matches.Count} replacement(s) would be made.");
 		}
 		
-		var newContent = regex.Replace(originalContent, replacement);
+		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
+		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
 		try {
 			File.WriteAllText(fullPath, newContent);

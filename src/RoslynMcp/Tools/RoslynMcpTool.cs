@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp.Tools;
@@ -434,6 +435,37 @@ internal abstract partial class RoslynMcpTool
 	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
 	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.
 	/// </summary>
+
+	/// <summary>
+	///     Builds a compiled regex for literal pattern matching, with CRLF-agnostic newline handling.
+	///     Literal newlines in the pattern match both <c>\n</c> and <c>\r\n</c> in the file content,
+	///     preventing silent match failures on Windows files.
+	/// </summary>
+	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive = true)
+	{
+		var escaped = Regex.Escape(pattern).Replace("\n", @"\r?\n");
+		var options = RegexOptions.Compiled;
+
+		if(!caseSensitive)
+			options |= RegexOptions.IgnoreCase;
+
+		return new Regex(escaped, options);
+	}
+
+	/// <summary>
+	///     Detects the dominant line ending in a string and normalizes the replacement text to match.
+	///     Returns the replacement unchanged if the file uses LF or the replacement already matches.
+	/// </summary>
+	protected static string NormalizeLineEndings(string replacement, string fileContent)
+	{
+		var hasCrlf = fileContent.Contains("\r\n");
+
+		if(hasCrlf && !replacement.Contains("\r\n"))
+			return replacement.Replace("\n", "\r\n");
+
+		return replacement;
+	}
+
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 
