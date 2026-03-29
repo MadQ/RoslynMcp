@@ -220,7 +220,7 @@ If any of this sounds interesting, [open an issue](https://github.com/MadQ/Rosly
 
 Contributions are welcome at every level. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
-**Small PRs are great.** Tool description improvements, documentation fixes, typo corrections -- these directly affect how well agents use the tools. Never submitted a PR to an open-source project? This is a good place to start.
+**Small PRs are great.** Tool description improvements, documentation fixes, typo corrections -- these directly affect how well agents use the tools. First open-source PR? This is a good place to start.
 
 **Larger contributions.** New tools, performance improvements, platform fixes. Fork from `dev` and submit a PR.
 
@@ -231,6 +231,8 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 # Run the test suite (tests RoslynMcp against itself)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.
 
 ---
 
