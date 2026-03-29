@@ -93,19 +93,19 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		SymbolInfo[] typesArr      = [.. types];
 		SymbolInfo[] otherArr      = [.. other];
 
-		return new {
-			file       = Path.GetRelativePath(rootPath, tree.FilePath),
+		return new SymbolsInScopeResult(
+			Path.GetRelativePath(rootPath, tree.FilePath),
 			line,
 			column,
-			locals     = localsArr,
-			parameters = parametersArr,
-			fields     = fieldsArr,
-			properties = propertiesArr,
-			methods    = methodsArr,
-			types      = typesArr,
-			other      = otherArr,
-			_caution   = AdhocCaution(projectPath)
-		};
+			localsArr,
+			parametersArr,
+			fieldsArr,
+			propertiesArr,
+			methodsArr,
+			typesArr,
+			otherArr,
+			AdhocCaution(projectPath)
+		);
 	}
 	
 	private static int GetPosition(SourceText text, int line, int column)
@@ -137,5 +137,5 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		return new SymbolInfo(kind, name, type, containingType);
 	}
 	
-	private sealed record SymbolInfo(string Kind, string Name, string? Type, string? ContainingType);
+	internal sealed record SymbolInfo(string Kind, string Name, string? Type, string? ContainingType);
 }

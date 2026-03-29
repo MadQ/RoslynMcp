@@ -117,6 +117,111 @@ internal sealed record LineCountEntry(
 	string? Error
 );
 
+internal sealed record MemberBodySingleResult(
+	string  Symbol_name,
+	string  Symbol_kind,
+	string  File,
+	int     Start_line,
+	int     End_line,
+	string  Body,
+	string? _caution
+);
+
+internal sealed record MemberBodyPartialResult(
+	string        Symbol_name,
+	string        Symbol_kind,
+	List<object>  Parts,
+	string        Note,
+	string?       _caution
+);
+
+internal sealed record MemberBodyPart(
+	string  File,
+	int     Start_line,
+	int     End_line,
+	string  Body,
+	int?    Part_index
+);
+
+internal sealed record MetadataSymbolResult(
+	string Symbol_name,
+	string Symbol_kind,
+	string Location,
+	string Message
+);
+
+internal sealed record SymbolDefinitionResult(
+	string  Symbol_name,
+	string  Symbol_kind,
+	string  File,
+	int     Line,
+	int     Column,
+	string  Signature,
+	string? Doc_summary,
+	string? _caution
+);
+
+internal sealed record SymbolDocumentationResult(
+	string  Symbol_name,
+	string  Symbol_kind,
+	string? Summary,
+	object? Parameters,
+	string? Returns,
+	string? Remarks,
+	string? Example,
+	string? _caution
+);
+
+internal sealed record SymbolDocumentationEmptyResult(
+	string  Symbol_name,
+	string  Symbol_kind,
+	string? Documentation,
+	string  Message
+);
+
+internal sealed record SymbolInfoResult(
+	string  Kind,
+	string  Name,
+	string? Containing_type,
+	string? Type_or_return,
+	string? _caution = null
+);
+
+internal sealed record SymbolsInScopeResult(
+	string                              File,
+	int                                 Line,
+	int                                 Column,
+	GetSymbolsInScopeTool.SymbolInfo[]  Locals,
+	GetSymbolsInScopeTool.SymbolInfo[]  Parameters,
+	GetSymbolsInScopeTool.SymbolInfo[]  Fields,
+	GetSymbolsInScopeTool.SymbolInfo[]  Properties,
+	GetSymbolsInScopeTool.SymbolInfo[]  Methods,
+	GetSymbolsInScopeTool.SymbolInfo[]  Types,
+	GetSymbolsInScopeTool.SymbolInfo[]  Other,
+	string?                             _caution
+);
+
+internal sealed record GetUsingsResult(
+	string              File,
+	GetUsingsTool.UsingDirective[] Usings,
+	string[]            Global_usings,
+	string?             _caution
+);
+
+internal sealed record ProjectInfoResult(
+	string   Name,
+	string   Assembly_name,
+	string?  File_path,
+	string?  Target_framework,
+	string   Language_version,
+	string   Output_kind,
+	string   Nullable,
+	bool     Is_msbuild_workspace,
+	object[] Package_references,
+	string[] Additional_files,
+	string?  _caution
+);
+
 // ── Editing tools ───────────────────────────────────────────────────────────
 
 internal sealed record ReplaceInFileResult(

@@ -27,19 +27,17 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		var symbol   = FindSymbol(compilation, symbolName, containingType);
 
 		if(symbol is null)
-			return scope.Failed("symbol not found", new {
-				error = $"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name."
-			});
+			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 
 		var syntaxRefs = symbol.DeclaringSyntaxReferences;
 
 		if(syntaxRefs.Length == 0)
-			return new {
-				symbol_name = FormatSymbolName(symbol),
-				symbol_kind = symbol.Kind.ToString().ToLowerInvariant(),
-				location    = "metadata",
-				message     = "This symbol is defined in metadata (compiled assembly), not source code."
-			};
+			return new MetadataSymbolResult(
+				FormatSymbolName(symbol),
+				symbol.Kind.ToString().ToLowerInvariant(),
+				"metadata",
+				"This symbol is defined in metadata (compiled assembly), not source code."
+			);
 
 		var parts = new List<object>();
 
@@ -64,34 +62,34 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 				: Path.GetRelativePath(rootPath, tree.FilePath)
 			;
 
-			parts.Add(new {
-				file       = filePath,
-				start_line = startLine + 1,
-				end_line   = endLine + 1,
-				body       = string.Join("\n", lines),
-				part_index = syntaxRefs.Length > 1 ? i + 1 : (int?) null
-			});
+			parts.Add(new MemberBodyPart(
+				filePath,
+				startLine + 1,
+				endLine + 1,
+				string.Join("\n", lines),
+				syntaxRefs.Length > 1 ? i + 1 : null
+			));
 		}
 
-		var totalLines = parts.Cast<dynamic>().Sum(p => (int) p.end_line - (int) p.start_line + 1);
+		var totalLines = parts.Cast<MemberBodyPart>().Sum(p => p.End_line - p.Start_line + 1);
 
 		return scope.Outcome($"{totalLines} line(s)", syntaxRefs.Length == 1
-			? new {
-				symbol_name = FormatSymbolName(symbol),
-				symbol_kind = symbol.Kind.ToString().ToLowerInvariant(),
-				file        = ((dynamic) parts[0]).file,
-				start_line  = ((dynamic) parts[0]).start_line,
-				end_line    = ((dynamic) parts[0]).end_line,
-				body        = ((dynamic) parts[0]).body,
-				_caution    = AdhocCaution(projectPath)
-			}
-			: (object) new {
-				symbol_name = FormatSymbolName(symbol),
-				symbol_kind = symbol.Kind.ToString().ToLowerInvariant(),
+			? new MemberBodySingleResult(
+				FormatSymbolName(symbol),
+				symbol.Kind.ToString().ToLowerInvariant(),
+				((MemberBodyPart) parts[0]).File,
+				((MemberBodyPart) parts[0]).Start_line,
+				((MemberBodyPart) parts[0]).End_line,
+				((MemberBodyPart) parts[0]).Body,
+				AdhocCaution(projectPath)
+			)
+			: (object) new MemberBodyPartialResult(
+				FormatSymbolName(symbol),
+				symbol.Kind.ToString().ToLowerInvariant(),
 				parts,
-				note        = $"Partial declaration — {syntaxRefs.Length} parts across {parts.Select(p => ((dynamic) p).file).Distinct().Count()} file(s).",
-				_caution    = AdhocCaution(projectPath)
-			}
+				$"Partial declaration — {syntaxRefs.Length} parts across {parts.Cast<MemberBodyPart>().Select(p => p.File).Distinct().Count()} file(s).",
+				AdhocCaution(projectPath)
+			)
 		);
 	}
 

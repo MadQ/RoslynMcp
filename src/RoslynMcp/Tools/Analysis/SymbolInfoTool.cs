@@ -49,29 +49,24 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 			var typeInfo = model.GetTypeInfo(node);
 
 			if(typeInfo.Type is not null)
-				return new {
-					kind = "type",
-					name = typeInfo.Type.ToDisplayString(),
-					containing_type = (string?) null,
-					type_or_return  = (string?) null
-				};
+				return new SymbolInfoResult("type", typeInfo.Type.ToDisplayString(), null, null);
 
 			return new ErrorResult("No symbol resolved at that position.");
 		}
 
-		return new {
-			kind            = symbol.Kind.ToString().ToLowerInvariant(),
-			name            = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-			containing_type = symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-			type_or_return  = symbol switch {
+		return new SymbolInfoResult(
+			symbol.Kind.ToString().ToLowerInvariant(),
+			symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+			symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+			symbol switch {
 				IMethodSymbol   m => m.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 				IPropertySymbol p => p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 				IFieldSymbol    f => f.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 				ILocalSymbol    l => l.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-				_                 => (string?) null
+				_                 => null
 			},
-			_caution = AdhocCaution(projectPath)
-		};
+			AdhocCaution(projectPath)
+		);
 	}
 
 	private static int GetPosition(SourceText text, int line, int column)

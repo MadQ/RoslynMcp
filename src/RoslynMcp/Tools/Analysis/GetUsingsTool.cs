@@ -49,12 +49,12 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 			? ExtractGlobalUsings(compilation)
 			: [];
 		
-		return new {
-			file          = Path.GetRelativePath(rootPath, tree.FilePath),
-			usings        = usings,
-			global_usings = globalUsings,
-			_caution      = AdhocCaution(projectPath)
-		};
+		return new GetUsingsResult(
+			Path.GetRelativePath(rootPath, tree.FilePath),
+			usings,
+			globalUsings,
+			AdhocCaution(projectPath)
+		);
 	}
 	
 	private static string[] ExtractGlobalUsings(Compilation compilation)
@@ -79,5 +79,5 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		return [.. globalUsings.Order()];
 	}
 	
-	private sealed record UsingDirective(string? Namespace, string? Alias);
+	internal sealed record UsingDirective(string? Namespace, string? Alias);
 }
