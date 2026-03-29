@@ -134,11 +134,23 @@ If your AI tool supports spawning subagents (e.g., Claude Code's Agent tool, bac
 When delegating C# work to a subagent, include this in the prompt:
 
 ```
-Use roslyn_* MCP tools for all C# file operations:
-- roslyn_read_file / roslyn_get_member_body instead of Read
-- roslyn_search_files instead of Grep
-- roslyn_replace_in_code / roslyn_replace_in_file instead of Edit
-- roslyn_build_project instead of dotnet build
+Use roslyn_* MCP tools for ALL C# file operations — do NOT use built-in
+Read/Grep/Edit/Glob/Bash tools for C# code:
+
+Reading:     roslyn_get_member_body (single method/property) or roslyn_read_file (whole file)
+Structure:   roslyn_get_file_outline (types + signatures, no bodies)
+Search:      roslyn_search_files or roslyn_semantic_search (not Grep)
+Files:       roslyn_list_files (not Glob)
+References:  roslyn_find_references (semantic, cross-project)
+Impls:       roslyn_find_implementations (interfaces, overrides)
+Definition:  roslyn_get_symbol_definition (file + line + signature)
+Types:       roslyn_get_type_members, roslyn_get_type_hierarchy
+Editing:     roslyn_replace_in_code (C#) or roslyn_replace_in_file (any file)
+Inserting:   roslyn_insert_lines (by line number or anchor pattern)
+Renaming:    roslyn_preview_rename + roslyn_apply_rename
+Signatures:  roslyn_change_signature + roslyn_apply_signature_change
+Building:    roslyn_build_project (NEVER run dotnet build in terminal)
+Diagnostics: roslyn_get_diagnostics for fast error checks
 ```
 
 This is easy to forget — the main agent follows the instructions perfectly, then delegates to a subagent that reverts to grep and file reads. If you notice a subagent using built-in tools on C# files, that's the cause.
