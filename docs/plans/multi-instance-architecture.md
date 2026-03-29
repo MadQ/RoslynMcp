@@ -201,6 +201,43 @@ This is a natural fit for fan-out patterns: main agent dispatches "find all refe
 
 ---
 
+## Opt-In Design: Don't Force It
+
+The shared service is an optimization, not a requirement. Users can always run standalone.
+
+**Default behavior:** Standalone mode — identical to today. One process, one workspace, stdio. Zero IPC, zero surprises. This remains the default through v1.0 at minimum.
+
+**Opt-in:** `ROSLYNMCP_SHARED=true` (env var) or `--shared` (CLI flag) enables the shared service. Without it, RoslynMcp behaves exactly as it does now.
+
+**Per-model / per-task configuration:** Users may want different modes for different use cases. MCP client configs already support multiple server entries with different env vars:
+
+```json
+{
+  "servers": {
+    "roslyn-main": {
+      "command": "RoslynMcp.exe",
+      "env": { "ROSLYNMCP_MODE": "read-write", "ROSLYNMCP_SHARED": "true" }
+    },
+    "roslyn-scout": {
+      "command": "RoslynMcp.exe",
+      "env": { "ROSLYNMCP_MODE": "read-only", "ROSLYNMCP_SHARED": "true" }
+    },
+    "roslyn-standalone": {
+      "command": "RoslynMcp.exe"
+    }
+  }
+}
+```
+
+Use cases:
+- **Cheap model for exploration:** standalone + adhoc mode — fast startup, low memory, no shared service overhead
+- **Expensive model for editing:** shared service + read-write — full MSBuild semantics, exclusive writes
+- **Parallel subagents for research:** shared service + read-only — fan-out reads on frozen snapshot
+
+**Graduation path:** Off by default → opt-in for early adopters → on by default when stable.
+
+---
+
 ## Open Questions
 
 - Should the service support multiple solutions simultaneously, or strictly one per process?
