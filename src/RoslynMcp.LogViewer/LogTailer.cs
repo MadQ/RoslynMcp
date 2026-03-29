@@ -11,9 +11,10 @@ namespace RoslynMcp.LogViewer;
 /// </summary>
 sealed class LogTailer
 {
-	// Format: [14:30:45.123] [TOOL  ] MSB OK      142ms get_type_members         WorkspaceManager — 18/18 member(s)
+	// Format: [14:30:45.123] [12345] [TOOL  ] MSB OK  142ms get_type_members  WorkspaceManager — 18/18 member(s)
+	// Also supports old format without PID: [14:30:45.123] [TOOL  ] ...
 	static readonly Regex LinePattern = new(
-		@"^\[(\d{2}:\d{2}:\d{2}\.\d{3})\] \[(.{6})\] (.*)$",
+		@"^\[(\d{2}:\d{2}:\d{2}\.\d{3})\] (?:\[(\d+)\] )?\[(.{6})\] (.*)$",
 		RegexOptions.Compiled
 	);
 
@@ -231,11 +232,12 @@ sealed class LogTailer
 		var m = LinePattern.Match(raw);
 
 		if(!m.Success)
-			return new LogEntry("", "OTHER", raw, raw);
+			return new LogEntry("", null, "OTHER", raw, raw);
 
 		var timestamp = m.Groups[1].Value;
-		var level     = m.Groups[2].Value.TrimEnd();
-		var message   = m.Groups[3].Value;
+		var pid       = m.Groups[2].Success ? m.Groups[2].Value : null;
+		var level     = m.Groups[3].Value.TrimEnd();
+		var message   = m.Groups[4].Value;
 
 		if(level == "TOOL") {
 
@@ -251,6 +253,7 @@ sealed class LogTailer
 
 				return new LogEntry(
 					Timestamp:     timestamp,
+					Pid:           pid,
 					Level:         level,
 					Message:       message,
 					Raw:           raw,
@@ -264,6 +267,6 @@ sealed class LogTailer
 			}
 		}
 
-		return new LogEntry(timestamp, level, message, raw);
+		return new LogEntry(timestamp, pid, level, message, raw);
 	}
 }

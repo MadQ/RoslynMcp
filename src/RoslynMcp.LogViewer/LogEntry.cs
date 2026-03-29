@@ -13,6 +13,7 @@
 /// <param name="Detail">For TOOL entries: outcome summary, e.g. '18/18 member(s)'.</param>
 record LogEntry(
     string  Timestamp,
+    string? Pid,
     string  Level,
     string  Message,
     string  Raw,
