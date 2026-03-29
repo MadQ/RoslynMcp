@@ -294,6 +294,20 @@ RoslynMcp/
 
 ---
 
+## Technical Notes
+
+### CRLF vs LF in MCP Tool Matching
+
+MCP transmits tool parameters as JSON, which uses `\n` (LF) for newlines. But files on Windows use `\r\n` (CRLF). Any tool that does literal string matching on file content — find-and-replace, anchor-based insertion, pattern search — will silently fail when a multi-line pattern arrives with LF but the file contains CRLF.
+
+This is not specific to RoslynMcp. **Any MCP server that matches tool input against file content is affected.** The pattern (content from disk with platform line endings, pattern from JSON with LF-only) is universal.
+
+RoslynMcp addresses this with `BuildLiteralRegex` in the tool base class, which replaces literal `\n` in escaped patterns with `\r?\n` so they match both line ending styles. Writing tools also offer a `normalizeLineEndings` parameter (default `true`) that adjusts replacement text to match the file's existing convention.
+
+If you're building MCP tools that edit files, consider handling this in your implementation.
+
+---
+
 ## Questions or Need Help?
 
 - **Open an issue** for questions or discussions
