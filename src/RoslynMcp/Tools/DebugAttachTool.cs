@@ -23,17 +23,17 @@ internal sealed class DebugAttachTool
 		logger.LogTool("roslyn_debug_attach", 0, true, detail: $"launching debugger for PID {pid}");
 
 		if(Debugger.IsAttached)
-			return new { already_attached = true, pid, message = "A debugger is already attached." };
+			return new DebugAlreadyAttachedResult(true, pid, "A debugger is already attached.");
 
 		Debugger.Launch();
 
-		return new {
-			attached = Debugger.IsAttached,
+		return new DebugAttachResult(
+			Debugger.IsAttached,
 			pid,
-			message = Debugger.IsAttached
+			Debugger.IsAttached
 				? "Debugger attached. Set breakpoints and invoke the next tool."
 				: "Debugger dialog was dismissed without attaching."
-		};
+		);
 	}
 }
 #endif

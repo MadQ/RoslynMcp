@@ -222,6 +222,143 @@ internal sealed record ProjectInfoResult(
 	string?  _caution
 );
 
+internal sealed record GetTriviaNoMatchResult(
+	string   Error,
+	string   Message,
+	string   Hint,
+	string   ProvidedKind,
+	string[] CommonKinds
+);
+
+internal sealed record TriviaNodeSpan(int Start, int End, int StartLine, int EndLine);
+
+internal sealed record TriviaNodeResult(
+	string         NodeKind,
+	TriviaNodeSpan NodeSpan,
+	string         NodeText,
+	object[]       LeadingTrivia,
+	object[]       TrailingTrivia
+);
+
+internal sealed record GetTriviaResult(
+	string   File,
+	int      TotalNodes,
+	int      FilteredNodes,
+	int      Skip,
+	int      Take,
+	object[] Results,
+	string   Page_token,
+	bool     Has_more
+);
+
+internal sealed record TriviaEntry(string Kind, string Text, TriviaSpan Span);
+internal sealed record TriviaSpan(int Start, int End);
+
+internal sealed record ListFilesResult(
+	string[] Files,
+	int      Count,
+	int      Skip,
+	int      Take,
+	string   Page_token,
+	bool     Has_more,
+	string?  _caution
+);
+
+internal sealed record ListFilesEmptyResult(string[] Files, int Count, string? _caution);
+
+internal sealed record SearchFilesResult(
+	object[] Matches,
+	int      Total_matches,
+	int      Returned,
+	string   Page_token,
+	bool     Has_more,
+	string?  _caution
+);
+
+internal sealed record SemanticSearchResult(
+	object[] Matches,
+	int      Total_matches,
+	int      Returned,
+	string   Page_token,
+	bool     Has_more,
+	string?  Context  = null,
+	string?  _caution = null
+);
+
+internal sealed record SemanticSearchListResult(string[] Values, string Description);
+
+internal sealed record DiscoveryKindsResult(
+	string   Mode,
+	int      Count,
+	string[] CommonKinds,
+	string[] AllKinds
+);
+
+internal sealed record DiscoveryValuesResult(
+	string   Mode,
+	string[] Kinds,
+	string   Hint
+);
+
+internal sealed record DiscoveryContextsResult(
+	string   Mode,
+	string[] Contexts,
+	string   Hint
+);
+
+internal sealed record DiscoveryNoMatchResult(
+	string   Error,
+	string   Message,
+	string   Hint,
+	string   ProvidedKind,
+	string[] ValidKinds
+);
+
+internal sealed record DetailedErrorResult(string Error, string Details);
+
+internal sealed record BuildResult(
+	bool     Succeeded,
+	object[] Errors,
+	object[] Warnings,
+	string   Source,
+	bool     Build_skipped,
+	string?  Skip_reason,
+	long     Duration_ms,
+	int?     Exit_code,
+	string?  Error_details = null
+);
+
+internal sealed record ReplaceInCodeResult(
+	bool     Applied,
+	int      ChangeCount,
+	object[] ChangedNodes,
+	string?  Message      = null,
+	bool     SyntaxValid  = true
+);
+
+internal sealed record ReplaceInCodeNodeInfo(string OriginalText, int Line, int Column);
+internal sealed record ReplaceInCodeSyntaxError(string Error, string Details, object[]? ChangedNodes = null);
+
+internal sealed record RespawnResult(string Message, int Pid, string Tip);
+internal sealed record DebugAttachResult(bool Attached, int Pid, string Message);
+internal sealed record DebugAlreadyAttachedResult(bool Already_attached, int Pid, string Message);
+
+// ── Base class error shapes ────────────────────────────────────────────────
+
+internal sealed record PathErrorResult(
+	string    Error,
+	string    Message,
+	string?   Provided_path  = null,
+	string?   Search_path    = null,
+	string?   Directory      = null,
+	string?   File_name      = null,
+	string[]? Found_projects = null,
+	string[]? Found_in       = null,
+	string?   Hint           = null
+);
+
+internal sealed record UnexpectedErrorResult(string Error, string Message, string Type);
+
 // ── Editing tools ───────────────────────────────────────────────────────────
 
 internal sealed record ReplaceInFileResult(

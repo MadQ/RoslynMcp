@@ -28,11 +28,11 @@ internal sealed class RespawnTool
 			Environment.Exit(0);
 		});
 		
-		return new {
-			message = "RoslynMcp server terminating — client will respawn automatically.",
-			pid = pid,
-			tip = "Rebuild first, then call respawn to load the new build."
-		};
+		return new RespawnResult(
+			"RoslynMcp server terminating — client will respawn automatically.",
+			pid,
+			"Rebuild first, then call respawn to load the new build."
+		);
 	}
 }
 #endif

@@ -66,10 +66,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		
 		if(!validContexts.Contains(context.ToLowerInvariant())) {
 		
-			return new {
-				error = "Invalid context parameter",
-				details = $"Must be one of: {string.Join(", ", validContexts)}"
-			};
+			return new DetailedErrorResult(
+				"Invalid context parameter",
+				$"Must be one of: {string.Join(", ", validContexts)}"
+			);
 		}
 		
 		context = context.ToLowerInvariant();
@@ -171,15 +171,15 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 
 		scope.Outcome($"{result.Total} match(es)");
 
-		return new {
-			matches       = result.Items,
-			total_matches = result.Total,
-			returned      = result.Items.Length,
-			page_token    = result.PageToken,
-			has_more      = result.HasMore,
-			context		  = context,
-			_caution	  = AdhocCaution(projectPath)
-		};
+		return new SemanticSearchResult(
+			result.Items,
+			result.Total,
+			result.Items.Length,
+			result.PageToken,
+			result.HasMore,
+			context,
+			AdhocCaution(projectPath)
+		);
 	}
 	
 	bool IsGeneratedCode(SyntaxTree tree)

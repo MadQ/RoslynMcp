@@ -63,17 +63,16 @@ internal sealed class BuildTool : RoslynMcpTool
 				
 				BuildDiagnostic[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
 				
-				return new {
-					
-					succeeded     = false,
-					errors        = roslynErrors,
-					warnings      = roslynWarnings,
-					source        = "roslyn",
-					build_skipped = true,
-					skip_reason   = "Roslyn reported errors — fix these first, then build will run automatically.",
-					duration_ms   = 0,
-					exit_code     = (int?) null
-				};
+				return new BuildResult(
+					Succeeded:     false,
+					Errors:        roslynErrors,
+					Warnings:      roslynWarnings,
+					Source:        "roslyn",
+					Build_skipped: true,
+					Skip_reason:   "Roslyn reported errors — fix these first, then build will run automatically.",
+					Duration_ms:   0,
+					Exit_code:     null
+				);
 			}
 		}
 		
@@ -89,18 +88,17 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		catch(InvalidOperationException ex) {
 			
-			return new {
-				
-				succeeded     = false,
-				errors        = (BuildDiagnostic[]) [],
-				warnings      = (BuildDiagnostic[]) [],
-				source        = "msbuild",
-				build_skipped = true,
-				skip_reason   = ex.Message,
-				duration_ms   = 0,
-				exit_code     = (int?) null,
-				error_details = ex.InnerException?.Message
-			};
+			return new BuildResult(
+				Succeeded:     false,
+				Errors:        (BuildDiagnostic[]) [],
+				Warnings:      (BuildDiagnostic[]) [],
+				Source:        "msbuild",
+				Build_skipped: true,
+				Skip_reason:   ex.Message,
+				Duration_ms:   0,
+				Exit_code:     null,
+				Error_details: ex.InnerException?.Message
+			);
 		}
 		
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
@@ -108,17 +106,16 @@ internal sealed class BuildTool : RoslynMcpTool
 		BuildDiagnostic[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
 		BuildDiagnostic[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
 
-		return new {
-
+		return new BuildResult(
 			succeeded,
 			errors,
 			warnings,
-			source        = "msbuild",
-			build_skipped = false,
-			skip_reason   = (string?) null,
-			duration_ms   = (int) elapsed.TotalMilliseconds,
-			exit_code     = (int?) exitCode,
-		};
+			Source:        "msbuild",
+			Build_skipped: false,
+			Skip_reason:   null,
+			Duration_ms:   (int) elapsed.TotalMilliseconds,
+			Exit_code:     exitCode
+		);
 	}
 	
 	private static string BuildArgs(string csprojPath, string? tfm)

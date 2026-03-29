@@ -74,13 +74,12 @@ internal abstract partial class RoslynMcpTool
                 .OrderBy(s => s)
         ];
 
-        return new {
-
-            mode = "list_syntax_kinds",
-            count = all.Length,
-            commonKinds = GetCommonSyntaxKinds(),
-            allKinds = all
-        };
+        return new DiscoveryKindsResult(
+            "list_syntax_kinds",
+            all.Length,
+            GetCommonSyntaxKinds(),
+            all
+        );
     }
 
     /// <summary>
@@ -125,13 +124,12 @@ internal abstract partial class RoslynMcpTool
                 .OrderBy(s => s)
         ];
 
-        return new {
-
-            mode = "list_trivia_kinds",
-            count = all.Length,
-            commonKinds = GetCommonTriviaKinds(),
-            allKinds = all
-        };
+        return new DiscoveryKindsResult(
+            "list_trivia_kinds",
+            all.Length,
+            GetCommonTriviaKinds(),
+            all
+        );
     }
 
     /// <summary>
@@ -161,12 +159,11 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     private static object ListMemberKinds()
     {
-        return new {
-
-            mode = "list_member_kinds",
-            kinds = new[] { "field", "property", "method", "event", "enum" },
-            hint = "Use these values with roslyn_get_type_members memberKind parameter"
-        };
+        return new DiscoveryValuesResult(
+            "list_member_kinds",
+            ["field", "property", "method", "event", "enum"],
+            "Use these values with roslyn_get_type_members memberKind parameter"
+        );
     }
 
     // ── Discovery: Type Kinds ────────────────────────────────────────────────────
@@ -177,12 +174,11 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     private static object ListTypeKinds()
     {
-        return new {
-
-            mode = "list_type_kinds",
-            kinds = new[] { "class", "interface", "enum", "struct", "record", "delegate" },
-            hint = "Use these values with roslyn_list_types kindFilter parameter"
-        };
+        return new DiscoveryValuesResult(
+            "list_type_kinds",
+            ["class", "interface", "enum", "struct", "record", "delegate"],
+            "Use these values with roslyn_list_types kindFilter parameter"
+        );
     }
 
     // ── Discovery: Search Contexts ───────────────────────────────────────────────
@@ -193,12 +189,11 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     private static object ListSearchContexts()
     {
-        return new {
-
-            mode = "list_search_contexts",
-            contexts = new[] { "comments", "strings", "identifiers", "code", "xmldocs", "all" },
-            hint = "Use these values with roslyn_semantic_search context parameter"
-        };
+        return new DiscoveryContextsResult(
+            "list_search_contexts",
+            ["comments", "strings", "identifiers", "code", "xmldocs", "all"],
+            "Use these values with roslyn_semantic_search context parameter"
+        );
     }
 
     // ── Error Helpers: No Matching Nodes ─────────────────────────────────────────
@@ -209,14 +204,13 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     protected static object NoMatchingSyntaxKindError(string providedKind)
     {
-        return new {
-
-            error = "no_matching_nodes",
-            message = $"No syntax nodes of kind '{providedKind}' found in the specified range.",
-            hint = "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
+        return new DiscoveryNoMatchResult(
+            "no_matching_nodes",
+            $"No syntax nodes of kind '{providedKind}' found in the specified range.",
+            "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
             providedKind,
-            commonKinds = GetCommonSyntaxKinds()
-        };
+            GetCommonSyntaxKinds()
+        );
     }
 
     /// <summary>
@@ -225,14 +219,13 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     protected static object NoMatchingMemberKindError(string providedKind)
     {
-        return new {
-
-            error = "invalid_member_kind",
-            message = $"Invalid member kind: '{providedKind}'.",
-            hint = "Use listMemberKinds=true to see all available member kinds.",
+        return new DiscoveryNoMatchResult(
+            "invalid_member_kind",
+            $"Invalid member kind: '{providedKind}'.",
+            "Use listMemberKinds=true to see all available member kinds.",
             providedKind,
-            validKinds = new[] { "field", "property", "method", "event", "enum" }
-        };
+            ["field", "property", "method", "event", "enum"]
+        );
     }
 
     /// <summary>
@@ -241,13 +234,12 @@ internal abstract partial class RoslynMcpTool
     /// </summary>
     protected static object NoMatchingTypeKindError(string providedKind)
     {
-        return new {
-
-            error = "invalid_type_kind",
-            message = $"Invalid type kind: '{providedKind}'.",
-            hint = "Use listTypeKinds=true to see all available type kinds.",
+        return new DiscoveryNoMatchResult(
+            "invalid_type_kind",
+            $"Invalid type kind: '{providedKind}'.",
+            "Use listTypeKinds=true to see all available type kinds.",
             providedKind,
-            validKinds = new[] { "class", "interface", "enum", "struct", "record", "delegate" }
-        };
+            ["class", "interface", "enum", "struct", "record", "delegate"]
+        );
     }
 }
