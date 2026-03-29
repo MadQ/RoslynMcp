@@ -177,7 +177,7 @@ When working with C# code, prefer roslyn_* MCP tools:
 - `roslyn_get_diagnostics` with `severity: "errors"` for fast error checks
 ```
 
-For complete instructions covering every tool, see [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) — includes both a full version and a compact version.
+For complete instructions covering every tool, see [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) — includes a full version, a compact version, and guidance for subagent delegation (subagents don't inherit your instructions).
 
 ---
 

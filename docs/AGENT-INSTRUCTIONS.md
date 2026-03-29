@@ -124,3 +124,21 @@ are more accurate than grep/Read/Edit.
 - Build: `roslyn_build_project` > NEVER `dotnet build` in terminal
 - Diagnostics: `roslyn_get_diagnostics` for fast error checks
 ```
+
+---
+
+## Subagents and Delegated Tasks
+
+If your AI tool supports spawning subagents (e.g., Claude Code's Agent tool, background workers, or task delegation), those subagents **do not inherit your agent instructions**. They will default to built-in tools unless explicitly told otherwise.
+
+When delegating C# work to a subagent, include this in the prompt:
+
+```
+Use roslyn_* MCP tools for all C# file operations:
+- roslyn_read_file / roslyn_get_member_body instead of Read
+- roslyn_search_files instead of Grep
+- roslyn_replace_in_code / roslyn_replace_in_file instead of Edit
+- roslyn_build_project instead of dotnet build
+```
+
+This is easy to forget — the main agent follows the instructions perfectly, then delegates to a subagent that reverts to grep and file reads. If you notice a subagent using built-in tools on C# files, that's the cause.
