@@ -70,7 +70,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (36 tests covering all 28 tools)
+# Run the comprehensive test suite (41 tests covering all tools)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
@@ -134,7 +134,8 @@ Publish a Release build and configure your MCP client to use it:
    [McpServerToolType]
    internal sealed class MyNewTool : RoslynMcpTool
    {
-       public MyNewTool(WorkspaceResolver workspace) : base(workspace) { }
+       public MyNewTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
+           : base(workspace, logger, paginationCache) { }
 
        [McpServerTool, Description("...")]
        public object MyToolMethod(
@@ -145,6 +146,7 @@ Publish a Release build and configure your MCP client to use it:
                return error;
 
            // Use Roslyn APIs here
+           // Typed result records are preferred over anonymous objects
            return new { result = "..." };
        }
    }
@@ -171,10 +173,7 @@ Tools are the user-facing API surface. Exception handling must be explicit, info
 - Catch **specific exception types** (`ArgumentException`, `IOException`, `UnauthorizedAccessException`, etc.)
 - Return structured error objects:
   ```csharp
-  return new {
-      error = "Short description",
-      details = ex.Message
-  };
+  return new ErrorResult("Short description", Hint: "...");
   ```
 - Document expected exceptions in code comments
 
@@ -191,10 +190,7 @@ try {
     var regex = new Regex(pattern);
 }
 catch(ArgumentException ex) {
-    return new {
-        error = "Invalid regex pattern",
-        details = ex.Message
-    };
+    return new ErrorResult($"Invalid regex pattern: {ex.Message}");
 }
 ```
 

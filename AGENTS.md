@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.7.0-alpha (pre-1.0) |
-| **Tool Count** | 28 MCP tools (25 stable + 2 refactoring + 1 experimental) |
+| **Tool Count** | 33 MCP tools (27 stable + 2 refactoring + 1 experimental + 3 infrastructure) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -64,6 +64,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `ListFilesTool` | `roslyn_list_files` — enumerate files matching glob pattern (fast file listing, no content) |
 | `ReplaceInFileTool` | `roslyn_replace_in_file` — text-level find/replace with regex support (any file type) |
 | `ReplaceInCodeTool` | `roslyn_replace_in_code` — semantic C# node replacement using Roslyn (validates syntax, preserves formatting) |
+| `InsertLinesTool` | `roslyn_insert_lines` — insert lines at a position or anchor pattern |
 | `RespawnTool` | `roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `TypeMembersTool` | `roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
 | `DiagnosticsTool` | `roslyn_get_diagnostics` — compiler errors and warnings for project or single file |
@@ -71,6 +72,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
 | `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token |
 | `ApplyRenameTool` | `roslyn_apply_rename` — approve/reject a pending rename by token |
+| `ChangeSignatureTool` | `roslyn_change_signature` — add parameters with non-breaking forwarding overload |
+| `ApplySignatureChangeTool` | `roslyn_apply_signature_change` — apply or reject a previewed signature change |
 | `ProjectInfoTool` | `roslyn_get_project_info` — project metadata (TFM, language version, packages, etc.) |
 | `BuildTool` | `roslyn_build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true` |
 | `CleanSolutionTool` | `roslyn_clean_solution` — remove all build artifacts (bin/obj directories) |
@@ -83,6 +86,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetSymbolDocumentationTool` | `roslyn_get_symbol_documentation` — XML doc comments for symbols |
 | `GetSymbolDefinitionTool` | `roslyn_get_symbol_definition` — find declaration location with signature |
 | `GetSymbolsInScopeTool` | `roslyn_get_symbols_in_scope` — enumerate accessible symbols at a location |
+| `ReadFileTool` | `roslyn_read_file` — file contents with line numbers (C# from in-memory workspace) |
+| `GetLineCountTool` | `roslyn_get_line_count` — line count for one or more files |
 | `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name; handles partial types |
 | `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
@@ -93,9 +98,9 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging).
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
-- `Tools/Analysis/` — 13 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
+- `Tools/Analysis/` — 17 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
 - `Tools/Search/` — 3 file/content search tools (list files, text search, semantic search)
-- `Tools/Editing/` — 2 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`)
+- `Tools/Editing/` — 3 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
 - `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RespawnTool.cs` (debug-only)
