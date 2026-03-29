@@ -82,13 +82,12 @@ internal abstract partial class RoslynMcpTool
 			// Defensive check: if path doesn't exist, return helpful error.
 			if(!Path.IsPathRooted(projectPath) || (!File.Exists(projectPath) && !Directory.Exists(projectPath))) {
 				
-				error = new {
-					
-					error = "invalid_project_path",
-					message = $"Path '{projectPath}' does not exist or is not rooted.",
-					provided_path = projectPath,
-					hint = "Use an absolute path (e.g., 'J:\\Projects\\MyProject') or ensure the relative path exists. If you have a valid full path, provide it and the server will cache the association."
-				};
+				error = new PathErrorResult(
+					"invalid_project_path",
+					$"Path '{projectPath}' does not exist or is not rooted.",
+					Provided_path: projectPath,
+					Hint: "Use an absolute path (e.g., 'J:\\Projects\\MyProject') or ensure the relative path exists. If you have a valid full path, provide it and the server will cache the association."
+				);
 				logger.LogError("TryGetCompilation", $"Path does not exist: '{projectPath}'");
 				
 				return false;
@@ -155,12 +154,11 @@ internal abstract partial class RoslynMcpTool
 		}
 		catch(ArgumentException ex) {
 			
-			error = new {
-				
-				error   = "missing_project_path",
-				message = ex.Message,
-				hint    = "projectPath is required. Pass the .csproj file path or a directory containing one."
-			};
+			error = new PathErrorResult(
+				"missing_project_path",
+				ex.Message,
+				Hint: "projectPath is required. Pass the .csproj file path or a directory containing one."
+			);
 			logger.LogError("TryGetCompilation", ex.Message);
 			
 			return false;
@@ -233,12 +231,11 @@ internal abstract partial class RoslynMcpTool
 		}
 		catch(ArgumentException ex) {
 			
-			error = new {
-				
-				error   = "missing_project_path",
-				message = ex.Message,
-				hint    = "projectPath is required. Pass the .csproj file path or a directory containing one."
-			};
+			error = new PathErrorResult(
+				"missing_project_path",
+				ex.Message,
+				Hint: "projectPath is required. Pass the .csproj file path or a directory containing one."
+			);
 			logger.LogError("TryGetProject", ex.Message);
 			
 			return false;
@@ -253,54 +250,49 @@ internal abstract partial class RoslynMcpTool
 	}
 	
 	private static object ProjectNotFoundError(ProjectNotFoundException ex)
-		=> new {
-			
-			error       = "project_not_found",
-			message     = ex.Message,
-			search_path = ex.SearchPath,
-			hint        = "Provide a valid projectPath pointing to a directory containing a .csproj file, or the .csproj file itself."
-		};
+		=> new PathErrorResult(
+			"project_not_found",
+			ex.Message,
+			Search_path: ex.SearchPath,
+			Hint: "Provide a valid projectPath pointing to a directory containing a .csproj file, or the .csproj file itself."
+		);
 	
 	private static object MultipleProjectsError(MultipleProjectsFoundException ex)
 	{
 		string[] foundProjects = [.. ex.ProjectFiles.Select(Path.GetFileName).Where(f => f is not null)!];
 
-		return new {
-
-			error          = "multiple_projects_found",
-			message        = ex.Message,
-			directory      = ex.Directory,
-			found_projects = foundProjects,
-			hint           = "Specify the exact .csproj file path instead of the directory."
-		};
+		return new PathErrorResult(
+			"multiple_projects_found",
+			ex.Message,
+			Directory: ex.Directory,
+			Found_projects: foundProjects,
+			Hint: "Specify the exact .csproj file path instead of the directory."
+		);
 	}
 	
 	private static object AmbiguousFileError(AmbiguousFileException ex)
-		=> new {
-			
-			error          = "ambiguous_file",
-			message        = ex.Message,
-			file_name      = ex.FileName,
-			found_in       = ex.CsprojPaths,
-			hint           = "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
-		};
+		=> new PathErrorResult(
+			"ambiguous_file",
+			ex.Message,
+			File_name: ex.FileName,
+			Found_in: ex.CsprojPaths,
+			Hint: "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
+		);
 	
 	private static object InvalidPathError(InvalidProjectPathException ex)
-		=> new {
-			
-			error         = "invalid_project_path",
-			message       = ex.Message,
-			provided_path = ex.Path,
-			hint          = "Ensure the path exists and contains a valid .csproj file."
-		};
+		=> new PathErrorResult(
+			"invalid_project_path",
+			ex.Message,
+			Provided_path: ex.Path,
+			Hint: "Ensure the path exists and contains a valid .csproj file."
+		);
 	
 	private static object UnexpectedError(Exception ex)
-		=> new {
-			
-			error   = "unexpected_error",
-			message = ex.Message,
-			type    = ex.GetType().Name
-		};
+		=> new UnexpectedErrorResult(
+			"unexpected_error",
+			ex.Message,
+			ex.GetType().Name
+		);
 	
 	/// <summary>
 	///     Returns a caution string when the resolved workspace is AdhocWorkspace (no .csproj).

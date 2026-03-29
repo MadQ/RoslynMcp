@@ -85,12 +85,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 
 		if(matchedNodes.Length == 0) {
 
-			return new {
-				applied      = false,
-				changeCount  = 0,
-				changedNodes = Array.Empty<object>(),
-				message      = "No matching nodes found."
-			};
+			return new ReplaceInCodeResult(false, 0, [], "No matching nodes found.");
 		}
 		
 		SyntaxNode? replacementNode;
@@ -126,18 +121,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			if(replacementNode.ContainsDiagnostics) {
 			
-				return new {
-					error = "Replacement text contains syntax errors",
-					details = string.Join("; ", replacementNode.GetDiagnostics().Select(d => d.GetMessage()))
-				};
+				return new ReplaceInCodeSyntaxError(
+					"Replacement text contains syntax errors",
+					string.Join("; ", replacementNode.GetDiagnostics().Select(d => d.GetMessage()))
+				);
 			}
 		}
 		catch(Exception ex) {
 		
-			return new {
-				error = "Failed to parse replacement text as valid C# syntax",
-				details = ex.Message
-			};
+			return new ReplaceInCodeSyntaxError(
+				"Failed to parse replacement text as valid C# syntax",
+				ex.Message
+			);
 		}
 		
 		// Collect change info before replacement.
@@ -145,33 +140,23 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 			var lineSpan = syntaxTree.GetLineSpan(n.Span);
 			
-			return new {
-				originalText = n.ToString(),
-				line = lineSpan.StartLinePosition.Line + 1,
-				column = lineSpan.StartLinePosition.Character + 1
-			};
+			return new ReplaceInCodeNodeInfo(
+				n.ToString(),
+				lineSpan.StartLinePosition.Line + 1,
+				lineSpan.StartLinePosition.Character + 1
+			);
 		}).ToArray()
 		;
 		
 		if(dryRun) {
 
-			return new {
-				applied      = false,
-				changeCount  = matchedNodes.Length,
-				changedNodes = changedNodeInfo,
-				message      = $"Dry run: {matchedNodes.Length} node(s) would be replaced."
-			};
+			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Dry run: {matchedNodes.Length} node(s) would be replaced.");
 		}
 
 		// Safety guard: multiple matches require explicit opt-in via force=true.
 		if(matchedNodes.Length > 1 && !force) {
 
-			return new {
-				applied      = false,
-				changeCount  = matchedNodes.Length,
-				changedNodes = changedNodeInfo,
-				message      = $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one."
-			};
+			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one.");
 		}
 		
 		// Apply replacements
@@ -191,11 +176,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		if(!syntaxValid) {
 		
-			return new {
-				error = "Replacement would introduce syntax errors",
-				details = string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
-				changedNodes = changedNodeInfo
-			};
+			return new ReplaceInCodeSyntaxError(
+				"Replacement would introduce syntax errors",
+				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
+				changedNodeInfo
+			);
 		}
 		
 		try {
@@ -209,12 +194,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// Invalidate workspace cache
 		workspace.InvalidateFile(projectPath, fullPath);
 		
-		return new {
-			applied = true,
-			changeCount = matchedNodes.Length,
-			changedNodes = changedNodeInfo,
-			syntaxValid
-		};
+		return new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo);
 	}
 	
 	/// <summary>

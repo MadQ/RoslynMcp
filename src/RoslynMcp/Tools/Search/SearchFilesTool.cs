@@ -87,14 +87,14 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 
 		scope.Outcome($"{result.Total} match(es)");
 
-		return new {
-			matches       = result.Items,
-			total_matches = result.Total,
-			returned      = result.Items.Length,
-			page_token    = result.PageToken,
-			has_more      = result.HasMore,
-			_caution      = AdhocCaution(projectPath)
-		};
+		return new SearchFilesResult(
+			result.Items,
+			result.Total,
+			result.Items.Length,
+			result.PageToken,
+			result.HasMore,
+			AdhocCaution(projectPath)
+		);
 	}
 	
 	// TODO: Future enhancement — add syntax-tree-based semantic filtering.

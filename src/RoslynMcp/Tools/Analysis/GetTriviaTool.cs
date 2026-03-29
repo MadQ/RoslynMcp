@@ -92,14 +92,13 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             if(nodesInSpan.Count == 0) {
 
-                return new {
-
-                    error = "no_matching_nodes",
-                    message = $"No syntax nodes of kind '{syntaxKind}' found in the specified range.",
-                    hint = "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
-                    providedKind = syntaxKind,
-                    commonKinds = GetCommonSyntaxKinds()
-                };
+                return new GetTriviaNoMatchResult(
+                    "no_matching_nodes",
+                    $"No syntax nodes of kind '{syntaxKind}' found in the specified range.",
+                    "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
+                    syntaxKind,
+                    GetCommonSyntaxKinds()
+                );
             }
         }
 
@@ -121,35 +120,32 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             var lineSpan = tree.GetLineSpan(node.Span);
 
-            results.Add(new {
-
-                nodeKind = node.Kind().ToString(),
-                nodeSpan = new {
-
-                    start = node.Span.Start,
-                    end = node.Span.End,
-                    startLine = lineSpan.StartLinePosition.Line + 1,
-                    endLine = lineSpan.EndLinePosition.Line + 1
-                },
-                nodeText = TruncateText(node.ToString(), 80),
-                leadingTrivia = leadingTriviaList,
-                trailingTrivia = trailingTriviaList
-            });
+            results.Add(new TriviaNodeResult(
+                node.Kind().ToString(),
+                new TriviaNodeSpan(
+                    node.Span.Start,
+                    node.Span.End,
+                    lineSpan.StartLinePosition.Line + 1,
+                    lineSpan.EndLinePosition.Line + 1
+                ),
+                TruncateText(node.ToString(), 80),
+                leadingTriviaList,
+                trailingTriviaList
+            ));
         }
 
         object[] allResults = [.. results];
         var result = PaginateAndStore(allResults, ref skip, take);
 
-        return new {
-
-            file          = filePath,
+        return new GetTriviaResult(
+            filePath,
             totalNodes,
-            filteredNodes = allResults.Length,
+            allResults.Length,
             skip, take,
-            results    = result.Items,
-            page_token = result.PageToken,
-            has_more   = result.HasMore
-        };
+            result.Items,
+            result.PageToken,
+            result.HasMore
+        );
     }
 
     private static object[] FilterTrivia(SyntaxTriviaList triviaList, string? kindFilter)
@@ -159,12 +155,11 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             : triviaList;
 
         return [..
-            filtered.Select(t => new {
-
-                kind = t.Kind().ToString(),
-                text = t.ToString(),
-                span = new { start = t.Span.Start, end = t.Span.End }
-            })
+            filtered.Select(t => new TriviaEntry(
+                t.Kind().ToString(),
+                t.ToString(),
+                new TriviaSpan(t.Span.Start, t.Span.End)
+            ))
             .Cast<object>()
         ];
     }

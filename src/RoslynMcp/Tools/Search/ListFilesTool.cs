@@ -47,10 +47,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
 
-			return new {
-				error   = "Failed to enumerate files",
-				details = ex.Message
-			};
+			return new ErrorResult($"Failed to enumerate files: {ex.Message}");
 		}
 
 		var allResults = allFiles
@@ -60,17 +57,17 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		;
 
 		if(allResults.Length == 0)
-			return new { files = Array.Empty<string>(), count = 0, _caution = AdhocCaution(projectPath) };
+			return new ListFilesEmptyResult([], 0, AdhocCaution(projectPath));
 
 		var result = PaginateAndStore(allResults, ref skip, take);
 
-		return new {
-			files      = result.Items,
-			count      = result.Total,
+		return new ListFilesResult(
+			result.Items,
+			result.Total,
 			skip, take,
-			page_token = result.PageToken,
-			has_more   = result.HasMore,
-			_caution   = AdhocCaution(projectPath)
-		};
+			result.PageToken,
+			result.HasMore,
+			AdhocCaution(projectPath)
+		);
 	}
 }
