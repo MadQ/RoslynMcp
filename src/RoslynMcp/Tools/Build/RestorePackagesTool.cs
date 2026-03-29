@@ -26,12 +26,12 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 			projectFile = FindProjectFile(rootPath);
 		}
 		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
-		
-			return new RestoreResult(false, "Failed to access project directory.", ex.Message);
+
+			return scope.Error(new RestoreResult(false, "Failed to access project directory.", ex.Message));
 		}
-		
+
 		if(projectFile is null)
-			return new RestoreResult(false, "No .csproj file found in target directory.", null);
+			return scope.Error(new RestoreResult(false, "No .csproj file found in target directory.", null));
 		
 		var startInfo = new ProcessStartInfo
 		{
@@ -50,12 +50,12 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 			process = Process.Start(startInfo) ?? throw new InvalidOperationException("Process.Start returned null.");
 		}
 		catch(Win32Exception ex) {
-		
-			return new RestoreResult(false, "Failed to start dotnet process. Is dotnet installed and in PATH?", ex.Message);
+
+			return scope.Error(new RestoreResult(false, "Failed to start dotnet process. Is dotnet installed and in PATH?", ex.Message));
 		}
 		catch(InvalidOperationException ex) {
-		
-			return new RestoreResult(false, "Failed to start dotnet restore process.", ex.Message);
+
+			return scope.Error(new RestoreResult(false, "Failed to start dotnet restore process.", ex.Message));
 		}
 		
 		string output, error;
@@ -66,8 +66,8 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 			await process.WaitForExitAsync();
 		}
 		catch(IOException ex) {
-		
-			return new RestoreResult(false, "Failed to read process output.", ex.Message);
+
+			return scope.Error(new RestoreResult(false, "Failed to read process output.", ex.Message));
 		}
 		
 		var success = process.ExitCode == 0;

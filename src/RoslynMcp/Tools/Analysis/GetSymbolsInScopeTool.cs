@@ -37,7 +37,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		var position = GetPosition(text, line, column);
 		
 		if(position < 0)
-			return new ErrorResult($"Line {line}, column {column} is out of range.");
+			return scope.Error(new ErrorResult($"Line {line}, column {column} is out of range."));
 		
 		var model   = compilation.GetSemanticModel(tree);
 		var symbols = model.LookupSymbols(position);

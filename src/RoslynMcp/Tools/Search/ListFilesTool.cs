@@ -47,7 +47,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
 
-			return new ErrorResult($"Failed to enumerate files: {ex.Message}");
+			return scope.Error(new ErrorResult($"Failed to enumerate files: {ex.Message}"));
 		}
 
 		var allResults = allFiles
@@ -57,7 +57,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		;
 
 		if(allResults.Length == 0)
-			return new ListFilesEmptyResult([], 0, AdhocCaution(projectPath));
+			return scope.Error(new ListFilesEmptyResult([], 0, AdhocCaution(projectPath)));
 
 		var result = PaginateAndStore(allResults, ref skip, take);
 

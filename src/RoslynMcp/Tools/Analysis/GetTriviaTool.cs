@@ -44,13 +44,13 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             return cachedPage;
 
         if(string.IsNullOrEmpty(filePath))
-            return new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds");
+            return scope.Error(new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds"));
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
             return error;
 
         if(take <= 0 || take > 500)
-            return new ErrorResult("take must be between 1 and 500");
+            return scope.Error(new ErrorResult("take must be between 1 and 500"));
 
         var normalizedPath = NormalizePath(filePath);
         var tree = compilation.SyntaxTrees.FirstOrDefault(t =>
@@ -58,7 +58,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         );
 
         if(tree is null)
-            return new ErrorResult($"File '{filePath}' not found in the compilation.");
+            return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
 
         var root = tree.GetRoot();
         var sourceText = tree.GetText();
@@ -92,13 +92,13 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             if(nodesInSpan.Count == 0) {
 
-                return new GetTriviaNoMatchResult(
+                return scope.Error(new GetTriviaNoMatchResult(
                     "no_matching_nodes",
                     $"No syntax nodes of kind '{syntaxKind}' found in the specified range.",
                     "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
                     syntaxKind,
                     GetCommonSyntaxKinds()
-                );
+                ));
             }
         }
 

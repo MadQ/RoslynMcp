@@ -62,9 +62,9 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		}
 		catch(ArgumentException ex) {
 
-			return new ErrorResult($"Invalid regex pattern: {ex.Message}");
+			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
-		
+
 		string originalContent;
 		
 		try {
@@ -72,9 +72,9 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new ErrorResult($"Failed to read file: {ex.Message}");
+			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 		}
-		
+
 		// Split into lines to compute 1-based line numbers for each match position.
 		var lines        = originalContent.Split('\n');
 		var lineStarts   = BuildLineStartMap(lines);
@@ -88,7 +88,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		if(matches.Count == 0) {
 
-			return new ReplaceInFileResult(false, 0, [], "No matches found.");
+			return scope.Error(new ReplaceInFileResult(false, 0, [], "No matches found."));
 		}
 		
 		if(dryRun) {
@@ -105,9 +105,9 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new ErrorResult($"Failed to write file: {ex.Message}");
+			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
-		
+
 		// Invalidate the workspace so subsequent Roslyn tools see the updated source.
 		workspace.InvalidateFile(projectPath, fullPath);
 		
