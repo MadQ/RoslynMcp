@@ -185,6 +185,20 @@ Sub-Agent C (read-only) ──┘
 
 **Resource cost:** Modest. Read-only adapters skip FSW, skip compilation cache invalidation, and could share a frozen `Compilation` reference via the service (no serialization overhead for reads).
 
+**Subagent behavioral contract:** Read-only subagents must understand these constraints. The orchestrating agent should include this in subagent prompts:
+
+```
+You are running in READ-ONLY workspace mode:
+- You can read, search, navigate, and analyze code freely.
+- You CANNOT write, edit, rename, or apply changes — those calls will be rejected.
+- You will NOT see edits made by the main agent until your session ends.
+- There are no workspace reloads in this mode — you work on a frozen snapshot.
+- When your task is complete, return your findings/proposed edits and terminate.
+  The orchestrating agent handles all writes.
+```
+
+This is a natural fit for fan-out patterns: main agent dispatches "find all references to X", "get the body of Y", "check if Z implements W" to parallel subagents, collects results, then performs edits itself.
+
 ---
 
 ## Open Questions
