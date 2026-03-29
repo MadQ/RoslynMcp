@@ -32,12 +32,12 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		var location = symbol.Locations.FirstOrDefault(loc => loc.IsInSource);
 		
 		if(location is null)
-			return new {
-				symbol_name = FormatSymbolName(symbol),
-				symbol_kind = symbol.Kind.ToString().ToLowerInvariant(),
-				location    = "metadata",
-				message     = "This symbol is defined in metadata (compiled assembly), not source code."
-			};
+			return new MetadataSymbolResult(
+				FormatSymbolName(symbol),
+				symbol.Kind.ToString().ToLowerInvariant(),
+				"metadata",
+				"This symbol is defined in metadata (compiled assembly), not source code."
+			);
 		
 		var span      = location.GetLineSpan();
 		var filePath  = span.Path;
@@ -46,16 +46,16 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		var docXml    = symbol.GetDocumentationCommentXml();
 		var docSummary = ExtractDocSummary(docXml);
 		
-		return new {
-			symbol_name = FormatSymbolName(symbol),
-			symbol_kind = symbol.Kind.ToString().ToLowerInvariant(),
-			file        = relative,
-			line        = span.StartLinePosition.Line + 1,
-			column      = span.StartLinePosition.Character + 1,
-			signature   = signature,
-			doc_summary = docSummary,
-			_caution    = AdhocCaution(projectPath)
-		};
+		return new SymbolDefinitionResult(
+			FormatSymbolName(symbol),
+			symbol.Kind.ToString().ToLowerInvariant(),
+			relative,
+			span.StartLinePosition.Line + 1,
+			span.StartLinePosition.Character + 1,
+			signature,
+			docSummary,
+			AdhocCaution(projectPath)
+		);
 	}
 	
 	

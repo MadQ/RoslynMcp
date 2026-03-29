@@ -49,21 +49,21 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 				.Order()
 		];
 		
-		return new {
-			name            = project.Name,
-			assembly_name   = project.AssemblyName,
-			file_path       = project.FilePath is not null
+		return new ProjectInfoResult(
+			project.Name,
+			project.AssemblyName,
+			project.FilePath is not null
 				? Path.GetRelativePath(rootPath, project.FilePath)
 				: null,
-			target_framework    = tfm,
-			language_version    = langVersion,
-			output_kind         = outputKind,
-			nullable            = nullable,
-			is_msbuild_workspace = isMSBuild,
-			package_references  = packages,
-			additional_files    = extraFiles,
-			_caution            = AdhocCaution(projectPath)
-		};
+			tfm,
+			langVersion,
+			outputKind,
+			nullable,
+			isMSBuild,
+			packages,
+			extraFiles,
+			AdhocCaution(projectPath)
+		);
 	}
 	
 	private static string? InferTfm(Project project)
