@@ -159,6 +159,34 @@ Each phase ships independently. Phase 1 is pure refactoring with no user-visible
 
 ---
 
+## Read-Only / Read-Write Mode
+
+Optional copy-on-write semantics for workspace access:
+
+```
+Main Agent (read-write) ── owns the mutable workspace, exclusive writes
+Sub-Agent A (read-only) ──┐
+Sub-Agent B (read-only) ──┼── share an immutable snapshot, full parallel reads
+Sub-Agent C (read-only) ──┘
+```
+
+**How it works:**
+- Each adapter registers with the service as `read-only` or `read-write` (via `roslyn_configure(mode: "read-only")` tool call or `ROSLYNMCP_MODE=readonly` env var)
+- At most **one** read-write connection per solution — the service enforces this
+- Read-only adapters share the same immutable `Solution` snapshot — no locks needed, fully parallel
+- Write attempts from read-only adapters return an actionable error: `"Workspace is read-only. Return your proposed edits to the orchestrating agent."`
+- The agent knows what to do with that error — it becomes a natural producer/consumer pattern
+
+**Connection tracking:**
+- Service tracks each adapter's PID, connection time, and mode
+- Stale connection detection: if a PID dies without clean disconnect (poll `Process.GetProcessById`), reclaim the slot
+- When the read-write adapter disconnects: read-only adapters continue working; no automatic promotion (too risky). A new read-write connection can be established by the next agent that requests it.
+- PID tracking also enables future "which agent is editing which file" conflict detection
+
+**Resource cost:** Modest. Read-only adapters skip FSW, skip compilation cache invalidation, and could share a frozen `Compilation` reference via the service (no serialization overhead for reads).
+
+---
+
 ## Open Questions
 
 - Should the service support multiple solutions simultaneously, or strictly one per process?
@@ -167,6 +195,8 @@ Each phase ships independently. Phase 1 is pure refactoring with no user-visible
 - Windows named pipes vs Unix domain sockets — use `System.IO.Pipes` abstraction or go lower?
 - What's the right grace period before service shutdown? Configurable via env var?
 - How does this interact with the adhoc fallback strategy (scratchpad item)?
+- Should `roslyn_configure` be a tool (agent-controlled) or strictly env var (user-controlled)?
+- When read-write adapter disconnects, should pending read-only requests drain or fail immediately?
 
 ---
 
