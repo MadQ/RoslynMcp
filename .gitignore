@@ -405,6 +405,7 @@ docs/github-issues/
 
 # Local utility scripts
 scripts/
+!scripts/enforce-roslyn-tools.sh
 
 # Release artifacts
 RoslynMcp-v*.zip
