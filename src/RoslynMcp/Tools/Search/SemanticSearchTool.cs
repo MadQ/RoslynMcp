@@ -65,11 +65,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		var validContexts = new[] { "comments", "strings", "identifiers", "code", "xmldocs", "all" };
 		
 		if(!validContexts.Contains(context.ToLowerInvariant())) {
-		
-			return new DetailedErrorResult(
+
+			return scope.Error(new DetailedErrorResult(
 				"Invalid context parameter",
 				$"Must be one of: {string.Join(", ", validContexts)}"
-			);
+			));
 		}
 		
 		context = context.ToLowerInvariant();
@@ -87,10 +87,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			regex = new Regex(pattern, options);
 		}
 		catch(ArgumentException ex) {
-		
-			return new ErrorResult($"Invalid regex pattern: {ex.Message}");
+
+			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
-		
+
 		var solution   = workspace.GetSolution(projectPath);
 		var rootPath   = workspace.GetRootPath(projectPath);
 		var allMatches = new List<SemanticMatchResult>();
@@ -169,9 +169,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		var allResults = allMatches.ToArray();
 		var result     = PaginateAndStore(allResults, ref skip, take);
 
-		scope.Outcome($"{result.Total} match(es)");
-
-		return new SemanticSearchResult(
+		return scope.Outcome($"{result.Total} match(es)", new SemanticSearchResult(
 			result.Items,
 			result.Total,
 			result.Items.Length,
@@ -179,7 +177,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			result.HasMore,
 			context,
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 	
 	bool IsGeneratedCode(SyntaxTree tree)
