@@ -63,7 +63,9 @@ internal sealed partial class WorkspaceManager
 					rootPath = Path.GetDirectoryName(path)!;
 					MSBuildBootstrap.EnsureReady();
 					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
-					workspace = LoadSolution(path);
+					logger.LogInfo("Load", $"Loading solution: {path}");
+					var slnSw = System.Diagnostics.Stopwatch.StartNew();
+					workspace = LoadSolution(path, logger);
 					isMSBuild = true;
 
 					BuildProjectMap();
@@ -71,6 +73,7 @@ internal sealed partial class WorkspaceManager
 						.FirstOrDefault()?.Id
 						?? throw new InvalidOperationException($"Solution '{path}' contains no projects.")
 					;
+					logger.LogInfo("Load", $"Solution loaded in {slnSw.ElapsedMilliseconds}ms ({workspace.CurrentSolution.Projects.Count()} projects)");
 					StartWatcher();
 					break;
 
@@ -79,6 +82,8 @@ internal sealed partial class WorkspaceManager
 					rootPath = Path.GetDirectoryName(path)!;
 					MSBuildBootstrap.EnsureReady();
 					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+					logger.LogInfo("Load", $"Loading project: {path}");
+					var projSw = System.Diagnostics.Stopwatch.StartNew();
 
 					var (msbuildWs, pid) = LoadMSBuildWorkspace(path);
 					workspace        = msbuildWs;
@@ -87,6 +92,7 @@ internal sealed partial class WorkspaceManager
 
 					// OpenProjectAsync also loads referenced projects — map them all.
 					BuildProjectMap();
+					logger.LogInfo("Load", $"Project loaded in {projSw.ElapsedMilliseconds}ms ({workspace.CurrentSolution.Projects.Count()} projects)");
 					StartWatcher();
 					break;
 
@@ -262,7 +268,7 @@ internal sealed partial class WorkspaceManager
 
 		// ── Workspace loading ────────────────────────────────────────────────
 
-		static Workspace LoadSolution(string solutionPath)
+		static Workspace LoadSolution(string solutionPath, FileLogger? log = null)
 		{
 			var msbuildWorkspace = MSBuildWorkspace.Create();
 
@@ -282,8 +288,17 @@ internal sealed partial class WorkspaceManager
 						.Where(p => p.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
 					;
 
-					foreach(var projectPath in projectPaths)
-						msbuildWorkspace.OpenProjectAsync(projectPath).GetAwaiter().GetResult();
+					foreach(var projectPath in projectPaths) {
+
+						try {
+							msbuildWorkspace.OpenProjectAsync(projectPath).GetAwaiter().GetResult();
+						}
+						catch(Exception ex) when(ex is not OperationCanceledException) {
+							// Multi-TFM projects or transitive references may already be loaded
+							// by a previous OpenProjectAsync call. Log and skip.
+							log?.LogInfo("Load", $"Skipped {Path.GetFileName(projectPath)}: {ex.GetType().Name}: {ex.Message}");
+						}
+					}
 				}
 				else {
 
@@ -293,6 +308,7 @@ internal sealed partial class WorkspaceManager
 				return msbuildWorkspace;
 			}
 			catch(Exception ex) when(ex is not OperationCanceledException) {
+				log?.LogError("LoadSolution", $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
 				msbuildWorkspace.Dispose();
 				throw new InvalidOperationException($"Failed to load solution '{solutionPath}': {ex.Message}", ex);
 			}

@@ -44,8 +44,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			regex = new Regex(pattern, options);
 		}
 		catch(ArgumentException ex) {
-		
-			return new ErrorResult($"Invalid regex pattern: {ex.Message}");
+
+			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
 		
 		var solution   = workspace.GetSolution(projectPath);
@@ -85,16 +85,14 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		var allResults = allMatches.ToArray();
 		var result     = PaginateAndStore(allResults, ref skip, take);
 
-		scope.Outcome($"{result.Total} match(es)");
-
-		return new SearchFilesResult(
+		return scope.Outcome($"{result.Total} match(es)", new SearchFilesResult(
 			result.Items,
 			result.Total,
 			result.Items.Length,
 			result.PageToken,
 			result.HasMore,
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 	
 	// TODO: Future enhancement — add syntax-tree-based semantic filtering.

@@ -20,6 +20,7 @@ internal sealed class FileLogger : IDisposable
 	
 	readonly string? logPath;
 	readonly object  writeLock = new();
+	readonly int     pid = Environment.ProcessId;
 	long             sessionTokens;
 
 	public bool IsEnabled => logPath is not null;
@@ -105,7 +106,7 @@ internal sealed class FileLogger : IDisposable
 		if(logPath is null)
 			return;
 		
-		var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level}] {message}{Environment.NewLine}";
+		var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{pid}] [{level}] {message}{Environment.NewLine}";
 		
 		lock(writeLock) {
 			

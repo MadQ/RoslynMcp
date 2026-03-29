@@ -51,8 +51,23 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
 		public void Failed(string reason) { failed = true; detail = reason; }
 
+		/// <summary>Marks the invocation as failed, estimates tokens, and returns the error result for fluent use.</summary>
+		public T Error<T>(T returnValue)
+		{
+			failed          = true;
+			detail          = returnValue is ErrorResult err ? err.Error : "error";
+			estimatedTokens = EstimateTokens(returnValue);
+			return returnValue;
+		}
+
 		/// <summary>Marks the invocation as failed and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
-		public T Failed<T>(string reason, T returnValue) { failed = true; detail = reason; return returnValue; }
+		public T Failed<T>(string reason, T returnValue)
+		{
+			failed          = true;
+			detail          = reason;
+			estimatedTokens = EstimateTokens(returnValue);
+			return returnValue;
+		}
 
 		/// <summary>Appends a neutral annotation without changing the outcome.</summary>
 		public void Record(string note) => detail = detail is null ? note : $"{detail}; {note}";
