@@ -33,13 +33,13 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		var position = GetPosition(text, line, column);
 
 		if(position < 0)
-			return new ErrorResult($"Line {line}, column {column} is out of range.");
+			return scope.Error(new ErrorResult($"Line {line}, column {column} is out of range."));
 
 		var model = compilation.GetSemanticModel(tree);
 		var node  = (await tree.GetRootAsync()).FindToken(position).Parent;
 
 		if(node is null)
-			return new ErrorResult("No node at that position.");
+			return scope.Error(new ErrorResult("No node at that position."));
 
 		var info   = model.GetSymbolInfo(node);
 		var symbol = info.Symbol ?? info.CandidateSymbols.FirstOrDefault();
@@ -51,7 +51,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 			if(typeInfo.Type is not null)
 				return new SymbolInfoResult("type", typeInfo.Type.ToDisplayString(), null, null);
 
-			return new ErrorResult("No symbol resolved at that position.");
+			return scope.Error(new ErrorResult("No symbol resolved at that position."));
 		}
 
 		return new SymbolInfoResult(

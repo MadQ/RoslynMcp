@@ -50,7 +50,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new ErrorResult($"Failed to read file: {ex.Message}");
+			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 		}
 
 		// Resolve insertion index (0-based, insert BEFORE this index).
@@ -103,7 +103,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
-			return new ErrorResult($"Failed to write file: {ex.Message}");
+			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
 
 		workspace.InvalidateFile(projectPath, fullPath);

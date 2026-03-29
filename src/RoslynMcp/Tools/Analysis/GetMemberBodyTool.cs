@@ -32,12 +32,12 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		var syntaxRefs = symbol.DeclaringSyntaxReferences;
 
 		if(syntaxRefs.Length == 0)
-			return new MetadataSymbolResult(
+			return scope.Error(new MetadataSymbolResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
 				"metadata",
 				"This symbol is defined in metadata (compiled assembly), not source code."
-			);
+			));
 
 		var parts = new List<object>();
 

@@ -46,10 +46,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-			return new ErrorResult("File must be a C# source file (.cs)");
+			return scope.Error(new ErrorResult("File must be a C# source file (.cs)"));
 		
 		if(!TryParseSyntaxKind(nodeKind, out var kind))
-			return new ErrorResult($"Unknown node kind: {nodeKind}.", Hint: "Examples: MethodDeclaration, FieldDeclaration, IdentifierName.");
+			return scope.Error(new ErrorResult($"Unknown node kind: {nodeKind}.", Hint: "Examples: MethodDeclaration, FieldDeclaration, IdentifierName."));
 		
 		SourceText sourceText;
 		
@@ -57,10 +57,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			sourceText = SourceText.From(File.ReadAllText(fullPath));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-		
-			return new ErrorResult($"Failed to read file: {ex.Message}");
+
+			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 		}
-		
+
 		var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
 		var root = await syntaxTree.GetRootAsync();
 		
@@ -85,7 +85,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 
 		if(matchedNodes.Length == 0) {
 
-			return new ReplaceInCodeResult(false, 0, [], "No matching nodes found.");
+			return scope.Error(new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
 		}
 		
 		SyntaxNode? replacementNode;
@@ -117,22 +117,22 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			};
 			
 			if(replacementNode is null)
-				return new ErrorResult("Failed to parse replacement text — parser returned null");
+				return scope.Error(new ErrorResult("Failed to parse replacement text — parser returned null"));
 			
 			if(replacementNode.ContainsDiagnostics) {
-			
-				return new ReplaceInCodeSyntaxError(
+
+				return scope.Error(new ReplaceInCodeSyntaxError(
 					"Replacement text contains syntax errors",
 					string.Join("; ", replacementNode.GetDiagnostics().Select(d => d.GetMessage()))
-				);
+				));
 			}
 		}
 		catch(Exception ex) {
-		
-			return new ReplaceInCodeSyntaxError(
+
+			return scope.Error(new ReplaceInCodeSyntaxError(
 				"Failed to parse replacement text as valid C# syntax",
 				ex.Message
-			);
+			));
 		}
 		
 		// Collect change info before replacement.
@@ -175,22 +175,22 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		var syntaxValid = newDiagnostics.Length == 0;
 		
 		if(!syntaxValid) {
-		
-			return new ReplaceInCodeSyntaxError(
+
+			return scope.Error(new ReplaceInCodeSyntaxError(
 				"Replacement would introduce syntax errors",
 				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
 				changedNodeInfo
-			);
+			));
 		}
 		
 		try {
 			File.WriteAllText(fullPath, newRoot.ToFullString());
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-		
-			return new ErrorResult($"Failed to write file: {ex.Message}");
+
+			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
-		
+
 		// Invalidate workspace cache
 		workspace.InvalidateFile(projectPath, fullPath);
 		

@@ -73,9 +73,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				));
 			}
 			
-			return new ErrorResult($"'{symbolName}' is not an interface or abstract class.");
+			return scope.Error(new ErrorResult($"'{symbolName}' is not an interface or abstract class."));
 		}
-		
+
 		// Handle method symbols (abstract or virtual).
 		if(symbol is IMethodSymbol methodSymbol) {
 
@@ -108,10 +108,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				));
 			}
 			
-			return new ErrorResult($"'{symbolName}' is not an abstract, virtual, or override method.");
+			return scope.Error(new ErrorResult($"'{symbolName}' is not an abstract, virtual, or override method."));
 		}
-		
-		return new ErrorResult($"'{symbolName}' is not a type or method — cannot find implementations.");
+
+		return scope.Error(new ErrorResult($"'{symbolName}' is not a type or method — cannot find implementations."));
 	}
 	
 	

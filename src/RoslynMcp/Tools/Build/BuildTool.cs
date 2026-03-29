@@ -48,7 +48,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 		
 		if(csprojPath is null)
-			return new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode.");
+			return scope.Error(new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode."));
 		
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true).
 		if(!forceBuild) {
@@ -63,7 +63,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				
 				BuildDiagnostic[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
 				
-				return new BuildResult(
+				return scope.Error(new BuildResult(
 					Succeeded:     false,
 					Errors:        roslynErrors,
 					Warnings:      roslynWarnings,
@@ -72,7 +72,7 @@ internal sealed class BuildTool : RoslynMcpTool
 					Skip_reason:   "Roslyn reported errors — fix these first, then build will run automatically.",
 					Duration_ms:   0,
 					Exit_code:     null
-				);
+				));
 			}
 		}
 		
@@ -87,8 +87,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope);
 		}
 		catch(InvalidOperationException ex) {
-			
-			return new BuildResult(
+
+			return scope.Error(new BuildResult(
 				Succeeded:     false,
 				Errors:        (BuildDiagnostic[]) [],
 				Warnings:      (BuildDiagnostic[]) [],
@@ -98,7 +98,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				Duration_ms:   0,
 				Exit_code:     null,
 				Error_details: ex.InnerException?.Message
-			);
+			));
 		}
 		
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);

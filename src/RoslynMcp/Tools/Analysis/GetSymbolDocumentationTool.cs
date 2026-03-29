@@ -33,12 +33,12 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		var xml = symbol.GetDocumentationCommentXml();
 		
 		if(string.IsNullOrWhiteSpace(xml))
-			return new SymbolDocumentationEmptyResult(
+			return scope.Error(new SymbolDocumentationEmptyResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
 				null,
 				"No documentation comments found for this symbol."
-			);
+			));
 		
 		var parsed = ParseDocumentation(xml);
 		

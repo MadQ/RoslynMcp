@@ -32,12 +32,12 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		var location = symbol.Locations.FirstOrDefault(loc => loc.IsInSource);
 		
 		if(location is null)
-			return new MetadataSymbolResult(
+			return scope.Error(new MetadataSymbolResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
 				"metadata",
 				"This symbol is defined in metadata (compiled assembly), not source code."
-			);
+			));
 		
 		var span      = location.GetLineSpan();
 		var filePath  = span.Path;
