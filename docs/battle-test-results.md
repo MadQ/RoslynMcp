@@ -134,6 +134,8 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 
 **Cold start** — the one-time cost of loading the Roslyn workspace on the first tool call. Subsequent calls reuse the cached workspace and are near-instant.
 
+**Narrow focus vs greedy file reading** — a fundamental trade-off we observed. Roslyn tools return precisely what was asked for (a single method body, a list of references) — efficient but the agent only sees what it requests. Built-in tools read entire files — expensive but the agent gains ambient context that can surface unexpected findings. In our testing, roslyn tools produced faster, more focused answers with fewer wasted tokens. Built-in tools occasionally discovered issues the roslyn tools agent missed because it never looked at the surrounding code. Neither approach is universally better; the ideal is roslyn tools with optional "awareness hints" that flag related code worth investigating.
+
 ---
 
 ## Test Methodology Notes
