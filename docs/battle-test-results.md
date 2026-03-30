@@ -1,0 +1,133 @@
+# RoslynMcp Battle-Test Results
+
+**First battle-test run — Sonnet 4.6, medium effort, March 2026**
+
+We tested RoslynMcp against three repos with the same prompts, with and without roslyn_* tools. Here's what we found — the good, the bad, and the honest.
+
+---
+
+## The Numbers
+
+### Spectre.Console (26 projects) — 7 tests
+
+| Test | WITH tokens | WITHOUT tokens | Savings | Winner |
+|------|------------|---------------|---------|--------|
+| Find implementations | +7k | +4k | -43% | WITHOUT |
+| Understand method | +6k | +8k | +25% | WITH |
+| Type hierarchy | +4k | +6k | +33% | WITH (but WITHOUT was richer) |
+| Find references | +5k | +7k | +29% | WITH (but WITHOUT found 14+ vs 5 refs) |
+| File overview | +5k | +9k | +44% | WITH |
+| Diagnostics | +3k | +3k | tie | WITH (18× faster) |
+| Rename (full) | ~10k | ~25k | +60% | WITH |
+
+### RoslynMcp Self-Refactoring — scope.Error migration
+
+| | Tokens | Time | Tool calls |
+|---|--------|------|------------|
+| **WITH** | +10k | 1m 0s | 11 |
+| **WITHOUT** | +32k | 1m 23s | ~31 |
+| **Original subagent** | unknown | 8+ min | 93 |
+
+**69% fewer tokens with RoslynMcp.** The regex replacement approach (one search + 9 parallel replace_in_file) was fundamentally smarter than 9 file reads + 22 individual edits.
+
+### Orleans (63 projects) — Full 13-prompt workflow
+
+| Metric | WITH RoslynMcp | WITHOUT |
+|--------|---------------|---------|
+| Total context delta | **+37k** | +60k |
+| Cold start | 7m 6s (MSBuild, 235 projects) | 0 |
+| Actual work time | ~5m | ~8m |
+| Build verification | 3× instant, all confirmed | 1× attempted, timed out |
+| Bug found | null-deref (34s) | ToString() drops stack trace (1m 22s) |
+| Strategy pivots | 0 | 1 |
+
+**38% fewer tokens for the full workflow.**
+
+---
+
+## Where RoslynMcp Wins Clearly
+
+### 1. Rename — 60% token savings, zero risk
+One call to preview, one call to apply. Atomic — either succeeds completely or fails cleanly. The WITHOUT run needed 11 Edit calls with an error/retry. Haiku + RoslynMcp produced the identical rename as Sonnet — the model doesn't matter when the tool does the work.
+
+### 2. Build verification — 18× faster, actually verifies
+`roslyn_get_diagnostics` returns in milliseconds. `dotnet build` on Orleans took 1m+ and timed out on one project. The WITHOUT run said "yes, it's fine" without actually building once. The WITH run proved it three times.
+
+### 3. Large-scale refactoring — 69% fewer tokens
+The self-refactoring test is the clearest win. `roslyn_search_files` found all 22 matches in one call. `roslyn_replace_in_file` with regex applied the fix to 9 files in parallel. No file reading, no manual edit construction.
+
+### 4. Cheap model parity
+Haiku + RoslynMcp = same correctness as Sonnet + RoslynMcp for semantic operations. The tool does the heavy lifting, not the model.
+
+### 5. Zero strategy pivots
+Across the full Orleans workflow (13 prompts), the WITH run had zero strategy pivots. Every approach was direct. The WITHOUT run had to retry (MSBuild multi-project error) and sometimes abandoned approaches.
+
+---
+
+## Where Built-In Tools Won or Tied
+
+### 1. Simple grep-friendly tasks
+Test 1 (find implementations of `IAnsiConsole`) — grep won because the interface name is unique. No false positives, fewer tokens. For unique names in small-to-medium repos, grep is fine.
+
+### 2. Answer richness on exploration
+The WITHOUT runs consistently produced more detailed, contextualized answers for exploration prompts. Reading full files gives the agent ambient context it can reference later. RoslynMcp's tools return precise but minimal data.
+
+### 3. Cached context advantage
+After reading a file once, the WITHOUT agent could answer follow-up questions about that file for free (already in context). The WITH agent made fresh tool calls for each question. This advantage fades on cross-project work.
+
+### 4. The ToString() bug discovery
+The WITHOUT agent found a more impactful bug (ToString() dropping stack traces) because it read the full 180-line file and noticed the override while scanning for constructors. The WITH agent found a different bug (null-deref in constructor) by tracing the call chain precisely — but didn't see ToString() because `get_member_body` only returned what was asked for.
+
+---
+
+## Honest Assessment
+
+**RoslynMcp's value is clearest for:** rename, refactoring, build verification, large-scale search-and-replace, and cross-project analysis. These are operations where precision and atomicity matter more than breadth.
+
+**RoslynMcp's tools need improvement for:** exploration (richer responses needed), type hierarchy (missing per-type details), find_references (needs context snippets), and "awareness" of related members the agent didn't ask about.
+
+**The cold start problem is real.** 7 minutes for Orleans (235 compiled projects) is painful. The adhoc fallback works (~20s) but loses MSBuild semantics. We need the `workspaceMode` parameter (#101) and the large-solution heuristic.
+
+**Token savings are real but not universal.** 38-69% savings on refactoring/editing workflows. Modest savings on exploration (25-44%). Grep wins on simple unique-name searches. The headline is NOT "X% fewer tokens on everything" — it's "dramatically fewer tokens where it matters most, and comparable or slightly more where it doesn't."
+
+---
+
+## Bugs Found During Testing
+
+### In RoslynMcp
+1. `.slnx` parser missed `<Folder>`-nested projects (`.Elements` → `.Descendants`)
+2. `ResolveProjectPath` doesn't handle `.slnx` input
+3. Path resolution requires absolute paths — agents always try relative first
+4. 7-minute cold start on large solutions — needs `workspaceMode` option
+5. `scope.Outcome` missing on several success paths
+6. `roslyn_insert_lines` never chosen by agents — description needs improvement
+7. Multi-line `roslyn_replace_in_file` patterns still broken (CRLF in MCP JSON)
+
+### In Orleans (real bugs found by both agents)
+1. `InconsistentStateException` constructor null-deref on `storageException.Message` (found by WITH)
+2. `InconsistentStateException.ToString()` drops stack trace (found by WITHOUT)
+3. Typo: "help" → "held" in XML doc (found by both, in two files)
+
+---
+
+## Improvement Roadmap (from battle-test findings)
+
+1. **Enrich `find_references`** — add context snippets per reference
+2. **Enrich `get_type_hierarchy`** — per-type interfaces, intermediate base classes
+3. **"Awareness hints"** — note related overrides (ToString, Dispose, etc.) when returning member bodies
+4. **`workspaceMode` parameter** — opt-in adhoc for large solutions (#101)
+5. **Smarter `projectPath` resolution** — handle .slnx, try CWD-relative, search by filename
+6. **`roslyn_replace_body`** — replace method body only, keep signature intact
+7. **Diagnostics grouping** — `groupBy: "code"` for summarized error/warning view
+8. **Fix CRLF in multi-line patterns** — investigate MCP JSON string escaping
+
+---
+
+## Test Methodology Notes
+
+- Same model (Sonnet 4.6), same thinking level (medium), same prompts
+- `/context` before and after each prompt for token tracking
+- Fresh Claude Code terminal for each WITH/WITHOUT run
+- Orleans run included deliberately planted bugs (missing semicolon, unused variable)
+- The `/context` commands may have influenced agent behavior (agents may optimize for token savings when they see the user checking context repeatedly)
+- Retry/pivot tracking was observational, not automated — future runs should use hooks
