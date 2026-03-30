@@ -128,6 +128,14 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 
 ---
 
+## Glossary
+
+**Strategy pivot** — when the agent abandons its current approach and tries something different. Examples: "wait, let me try a different file", "actually, let me search for that instead", "that didn't work, let me approach this differently." Each pivot wastes the tokens already spent on the abandoned approach. Fewer pivots = more efficient, more focused work.
+
+**Cold start** — the one-time cost of loading the Roslyn workspace on the first tool call. Subsequent calls reuse the cached workspace and are near-instant.
+
+---
+
 ## Test Methodology Notes
 
 - Same model (Sonnet 4.6), same thinking level (medium), same prompts
