@@ -106,7 +106,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		BuildDiagnostic[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
 		BuildDiagnostic[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
 
-		return new BuildResult(
+		return scope.Outcome("msbuild", new BuildResult(
 			succeeded,
 			errors,
 			warnings,
@@ -115,7 +115,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			Skip_reason:   null,
 			Duration_ms:   (int) elapsed.TotalMilliseconds,
 			Exit_code:     exitCode
-		);
+		));
 	}
 	
 	private static string BuildArgs(string csprojPath, string? tfm)

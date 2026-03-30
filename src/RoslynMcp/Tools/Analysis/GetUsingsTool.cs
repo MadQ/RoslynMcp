@@ -49,12 +49,12 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 			? ExtractGlobalUsings(compilation)
 			: [];
 		
-		return new GetUsingsResult(
+		return scope.Outcome(filePath, new GetUsingsResult(
 			Path.GetRelativePath(rootPath, tree.FilePath),
 			usings,
 			globalUsings,
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 	
 	private static string[] ExtractGlobalUsings(Compilation compilation)

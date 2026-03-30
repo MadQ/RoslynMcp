@@ -49,12 +49,12 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 			var typeInfo = model.GetTypeInfo(node);
 
 			if(typeInfo.Type is not null)
-				return new SymbolInfoResult("type", typeInfo.Type.ToDisplayString(), null, null);
+				return scope.Outcome("type", new SymbolInfoResult("type", typeInfo.Type.ToDisplayString(), null, null));
 
 			return scope.Error(new ErrorResult("No symbol resolved at that position."));
 		}
 
-		return new SymbolInfoResult(
+		return scope.Outcome(symbol.Name, new SymbolInfoResult(
 			symbol.Kind.ToString().ToLowerInvariant(),
 			symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 			symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
@@ -66,7 +66,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 				_                 => null
 			},
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 
 	private static int GetPosition(SourceText text, int line, int column)

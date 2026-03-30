@@ -281,7 +281,7 @@ internal sealed partial class WorkspaceManager
 					var slnDir = Path.GetDirectoryName(solutionPath)!;
 
 					var projectPaths = doc.Root!
-						.Elements("Project")
+						.Descendants("Project")
 						.Select(e => e.Attribute("Path")?.Value)
 						.Where(p => p is not null)
 						.Select(p => Path.GetFullPath(Path.Combine(slnDir, p!)))

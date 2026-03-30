@@ -46,7 +46,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		var docXml    = symbol.GetDocumentationCommentXml();
 		var docSummary = ExtractDocSummary(docXml);
 		
-		return new SymbolDefinitionResult(
+		return scope.Outcome(symbolName, new SymbolDefinitionResult(
 			FormatSymbolName(symbol),
 			symbol.Kind.ToString().ToLowerInvariant(),
 			relative,
@@ -55,7 +55,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			signature,
 			docSummary,
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 	
 	
