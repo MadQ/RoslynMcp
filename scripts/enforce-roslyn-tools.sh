@@ -22,5 +22,5 @@ TOOL=$(echo "$INPUT" | sed -n 's/.*"tool_name"[[:space:]]*:[[:space:]]*"\([^"]*\
 
 # Check if it's a .cs file (case-insensitive)
 if echo "$FILE" | grep -qi '\.cs$'; then
-  echo "{\"decision\":\"block\",\"reason\":\"DOGFOOD! Use roslyn_* tools for .cs files (roslyn_read_file, roslyn_search_files, roslyn_replace_in_file, roslyn_replace_in_code). Only fall back to $TOOL if the RoslynMcp MCP server is disconnected — and if so, state clearly: RoslynMcp disconnected: falling back to $TOOL.\"}"
+  echo "{\"decision\":\"block\",\"reason\":\"Use roslyn_* MCP tools for .cs files (roslyn_read_file, roslyn_search_files, roslyn_replace_in_file, roslyn_replace_in_code). Only fall back to $TOOL if the RoslynMcp MCP server is disconnected — and if so, state clearly: RoslynMcp disconnected: falling back to $TOOL.\"}"
 fi
