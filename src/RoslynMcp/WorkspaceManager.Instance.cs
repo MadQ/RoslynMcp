@@ -292,8 +292,40 @@ internal sealed partial class WorkspaceManager
 				}
 			}
 
+			WarnIfLargeSolution(path, mode, logger);
 			MSBuildBootstrap.EnsureReady(mode);
 			logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+		}
+
+
+
+		const int LargeSolutionThreshold = 30;
+
+		/// <summary>
+		///     Counts .csproj files under the solution directory. If over the threshold,
+		///     logs a warning before the potentially long MSBuild load.
+		/// </summary>
+		static void WarnIfLargeSolution(string path, WorkspaceMode mode, FileLogger logger)
+		{
+			if(mode == WorkspaceMode.Adhoc)
+				return;
+
+			var dir = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
+
+			if(dir is null)
+				return;
+
+			try {
+
+				var count = Directory.EnumerateFiles(dir, "*.csproj", SearchOption.AllDirectories).Count();
+
+				if(count > LargeSolutionThreshold)
+					logger.LogInfo("Workspace",
+						$"Large solution detected: ~{count} projects. " +
+						$"MSBuild loading may take several minutes. " +
+						$"For faster startup, use --workspace adhoc or set ROSLYNMCP_WORKSPACE=adhoc.");
+			}
+			catch { }
 		}
 
 
