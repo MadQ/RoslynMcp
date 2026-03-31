@@ -146,7 +146,7 @@ You don't manually "switch" modes—RoslynMcp detects the mode per project path.
 
 ### Multi-Project Workflows (v0.3.0+)
 
-All 28 tools require a `projectPath` parameter, so you can work with **both modes in a single session**:
+All 31 tools require a `projectPath` parameter, so you can work with **both modes in a single session**:
 
 ```json
 // Example: workspace with both project types

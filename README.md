@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 30+ tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 34 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -80,7 +80,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-33 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
+34 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -141,6 +141,12 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | `roslyn_build_project` | Smart build: Roslyn diagnostics first, MSBuild only if clean |
 | `roslyn_clean_solution` | Remove all build artifacts |
 | `roslyn_restore_packages` | Restore NuGet packages |
+
+### Diagnostics & Info
+
+| Tool | What it does |
+|------|--------------|
+| `roslyn_info` | Server version, PID, uptime, MSBuild discovery, log markers |
 
 ---
 
