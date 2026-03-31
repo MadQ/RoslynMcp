@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -49,7 +49,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 				.Order()
 		];
 		
-		return new ProjectInfoResult(
+		return scope.Outcome(project.Name, new ProjectInfoResult(
 			project.Name,
 			project.AssemblyName,
 			project.FilePath is not null
@@ -63,7 +63,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			packages,
 			extraFiles,
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 	
 	private static string? InferTfm(Project project)

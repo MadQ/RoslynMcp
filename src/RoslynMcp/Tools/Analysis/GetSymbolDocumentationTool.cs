@@ -42,7 +42,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		
 		var parsed = ParseDocumentation(xml);
 		
-		return new SymbolDocumentationResult(
+		return scope.Outcome(symbolName, new SymbolDocumentationResult(
 			FormatSymbolName(symbol),
 			symbol.Kind.ToString().ToLowerInvariant(),
 			parsed.Summary,
@@ -51,7 +51,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			parsed.Remarks,
 			parsed.Example,
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 	
 	
