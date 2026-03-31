@@ -21,13 +21,66 @@ internal static class MSBuildBootstrap
 
 	/// <summary>How MSBuild was discovered. Always non-null — describes the method or the failure.</summary>
 	public static string DiscoveryMethod => discoveryMethod;
+	static WorkspaceMode resolvedMode;
+
+	/// <summary>The workspace mode that was resolved and applied.</summary>
+	public static WorkspaceMode ResolvedMode => resolvedMode;
+
+	/// <summary>
+	///     Peeks at a .csproj to determine if it's SDK-style or old-style (.NET Framework).
+	///     SDK-style projects have <c>Sdk="Microsoft.NET.Sdk"</c> in the Project element.
+	///     Old-style projects have <c>ToolsVersion</c> or <c>TargetFrameworkVersion</c>.
+	///     Reads only the first few lines — fast, no XML parsing.
+	/// </summary>
+	public static WorkspaceMode DetectProjectStyle(string csprojPath)
+	{
+		if(!File.Exists(csprojPath))
+			return WorkspaceMode.Sdk;
+
+		try {
+
+			using var reader = new StreamReader(csprojPath);
+
+			for(var i = 0; i < 5 && !reader.EndOfStream; i++) {
+
+				var line = reader.ReadLine();
+
+				if(line is null)
+					break;
+
+				if(line.Contains("Sdk=", StringComparison.OrdinalIgnoreCase))
+					return WorkspaceMode.Sdk;
+
+				if(line.Contains("ToolsVersion=", StringComparison.OrdinalIgnoreCase) ||
+				   line.Contains("TargetFrameworkVersion", StringComparison.OrdinalIgnoreCase))
+					return WorkspaceMode.Vs;
+			}
+		}
+		catch { }
+
+		return WorkspaceMode.Sdk;
+	}
+
+	/// <summary>
+	///     Finds the first .csproj under a directory for project style detection.
+	/// </summary>
+	public static string? FindFirstCsproj(string directory)
+	{
+		try {
+			return Directory.EnumerateFiles(directory, "*.csproj", SearchOption.AllDirectories)
+				.FirstOrDefault();
+		}
+		catch { return null; }
+	}
+
+
 
 	/// <summary>
 	///     Ensures MSBuild is registered for the process. Blocks until discovery
 	///     is complete. Subsequent calls return immediately. If discovery failed,
 	///     returns the failure reason (does not throw — callers decide how to handle).
 	/// </summary>
-	public static string? EnsureReady()
+	public static string? EnsureReady(WorkspaceMode mode = WorkspaceMode.Auto)
 	{
 		if(completed)
 			return failureReason;
@@ -38,6 +91,41 @@ internal static class MSBuildBootstrap
 
 			if(completed)
 				return failureReason;
+
+
+			resolvedMode = mode;
+
+			// Adhoc mode: skip MSBuild entirely.
+			if(mode == WorkspaceMode.Adhoc) {
+				discoveryMethod = "adhoc mode (MSBuild skipped)";
+				return null;
+			}
+
+			// VS mode: skip SDK, go straight to vswhere.
+			if(mode == WorkspaceMode.Vs) {
+
+				if(!OperatingSystem.IsWindows()) {
+					failureReason = "VS workspace mode requires Windows (Visual Studio MSBuild).";
+					discoveryMethod = "not found — " + failureReason;
+					return failureReason;
+				}
+
+				var msbuildDir = TryVsWhere();
+
+				if(msbuildDir is not null) {
+					PrependToPath(msbuildDir);
+					if(TryRegister()) {
+						discoveryMethod = $"resolved via vswhere — VS mode ({msbuildDir})";
+						return null;
+					}
+				}
+
+				failureReason = "Visual Studio MSBuild not found. Install Visual Studio or Build Tools.";
+				discoveryMethod = "not found — " + failureReason;
+				return failureReason;
+			}
+
+			// SDK mode (or Auto): standard discovery chain.
 
 			// 1. Try MSBuildLocator directly — works when .NET SDK is on PATH.
 			if(TryRegister()) {

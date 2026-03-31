@@ -61,8 +61,8 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Solution:
 
 					rootPath = Path.GetDirectoryName(path)!;
-					MSBuildBootstrap.EnsureReady();
-					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+					AutoDetectAndBootstrap(path, logger);
+	
 					logger.LogInfo("Load", $"Loading solution: {path}");
 					var slnSw = System.Diagnostics.Stopwatch.StartNew();
 					workspace = LoadSolution(path, logger);
@@ -80,8 +80,8 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Project:
 
 					rootPath = Path.GetDirectoryName(path)!;
-					MSBuildBootstrap.EnsureReady();
-					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+					AutoDetectAndBootstrap(path, logger);
+	
 					logger.LogInfo("Load", $"Loading project: {path}");
 					var projSw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -267,6 +267,67 @@ internal sealed partial class WorkspaceManager
 		}
 
 		// ── Workspace loading ────────────────────────────────────────────────
+
+
+		/// <summary>
+		///     When workspace mode is Auto, peeks at the project to detect SDK vs Framework style,
+		///     then calls EnsureReady with the detected mode. Logs the result.
+		/// </summary>
+		static void AutoDetectAndBootstrap(string path, FileLogger logger)
+		{
+			var mode = MSBuildBootstrap.ResolvedMode;
+
+			if(mode == WorkspaceMode.Auto) {
+
+				// Find a .csproj to peek at — either the path itself, or first .csproj in the directory.
+				var csprojToCheck = path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+					? path
+					: MSBuildBootstrap.FindFirstCsproj(Path.GetDirectoryName(path) ?? path);
+
+				if(csprojToCheck is not null) {
+
+					var detected = MSBuildBootstrap.DetectProjectStyle(csprojToCheck);
+					logger.LogInfo("Workspace", $"auto-detected {detected} from {Path.GetFileName(csprojToCheck)}");
+					mode = detected;
+				}
+			}
+
+			WarnIfLargeSolution(path, mode, logger);
+			MSBuildBootstrap.EnsureReady(mode);
+			logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+		}
+
+
+
+		const int LargeSolutionThreshold = 30;
+
+		/// <summary>
+		///     Counts .csproj files under the solution directory. If over the threshold,
+		///     logs a warning before the potentially long MSBuild load.
+		/// </summary>
+		static void WarnIfLargeSolution(string path, WorkspaceMode mode, FileLogger logger)
+		{
+			if(mode == WorkspaceMode.Adhoc)
+				return;
+
+			var dir = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
+
+			if(dir is null)
+				return;
+
+			try {
+
+				var count = Directory.EnumerateFiles(dir, "*.csproj", SearchOption.AllDirectories).Count();
+
+				if(count > LargeSolutionThreshold)
+					logger.LogInfo("Workspace",
+						$"Large solution detected: ~{count} projects. " +
+						$"MSBuild loading may take several minutes. " +
+						$"For faster startup, use --workspace adhoc or set ROSLYNMCP_WORKSPACE=adhoc.");
+			}
+			catch { }
+		}
+
 
 		static Workspace LoadSolution(string solutionPath, FileLogger? log = null)
 		{
