@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.7.1-alpha] — 2026-03-31
+
+### Added
+- **`roslyn_info` tool** — server version, PID, uptime, MSBuild discovery method, log markers. `roslyn_info clear` clears the LogViewer.
+- **`roslyn_insert_lines` tool** — insert lines by line number or anchor pattern (insertAfter/insertBefore). (#72)
+- **Workspace mode selection** — `--workspace sdk|vs|adhoc|auto` CLI arg and `ROSLYNMCP_WORKSPACE` env var. Adhoc mode reduces Orleans (63 projects) load from 7 minutes to 22 seconds. (#101)
+- **Auto-detection of SDK vs Framework projects** — peeks at .csproj to choose .NET SDK or VS MSBuild automatically.
+- **Large solution warning** — logs a warning with actionable advice when >30 projects detected before MSBuild load.
+- **Token estimation in logs** — per-tool `~Ntok` and session cumulative `(Ntot)` in every log line. (#84)
+- **PID in log lines** — all log entries include `[pid]` for multi-instance disambiguation. (#96)
+- **`scope.Error<T>()` method** — error returns now estimate tokens and log properly. (#94)
+- **PreToolUse enforcement hook** — `scripts/enforce-roslyn-tools.sh` blocks Read/Grep/Edit on .cs files with actionable error. (#98, #100)
+- **LogViewer themes** — dark, light, parchment (original), system-following. Dropdown + `T` key cycling. Persisted in localStorage. (#91)
+- **LogViewer SSE clear** — INFO entries containing "clear" auto-clear the viewer.
+- **No-cache headers** on LogViewer HTML endpoint.
+- **Battle-test results** — first comparative benchmark against Spectre.Console (26 projects) and Orleans (63 projects). 38-69% token savings on refactoring workflows. (`docs/battle-test-results.md`)
+- **Multi-instance architecture design doc** — named-pipe workspace service, read-only/read-write modes. (`docs/plans/multi-instance-architecture.md`, #86)
+- **Complete agent instructions reference** — `docs/AGENT-INSTRUCTIONS.md` with full, compact, and subagent versions. (#77)
+- **CODE_OF_CONDUCT.md** and **SECURITY.md** for community standards.
+
+### Fixed
+- **`.slnx` parser** — `.Elements("Project")` → `.Descendants("Project")`. Projects nested inside `<Folder>` elements (like Orleans) are now found. (#102)
+- **CRLF-agnostic pattern matching** — `BuildLiteralRegex` makes literal newlines match both `\n` and `\r\n`. `normalizeLineEndings` parameter on `replace_in_file`. (#80)
+- **Workspace reload for new files** — FSW detects new .cs files, `ReloadIfNeeded()` rebuilds the workspace under write lock. No more server restarts. (#71)
+- **Test harness pre-build** — `dotnet run` build output no longer breaks MCP stdio protocol. (#74)
+- **MSBuild discovery logging** — logs on first workspace load (not at startup when it's "not attempted").
+- **Stale MSBuild log removed** from startup.
+- **`scope.Outcome` on all success paths** — 7 tools were missing token estimation on success returns. (#102)
+- **UTF-8 BOM stripped** from community standard files. (#76)
+
+### Changed
+- **Result records** — ALL anonymous `new { }` types replaced with typed records across all 34 tools. `ErrorResult`, `ToolResults.cs` with 30+ record types. JSON field names preserved — no breaking change. (#74, #79, #81, #82)
+- **`Failed<T>` token estimation** — error paths now estimate tokens.
+- **SearchFiles/SemanticSearch** — switched from void `Outcome` to `Outcome<T>` for token estimation.
+- **README rewritten** — hero section, quick start, tool catalog, agent instructions, help wanted. (#74, #77, #78, #88)
+- **MSBuild discovery messages** — `"resolved via PATH (.NET SDK found on PATH)"` etc. for clarity.
+- **FileLogger** — `FileLogger` injected into `WorkspaceManager` → `WorkspaceInstance` for load timing and reload logging.
 
 ---
 

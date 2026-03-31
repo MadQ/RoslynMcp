@@ -263,7 +263,7 @@ static class ViewerHtml
 		.entry {
 		  padding: 1px 12px;
 		  display: grid;
-		  grid-template-columns: 12ch 5ch 1fr;
+		  grid-template-columns: 22ch 5ch 1fr;
 		  gap: 10px;
 		  white-space: pre-wrap;
 		  word-break: break-all;
@@ -504,7 +504,7 @@ static class ViewerHtml
 
 		  const ts  = document.createElement('span');
 		  ts.className   = 'ts';
-		  ts.textContent = e.Timestamp;
+		  ts.textContent = e.Pid ? e.Timestamp + ' [' + e.Pid + ']' : e.Timestamp;
 
 		  const lvl = document.createElement('span');
 		  lvl.className   = `lvl lvl-${level}`;
