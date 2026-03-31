@@ -61,8 +61,8 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Solution:
 
 					rootPath = Path.GetDirectoryName(path)!;
-					MSBuildBootstrap.EnsureReady();
-					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+					AutoDetectAndBootstrap(path, logger);
+	
 					logger.LogInfo("Load", $"Loading solution: {path}");
 					var slnSw = System.Diagnostics.Stopwatch.StartNew();
 					workspace = LoadSolution(path, logger);
@@ -80,8 +80,8 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Project:
 
 					rootPath = Path.GetDirectoryName(path)!;
-					MSBuildBootstrap.EnsureReady();
-					logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+					AutoDetectAndBootstrap(path, logger);
+	
 					logger.LogInfo("Load", $"Loading project: {path}");
 					var projSw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -267,6 +267,35 @@ internal sealed partial class WorkspaceManager
 		}
 
 		// ── Workspace loading ────────────────────────────────────────────────
+
+
+		/// <summary>
+		///     When workspace mode is Auto, peeks at the project to detect SDK vs Framework style,
+		///     then calls EnsureReady with the detected mode. Logs the result.
+		/// </summary>
+		static void AutoDetectAndBootstrap(string path, FileLogger logger)
+		{
+			var mode = MSBuildBootstrap.ResolvedMode;
+
+			if(mode == WorkspaceMode.Auto) {
+
+				// Find a .csproj to peek at — either the path itself, or first .csproj in the directory.
+				var csprojToCheck = path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+					? path
+					: MSBuildBootstrap.FindFirstCsproj(Path.GetDirectoryName(path) ?? path);
+
+				if(csprojToCheck is not null) {
+
+					var detected = MSBuildBootstrap.DetectProjectStyle(csprojToCheck);
+					logger.LogInfo("Workspace", $"auto-detected {detected} from {Path.GetFileName(csprojToCheck)}");
+					mode = detected;
+				}
+			}
+
+			MSBuildBootstrap.EnsureReady(mode);
+			logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
+		}
+
 
 		static Workspace LoadSolution(string solutionPath, FileLogger? log = null)
 		{
