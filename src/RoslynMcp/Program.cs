@@ -1,4 +1,4 @@
-﻿//
+//
 // Note: While I am generally not a fan of (IMHO) overly opinionated frameworks... admittedly, the Microsoft.Extensions.Hosting pattern
 //       is a good fit for this kind of long-running server application. It provides a clean way to set up dependency injection,
 //       logging, and graceful shutdown.
@@ -17,7 +17,8 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 
-var projectsToPreload = args;
+var workspaceMode    = WorkspaceModeParser.Resolve(args);
+var projectsToPreload = WorkspaceModeParser.StripWorkspaceArg(args);
 
 // Log unhandled exceptions before the host/DI is available.
 // This is the last line of defence — catches crashes that occur before tool handlers run.
@@ -67,6 +68,8 @@ var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 lifetime.ApplicationStarted.Register(() => {
 	logger.LogStart();
+	logger.LogInfo("Workspace", $"mode={workspaceMode}");
+
 });
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
 

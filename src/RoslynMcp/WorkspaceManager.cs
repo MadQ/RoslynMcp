@@ -81,7 +81,14 @@ internal sealed partial class WorkspaceManager : IDisposable
 		WorkspaceInstance instance;
 		string cacheKey;
 
-		if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
+		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc) {
+
+			instance = WorkspaceInstance.ForDirectory(
+				Directory.Exists(normalizedPath) ? normalizedPath : Path.GetDirectoryName(normalizedPath)!,
+				logger);
+			cacheKey = instance.RootPath;
+		}
+		else if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
 
 			var solutionPath = FindSolutionFileUpwards(Path.GetDirectoryName(normalizedPath)!);
 
