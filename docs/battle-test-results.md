@@ -11,6 +11,18 @@ We tested RoslynMcp against three repos with the same prompts, with and without 
 
 ---
 
+## TL;DR
+
+- **38-69% fewer tokens** on refactoring and editing workflows
+- **18x faster build verification** (milliseconds vs minutes)
+- **Semantic rename: 60% fewer tokens**, atomic, zero risk
+- **Cheap model parity**: Haiku + roslyn tools = same correctness as Sonnet
+- **Built-in tools won** on exploration richness and simple grep-friendly tasks
+- **We found real bugs in Orleans** -- both approaches found different ones
+- **Cold start is real**: 22s (adhoc) to 7min (MSBuild) for large solutions. Now configurable via `--workspace adhoc`.
+
+---
+
 ## The Numbers
 
 ### Spectre.Console (26 projects) — 7 tests
@@ -91,7 +103,7 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 
 **RoslynMcp's tools need improvement for:** exploration (richer responses needed), type hierarchy (missing per-type details), find_references (needs context snippets), and "awareness" of related members the agent didn't ask about.
 
-**The cold start problem is real.** 7 minutes for Orleans (235 compiled projects) is painful. The adhoc fallback works (~20s) but loses MSBuild semantics. We need the `workspaceMode` parameter (#101) and the large-solution heuristic.
+**The cold start problem is real.** 7 minutes for Orleans (235 compiled projects) is painful. The `--workspace adhoc` option (shipped in #104) reduced Orleans load time from 7 minutes to 22 seconds. Now configurable via `--workspace sdk|vs|adhoc|auto` or the `ROSLYNMCP_WORKSPACE` env var.
 
 **Token savings are real but not universal.** 38-69% savings on refactoring/editing workflows. Modest savings on exploration (25-44%). Grep wins on simple unique-name searches. The headline is NOT "X% fewer tokens on everything" — it's "dramatically fewer tokens where it matters most, and comparable or slightly more where it doesn't."
 
@@ -103,7 +115,7 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 1. `.slnx` parser missed `<Folder>`-nested projects (`.Elements` → `.Descendants`)
 2. `ResolveProjectPath` doesn't handle `.slnx` input
 3. Path resolution requires absolute paths — agents always try relative first
-4. 7-minute cold start on large solutions — needs `workspaceMode` option
+4. 7-minute cold start on large solutions — now configurable via `--workspace adhoc` (shipped in #104)
 5. `scope.Outcome` missing on several success paths
 6. `roslyn_insert_lines` never chosen by agents — description needs improvement
 7. Multi-line `roslyn_replace_in_file` patterns still broken (CRLF in MCP JSON)
@@ -120,7 +132,7 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 1. **Enrich `find_references`** — add context snippets per reference
 2. **Enrich `get_type_hierarchy`** — per-type interfaces, intermediate base classes
 3. **"Awareness hints"** — note related overrides (ToString, Dispose, etc.) when returning member bodies
-4. **`workspaceMode` parameter** — opt-in adhoc for large solutions (#101)
+4. **~~`workspaceMode` parameter~~** — shipped in #104 as `--workspace adhoc`
 5. **Smarter `projectPath` resolution** — handle .slnx, try CWD-relative, search by filename
 6. **`roslyn_replace_body`** — replace method body only, keep signature intact
 7. **Diagnostics grouping** — `groupBy: "code"` for summarized error/warning view

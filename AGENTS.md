@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.7.0-alpha (pre-1.0) |
-| **Tool Count** | 33 MCP tools (27 stable + 2 refactoring + 1 experimental + 3 infrastructure) |
+| **Tool Count** | 34 MCP tools (27 stable + 2 refactoring + 1 experimental + 4 infrastructure) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -90,6 +90,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetLineCountTool` | `roslyn_get_line_count` — line count for one or more files |
 | `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name; handles partial types |
 | `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
+| `InfoTool` | `roslyn_info` — server version, PID, uptime, MSBuild discovery method, log markers |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 
@@ -115,7 +116,9 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
 - **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms)
+- **VS workspace** — uses Visual Studio's MSBuild instance when available
 - See [docs/reference/WORKSPACE_MODES.md](docs/reference/WORKSPACE_MODES.md) for detailed comparison and FAQ
+- **CLI flag:** `--workspace sdk|vs|adhoc|auto` (default: `auto`) — or set `ROSLYNMCP_WORKSPACE` env var to override
 
 **Tool Selection Guidance:**
 

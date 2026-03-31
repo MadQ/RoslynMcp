@@ -99,6 +99,11 @@ built-in tools only if a roslyn tool fails.
   updating.
 - `roslyn_clean_solution` — Run `dotnet clean`. Use when build artifacts need
   clearing.
+
+### Diagnostics & Info
+
+- `roslyn_info` — Server version, PID, uptime, MSBuild discovery method, and
+  log markers. Use to verify the server is running and check its configuration.
 ```
 
 ---
@@ -123,6 +128,7 @@ are more accurate than grep/Read/Edit.
 - Rename: `roslyn_preview_rename` + `roslyn_apply_rename` > find-and-replace
 - Build: `roslyn_build_project` > NEVER `dotnet build` in terminal
 - Diagnostics: `roslyn_get_diagnostics` for fast error checks
+- Info: `roslyn_info` for server version, PID, uptime, MSBuild discovery
 ```
 
 ---
@@ -154,6 +160,7 @@ Specific alternatives for common tasks:
 - Insert lines:   roslyn_insert_lines (not Edit)
 - Build:          roslyn_build_project (NEVER dotnet build in terminal)
 - Diagnostics:    roslyn_get_diagnostics
+- Server info:    roslyn_info (version, PID, uptime, MSBuild discovery)
 
 Violation triggers permission prompts that block the user.
 ```
