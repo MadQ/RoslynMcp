@@ -19,7 +19,7 @@ internal abstract partial class RoslynMcpTool
 
 		bool    failed;
 		string? detail;
-		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
+		bool    isMSBuild = MSBuildBootstrap.ResolvedMode != WorkspaceMode.Adhoc;  // Default based on workspace mode; SetWorkspaceMode overrides.
 		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
 		int     estimatedTokens;
 
