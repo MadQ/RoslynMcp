@@ -48,6 +48,22 @@ For Claude Code, create `.mcp.json` in your project root:
 }
 ```
 
+**For .NET Framework or large solutions**, add `--workspace adhoc` for faster startup:
+
+```json
+{
+  "servers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "/absolute/path/to/RoslynMcp.exe",
+      "args": ["--workspace", "adhoc"]
+    }
+  }
+}
+```
+
+Options: `auto` (default), `sdk`, `vs` (Visual Studio MSBuild for .NET Framework), `adhoc` (skip MSBuild, fastest startup). Also configurable via `ROSLYNMCP_WORKSPACE` env var.
+
 **3. Start using it.** Every tool accepts a `projectPath` parameter pointing at your `.csproj`, `.sln`, or project directory. Your agent handles this automatically.
 
 ```
