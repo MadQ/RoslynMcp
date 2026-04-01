@@ -69,6 +69,7 @@ var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStarted.Register(() => {
 	logger.LogStart();
 	logger.LogInfo("Workspace", $"mode={workspaceMode}");
+	MSBuildBootstrap.EnsureReady(workspaceMode);
 
 });
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
