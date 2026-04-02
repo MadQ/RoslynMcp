@@ -20,7 +20,8 @@ internal sealed class SignatureChangeOrchestrator
 		IMethodSymbol method,
 		SignatureChangeRequest request,
 		Solution solution,
-		Compilation compilation)
+		Compilation compilation,
+		CancellationToken cancellationToken)
 	{
 		// Find an editor that can handle this method kind.
 		var editor = Editors.FirstOrDefault(e => e.CanHandle(method));
@@ -42,12 +43,12 @@ internal sealed class SignatureChangeOrchestrator
 		if(declRef is null)
 			return SignatureChangeResult.Failed(solution, "Method is defined in metadata, not source.");
 
-		var declaration = await declRef.GetSyntaxAsync() as MethodDeclarationSyntax;
+		var declaration = await declRef.GetSyntaxAsync(cancellationToken) as MethodDeclarationSyntax;
 
 		if(declaration is null)
 			return SignatureChangeResult.Failed(solution, "Symbol resolves to a non-method syntax node.");
 
 		// Delegate to the editor.
-		return await editor.ApplyAsync(method, declaration, request, solution, compilation);
+		return await editor.ApplyAsync(method, declaration, request, solution, compilation, cancellationToken);
 	}
 }

@@ -85,7 +85,7 @@ internal sealed partial class WorkspaceManager
 					logger.LogInfo("Load", $"Loading project: {path}");
 					var projSw = System.Diagnostics.Stopwatch.StartNew();
 
-					var (msbuildWs, pid) = LoadMSBuildWorkspace(path);
+					var (msbuildWs, pid) = LoadMSBuildWorkspace(path, logger);
 					workspace        = msbuildWs;
 					defaultProjectId = pid;
 					isMSBuild        = true;
@@ -329,9 +329,18 @@ internal sealed partial class WorkspaceManager
 		}
 
 
-		static Workspace LoadSolution(string solutionPath, FileLogger? log = null)
+		static Workspace LoadSolution(string solutionPath)
+			=> LoadSolution(solutionPath, null);
+
+		static Workspace LoadSolution(string solutionPath, FileLogger? log)
 		{
 			var msbuildWorkspace = MSBuildWorkspace.Create();
+			msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
+			{
+				var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
+				log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
+			}, options: null);
+
 
 			try {
 
@@ -375,10 +384,17 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 
-		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath)
+		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log)
 		{
 			try {
 				var msbuildWorkspace = MSBuildWorkspace.Create();
+
+				msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
+				{
+					var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
+					log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
+				}, options: null);
+
 				var project = msbuildWorkspace.OpenProjectAsync(csprojPath).GetAwaiter().GetResult();
 
 				return (msbuildWorkspace, project.Id);
@@ -677,7 +693,7 @@ internal sealed partial class WorkspaceManager
 						break;
 
 					case LoadMode.Project:
-						var (ws, pid) = LoadMSBuildWorkspace(loadPath);
+						var (ws, pid) = LoadMSBuildWorkspace(loadPath, logger);
 						workspace        = ws;
 						defaultProjectId = pid;
 						projectMap.Clear();

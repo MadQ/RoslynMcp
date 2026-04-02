@@ -18,6 +18,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 	public async Task<object> FindImplementations(
 		[Description("The symbol name, e.g. 'IDisposable', 'SymbolVisitor', 'Accept'.")] string symbolName,
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
 		[Description("Number of implementations to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50,
@@ -43,9 +44,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		// Handle type symbols (interface or abstract class).
 		if(symbol is INamedTypeSymbol typeSymbol) {
 
-			if(typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class && typeSymbol.IsAbstract) {
+			if((typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class) && typeSymbol.IsAbstract) {
 
-					var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution);
+					var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = impls
 					.OfType<INamedTypeSymbol>()
 					.Select(t => t.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
@@ -81,7 +82,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 
 			if(methodSymbol.IsAbstract || methodSymbol.IsVirtual || methodSymbol.IsOverride) {
 
-					var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution);
+					var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = overrides
 					.OfType<IMethodSymbol>()
 					.Select(m => FormatMethod(m))

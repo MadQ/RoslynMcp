@@ -39,19 +39,32 @@ internal sealed class AddParameterEditor : SignatureEditor
 		MethodDeclarationSyntax declaration,
 		SignatureChangeRequest request,
 		Solution solution,
-		Compilation compilation)
+		Compilation compilation,
+		CancellationToken cancellationToken)
 	{
 		// Build the new parameter list (existing + added).
 		var newParams = new List<ParameterSyntax>(declaration.ParameterList.Parameters);
 
 		foreach(var p in request.AddParameters) {
 
+			var typeSyntax = SyntaxFactory.ParseTypeName(p.Type + " ");
+
+			if(typeSyntax.ContainsDiagnostics)
+				return SignatureChangeResult.Failed(solution, $"Parameter type '{p.Type}' for '{p.Name}' is not valid C#.");
+
 			var param = SyntaxFactory.Parameter(SyntaxFactory.Identifier(p.Name))
-				.WithType(SyntaxFactory.ParseTypeName(p.Type + " "))
+				.WithType(typeSyntax)
 			;
 
-			if(p.DefaultValue is not null)
-				param = param.WithDefault(SyntaxFactory.EqualsValueClause(SyntaxFactory.ParseExpression(p.DefaultValue)));
+			if(p.DefaultValue is not null) {
+
+				var defaultExpr = SyntaxFactory.ParseExpression(p.DefaultValue);
+
+				if(defaultExpr.ContainsDiagnostics)
+					return SignatureChangeResult.Failed(solution, $"Default value '{p.DefaultValue}' for '{p.Name}' is not valid C#.");
+
+				param = param.WithDefault(SyntaxFactory.EqualsValueClause(defaultExpr));
+			}
 
 			newParams.Add(param);
 		}
@@ -66,8 +79,15 @@ internal sealed class AddParameterEditor : SignatureEditor
 		foreach(var existingParam in declaration.ParameterList.Parameters)
 			forwardingArgs.Add(SyntaxFactory.Argument(SyntaxFactory.IdentifierName(existingParam.Identifier)));
 
-		foreach(var p in request.AddParameters)
-			forwardingArgs.Add(SyntaxFactory.Argument(SyntaxFactory.ParseExpression(p.DefaultValue ?? "default")));
+		foreach(var p in request.AddParameters) {
+
+			var defaultExpr = SyntaxFactory.ParseExpression(p.DefaultValue ?? "default");
+
+			if(defaultExpr.ContainsDiagnostics)
+				return SignatureChangeResult.Failed(solution, $"Default value '{p.DefaultValue}' for '{p.Name}' is not valid C#.");
+
+			forwardingArgs.Add(SyntaxFactory.Argument(defaultExpr));
+		}
 
 		var forwardingCall = SyntaxFactory.InvocationExpression(
 			SyntaxFactory.IdentifierName(method.Name),
@@ -102,7 +122,7 @@ internal sealed class AddParameterEditor : SignatureEditor
 
 		// Apply to the syntax tree.
 		var tree    = declaration.SyntaxTree;
-		var root    = await tree.GetRootAsync();
+		var root    = await tree.GetRootAsync(cancellationToken);
 		var newRoot = root.ReplaceNode(declaration, new SyntaxNode[] { updatedMethod, forwardingMethod });
 
 		var docId = solution.GetDocumentIdsWithFilePath(tree.FilePath).FirstOrDefault();
@@ -111,7 +131,7 @@ internal sealed class AddParameterEditor : SignatureEditor
 			return SignatureChangeResult.Failed(solution, "Could not resolve document in solution.");
 
 		var newSolution = solution.WithDocumentSyntaxRoot(docId, newRoot);
-		var diff        = await SolutionDiff.BuildAsync(solution, newSolution);
+		var diff        = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
 
 		return new SignatureChangeResult {
 

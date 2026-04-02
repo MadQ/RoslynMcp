@@ -15,9 +15,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		"Searches workspace files for lines matching a regex pattern. " +
 		"Returns file paths, line numbers, and matching text with paging support. " +
 		"Use this to discover code locations before applying Roslyn tools.")]
-	public object SearchFiles(
+	public async Task<object> SearchFiles(
 		[Description("Regex pattern to search for (e.g., 'class.*Tool', 'TODO.*performance').")] string pattern,
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("File glob pattern (e.g., '*.cs', '*.csproj'). Default: '*.cs'.")] string? filePattern = null,
 		[Description("Case-sensitive matching. Default: false.")] bool caseSensitive = false,
 		[Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
@@ -64,7 +65,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				if(!MatchesGlob(fileName, filePattern))
 					continue;
 				
-				var text  = document.GetTextAsync().GetAwaiter().GetResult();
+				var text  = await document.GetTextAsync(cancellationToken);
 				var lines = text.Lines;
 				
 				for(int i = 0; i < lines.Count; i++) {

@@ -18,6 +18,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 	public async Task<object> FindReferences(
 		[Description("The symbol name to find, e.g. 'WindowKey', 'RestoreFromPlacements', 'trackedWindows'.")] string symbolName,
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("Optional type name to narrow the search, e.g. 'WindowTracker'.")] string? containingType = null,
 		[Description("Number of references to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
@@ -60,7 +61,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 
 		foreach(var sym in symbols) {
 
-			var refs = await RoslynSymbolFinder.FindReferencesAsync(sym, solution);
+			var refs = await RoslynSymbolFinder.FindReferencesAsync(sym, solution, cancellationToken: cancellationToken);
 
 			allLocations.AddRange(
 				refs.SelectMany(r => r.Locations)

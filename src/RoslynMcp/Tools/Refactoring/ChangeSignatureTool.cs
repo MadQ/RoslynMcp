@@ -30,6 +30,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 	public async Task<object> ChangeSignature(
 		[Description("Method name to change, e.g. 'ProcessOrder'.")] string methodName,
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("Optional containing type, e.g. 'OrderService'.")] string? containingType = null,
 		[Description("Parameters to add as JSON array: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]")] string? addParameters = null)
 	{
@@ -69,7 +70,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 
 		var result = await orchestrator.PrepareAsync(method, new SignatureChangeRequest {
 			AddParameters = paramsToAdd
-		}, solution, compilation);
+		}, solution, compilation, cancellationToken);
 
 		if(!result.Success)
 			return scope.Failed("change failed", new ErrorResult(result.Error!));

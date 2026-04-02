@@ -29,7 +29,8 @@ internal abstract class SignatureEditor
 		MethodDeclarationSyntax declaration,
 		SignatureChangeRequest request,
 		Solution solution,
-		Compilation compilation);
+		Compilation compilation,
+		CancellationToken cancellationToken);
 }
 
 /// <summary>

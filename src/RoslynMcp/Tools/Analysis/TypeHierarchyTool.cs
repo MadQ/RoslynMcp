@@ -19,6 +19,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	public async Task<object> GetTypeHierarchy(
 		[Description("The type name, e.g. 'WindowTracker' or 'RoslynMcp.WorkspaceManager'.")] string typeName,
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("Number of derived types/interfaces to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of derived types/interfaces to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
@@ -49,8 +50,8 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 
 		// FindDerivedClassesAsync only finds subclasses — for interfaces, use FindImplementationsAsync.
 		var derivedRefs = type.TypeKind == TypeKind.Interface
-			? (await RoslynSymbolFinder.FindImplementationsAsync(type, solution)).OfType<INamedTypeSymbol>()
-			: await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution)
+			? (await RoslynSymbolFinder.FindImplementationsAsync(type, solution, cancellationToken: cancellationToken)).OfType<INamedTypeSymbol>()
+			: await RoslynSymbolFinder.FindDerivedClassesAsync(type, solution, cancellationToken: cancellationToken)
 		;
 		string[] allDerived = [..
 			derivedRefs

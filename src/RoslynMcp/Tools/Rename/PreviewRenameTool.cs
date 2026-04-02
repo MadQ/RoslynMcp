@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
@@ -25,6 +25,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		[Description("Current symbol name, e.g. 'WindowKey'.")] string symbolName,
 		[Description("New name, e.g. 'WindowIdentity'.")] string newName,
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("Optional containing type to disambiguate, e.g. 'WindowTracker'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}");
@@ -46,8 +47,8 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		
 		var solution    = workspace.GetSolution(projectPath);
 		var symbolKey   = SymbolKey(symbol);
-		var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions(), newName);
-		var diff        = await SolutionDiff.BuildAsync(solution, newSolution);
+		var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions(), newName, cancellationToken);
+		var diff        = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
 		var token       = approvals.Register(solution, newSolution, diff, symbolKey);
 		var preConfirmed = approvals.IsSessionApproved(symbolKey);
 		

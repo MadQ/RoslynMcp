@@ -21,12 +21,14 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			"Use this when you need to search within specific code contexts."
 		)
 	]
-	public object SemanticSearch(
+	public async Task<object> SemanticSearch(
 		[Description("Regex pattern to search for (e.g., 'TODO.*performance', 'UserName').")]
 		string pattern,
 
 		[Description(ProjectPathDescription)]
 		string projectPath,
+
+		CancellationToken cancellationToken,
 
 		[Description("Syntax context to search within: 'comments', 'strings', 'identifiers', 'code', 'xmldocs', 'all'. Default: 'all'.")]
 		string? context = null,
@@ -112,7 +114,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 					continue;
 				
 				// Get syntax tree
-				var tree = document.GetSyntaxTreeAsync().GetAwaiter().GetResult();
+				var tree = await document.GetSyntaxTreeAsync(cancellationToken);
 				
 				if(tree is null)
 					continue;
@@ -123,18 +125,18 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 					continue;
 				}
 				
-				var root = tree.GetRoot();
-				var text = tree.GetText();
+				var root = tree.GetRoot(cancellationToken);
+				var text = tree.GetText(cancellationToken);
 				
 				// Search based on context
 				var matches = context switch {
-					"comments"	  => SearchInComments(root, text, regex),
-					"strings"	  => SearchInStrings(root, text, regex),
+					"comments"    => SearchInComments(root, text, regex),
+					"strings"     => SearchInStrings(root, text, regex),
 					"identifiers" => SearchInIdentifiers(root, text, regex),
-					"code"		  => SearchInCode(root, text, regex),
-					"xmldocs"	  => SearchInXmlDocs(root, text, regex),
-					"all"		  => SearchInAll(root, text, regex),
-					_			  => Array.Empty<SemanticMatchResult>()
+					"code"        => SearchInCode(root, text, regex),
+					"xmldocs"     => SearchInXmlDocs(root, text, regex),
+					"all"         => SearchInAll(root, text, regex),
+					_             => Array.Empty<SemanticMatchResult>()
 				};
 				
 				// Filter by containing syntax kind if specified.

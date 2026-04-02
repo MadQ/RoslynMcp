@@ -11,7 +11,7 @@ internal static class SolutionDiff
 	///     Returns a unified diff string comparing the changed documents between
 	///     <paramref name="before"/> and <paramref name="after"/>.
 	/// </summary>
-	public static async Task<string> BuildAsync(Solution before, Solution after)
+	public static async Task<string> BuildAsync(Solution before, Solution after, CancellationToken cancellationToken)
 	{
 		var sb = new System.Text.StringBuilder();
 		
@@ -21,8 +21,8 @@ internal static class SolutionDiff
 				var oldDoc = before.GetDocument(docId)!;
 				var newDoc = after.GetDocument(docId)!;
 				
-				var oldText = (await oldDoc.GetTextAsync()).ToString();
-				var newText = (await newDoc.GetTextAsync()).ToString();
+				var oldText = (await oldDoc.GetTextAsync(cancellationToken)).ToString();
+				var newText = (await newDoc.GetTextAsync(cancellationToken)).ToString();
 				
 				if(oldText == newText)
 					continue;
