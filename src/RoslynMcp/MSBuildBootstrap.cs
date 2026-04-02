@@ -135,9 +135,7 @@ internal static class MSBuildBootstrap
 			}
 
 			// 2. dotnet not on PATH — discover via env vars, registry, well-known paths.
-			var (dotnetDir, source) = TryDiscoverDotnet();
-
-			if(dotnetDir is not null) {
+			if(TryDiscoverDotnet(out var dotnetDir, out var source)) {
 
 				PrependToPath(dotnetDir);
 
@@ -187,43 +185,68 @@ internal static class MSBuildBootstrap
 	///     well-known platform-specific install locations.
 	///     Returns (directory, source description) or (null, null).
 	/// </summary>
-	static (string? dir, string? source) TryDiscoverDotnet()
+	static bool TryDiscoverDotnet(out string dotnetDir, out string source)
 	{
 		// DOTNET_ROOT is the official cross-platform override.
 		var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
 
-		if(dotnetRoot is not null && Directory.Exists(dotnetRoot))
-			return (dotnetRoot, "resolved via DOTNET_ROOT env var");
+		if(dotnetRoot is not null && Directory.Exists(dotnetRoot)) {
+
+			dotnetDir = dotnetRoot;
+			source    = "resolved via DOTNET_ROOT env var";
+			return true;
+		}
 
 		// DOTNET_ROOT(x86) — official env var for x86 SDK on Windows (yes, parens in the name).
 		if(OperatingSystem.IsWindows()) {
 
 			var dotnetRootX86 = Environment.GetEnvironmentVariable("DOTNET_ROOT(x86)");
 
-			if(dotnetRootX86 is not null && Directory.Exists(dotnetRootX86))
-				return (dotnetRootX86, "resolved via DOTNET_ROOT(x86) env var");
+			if(dotnetRootX86 is not null && Directory.Exists(dotnetRootX86)) {
+
+				dotnetDir = dotnetRootX86;
+				source    = "resolved via DOTNET_ROOT(x86) env var";
+				return true;
+			}
 		}
 
 		// DOTNET_HOST_PATH — set by some .NET hosting scenarios.
 		var hostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
 
-		if(hostPath is not null && File.Exists(hostPath))
-			return (Path.GetDirectoryName(hostPath), "resolved via DOTNET_HOST_PATH env var");
+		if(hostPath is not null && File.Exists(hostPath)) {
+
+			var hostDir = Path.GetDirectoryName(hostPath);
+
+			if(hostDir is not null) {
+
+				dotnetDir = hostDir;
+				source    = "resolved via DOTNET_HOST_PATH env var";
+				return true;
+			}
+		}
 
 		// Windows: check registry for SDK install location.
 		if(OperatingSystem.IsWindows()) {
 
 			var regPath = TryDotnetFromRegistry();
 
-			if(regPath is not null)
-				return (regPath, "resolved via Windows registry");
+			if(regPath is not null) {
+
+				dotnetDir = regPath;
+				source    = "resolved via Windows registry";
+				return true;
+			}
 		}
 
 		// Well-known install paths per platform.
 		var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
 		string[] candidates = OperatingSystem.IsWindows()
-			? [@"C:\Program Files\dotnet", Path.Combine(home, ".dotnet")]
+			? [
+				Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet"),
+				Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "dotnet"),
+				Path.Combine(home, ".dotnet")
+			]
 			: [
 				"/usr/share/dotnet",
 				"/usr/lib/dotnet",
@@ -241,11 +264,16 @@ internal static class MSBuildBootstrap
 			if(!Directory.Exists(dir))
 				continue;
 
-			if(File.Exists(Path.Combine(dir, exeName)))
-				return (dir, $"resolved via well-known path ({dir})");
+			if(File.Exists(Path.Combine(dir, exeName))) {
+
+				dotnetDir = dir;
+				source    = $"resolved via well-known path ({dir})";
+				return true;
+			}
 		}
 
-		return (null, null);
+		dotnetDir = source = "";
+		return false;
 	}
 
 	static bool TryRegister()
