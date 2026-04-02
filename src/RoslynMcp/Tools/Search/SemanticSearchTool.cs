@@ -161,11 +161,8 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 
 				var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
 
-				foreach(var match in matches) {
-
-					match.File = relativePath;
-					allMatches.Add(match);
-				}
+				foreach(var match in matches)
+					allMatches.Add(match with { File = relativePath });
 			}
 		
 		var allResults = allMatches.ToArray();
@@ -298,8 +295,12 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	{
 		// Search line-by-line (supports multi-token patterns like "new List"),
 		// but skip lines whose primary content is a comment or string literal.
-		var lines    = text.Lines;
-		var reported = new HashSet<int>();
+		var lines       = text.Lines;
+		var reported    = new HashSet<int>();
+
+		// Build a per-line context index once — avoids repeated DescendantTokens traversals
+		// for each matching line (was O(matching_lines x tokens_per_line)).
+		var lineContexts = BuildLineContextIndex(root, text);
 
 		for(int i = 0; i < lines.Count; i++) {
 
@@ -308,10 +309,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			if(!regex.IsMatch(lineText))
 				continue;
 
-			// Determine whether this line is primarily a comment or string.
-			var context = DetermineContext(root, lines[i].Span);
-
-			if(context is "comment" or "xmldoc" or "string")
+			if(lineContexts[i] is "comment" or "xmldoc" or "string")
 				continue;
 
 			if(reported.Add(i)) {
@@ -372,6 +370,67 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		}
 	}
 	
+	// Returns a per-line (0-based) context label for the entire file in a single pass.
+	// Each label is: "comment", "xmldoc", "string", "identifier", or "code".
+	// Priority order: comment > xmldoc > string > identifier > code.
+	static string[] BuildLineContextIndex(SyntaxNode root, SourceText text)
+	{
+		var count    = text.Lines.Count;
+		var contexts = new string[count];
+		Array.Fill(contexts, "code");
+
+		foreach(var token in root.DescendantTokens()) {
+
+			foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia)) {
+
+				var kind = trivia.Kind();
+
+				if(kind is SyntaxKind.SingleLineCommentTrivia or SyntaxKind.MultiLineCommentTrivia) {
+					MarkLines(contexts, text, trivia.Span, "comment");
+					continue;
+				}
+
+				if(kind is SyntaxKind.SingleLineDocumentationCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia) {
+					MarkLines(contexts, text, trivia.Span, "xmldoc");
+				}
+			}
+
+			var tk = token.Kind();
+
+			if(tk is SyntaxKind.StringLiteralToken or SyntaxKind.InterpolatedStringTextToken) {
+				var line = text.Lines.GetLinePosition(token.Span.Start).Line;
+				if(contexts[line] is "code" or "identifier")
+					contexts[line] = "string";
+
+				continue;
+			}
+
+			if(tk == SyntaxKind.IdentifierToken) {
+				var line = text.Lines.GetLinePosition(token.Span.Start).Line;
+				if(contexts[line] == "code")
+					contexts[line] = "identifier";
+			}
+		}
+
+		return contexts;
+	}
+
+	static void MarkLines(string[] contexts, SourceText text, TextSpan span, string context)
+	{
+		var start = text.Lines.GetLinePosition(span.Start).Line;
+		var end   = text.Lines.GetLinePosition(Math.Max(span.Start, span.End - 1)).Line;
+
+		for(var li = start; li <= end && li < contexts.Length; li++) {
+
+			// Never overwrite a higher-priority context.
+			if(context == "comment")
+				contexts[li] = "comment";
+			else if(context == "xmldoc" && contexts[li] != "comment")
+				contexts[li] = "xmldoc";
+		}
+	}
+
+
 	string DetermineContext(SyntaxNode root, TextSpan lineSpan)
 	{
 		// Find tokens/trivia that intersect with this line
@@ -408,19 +467,29 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	
 	static bool MatchesGlob(string fileName, string pattern)
 	{
-		// Simple glob matching (same as SearchFilesTool)
-		var regexPattern = "^" + Regex.Escape(pattern)
-			.Replace("\\*", ".*")
-			.Replace("\\?", ".") + "$";
-		
-		return Regex.IsMatch(fileName, regexPattern, RegexOptions.IgnoreCase);
+		if(pattern is "*" or "*.*")
+			return true;
+
+		// Fast-path for the common *.ext form.
+		if(pattern.StartsWith("*.") && !pattern.AsSpan(2).Contains('*') && !pattern.AsSpan(2).Contains('?'))
+			return fileName.EndsWith(pattern.AsSpan(1), StringComparison.OrdinalIgnoreCase);
+
+		// General glob: convert wildcards to regex and match.
+		var regexPat = "^" + string.Concat(pattern.Select(c => c switch {
+			'*' => ".*",
+			'?' => ".",
+			'.' => "\\.",
+			_   => Regex.Escape(c.ToString())
+		})) + "$";
+
+		return Regex.IsMatch(fileName, regexPat, RegexOptions.IgnoreCase);
 	}
 	
-	sealed class SemanticMatchResult
+	sealed record SemanticMatchResult
 	{
-		public string File	  { get; set; } = "";
-		public int	  Line	  { get; set; }
-		public string Text	  { get; set; } = "";
-		public string Context { get; set; } = "";
+		public string File    { get; init; } = "";
+		public int    Line    { get; init; }
+		public string Text    { get; init; } = "";
+		public string Context { get; init; } = "";
 	}
 }

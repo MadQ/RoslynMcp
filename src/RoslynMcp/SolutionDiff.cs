@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using System.Text;
 
 namespace RoslynMcp;
 
@@ -51,10 +52,11 @@ internal static class SolutionDiff
 				if(newDoc.FilePath is null)
 					continue;
 				
-				var text = (await newDoc.GetTextAsync()).ToString();
+				var sourceText = await newDoc.GetTextAsync();
 
 				try {
-					await File.WriteAllTextAsync(newDoc.FilePath, text);
+					var encoding = sourceText.Encoding ?? Encoding.UTF8;
+				await File.WriteAllTextAsync(newDoc.FilePath, sourceText.ToString(), encoding);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					throw new InvalidOperationException($"Failed to write '{newDoc.FilePath}': {ex.Message}", ex);

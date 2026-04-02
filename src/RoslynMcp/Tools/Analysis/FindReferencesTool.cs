@@ -50,7 +50,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		else {
 
 			var finder = new AllSymbolsFinder(symbolName);
-			finder.Visit(compilation.GlobalNamespace);
+			finder.Visit(compilation.Assembly.GlobalNamespace);
 			symbols = [.. finder.Results];
 		}
 

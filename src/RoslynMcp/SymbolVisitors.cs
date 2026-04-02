@@ -42,7 +42,13 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 	}
 }
 
+
+
 /// <summary>Walks all types to collect ALL symbols (types and members) matching a simple name.</summary>
+/// <remarks>
+///     Intentionally does not extend <see cref="SymbolVisitor{T}"/>: that API returns a single T per visit,
+///     making multi-result accumulation awkward. A shared accumulator list is simpler and equally correct.
+/// </remarks>
 internal sealed class AllSymbolsFinder(string name)
 {
 	readonly List<ISymbol> results = [];

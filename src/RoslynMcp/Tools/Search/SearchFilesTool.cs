@@ -106,17 +106,22 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	
 	private static bool MatchesGlob(string fileName, string pattern)
 	{
-		if(pattern == "*" || pattern == "*.*")
+		if(pattern is "*" or "*.*")
 			return true;
-		
-		if(pattern.StartsWith("*.")) {
-		
-			var extension = pattern.Substring(1);
-			
-			return fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase);
-		}
-		
-		return fileName.Equals(pattern, StringComparison.OrdinalIgnoreCase);
+
+		// Fast-path for the common *.ext form.
+		if(pattern.StartsWith("*.") && !pattern.AsSpan(2).Contains('*') && !pattern.AsSpan(2).Contains('?'))
+			return fileName.EndsWith(pattern.AsSpan(1), StringComparison.OrdinalIgnoreCase);
+
+		// General glob: convert wildcards to regex and match.
+		var regexPat = "^" + string.Concat(pattern.Select(c => c switch {
+			'*' => ".*",
+			'?' => ".",
+			'.' => "\\.",
+			_   => Regex.Escape(c.ToString())
+		})) + "$";
+
+		return Regex.IsMatch(fileName, regexPat, RegexOptions.IgnoreCase);
 	}
 	
 	private sealed class MatchResult

@@ -21,7 +21,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		"Use dryRun=true to preview what would change without writing the file. " +
 		"This is a text-level tool — it works on any file type but has no semantic understanding of code structure."
 	)]
-	public object ReplaceInFile(
+	public async Task<object> ReplaceInFile(
 		[Description("Relative path to the file from the workspace root.")                                                ] string  filePath,
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("The pattern to find. Literal string by default; regex when useRegex=true.")                         ] string  pattern,
@@ -101,7 +101,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
 		try {
-			File.WriteAllText(fullPath, newContent);
+			await File.WriteAllTextAsync(fullPath, newContent);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 

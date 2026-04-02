@@ -43,7 +43,7 @@ internal sealed class AddParameterEditor : SignatureEditor
 		CancellationToken cancellationToken)
 	{
 		// Build the new parameter list (existing + added).
-		var newParams = new List<ParameterSyntax>(declaration.ParameterList.Parameters);
+		List<ParameterSyntax> newParams = [.. declaration.ParameterList.Parameters];
 
 		foreach(var p in request.AddParameters) {
 

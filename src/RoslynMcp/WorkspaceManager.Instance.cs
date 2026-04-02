@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
+using System.Text;
 
 namespace RoslynMcp;
 
@@ -38,7 +39,11 @@ internal sealed partial class WorkspaceManager
 		private readonly FileLogger logger;
 
 		// Debounce: accumulate FSW events for 300ms before processing.
+#if NET9_0_OR_GREATER
+		private readonly Lock             debounceLock   = new();
+#else
 		private readonly object           debounceLock   = new();
+#endif
 		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
 		private readonly HashSet<string>  pendingDeletes = new(StringComparer.OrdinalIgnoreCase);
 		private          Timer?           debounceTimer;
@@ -162,7 +167,8 @@ internal sealed partial class WorkspaceManager
 		{
 			ReloadIfNeeded();
 			var pid = ResolveProjectId(csprojPath);
-			return workspace.CurrentSolution.GetProject(pid)!;
+			return workspace.CurrentSolution.GetProject(pid)
+				?? throw new InvalidOperationException($"Project '{pid}' not found in current solution.");
 		}
 
 		ProjectId ResolveProjectId(string? csprojPath)
@@ -230,7 +236,8 @@ internal sealed partial class WorkspaceManager
 
 					try {
 
-						var newText     = SourceText.From(File.ReadAllText(fullPath));
+						using var stream = File.OpenRead(fullPath);
+						var newText = SourceText.From(stream, Encoding.UTF8);
 						var newSolution = workspace.CurrentSolution;
 
 						foreach(var id in docIds)
@@ -476,7 +483,8 @@ internal sealed partial class WorkspaceManager
 			if(!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
 				return;
 
-			var text = SourceText.From(File.ReadAllText(path));
+			using var stream = File.OpenRead(path);
+			var text = SourceText.From(stream, Encoding.UTF8);
 			var name = Path.GetRelativePath(rootPath, path);
 
 			var project  = adhocWorkspace.CurrentSolution.GetProject(pid)!;
@@ -628,7 +636,8 @@ internal sealed partial class WorkspaceManager
 						continue;
 					}
 
-					var text = SourceText.From(File.ReadAllText(path));
+					using var stream = File.OpenRead(path);
+			var text = SourceText.From(stream, Encoding.UTF8);
 
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);
@@ -720,19 +729,23 @@ internal sealed partial class WorkspaceManager
 
 		Compilation RebuildCompilation(ProjectId pid)
 		{
+			// Compile outside any lock — GetCompilationAsync can take seconds and
+			// holding the write lock for the full duration blocks all concurrent readers.
+			var project = workspace.CurrentSolution.GetProject(pid)!;
+
+			var compilation = project.GetCompilationAsync().GetAwaiter().GetResult()
+				?? CSharpCompilation.Create("empty")
+			;
+
+			// Briefly take the write lock only to cache the result.
+			// A concurrent thread may have compiled and stored first — prefer theirs
+			// to avoid caching a redundant result.
 			rwLock.EnterWriteLock();
 
 			try {
 
-				// Double-checked: another thread may have rebuilt while we waited.
-				if(compilationCache.TryGetValue(pid, out var cached))
-					return cached;
-
-				var project = workspace.CurrentSolution.GetProject(pid)!;
-
-				var compilation = project.GetCompilationAsync().GetAwaiter().GetResult()
-					?? CSharpCompilation.Create("empty")
-				;
+				if(compilationCache.TryGetValue(pid, out var concurrent))
+					return concurrent;
 
 				compilationCache[pid] = compilation;
 				return compilation;

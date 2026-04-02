@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using System.Text;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -31,6 +32,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Relative path to the C# file from workspace root.")] string filePath,
 		[Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'FieldDeclaration', 'IdentifierName').")] string nodeKind,
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Property/Field/Class etc.) matches the DECLARED NAME. For other nodes matches full text.")] string? textPattern = null,
 		[Description("Replacement text for the matched node. Must produce valid C# syntax.")] string replacement = "",
 		[Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false,
@@ -52,17 +54,32 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Unknown node kind: {nodeKind}.", Hint: "Examples: MethodDeclaration, FieldDeclaration, IdentifierName."));
 		
 		SourceText sourceText;
-		
-		try {
-			sourceText = SourceText.From(File.ReadAllText(fullPath));
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+		SyntaxTree syntaxTree;
 
-			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
+		// Prefer the in-memory workspace document to avoid races with concurrent edits.
+		var solution = workspace.GetSolution(projectPath);
+		var docIds   = solution.GetDocumentIdsWithFilePath(fullPath);
+
+		if(docIds.Length > 0) {
+			var doc = solution.GetDocument(docIds[0])!;
+			sourceText = await doc.GetTextAsync(cancellationToken);
+			syntaxTree = (await doc.GetSyntaxTreeAsync(cancellationToken))!;
+		}
+		else {
+
+			try {
+				using var stream = File.OpenRead(fullPath);
+				sourceText = SourceText.From(stream, Encoding.UTF8);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+
+				return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
+			}
+
+			syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
 		}
 
-		var syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
-		var root = await syntaxTree.GetRootAsync();
+		var root = await syntaxTree.GetRootAsync(cancellationToken);
 		
 		var matchedNodes = root.DescendantNodes()
 			.Where(n => n.IsKind(kind))
@@ -184,7 +201,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		}
 		
 		try {
-			File.WriteAllText(fullPath, newRoot.ToFullString());
+			await File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 
