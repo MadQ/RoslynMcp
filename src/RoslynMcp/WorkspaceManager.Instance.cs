@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -90,9 +90,9 @@ internal sealed partial class WorkspaceManager
 					logger.LogInfo("Load", $"Loading project: {path}");
 					var projSw = System.Diagnostics.Stopwatch.StartNew();
 
-					var (msbuildWs, pid) = LoadMSBuildWorkspace(path, logger);
+					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger);
 					workspace        = msbuildWs;
-					defaultProjectId = pid;
+					defaultProjectId = projectId;
 					isMSBuild        = true;
 
 					// OpenProjectAsync also loads referenced projects — map them all.
@@ -147,28 +147,29 @@ internal sealed partial class WorkspaceManager
 		public Compilation GetCompilation(string? csprojPath = null)
 		{
 			ReloadIfNeeded();
-			var pid = ResolveProjectId(csprojPath);
+			var projectId = ResolveProjectId(csprojPath);
 
 			rwLock.EnterReadLock();
 
 			try {
 
-				if(compilationCache.TryGetValue(pid, out var cached))
+				if(compilationCache.TryGetValue(projectId, out var cached))
 					return cached;
 			}
 			finally {
 				rwLock.ExitReadLock();
 			}
 
-			return RebuildCompilation(pid);
+			return RebuildCompilation(projectId);
 		}
 
 		public Project GetProject(string? csprojPath = null)
 		{
 			ReloadIfNeeded();
-			var pid = ResolveProjectId(csprojPath);
-			return workspace.CurrentSolution.GetProject(pid)
-				?? throw new InvalidOperationException($"Project '{pid}' not found in current solution.");
+			
+			var projectId = ResolveProjectId(csprojPath);
+			return workspace.CurrentSolution.GetProject(projectId)
+				?? throw new InvalidOperationException($"Project '{projectId}' not found in current solution.");
 		}
 
 		ProjectId ResolveProjectId(string? csprojPath)
@@ -176,8 +177,8 @@ internal sealed partial class WorkspaceManager
 			if(csprojPath is null)
 				return defaultProjectId;
 
-			if(projectMap.TryGetValue(csprojPath, out var pid))
-				return pid;
+			if(projectMap.TryGetValue(csprojPath, out var projectId))
+				return projectId;
 
 			// Match by filename only (agent may pass a relative path that doesn't match fully).
 			var fileName = Path.GetFileName(csprojPath);
@@ -203,9 +204,9 @@ internal sealed partial class WorkspaceManager
 		/// <summary>Searches all projects for a document matching a file suffix. Returns the .csproj of the first match.</summary>
 		public string? FindCsprojForFileSuffix(string suffix, string fileName)
 		{
-			foreach(var (csproj, pid) in projectMap) {
+			foreach(var (csproj, projectId) in projectMap) {
 
-				var project = workspace.CurrentSolution.GetProject(pid);
+				var project = workspace.CurrentSolution.GetProject(projectId);
 
 				if(project is null)
 					continue;
@@ -432,12 +433,12 @@ internal sealed partial class WorkspaceManager
 
 		// ── AdhocWorkspace file management ───────────────────────────────────
 
-		void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId pid)
+		void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId projectId)
 		{
 			var files = EnumerateFilesWithErrorHandling(rootPath, "*.cs");
 
 			foreach(var path in files)
-				AddOrUpdateDocument(adhocWorkspace, pid, path);
+				AddOrUpdateDocument(adhocWorkspace, projectId, path);
 		}
 
 		IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
@@ -478,7 +479,7 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 
-		void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
+		void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
 		{
 			if(!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
 				return;
@@ -487,7 +488,7 @@ internal sealed partial class WorkspaceManager
 			var text = SourceText.From(stream, Encoding.UTF8);
 			var name = Path.GetRelativePath(rootPath, path);
 
-			var project  = adhocWorkspace.CurrentSolution.GetProject(pid)!;
+			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
 			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
 
 			Solution newSolution;
@@ -496,17 +497,17 @@ internal sealed partial class WorkspaceManager
 				newSolution = adhocWorkspace.CurrentSolution.WithDocumentText(existing.Id, text);
 			else
 				newSolution = adhocWorkspace.CurrentSolution.AddDocument(
-					DocumentId.CreateNewId(pid), name, text, filePath: path
+					DocumentId.CreateNewId(projectId), name, text, filePath: path
 				);
 
 			adhocWorkspace.TryApplyChanges(newSolution);
 			InvalidateCompilation();
 		}
 
-		void RemoveDocument(AdhocWorkspace adhocWorkspace, ProjectId pid, string path)
+		void RemoveDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
 		{
 			var name     = Path.GetRelativePath(rootPath, path);
-			var project  = adhocWorkspace.CurrentSolution.GetProject(pid)!;
+			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
 			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
 
 			if(existing is null)
@@ -702,9 +703,9 @@ internal sealed partial class WorkspaceManager
 						break;
 
 					case LoadMode.Project:
-						var (ws, pid) = LoadMSBuildWorkspace(loadPath, logger);
+						var (ws, projectId) = LoadMSBuildWorkspace(loadPath, logger);
 						workspace        = ws;
-						defaultProjectId = pid;
+						defaultProjectId = projectId;
 						projectMap.Clear();
 						BuildProjectMap();
 						break;
@@ -727,11 +728,11 @@ internal sealed partial class WorkspaceManager
 
 	// ── Compilation cache ────────────────────────────────────────────────
 
-		Compilation RebuildCompilation(ProjectId pid)
+		Compilation RebuildCompilation(ProjectId projectId)
 		{
 			// Compile outside any lock — GetCompilationAsync can take seconds and
 			// holding the write lock for the full duration blocks all concurrent readers.
-			var project = workspace.CurrentSolution.GetProject(pid)!;
+			var project = workspace.CurrentSolution.GetProject(projectId)!;
 
 			var compilation = project.GetCompilationAsync().GetAwaiter().GetResult()
 				?? CSharpCompilation.Create("empty")
@@ -744,10 +745,10 @@ internal sealed partial class WorkspaceManager
 
 			try {
 
-				if(compilationCache.TryGetValue(pid, out var concurrent))
+				if(compilationCache.TryGetValue(projectId, out var concurrent))
 					return concurrent;
 
-				compilationCache[pid] = compilation;
+				compilationCache[projectId] = compilation;
 				return compilation;
 			}
 			finally {
