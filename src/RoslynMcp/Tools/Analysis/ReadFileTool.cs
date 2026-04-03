@@ -10,7 +10,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 {
     public ReadFileTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
-    [McpServerTool(Name = "roslyn_read_file", ReadOnly = true)]
+    [McpServerTool(Name = "roslyn_read_file", ReadOnly = true, Title = "Read File", OpenWorld = false, Idempotent = true)]
     [Description(
         "Returns the contents of a file with 1-based line numbers. " +
         "For .cs files, reads from the in-memory Roslyn workspace (no disk I/O, always current). " +

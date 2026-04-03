@@ -11,7 +11,7 @@ internal sealed class RespawnTool
 	
 	public RespawnTool(FileLogger logger) { this.logger = logger; }
 	
-	[McpServerTool(Name = "roslyn_respawn", Destructive = true)]
+	[McpServerTool(Name = "roslyn_respawn", Title = "Respawn", OpenWorld = false, Destructive = true)]
 	[Description(
 		"DEBUG ONLY: Terminates the MCP server process, forcing the client to respawn it. " +
 		"Use this to reload code changes after rebuilding without restarting your IDE. " +

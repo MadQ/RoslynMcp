@@ -9,7 +9,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 {
 	public ListTypesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_list_types", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_list_types", ReadOnly = true, Title = "List Types", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Lists all types (classes, interfaces, enums, structs, records) in the project. " +
 		"Optionally filter by namespace or type kind. Use this to discover what's available in the codebase.")]

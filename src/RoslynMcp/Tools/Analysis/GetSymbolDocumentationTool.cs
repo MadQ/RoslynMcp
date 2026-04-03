@@ -11,7 +11,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 {
 	public GetSymbolDocumentationTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_get_symbol_documentation", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_symbol_documentation", ReadOnly = true, Title = "Get Symbol Documentation", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns XML documentation comments for a symbol (type, method, property, field, event). " +
 		"Includes summary, parameter descriptions, return value description, and remarks. " +

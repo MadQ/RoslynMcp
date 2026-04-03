@@ -10,7 +10,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 {
 	public FileOutlineTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true, Title = "Get File Outline", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns a structured outline of a file: types and their members (signatures only, no bodies). " +
 		"Saves tokens by avoiding full file reads. Results are paged; use skip/take for large files.")]

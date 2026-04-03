@@ -25,7 +25,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		RegexOptions.Compiled | RegexOptions.IgnoreCase
 	);
 	
-	[McpServerTool(Name = "roslyn_build_project", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_build_project", Title = "Build Project", OpenWorld = false, Destructive = false)]
 	[Description(
 		"Fully validate the project — use this before committing or when you need confidence it completely builds. " +
 		"Runs in two tiers: (1) Roslyn in-process C# type/symbol check — fast, no process spawn; " +

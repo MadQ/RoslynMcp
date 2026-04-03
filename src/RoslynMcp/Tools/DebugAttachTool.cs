@@ -12,7 +12,7 @@ internal sealed class DebugAttachTool
 
 	public DebugAttachTool(FileLogger logger) { this.logger = logger; }
 
-	[McpServerTool(Name = "roslyn_debug_attach", Destructive = false)]
+	[McpServerTool(Name = "roslyn_debug_attach", Title = "Debug Attach", OpenWorld = false, Destructive = false)]
 	[Description(
 		"DEBUG ONLY — do NOT call unless the user explicitly asks to attach a debugger. " +
 		"Launches the JIT debugger dialog so Visual Studio can attach to the running server process. " +

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -13,7 +13,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		this.approvals = approvals;
 	}
 	
-	[McpServerTool(Name = "roslyn_apply_rename", Destructive = true)]
+	[McpServerTool(Name = "roslyn_apply_rename", Destructive = true, Title = "Apply Rename", OpenWorld = false)]
 	[Description(
 		"Applies or rejects a rename previewed by preview_rename. " +
 		"approval: 'y' = apply once, 'session' = apply and auto-approve this symbol for the session, 'n' = reject."

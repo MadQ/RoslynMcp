@@ -9,11 +9,11 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 {
 	public TypeMembersTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_get_type_members", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_type_members", ReadOnly = true, Title = "Get Type Members", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns detailed information about all members of a type (class, struct, enum, interface). " +
 		"Includes full signatures with parameter types, return types, modifiers, and XML doc summaries. " +
-		"For enums, returns the member names. Use this to understand a type's API surface. Results are paged; use skip/take for large types.")]
+		"For enums, returns the member names. Use this to understand a type's API surface. Results are paged; use skip/take for large types."),]
 	public object GetTypeMembers(
 		[Description("The simple or fully-qualified type name, e.g. 'ShowWindowCommand' or 'ScreenMon.RuleMode'.")]
 		string typeName,

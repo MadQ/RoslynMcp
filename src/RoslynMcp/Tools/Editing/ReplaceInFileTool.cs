@@ -9,7 +9,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 {
 	public ReplaceInFileTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_replace_in_file", Destructive = true)]
+	[McpServerTool(Name = "roslyn_replace_in_file", Destructive = true, Title = "Replace In File", OpenWorld = false)]
 	[Description(
 		"Replaces occurrences of a pattern in a file. Supports literal string or regex replacement. " +
 		"Returns the number of replacements made and the 1-based line numbers that were changed. " +

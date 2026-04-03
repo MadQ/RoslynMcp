@@ -10,7 +10,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 {
 	public SymbolInfoTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
-	[McpServerTool(Name = "roslyn_get_symbol_info", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_symbol_info", ReadOnly = true, Title = "Get Symbol Info", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns resolved symbol information at a specific file location — kind, name, containing type, return type. " +
 		"Use to verify what a name resolves to without reading the full file.")]

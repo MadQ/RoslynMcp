@@ -10,7 +10,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 {
 	public GetUsingsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_get_usings", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_usings", ReadOnly = true, Title = "Get Usings", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns all using directives in a file plus implicit global usings from the project.")]
 	public async Task<object> GetUsings(

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
@@ -9,7 +9,7 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 {
 	public RestorePackagesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_restore_packages", Idempotent = true)]
+	[McpServerTool(Name = "roslyn_restore_packages", Title = "Restore Packages", Idempotent = true, Destructive = false)]
 	[Description(
 		"Restores NuGet packages for the solution. " +
 		"Use this after adding package references or when packages are missing. " +

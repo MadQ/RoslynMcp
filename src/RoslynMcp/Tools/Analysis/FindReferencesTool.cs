@@ -11,7 +11,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 {
 	public FindReferencesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_find_references", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_find_references", ReadOnly = true, Title = "Find References", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Finds all references to a named symbol (type, method, field, property) across the project. " +
 		"Useful before renaming or refactoring to see every call site. Results are paged; use skip/take for large result sets.")]

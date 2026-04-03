@@ -11,7 +11,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 	public DiagnosticsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
 		: base(workspace, logger, paginationCache) { }
 
-	[McpServerTool(Name = "roslyn_get_diagnostics", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_diagnostics", ReadOnly = true, Title = "Get Diagnostics", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Check your code for compiler errors and warnings — fast, in-process, no build needed. " +
 		"Use this after editing code to verify correctness before committing or continuing work. " +

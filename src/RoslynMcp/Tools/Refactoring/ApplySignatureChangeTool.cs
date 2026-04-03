@@ -14,7 +14,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		this.approvals = approvals;
 	}
 
-	[McpServerTool(Name = "roslyn_apply_signature_change", Destructive = true)]
+	[McpServerTool(Name = "roslyn_apply_signature_change", Destructive = true, Title = "Apply Signature Change", OpenWorld = false)]
 	[Description(
 		"Applies or rejects a signature change previewed by change_signature. " +
 		"approval: 'y' = apply once, 'session' = apply and auto-approve this method for the session, 'n' = reject.")]

@@ -11,7 +11,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 {
     public GetTriviaTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
-    [McpServerTool(Name = "roslyn_get_trivia", ReadOnly = true)]
+    [McpServerTool(Name = "roslyn_get_trivia", ReadOnly = true, Title = "Get Trivia", OpenWorld = false, Idempotent = true)]
     [Description(
         "**EXPERIMENTAL:** Returns whitespace, comments, and formatting trivia from C# source files. " +
         "Useful for understanding indentation context, blank lines, and comment placement. " +

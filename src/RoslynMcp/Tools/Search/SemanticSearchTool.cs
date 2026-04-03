@@ -14,7 +14,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	public SemanticSearchTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[
-		McpServerTool(Name = "roslyn_semantic_search", ReadOnly = true)
+		McpServerTool(Name = "roslyn_semantic_search", ReadOnly = true, Title = "Semantic Search", OpenWorld = false, Idempotent = true)
 	,	Description(
 			"Searches C# files using Roslyn syntax-tree filtering. " +
 			"Allows filtering by syntax context (comments, strings, identifiers, code, etc.). " +

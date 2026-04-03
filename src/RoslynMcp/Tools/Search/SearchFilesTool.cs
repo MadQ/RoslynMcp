@@ -10,7 +10,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 {
 	public SearchFilesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_search_files", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_search_files", ReadOnly = true, Title = "Search Files", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Searches workspace files for lines matching a regex pattern. " +
 		"Returns file paths, line numbers, and matching text with paging support. " +

@@ -10,7 +10,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 {
 	public GetSymbolsInScopeTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_get_symbols_in_scope", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_symbols_in_scope", ReadOnly = true, Title = "Get Symbols In Scope", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns all symbols accessible at a specific file location: locals, parameters, fields, properties, methods, types. " +
 		"Use when generating code to understand what's available in scope.")]

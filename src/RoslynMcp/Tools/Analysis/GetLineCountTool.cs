@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -10,7 +10,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 {
     public GetLineCountTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
-    [McpServerTool(Name = "roslyn_get_line_count", ReadOnly = true)]
+    [McpServerTool(Name = "roslyn_get_line_count", ReadOnly = true, Title = "Get Line Count", OpenWorld = false, Idempotent = true)]
     [Description(
         "Returns the line count for one or more files. Accepts a single path or comma-separated list.")]
     public async Task<object> GetLineCount(

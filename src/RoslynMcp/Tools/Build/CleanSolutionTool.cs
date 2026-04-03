@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
@@ -9,7 +9,7 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 {
 	public CleanSolutionTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_clean_solution", Destructive = true)]
+	[McpServerTool(Name = "roslyn_clean_solution", Title = "Clean Solution", OpenWorld = false, Destructive = true)]
 	[Description(
 		"Cleans the solution by removing all build artifacts (bin/ and obj/ directories). " +
 		"Use this when the build is in a bad state or before a fresh rebuild. " +

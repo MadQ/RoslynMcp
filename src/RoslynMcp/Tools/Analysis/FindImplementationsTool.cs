@@ -11,7 +11,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 {
 	public FindImplementationsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_find_implementations", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_find_implementations", ReadOnly = true, Title = "Find Implementations", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Finds all types that implement an interface or abstract class, or all methods that override an abstract/virtual member. " +
 		"Use this to discover concrete implementations of abstractions. Results are paged; use skip/take for large result sets.")]

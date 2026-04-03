@@ -16,7 +16,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		this.approvals = approvals;
 	}
 	
-	[McpServerTool(Name = "roslyn_preview_rename", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_preview_rename", ReadOnly = true, Title = "Preview Rename", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Previews renaming a symbol across all files. Returns a unified diff and a confirmation token. " +
 		"Pass the token to apply_rename to commit the change, or discard it to cancel. " +

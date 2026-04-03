@@ -7,7 +7,7 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class InfoTool(FileLogger logger)
 {
-	[McpServerTool(Name = "roslyn_info", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_info", Title = "Server Info", ReadOnly = true, OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns RoslynMcp server info: version, build hash, process ID, uptime, MSBuild discovery method. " +
 		"Also logs a marker entry — useful for identifying test boundaries in the log viewer.")]

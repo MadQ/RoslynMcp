@@ -9,7 +9,7 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 {
 	public GetMemberBodyTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
-	[McpServerTool(Name = "roslyn_get_member_body", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_member_body", ReadOnly = true, Title = "Get Member Body", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns the full source of a single method, property, field, or type by name. " +
 		"Much more token-efficient than reading an entire file — returns only the declaration you need. " +
