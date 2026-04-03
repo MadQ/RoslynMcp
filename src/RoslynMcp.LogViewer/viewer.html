@@ -254,20 +254,30 @@
 	#empty { padding: 16px 12px; color: var(--text-dim); font-style: italic; }
 
 	/* ── Entries ── */
-	.entry {
-	  padding: 1px 12px;
-	  display: grid;
-	  grid-template-columns: 22ch 5ch 1fr;
-	  gap: 10px;
-	  white-space: pre-wrap;
-	  word-break: break-all;
+	.entry-wrap {
 	  border-bottom: 1px solid transparent;
 	}
-	.entry:hover { background: var(--bg-hover); }
+	.entry-wrap:hover .entry-row { background: var(--bg-hover); }
+	.entry-wrap.selected .entry-row { background: var(--btn-active); color: #fff; }
+	.entry-wrap[data-level="ERROR"] { border-left: 2px solid var(--error-border); }
 
-	.ts  { color: var(--text-dim); }
-	.lvl { font-weight: 600; }
-	.msg { color: var(--text); }
+	.entry-row {
+	  display: flex;
+	  align-items: baseline;
+	  gap: 8px;
+	  padding: 2px 8px;
+	  cursor: default;
+	}
+
+	.col-inst    { width: 4ch;  flex-shrink: 0; color: var(--text-dim); font-size: 11px; text-align: right; }
+	.col-time    { width: 12ch; flex-shrink: 0; color: var(--text-dim); }
+	.col-level   { width: 5ch;  flex-shrink: 0; font-weight: 600; }
+	.col-ws      { width: 3ch;  flex-shrink: 0; font-weight: 700; cursor: help; }
+	.col-tool    { width: 22ch; flex-shrink: 0; color: var(--tool-name); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.col-elapsed { width: 9ch;  flex-shrink: 0; text-align: right; white-space: nowrap; }
+	.col-subj    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+	.col-expand  { width: 2ch;  flex-shrink: 0; cursor: pointer; color: var(--text-dim); user-select: none; text-align: center; font-size: 10px; }
+	.col-expand:hover { color: var(--text); }
 
 	.lvl-START { color: var(--lvl-start); }
 	.lvl-STOP  { color: var(--lvl-stop); }
@@ -275,17 +285,30 @@
 	.lvl-ERROR { color: var(--lvl-error); }
 	.lvl-OTHER { color: var(--text-dim); }
 
-	.entry[data-level="ERROR"] { border-left: 2px solid var(--error-border); }
-
-	.ws-msb  { color: var(--ws-msb);  font-weight: 700; cursor: help; }
-	.ws-adh  { color: var(--ws-adh);  font-weight: 700; cursor: help; }
-	.ws-unk  { color: var(--text-dim); cursor: help; }
-	.tool-name { color: var(--tool-name); font-weight: 600; }
-	.tool-ms   { color: var(--tool-ms); }
+	.ws-msb  { color: var(--ws-msb); }
+	.ws-adh  { color: var(--ws-adh); }
 	.tool-ok   { color: var(--tool-ok); font-weight: 600; }
 	.tool-err  { color: var(--tool-err); font-weight: 600; }
+	.tool-ms   { color: var(--tool-ms); }
 	.tool-subj { color: var(--tool-subj); }
 	.tool-det  { color: var(--tool-det); font-style: italic; }
+
+	/* ── Expand detail panel ── */
+	.entry-detail {
+	  padding: 4px 8px 6px 36px;
+	  background: var(--bg-toolbar);
+	  border-top: 1px solid var(--border);
+	}
+	.entry-detail pre {
+	  font-family: inherit;
+	  font-size: 12px;
+	  color: var(--text-dim);
+	  white-space: pre-wrap;
+	  word-break: break-all;
+	  max-height: 300px;
+	  overflow-y: auto;
+	}
+	.show-more { margin-top: 4px; font-size: 11px; padding: 2px 6px; }
 
 	.hidden { display: none !important; }
 
@@ -311,7 +334,7 @@
 	}
 	#searchInput:focus { outline: 2px solid var(--focus); }
 	#searchCount { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
-	.entry.highlight { background: var(--highlight) !important; }
+	.entry-wrap.highlight .entry-row { background: var(--highlight) !important; }
 
 	/* ── Legend ── */
 	#legend {
@@ -352,7 +375,7 @@
 	<span id="status">Connecting…</span>
   </div>
   <div id="legend" class="hidden">
-	<kbd>1</kbd> ALL <kbd>2</kbd> TOOL <kbd>3</kbd> FAIL <kbd>4</kbd> ERROR <kbd>5</kbd> START <kbd>6</kbd> STOP &nbsp;|&nbsp; <kbd>S</kbd> Auto-scroll &nbsp; <kbd>T</kbd> Theme &nbsp; <kbd>Ctrl+F</kbd> Search &nbsp; <kbd>Ctrl+L</kbd> Clear &nbsp; <kbd>Esc</kbd> Close/Jump to end &nbsp; <kbd>Q</kbd> Shutdown &nbsp; <kbd>?</kbd> This legend
+	<kbd>1</kbd> ALL <kbd>2</kbd> TOOL <kbd>3</kbd> FAIL <kbd>4</kbd> ERROR <kbd>5</kbd> START <kbd>6</kbd> STOP &nbsp;|&nbsp; <kbd>S</kbd> Auto-scroll &nbsp; <kbd>T</kbd> Theme &nbsp; <kbd>Ctrl+F</kbd> Search &nbsp; <kbd>Ctrl+L</kbd> Clear &nbsp; <kbd>Ctrl+C</kbd> Copy entry &nbsp; <kbd>Esc</kbd> Close/Jump to end &nbsp; <kbd>Q</kbd> Shutdown &nbsp; <kbd>?</kbd> This legend
   </div>
   <div id="searchBar" class="hidden">
 	<input type="text" id="searchInput" placeholder="Search logs… (Esc to close)">
@@ -461,7 +484,7 @@
 		document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
 		btn.classList.add('active');
 		filter = btn.dataset.filter;
-		document.querySelectorAll('.entry').forEach(el => {
+		document.querySelectorAll('.entry-wrap').forEach(el => {
 		  if(filter === 'FAIL')
 			el.classList.toggle('hidden', el.dataset.fail !== 'true');
 		  else
@@ -477,89 +500,128 @@
 
 	// ── Clear ─────────────────────────────────────────────────────────────
 	document.getElementById('clearBtn').addEventListener('click', () => {
-	  document.querySelectorAll('.entry').forEach(el => el.remove());
+	  document.querySelectorAll('.entry-wrap').forEach(el => el.remove());
 	  emptyEl.style.display = '';
 	  count = 0;
+	  selectedWrap = null;
 	  updateStatus();
 	});
+
+	// ── Selection (for Ctrl+C copy) ───────────────────────────────────────
+	let selectedWrap = null;
+
+	function selectWrap(wrap) {
+	  selectedWrap?.classList.remove('selected');
+	  selectedWrap = wrap;
+	  wrap?.classList.add('selected');
+	}
 
 	// ── Append entry ──────────────────────────────────────────────────────
 	function addEntry(e) {
 	  emptyEl.style.display = 'none';
-	  const level  = e.Level || 'OTHER';
-	  const isFail = level === 'TOOL' && e.Success === false;
-	  const div    = document.createElement('div');
-	  div.className     = 'entry';
-	  div.dataset.level = level;
-	  if(isFail) div.dataset.fail = 'true';
+	  const level  = e.level || 'OTHER';
+	  const isFail = level === 'TOOL' && e.success === false;
+	  const wrap   = document.createElement('div');
+	  wrap.className     = 'entry-wrap';
+	  wrap.dataset.level = level;
+	  wrap.dataset.json  = JSON.stringify(e);
+	  if(isFail) wrap.dataset.fail = 'true';
 
 	  if(filter === 'FAIL' ? !isFail : (filter !== 'ALL' && level !== filter))
-		div.classList.add('hidden');
+		wrap.classList.add('hidden');
 
-	  const ts  = document.createElement('span');
-	  ts.className   = 'ts';
-	  ts.textContent = e.Pid ? e.Timestamp + ' [' + e.Pid + ']' : e.Timestamp;
+	  // ── Summary row ──────────────────────────────────────────────────────
+	  const row = document.createElement('div');
+	  row.className = 'entry-row';
+	  row.addEventListener('click', () => selectWrap(wrap));
 
-	  const lvl = document.createElement('span');
-	  lvl.className   = `lvl lvl-${level}`;
-	  lvl.textContent = level;
+	  // #instance
+	  const inst = mk('span', 'col-inst', e.instance != null ? '#' + e.instance : '');
+	  row.appendChild(inst);
 
-	  const msg = document.createElement('span');
-	  msg.className = 'msg';
+	  // time — just HH:mm:ss.fff from ISO timestamp
+	  const time = mk('span', 'col-time', e.timestamp ? e.timestamp.slice(11, 23) : '');
+	  row.appendChild(time);
 
-	  if(level === 'TOOL' && e.ToolName) {
-		const wsHints = { MSB: 'MSBuildWorkspace (.csproj)', ADH: 'AdhocWorkspace (no .csproj)', '---': 'Workspace mode unknown' };
+	  // level
+	  const lvl = mk('span', `col-level lvl-${level}`, level);
+	  row.appendChild(lvl);
 
-		if(e.WorkspaceMode) {
-		  const ws = document.createElement('span');
-		  ws.className = e.WorkspaceMode === 'MSB' ? 'ws-msb' : e.WorkspaceMode === 'ADH' ? 'ws-adh' : 'ws-unk';
-		  ws.textContent = e.WorkspaceMode + ' ';
-		  ws.title = wsHints[e.WorkspaceMode] || '';
-		  msg.appendChild(ws);
-		}
+	  // workspace mode
+	  const wsHints = { MSB: 'MSBuildWorkspace (.csproj)', ADH: 'AdhocWorkspace (no .csproj)' };
+	  const ws = mk('span', e.workspace_mode === 'MSB' ? 'col-ws ws-msb' : e.workspace_mode === 'ADH' ? 'col-ws ws-adh' : 'col-ws', e.workspace_mode || '');
+	  if(e.workspace_mode) ws.title = wsHints[e.workspace_mode] || '';
+	  row.appendChild(ws);
 
-		const ok = document.createElement('span');
-		ok.className   = e.Success ? 'tool-ok' : 'tool-err';
-		ok.textContent = (e.Success ? 'OK ' : 'ERR') + ' ';
-		msg.appendChild(ok);
+	  // tool name
+	  row.appendChild(mk('span', 'col-tool', e.tool_name || ''));
 
-		const ms = document.createElement('span');
-		ms.className   = 'tool-ms';
-		ms.textContent = `${String(e.ElapsedMs).padStart(5)}ms `;
-		msg.appendChild(ms);
+	  // elapsed + ok/err
+	  const el = document.createElement('span');
+	  el.className = 'col-elapsed';
+	  if(e.elapsed_ms != null) {
+		el.appendChild(mk('span', e.success ? 'tool-ok' : 'tool-err', e.success ? 'OK' : 'ERR'));
+		el.appendChild(mk('span', 'tool-ms', ' ' + e.elapsed_ms + 'ms'));
+	  }
+	  row.appendChild(el);
 
-		const tn = document.createElement('span');
-		tn.className   = 'tool-name';
-		tn.textContent = e.ToolName;
-		msg.appendChild(tn);
-
-		if(e.Subject) {
-		  const subj = document.createElement('span');
-		  subj.className   = 'tool-subj';
-		  subj.textContent = ' ' + e.Subject;
-		  msg.appendChild(subj);
-		}
-
-		if(e.Detail) {
-		  const det = document.createElement('span');
-		  det.className   = 'tool-det';
-		  det.textContent = ' — ' + e.Detail;
-		  msg.appendChild(det);
-		}
+	  // subject / message
+	  const subj = document.createElement('span');
+	  subj.className = 'col-subj';
+	  if(level === 'TOOL') {
+		if(e.subject) subj.appendChild(mk('span', 'tool-subj', e.subject));
+		if(e.detail)  subj.appendChild(mk('span', 'tool-det',  (e.subject ? ' — ' : '') + e.detail));
 	  } else {
-		msg.textContent = e.Message || e.Raw;
+		subj.textContent = e.message || '';
+	  }
+	  row.appendChild(subj);
+
+	  // expand chevron
+	  const chev = mk('span', 'col-expand', '▶');
+	  chev.title = 'Expand / collapse raw entry';
+	  row.appendChild(chev);
+
+	  wrap.appendChild(row);
+
+	  // ── Detail panel ────────────────────────────────────────────────────
+	  const detail = document.createElement('div');
+	  detail.className = 'entry-detail hidden';
+
+	  const raw    = JSON.stringify(e, null, 2);
+	  const TRUNC  = 800;
+	  const pre    = document.createElement('pre');
+	  pre.textContent = raw.length <= TRUNC ? raw : raw.slice(0, TRUNC) + '\n…';
+	  detail.appendChild(pre);
+
+	  if(raw.length > TRUNC) {
+		const more = document.createElement('button');
+		more.className   = 'btn show-more';
+		more.textContent = 'Show full';
+		more.addEventListener('click', ev => { ev.stopPropagation(); pre.textContent = raw; more.remove(); });
+		detail.appendChild(more);
 	  }
 
-	  div.appendChild(ts);
-	  div.appendChild(lvl);
-	  div.appendChild(msg);
-	  logEl.appendChild(div);
+	  chev.addEventListener('click', ev => {
+		ev.stopPropagation();
+		const open = detail.classList.toggle('hidden') === false;
+		chev.textContent = open ? '▼' : '▶';
+	  });
+
+	  wrap.appendChild(detail);
+	  logEl.appendChild(wrap);
 
 	  count++;
 	  updateStatus();
 
 	  if(shouldScroll())
 		logEl.scrollTop = logEl.scrollHeight;
+	}
+
+	function mk(tag, cls, text) {
+	  const el = document.createElement(tag);
+	  el.className   = cls;
+	  el.textContent = text;
+	  return el;
 	}
 
 	function updateStatus() {
@@ -582,7 +644,7 @@
 	  es.onmessage = e => {
 		try {
 		  const entry = JSON.parse(e.data);
-		  if(entry.Level === 'INFO' && entry.Message?.toLowerCase().includes('clear'))
+		  if(entry.level === 'INFO' && entry.message?.toLowerCase().includes('clear'))
 			document.getElementById('clearBtn').click();
 		  else
 			addEntry(entry);
@@ -613,17 +675,17 @@
 	function clearSearch() {
 	  searchInput.value = '';
 	  searchCount.textContent = '';
-	  document.querySelectorAll('.entry.highlight').forEach(el => el.classList.remove('highlight'));
+	  document.querySelectorAll('.entry-wrap.highlight').forEach(el => el.classList.remove('highlight'));
 	  searchBar.classList.add('hidden');
 	  searching = false;
 	}
 
 	function doSearch() {
 	  const q = searchInput.value.toLowerCase().trim();
-	  document.querySelectorAll('.entry.highlight').forEach(el => el.classList.remove('highlight'));
+	  document.querySelectorAll('.entry-wrap.highlight').forEach(el => el.classList.remove('highlight'));
 	  if(!q) { searchCount.textContent = ''; return; }
 	  let n = 0;
-	  document.querySelectorAll('.entry').forEach(el => {
+	  document.querySelectorAll('.entry-wrap').forEach(el => {
 		if(el.textContent.toLowerCase().includes(q)) { el.classList.add('highlight'); n++; }
 	  });
 	  searchCount.textContent = `${n} match${n !== 1 ? 'es' : ''}`;
@@ -650,6 +712,13 @@
 		searchInput.focus();
 		searchInput.select();
 		return;
+	  }
+
+	  if(e.ctrlKey && e.key === 'c') {
+		if(selectedWrap) {
+		  navigator.clipboard.writeText(selectedWrap.dataset.json || '').catch(() => {});
+		  return;
+		}
 	  }
 
 	  if(e.key === 'Escape') {
