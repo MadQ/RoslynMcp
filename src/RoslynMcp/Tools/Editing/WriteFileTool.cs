@@ -25,7 +25,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		"By default (createNew: false) the file must already exist — prevents accidental path creation. " +
 		"Set createNew: true to create a new file or overwrite an existing one. " +
 		"For existing files, a crash-safe backup is taken automatically before writing; the returned backupToken " +
-		"can be passed to roslyn_local_history (action: apply) to restore. " +
+		"can be passed to roslyn_local_history (action: apply) to restore (backups are branch-agnostic — verify your current branch before restoring). " +
 		"SDK-style .NET projects auto-include new .cs files via implicit glob — no .csproj edit required. " +
 		"Write is atomic: content is written to a temp file then renamed, preventing partial writes on crash. " +
 		"Supports dryRun: true to preview line count without touching disk."

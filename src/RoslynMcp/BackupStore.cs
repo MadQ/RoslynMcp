@@ -91,6 +91,9 @@ internal sealed class BackupStore
 		var unixMs   = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 		var token    = $"{pathHash}_{unixMs}";
 
+		// Read git context outside the lock — avoids holding it during file I/O.
+		var (gitBranch, gitCommit) = ReadGitContext(absolutePath);
+
 		lock(syncRoot) {
 
 			try {
@@ -110,7 +113,9 @@ internal sealed class BackupStore
 					FileSizeBytes   = current.Length,
 					PreWriteHash    = preHash,
 					PostWriteHash   = newContentHash,
-					ChangedLineHint = changedLineHint
+					ChangedLineHint = changedLineHint,
+					GitBranch       = gitBranch,
+					GitCommit       = gitCommit
 				};
 
 				WriteMetaEntry(metaFile, token, meta);
@@ -242,6 +247,106 @@ internal sealed class BackupStore
 		}
 	}
 
+
+	/// <summary>
+	///     Returns the current git branch for the repo containing <paramref name="startPath"/>,
+	///     or null if not in a git repo or in detached HEAD state.
+	/// </summary>
+	public string? GetCurrentBranch(string startPath) => ReadGitContext(startPath).Branch;
+
+	// ── Git context ──────────────────────────────────────────────────────────
+
+	static (string? Branch, string? Commit) ReadGitContext(string startPath)
+	{
+		var gitDir = FindGitDir(startPath);
+
+		if(gitDir is null)
+			return (null, null);
+
+		try {
+
+			var headPath = Path.Combine(gitDir, "HEAD");
+
+			if(!File.Exists(headPath))
+				return (null, null);
+
+			var head = File.ReadAllText(headPath).Trim();
+
+			if(head.StartsWith("ref: refs/heads/", StringComparison.Ordinal)) {
+
+				var branch = head["ref: refs/heads/".Length..];
+				var sha    = ReadRef(gitDir, branch);
+
+				return (branch, sha is not null ? sha[..Math.Min(7, sha.Length)] : null);
+			}
+
+			// Detached HEAD — bare SHA, no branch name.
+			return (null, head.Length >= 7 ? head[..7] : head);
+		}
+		catch {
+			return (null, null);
+		}
+	}
+
+	static string? FindGitDir(string startPath)
+	{
+		var dir = File.Exists(startPath) ? Path.GetDirectoryName(startPath) : startPath;
+
+		while(dir is not null) {
+
+			var gitPath = Path.Combine(dir, ".git");
+
+			if(Directory.Exists(gitPath))
+				return gitPath;
+
+			// Worktree: .git is a file pointing to the real gitdir.
+			if(File.Exists(gitPath)) {
+
+				try {
+
+					var content = File.ReadAllText(gitPath).Trim();
+
+					if(content.StartsWith("gitdir: ", StringComparison.Ordinal))
+						return content["gitdir: ".Length..].Trim();
+				}
+				catch { }
+			}
+
+			dir = Path.GetDirectoryName(dir);
+		}
+
+		return null;
+	}
+
+	static string? ReadRef(string gitDir, string branchName)
+	{
+		// Try loose ref first.
+		var refPath = Path.Combine(gitDir, "refs", "heads", branchName.Replace('/', Path.DirectorySeparatorChar));
+
+		if(File.Exists(refPath))
+			return File.ReadAllText(refPath).Trim();
+
+		// Fall back to packed-refs.
+		var packedRefs = Path.Combine(gitDir, "packed-refs");
+
+		if(!File.Exists(packedRefs))
+			return null;
+
+		var needle = $" refs/heads/{branchName}";
+
+		foreach(var line in File.ReadLines(packedRefs)) {
+
+			if(line.StartsWith('#'))
+				continue;
+
+			if(line.EndsWith(needle, StringComparison.Ordinal))
+				return line[..line.IndexOf(' ')];
+		}
+
+		return null;
+	}
+
+
 	// ── Internal helpers ────────────────────────────────────────────────────
 
 	// 8-char hex prefix of SHA256(normalized-lowercase-path).
@@ -332,6 +437,8 @@ internal sealed record BackupMeta
 	public required string   PreWriteHash    { get; init; }
 	public          string?  PostWriteHash   { get; init; }
 	public          int[]?   ChangedLineHint { get; init; }
+	public          string?  GitBranch       { get; init; }
+	public          string?  GitCommit       { get; init; }
 }
 
 internal sealed record BackupEntry(string Token, BackupMeta Meta, bool ConflictRisk);

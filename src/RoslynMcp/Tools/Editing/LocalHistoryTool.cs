@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using ModelContextProtocol.Server;
 using RoslynMcp.Tools;
 
@@ -26,7 +26,9 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		"Use action: \"apply\" with a token to restore a file from backup. " +
 		"If the file was modified after the backup, apply returns a conflict response rather than silently overwriting — " +
 		"pass force: true to overwrite unconditionally. " +
-		"Backup tokens are returned by roslyn_write_file and survive process restarts."
+		"Backup tokens are returned by roslyn_write_file and survive process restarts. " +
+		"Backups are branch-agnostic: a backup taken on one branch can be restored on any branch. " +
+		"The list response includes a caution field when any backup was taken on a different branch than the current one — verify your branch before applying."
 	)]
 	public object LocalHistory(
 		[Description("Action to perform: \"list\" (enumerate backups), \"preview\" (conflict check), or \"apply\" (restore from backup).")]
@@ -70,19 +72,27 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			absolutePath = entries.FirstOrDefault(e => e.Token == token)?.Meta.AbsolutePath;
 		}
 
-		var all = backups.List(absolutePath);
+		var all           = backups.List(absolutePath);
+		var rootDir       = workspace.GetRootPath(projectPath);
+		var currentBranch = backups.GetCurrentBranch(rootDir);
 
 		var items = all.Select(e => new LocalHistoryEntry(
-			Token:          e.Token,
-			AbsolutePath:   e.Meta.AbsolutePath,
-			Operation:      e.Meta.Operation,
-			Timestamp:      e.Meta.Timestamp,
-			FileSizeBytes:  e.Meta.FileSizeBytes,
-			ConflictRisk:   e.ConflictRisk,
-			ChangedLineHint: e.Meta.ChangedLineHint
+			Token:           e.Token,
+			AbsolutePath:    e.Meta.AbsolutePath,
+			Operation:       e.Meta.Operation,
+			Timestamp:       e.Meta.Timestamp,
+			FileSizeBytes:   e.Meta.FileSizeBytes,
+			ConflictRisk:    e.ConflictRisk,
+			ChangedLineHint: e.Meta.ChangedLineHint,
+			GitBranch:       e.Meta.GitBranch
 		)).ToArray();
 
-		return new LocalHistoryListResult(items, items.Length);
+		string? caution = null;
+
+		if(currentBranch is not null && all.Any(e => e.Meta.GitBranch is not null && e.Meta.GitBranch != currentBranch))
+			caution = "One or more backups were taken on a different branch. Verify branch context before restoring.";
+
+		return new LocalHistoryListResult(items, items.Length, caution);
 	}
 
 	object HandlePreview(ToolScope scope, string? token)
@@ -153,10 +163,11 @@ internal sealed record LocalHistoryEntry(
 	string  Timestamp,
 	long    FileSizeBytes,
 	bool    ConflictRisk,
-	int[]?  ChangedLineHint
+	int[]?  ChangedLineHint,
+	string? GitBranch
 );
 
-internal sealed record LocalHistoryListResult(LocalHistoryEntry[] Items, int Count);
+internal sealed record LocalHistoryListResult(LocalHistoryEntry[] Items, int Count, string? Caution);
 
 internal sealed record LocalHistoryPreviewResult(
 	string Token,
