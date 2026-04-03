@@ -1,10 +1,16 @@
-using System.Net;
+﻿using System.Net;
 using System.Reflection;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using RoslynMcp.LogViewer;
 
 class Program
 {
+	// Readable Unicode in SSE stream — em dashes, non-ASCII etc. pass through as-is.
+	static readonly JsonSerializerOptions SseOptions = new() {
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+	};
+
 	static string GetVersion() =>
 		typeof(Program).Assembly
 			.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
@@ -100,7 +106,7 @@ class Program
 
 			await foreach(var entry in tailer.TailAsync(linked.Token)) {
 
-				var json = JsonSerializer.Serialize(entry);
+				var json = JsonSerializer.Serialize(entry, SseOptions);
 
 				await ctx.Response.WriteAsync($"data: {json}\n\n", linked.Token);
 				await ctx.Response.Body.FlushAsync(linked.Token);

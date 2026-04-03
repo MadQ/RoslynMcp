@@ -1,5 +1,6 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text.Json;
+using RoslynMcp;
 
 namespace RoslynMcp.Tools;
 
@@ -47,7 +48,7 @@ internal abstract partial class RoslynMcpTool
 		public void SetArgs<T>(T argsObj)
 		{
 			try {
-				args = JsonSerializer.Serialize(argsObj, new JsonSerializerOptions { WriteIndented = false });
+				args = JsonSerializer.Serialize(argsObj, RoslynMcpJson.Compact);
 			}
 			catch {
 				args = null;
@@ -72,7 +73,7 @@ internal abstract partial class RoslynMcpTool
 		public T Error<T>(T returnValue)
 		{
 			failed                          = true;
-			detail                          = returnValue is ErrorResult err ? err.Error : "error";
+			detail                          = ExtractDetail(returnValue);
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			return returnValue;
 		}
@@ -96,13 +97,32 @@ internal abstract partial class RoslynMcpTool
 		}
 
 		/// <summary>
+/// <summary>
+		///     Extracts a human-readable detail string from a failed tool result.
+		///     Handles concrete result types that carry a meaningful failure message beyond
+		///     the generic <see cref="ErrorResult"/> used by most error paths.
+		/// </summary>
+		static string ExtractDetail<T>(T returnValue) => returnValue switch {
+			ErrorResult r              => r.Error,
+			ReplaceInCodeSyntaxError r => r.Error,
+			DetailedErrorResult r      => r.Error,
+			MetadataSymbolResult r     => r.Message,
+			ReplaceInFileResult r      => r.Message ?? "error",
+			ReplaceInCodeResult r      => r.Message ?? "error",
+			BuildResult r              => r.Error_details ?? "build failed",
+			CleanResult r              => r.Message,
+			RestoreResult r            => r.Message,
+			_                          => "error"
+		};
+
+		
 		///     Serializes the response to JSON, returns the token estimate and a truncated peek string.
 		///     The peek is capped at 600 chars — enough for the log viewer to show meaningful content.
 		/// </summary>
 		static (int tokens, string? peek) SerializeResponse<T>(T value)
 		{
 			try {
-				var json   = JsonSerializer.Serialize(value);
+				var json   = JsonSerializer.Serialize(value, RoslynMcpJson.Compact);
 				var tokens = json.Length / 4;
 				var peek   = json.Length <= 600 ? json : json[..600] + "…";
 

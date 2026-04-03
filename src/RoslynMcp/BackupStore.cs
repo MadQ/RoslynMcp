@@ -17,11 +17,7 @@ internal sealed class BackupStore
 	const int    MaxPerFile     = 10;
 	const string MetaFileName   = "meta.json";
 
-	static readonly JsonSerializerOptions JsonOptions = new() {
-		WriteIndented                      = true,
-		DefaultIgnoreCondition             = JsonIgnoreCondition.WhenWritingNull,
-		PropertyNamingPolicy               = JsonNamingPolicy.CamelCase
-	};
+	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Backup;
 
 	readonly string? backupRoot;
 	readonly object  syncRoot = new();

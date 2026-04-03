@@ -1,5 +1,6 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
+using RoslynMcp;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
 using ModelContextProtocol.Server;
@@ -38,7 +39,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			
 			return new PreviewRenameResult(
 				null, null,
-				JsonSerializer.Serialize(error),
+				JsonSerializer.Serialize(error, RoslynMcpJson.Compact),
 				false
 			);
 		

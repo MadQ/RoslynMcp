@@ -21,9 +21,7 @@ internal sealed class FileLogger : IDisposable
 	const int    MaxRotatedFiles  = 3;
 	const string EnvVar           = "ROSLYNMCP_LOG_PATH";
 
-	static readonly JsonSerializerOptions JsonOptions = new() {
-		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
-	};
+	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Log;
 
 	readonly string? logPath;
 	readonly object  writeLock = new();
