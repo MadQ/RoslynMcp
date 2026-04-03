@@ -12,4 +12,8 @@
     <Compile Include="..\..\src\RoslynMcp\LogEntry.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="viewer.html" />
+  </ItemGroup>
+
 </Project>
