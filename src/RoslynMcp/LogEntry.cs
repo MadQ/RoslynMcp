@@ -91,6 +91,16 @@ record LogEntry
     [JsonPropertyName("response_peek")]
     public string? ResponsePeek { get; init; }
 
+
+    /// <summary>
+    ///     For failed TOOL entries: key input arguments that caused the failure, as a compact JSON object.
+    ///     Null on success — only logged when the tool returns an error, to keep the log size manageable.
+    ///     Allows post-mortem diagnosis without re-running the tool.
+    /// </summary>
+    [JsonPropertyName("args")]
+    public string? Args { get; init; }
+
+
     // ── Reader-only ───────────────────────────────────────────────────────
 
     /// <summary>

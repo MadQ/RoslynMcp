@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -41,86 +41,136 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false
 	)
 	{
-		using var scope = BeginTool("roslyn_replace_in_code", filePath);
-		var rootPath = workspace.GetRootPath(projectPath);
-		
+		using var scope    = BeginTool("roslyn_replace_in_code", filePath);
+		var       rootPath = workspace.GetRootPath(projectPath);
+
+		// Log args upfront so failure entries show what was passed.
+		var replacementPreview = replacement.Length > 120 ? replacement[..120] + "…" : replacement;
+
+		scope.SetArgs(new { nodeKind, textPattern, replacement = replacementPreview, dryRun, force });
+
 		var fullPath = ResolveFilePath(filePath, rootPath);
-		
+
 		if(fullPath is null)
-			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
-		
+
 		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-			
 			return scope.Error(new ErrorResult("File must be a C# source file (.cs)"));
-		
+
 		if(!TryParseSyntaxKind(nodeKind, out var kind))
-			
 			return scope.Error(new ErrorResult($"Unknown node kind: {nodeKind}.", Hint: "Examples: MethodDeclaration, FieldDeclaration, IdentifierName."));
-		
+
 		SourceText sourceText;
 		SyntaxTree syntaxTree;
-		
+
 		// Prefer the in-memory workspace document to avoid races with concurrent edits.
-		var solution = workspace.GetSolution(projectPath)
-		;
+		var solution = workspace.GetSolution(projectPath);
 		var docIds   = solution.GetDocumentIdsWithFilePath(fullPath);
-		
+
 		if(docIds.Length > 0) {
-			
+
 			var doc = solution.GetDocument(docIds[0])!;
 			sourceText = await doc.GetTextAsync(cancellationToken);
 			syntaxTree = (await doc.GetSyntaxTreeAsync(cancellationToken))!;
 		}
 		else {
-			
+
 			try {
-				
+
 				using var stream = File.OpenRead(fullPath);
 				sourceText = SourceText.From(stream, Encoding.UTF8);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				
+
 				return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 			}
-			
+
 			syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
 		}
-		
+
 		var root = await syntaxTree.GetRootAsync(cancellationToken);
-		
+
 		var matchedNodes = root.DescendantNodes()
 			.Where(n => n.IsKind(kind))
 			.ToArray()
 		;
-		
+
 		// Filter by text pattern if provided.
 		// For declaration nodes, match against the declared name only — not the full body.
 		// This prevents "ParseDocumentation" from matching every method that *calls* it.
 		if(!string.IsNullOrWhiteSpace(textPattern)) {
-			
+
 			matchedNodes = matchedNodes
 				.Where(n => {
-					
+
 					var name = GetDeclaredName(n);
-					
+
 					return name.Contains(textPattern, StringComparison.OrdinalIgnoreCase);
 				})
 				.ToArray()
 			;
 		}
-		
-		if(matchedNodes.Length == 0) {
-			
+
+		if(matchedNodes.Length == 0)
 			return scope.Error(new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
+
+		var changedNodeInfo = matchedNodes.Select(n => {
+
+			var lineSpan = syntaxTree.GetLineSpan(n.Span);
+
+			return new ReplaceInCodeNodeInfo(
+				n.ToString(),
+				lineSpan.StartLinePosition.Line + 1,
+				lineSpan.StartLinePosition.Character + 1
+			);
+		}).ToArray();
+
+		if(dryRun)
+			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Dry run: {matchedNodes.Length} node(s) would be replaced.");
+
+		// Safety guard: multiple matches require explicit opt-in via force=true.
+		if(matchedNodes.Length > 1 && !force)
+			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one.");
+
+		// Empty replacement = delete matched node(s). Documented behavior: omitting replacement removes the node.
+		if(string.IsNullOrWhiteSpace(replacement)) {
+
+			var deletedRoot = root.RemoveNodes(matchedNodes, SyntaxRemoveOptions.KeepNoTrivia)!;
+			var deletedTree = CSharpSyntaxTree.Create((CSharpSyntaxNode) deletedRoot, path: fullPath);
+			var deleteErrors = deletedTree.GetDiagnostics()
+				.Where(d => d.Severity == DiagnosticSeverity.Error)
+				.ToArray()
+			;
+
+			if(deleteErrors.Length > 0) {
+
+				return scope.Error(new ReplaceInCodeSyntaxError(
+					"Deletion would introduce syntax errors",
+					string.Join("; ", deleteErrors.Select(d => d.GetMessage())),
+					changedNodeInfo
+				));
+			}
+
+			try {
+				await File.WriteAllTextAsync(fullPath, deletedRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+
+				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			}
+
+			workspace.InvalidateFile(projectPath, fullPath);
+
+			return new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo);
 		}
-		
+
+		// Parse and validate the replacement text.
 		SyntaxNode? replacementNode;
-		
+
 		try {
-			
+
 			replacementNode = kind switch {
-				
+
 				SyntaxKind.MethodDeclaration or
 				SyntaxKind.FieldDeclaration or
 				SyntaxKind.PropertyDeclaration or
@@ -130,7 +180,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				SyntaxKind.RecordDeclaration or
 				SyntaxKind.EnumDeclaration
 					=> (SyntaxNode?) SyntaxFactory.ParseMemberDeclaration(replacement),
-				
+
 				SyntaxKind.UsingDirective or
 				SyntaxKind.LocalDeclarationStatement or
 				SyntaxKind.ExpressionStatement or
@@ -140,90 +190,62 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				SyntaxKind.WhileStatement or
 				SyntaxKind.ThrowStatement
 					=> SyntaxFactory.ParseStatement(replacement),
-				
+
 				_ => (SyntaxNode?) SyntaxFactory.ParseExpression(replacement)
 			};
-			
+
 			if(replacementNode is null)
-				
 				return scope.Error(new ErrorResult("Failed to parse replacement text — parser returned null"));
-			
+
 			if(replacementNode.ContainsDiagnostics) {
-				
+
 				return scope.Error(new ReplaceInCodeSyntaxError(
 					"Replacement text contains syntax errors",
 					string.Join("; ", replacementNode.GetDiagnostics().Select(d => d.GetMessage()))
-				))
-				;
+				));
 			}
 		}
 		catch(Exception ex) {
-			
+
 			return scope.Error(new ReplaceInCodeSyntaxError(
 				"Failed to parse replacement text as valid C# syntax",
 				ex.Message
 			));
 		}
-		
-		// Collect change info before replacement.
-		var changedNodeInfo = matchedNodes.Select(n => {
-			
-			var lineSpan = syntaxTree.GetLineSpan(n.Span);
-			
-			return new ReplaceInCodeNodeInfo(
-				n.ToString(),
-				lineSpan.StartLinePosition.Line + 1,
-				lineSpan.StartLinePosition.Character + 1
-			);
-		}).ToArray()
-		;
-		
-		if(dryRun) {
-			
-			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Dry run: {matchedNodes.Length} node(s) would be replaced.");
-		}
-		
-		// Safety guard: multiple matches require explicit opt-in via force=true.
-		if(matchedNodes.Length > 1 && !force) {
-			
-			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one.");
-		}
-		
+
 		// Apply replacements
 		var newRoot = root.ReplaceNodes(
 			matchedNodes,
 			(originalNode, _) => replacementNode.WithTriviaFrom(originalNode)
 		);
-		
+
 		// Validate the new tree has no new errors
 		var newTree = CSharpSyntaxTree.Create((CSharpSyntaxNode) newRoot, path: fullPath);
 		var newDiagnostics = newTree.GetDiagnostics()
 			.Where(d => d.Severity == DiagnosticSeverity.Error)
 			.ToArray()
 		;
-		
-		var syntaxValid = newDiagnostics.Length == 0;
-		
-		if(!syntaxValid) {
-			
+
+		if(newDiagnostics.Length > 0) {
+
 			return scope.Error(new ReplaceInCodeSyntaxError(
 				"Replacement would introduce syntax errors",
 				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
 				changedNodeInfo
 			));
 		}
-		
+
 		try {
 			await File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			
+
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
-		
+
 		// Invalidate workspace cache
 		workspace.InvalidateFile(projectPath, fullPath);
-		
+
 		return new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo);
 	}
 	
