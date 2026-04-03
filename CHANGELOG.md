@@ -53,7 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.7.1-alpha]— 2026-03-31
+## [0.7.1-alpha] — 2026-03-31
 
 ### Added
 - **`roslyn_info` tool** — server version, PID, uptime, MSBuild discovery method, log markers. `roslyn_info clear` clears the LogViewer.
@@ -84,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UTF-8 BOM stripped** from community standard files. (#76)
 
 ### Changed
-- **Result records** — ALL anonymous `new { }` types replaced with typed records across all 34 tools. `ErrorResult`, `ToolResults.cs` with 30+ record types. JSON field names preserved — no breaking change. (#74, #79, #81, #82)
+- **Result records** — ALL anonymous `new { }` types replaced with typed records across all 33 tools. `ErrorResult`, `ToolResults.cs` with 30+ record types. JSON field names preserved — no breaking change. (#74, #79, #81, #82)
 - **`Failed<T>` token estimation** — error paths now estimate tokens.
 - **SearchFiles/SemanticSearch** — switched from void `Outcome` to `Outcome<T>` for token estimation.
 - **README rewritten** — hero section, quick start, tool catalog, agent instructions, help wanted. (#74, #77, #78, #88)

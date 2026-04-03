@@ -1,6 +1,6 @@
 # Roslyn MCP Tools: Honest Assessment
 
-> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.0-alpha.
+> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.2-alpha.
 
 ## Tools That Work Well
 
@@ -20,15 +20,15 @@
 
 ## Tools With Serious Problems
 
-**`roslyn_list_types` — broken by default.** Without `namespaceFilter` it dumps every type from every referenced assembly — 829,618 characters. With `namespaceFilter` it works perfectly. The default is a context-window bomb. **Planned fix: v0.7.0 (#29) — default to project namespace.**
+~~**`roslyn_list_types` — broken by default.**~~ **Fixed in v0.7.0 (#29).** Without `namespaceFilter`, the default now returns only source-defined types — not the thousands of types from referenced assemblies. With `namespaceFilter` it scopes further to a namespace prefix. Both paths are safe.
 
 ~~**`roslyn_semantic_search` — every result is duplicated.**~~ **Fixed in v0.4.0 (#18).** Multi-TFM projects produced one `Project` per target framework with identical source files. Deduplicated by `FilePath`.
 
-**`roslyn_find_references` — misleading without `containingType`.** Without it, `AnySymbolFinder` returns the first symbol it encounters in namespace traversal order. An agent that doesn't specify `containingType` gets a silently incomplete picture. **Planned fix: v0.7.0 (#29) — search all matching symbols.**
+~~**`roslyn_find_references` — misleading without `containingType`.**~~ **Fixed in v0.7.0 (#29).** Without `containingType`, the tool now searches ALL symbols matching the name via `AllSymbolsFinder` and returns the union of their references — no silent omissions.
 
-**`roslyn_get_project_info` — noisy.** Lists all transitive NuGet packages, not just direct dependencies. **Planned fix: v0.7.0 (#30) — add `directOnly` parameter.**
+~~**`roslyn_get_project_info` — noisy.**~~ **Fixed in v0.7.0 (#30).** A `directOnly` parameter was added (defaults to `true`), which reads package references directly from the `.csproj` XML — only explicitly declared packages. Set `directOnly=false` to include transitive dependencies.
 
-**`roslyn_get_symbol_info` — inconsistent output format.** Returns pipe-delimited string instead of structured JSON. **Planned fix: v0.7.0 (#30) — return JSON.**
+~~**`roslyn_get_symbol_info` — inconsistent output format.**~~ **Fixed in v0.7.0 (#30).** Now returns structured JSON with `kind`, `name`, `containing_type`, and `return_type` fields.
 
 ---
 
@@ -44,14 +44,14 @@ Where normal tools win:
 - Normal tools work on any file type, not just `.cs`
 - `Grep` finds all text matches regardless of which overload you meant, which is sometimes what you want
 - ~~`Grep` doesn't have the duplicate-result bug~~ (fixed)
-- ~~`Read` + `Glob` don't have context-window bombs~~ (mitigated with `namespaceFilter`; default fix planned)
+- ~~`Read` + `Glob` don't have context-window bombs~~ (fixed; default now returns only source-defined types)
 
 ---
 
 ## Bottom Line
 
-The design philosophy is right — Roslyn semantics are genuinely better than text search for C# navigation. `get_type_members`, `get_symbol_definition`, `get_symbol_info`, and `get_type_hierarchy` are all things worth reaching for first. ~~Three issues that would reliably break an AI agent:~~ Status as of v0.6.0:
+The design philosophy is right — Roslyn semantics are genuinely better than text search for C# navigation. `get_type_members`, `get_symbol_definition`, `get_symbol_info`, and `get_type_hierarchy` are all things worth reaching for first. ~~Three issues that would reliably break an AI agent:~~ Status as of v0.7.2-alpha:
 
-1. `list_types` needs a mandatory or defaulted namespace filter — **planned v0.7.0 (#29)**
+1. ~~`list_types` needs a namespace filter~~ — **fixed v0.7.0 (#29)**
 2. ~~`semantic_search` duplication~~ — **fixed v0.4.0 (#18)**
-3. `find_references` ambiguity — **planned v0.7.0 (#29)**
+3. ~~`find_references` ambiguity~~ — **fixed v0.7.0 (#29)**

@@ -1,31 +1,32 @@
 ﻿# Workspace Modes Reference
 
-RoslynMcp automatically detects the best workspace mode based on your project structure. This document explains the two modes, when each is used, and their tradeoffs.
+RoslynMcp automatically detects the best workspace mode based on your project structure. This document explains the three workspace modes (SDK, VS, and Adhoc), when each is used, and their tradeoffs. The mode can be overridden with the `--workspace` CLI flag or the `ROSLYNMCP_WORKSPACE` environment variable.
 
 ---
 
 ## Overview
 
-| Mode | Trigger | Startup Time | Type Resolution | Multi-Project | Best For |
-|------|---------|--------------|-----------------|---------------|----------|
-| **MSBuildWorkspace** | `.csproj` file found | 1-2 seconds | Full (NuGet + source) | ✅ Yes | Production codebases |
-| **AdhocWorkspace** | No `.csproj` file | <100 ms | Source-only | ❌ No | Quick scripts, demos |
+| Mode | Trigger / Override | Startup Time | Type Resolution | Multi-Project | Best For |
+|------|-------------------|--------------|-----------------|---------------|----------|
+| **MSBuildWorkspace (SDK)** | `.csproj` found + SDK MSBuild / `--workspace sdk` | 1-2 seconds | Full (NuGet + source) | ✅ Yes | Modern SDK-style projects (.NET 6+) |
+| **MSBuildWorkspace (VS)** | `.csproj` found + VS detected / `--workspace vs` | 2-4 seconds | Full (NuGet + source) | ✅ Yes | .NET Framework projects |
+| **AdhocWorkspace** | No `.csproj` found / `--workspace adhoc` | <100 ms | Source-only | ❌ No | Quick scripts, demos |
 
-RoslynMcp **automatically selects** the appropriate mode—you don't need to configure anything. Just point it at your project directory.
+RoslynMcp **automatically selects** the appropriate mode—you don't need to configure anything for most projects. To override, pass `--workspace sdk|vs|adhoc|auto` on the command line, or set the `ROSLYNMCP_WORKSPACE` environment variable to the same values.
 
 ---
 
-## MSBuildWorkspace (Full Resolution)
+## MSBuildWorkspace (SDK) — Full Resolution, SDK MSBuild
 
 ### When Used
 
-Activated when RoslynMcp finds a `.csproj` file in the target directory.
+Activated when RoslynMcp finds a `.csproj` file and the .NET SDK MSBuild is available. This is the default for modern SDK-style projects.
 
 ### Capabilities
 
 - ✅ **NuGet package type resolution** — `List<T>`, `HttpClient`, Entity Framework, etc. all resolve correctly
 - ✅ **Multi-project support** — follows `<ProjectReference>` and loads referenced projects
-- ✅ **.NET Framework projects** — supports .NET Framework 4.6.1+ (requires MSBuild)
+- ✅ **.NET 6+ projects** — best fit for modern SDK-style projects
 - ✅ **Correct preprocessor symbols** — respects `<DefineConstants>` from `.csproj`
 - ✅ **Project-specific language version** — uses `<LangVersion>` from project file
 - ✅ **Nullable reference types** — respects `<Nullable>` setting
@@ -33,7 +34,7 @@ Activated when RoslynMcp finds a `.csproj` file in the target directory.
 
 ### Requirements
 
-- **MSBuild on PATH** — installed with .NET SDK or Visual Studio
+- **MSBuild on PATH** — installed with .NET SDK
 - **NuGet packages restored** — run `dotnet restore` before first use (or use `roslyn_restore_packages` tool)
 
 ### Startup Performance
@@ -63,7 +64,42 @@ roslyn_restore_packages --projectPath src/YourProject
 
 **Issue:** "MSBuild not found"
 
-**Solution:** Install .NET SDK or Visual Studio. MSBuild is included with both.
+**Solution:** Install .NET SDK. MSBuild is included.
+
+---
+
+## MSBuildWorkspace (VS) — Full Resolution, Visual Studio MSBuild
+
+### When Used
+
+Activated via `--workspace vs` or `ROSLYNMCP_WORKSPACE=vs`. Uses the Visual Studio MSBuild instance located via `vswhere`. Required for .NET Framework projects that don't load correctly with the SDK MSBuild.
+
+### Capabilities
+
+Same as SDK mode, plus:
+- ✅ **.NET Framework projects** — supports .NET Framework 4.6.1+ (requires Visual Studio)
+- ✅ **Legacy project formats** — handles non-SDK-style `.csproj` files
+
+### Requirements
+
+- **Visual Studio installed** — any edition (Community, Professional, Enterprise)
+- **`vswhere.exe`** — bundled with Visual Studio; used to locate the MSBuild instance
+
+### Startup Performance
+
+- **Initial load:** 2-4 seconds (VS MSBuild discovery adds overhead)
+- **Subsequent calls:** Instant (workspace is cached in memory)
+
+### When to Force This Mode
+
+```bash
+# CLI flag
+RoslynMcp.exe --workspace vs .
+
+# Environment variable
+$env:ROSLYNMCP_WORKSPACE = "vs"
+RoslynMcp.exe .
+```
 
 ---
 
@@ -117,6 +153,19 @@ AdhocWorkspace includes protection against accidental misuse:
 
 ---
 
+## Overriding the Mode
+
+By default RoslynMcp auto-detects the best mode. To override:
+
+| Method | Syntax |
+|--------|--------|
+| **CLI flag** | `RoslynMcp.exe --workspace sdk\|vs\|adhoc\|auto <path>` |
+| **Environment variable** | `ROSLYNMCP_WORKSPACE=sdk\|vs\|adhoc\|auto` |
+
+Priority: CLI flag → env var → auto-detect.
+
+---
+
 ## Choosing a Mode
 
 ### Use MSBuildWorkspace When:
@@ -142,11 +191,11 @@ AdhocWorkspace includes protection against accidental misuse:
 
 ## Switching Modes
 
-You don't manually "switch" modes—RoslynMcp detects the mode per project path.
+RoslynMcp auto-detects the mode per `projectPath`. To force a specific mode for a session, use the `--workspace` flag or `ROSLYNMCP_WORKSPACE` env var (see [Overriding the Mode](#overriding-the-mode) above).
 
 ### Multi-Project Workflows (v0.3.0+)
 
-All 31 tools require a `projectPath` parameter, so you can work with **both modes in a single session**:
+All tools require a `projectPath` parameter, so you can work with **multiple modes in a single session**:
 
 ```json
 // Example: workspace with both project types
@@ -173,13 +222,14 @@ roslyn_get_diagnostics({ projectPath: "scripts" })
 
 ## Performance Comparison
 
-| Operation | MSBuildWorkspace | AdhocWorkspace |
-|-----------|------------------|----------------|
-| **Initial load** | 1-2 seconds | <100 ms |
-| **Type resolution** | Full (NuGet + source) | Source-only |
-| **Memory usage** | ~200-500 MB (depends on project size) | ~50-100 MB |
-| **File change detection** | Roslyn internal + FileSystemWatcher | FileSystemWatcher |
-| **Multi-project** | ✅ Yes | ❌ No |
+| Operation | MSBuildWorkspace (SDK) | MSBuildWorkspace (VS) | AdhocWorkspace |
+|-----------|------------------------|----------------------|----------------|
+| **Initial load** | 1-2 seconds | 2-4 seconds | <100 ms |
+| **Type resolution** | Full (NuGet + source) | Full (NuGet + source) | Source-only |
+| **Memory usage** | ~200-500 MB (depends on project size) | ~200-500 MB | ~50-100 MB |
+| **File change detection** | Roslyn internal + FileSystemWatcher | Roslyn internal + FileSystemWatcher | FileSystemWatcher |
+| **Multi-project** | ✅ Yes | ✅ Yes | ❌ No |
+| **.NET Framework** | ⚠️ Limited | ✅ Yes | ❌ No |
 
 ---
 
@@ -233,7 +283,7 @@ RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.c
 
 ### Q: Can I force MSBuildWorkspace even if no .csproj exists?
 
-**A:** No. AdhocWorkspace is the fallback when no `.csproj` is found. To use MSBuildWorkspace, create a minimal `.csproj`:
+**A:** No. The `--workspace sdk` and `--workspace vs` flags select *which* MSBuild instance to use, but both still require a `.csproj` to load. Without one, RoslynMcp falls back to AdhocWorkspace regardless of the flag. To use MSBuildWorkspace, create a minimal `.csproj`:
 
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
@@ -246,7 +296,7 @@ RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.c
 
 ### Q: Can I use AdhocWorkspace for a project with .csproj?
 
-**A:** Not directly. RoslynMcp prioritizes MSBuildWorkspace when a `.csproj` is found. You'd need to temporarily rename or move the `.csproj` file (not recommended).
+**A:** Yes — pass `--workspace adhoc` (or set `ROSLYNMCP_WORKSPACE=adhoc`) to force AdhocWorkspace even when a `.csproj` exists. This skips MSBuild entirely for faster startup with reduced semantics (no NuGet resolution, no project references).
 
 ### Q: Why is MSBuildWorkspace slower on first load?
 
@@ -276,4 +326,4 @@ Subsequent calls are instant because the workspace is cached.
 
 ---
 
-**Last Updated:** 2026-03-28 (v0.7.0-alpha)
+**Last Updated:** 2026-04-03 (v0.7.2-alpha)

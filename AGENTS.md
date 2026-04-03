@@ -43,10 +43,11 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
 
-Three projects:
+Four projects:
 - `src/RoslynMcp/RoslynMcp.csproj` — MCP server
 - `src/TestHarness/TestHarness.csproj` — local testing client
 - `src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj` — Roslyn analyzers applied to this codebase; the most direct expression of dogfooding — Roslyn-powered analysis running on the repo that wraps Roslyn
+- `src/RoslynMcp.LogViewer/RoslynMcp.LogViewer.csproj` — dev-only log viewer; not part of the MCP server
 
 Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 
@@ -94,10 +95,15 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `DebugAttachTool` | `roslyn_debug_attach` (DEBUG only) — launches the JIT debugger dialog so Visual Studio can attach; blocks the server until dismissed or attached |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
+| `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
+| `PaginationCache` | Generic TTL-based token cache for paginated tool results; shared across all tools via DI |
+| `SymbolFormatter` | Static helpers to format Roslyn `ISymbol` instances into human-readable signatures (method, property, field, event, type) |
+| `SymbolVisitors` | Roslyn symbol tree visitors (`SimpleNameFinder`, `AllSymbolsFinder`, `AnySymbolFinder`) used by reference and rename tools |
+| `Exceptions` | Project-specific exception types for workspace path resolution (`ProjectNotFoundException`, `MultipleProjectsFoundException`, `InvalidProjectPathException`, `AmbiguousFileException`) |
 
 **Data flow:** stdio MCP request → tool → `WorkspaceResolver.TryGetCompilation(projectPath, ...)` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
-**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging).
+**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging), `LogEntry.cs` (shared NDJSON log schema — linked into both `RoslynMcp` and `RoslynMcp.LogViewer`).
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
 - `Tools/Analysis/` — 17 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
@@ -112,9 +118,9 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - Default path: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`
 - Override: set `ROSLYNMCP_LOG_PATH` env var to any path
 - Disable: set `ROSLYNMCP_LOG_PATH` to an empty string
-- Rotation: 10 MB cap, keeps last 3 files (`roslynmcp.log`, `.log.1`, `.log.2`, `.log.3`)
+- Rotation: 10 MB cap, 3 rotated backups (`roslynmcp.log`, `.log.1`, `.log.2`, `.log.3`)
 - Format: NDJSON — one `LogEntry` object per line
-- Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `tool_name`, `workspace_mode` (MSB/ADH), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`
+- Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `message` (non-TOOL entries), `tool_name`, `workspace_mode` (MSB/ADH), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`, `response_peek` (truncated JSON preview of response)
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
@@ -508,6 +514,8 @@ Example `.mcp.json`:
 ```
 
 > **Note:** Use the published executable (see README.md "Building the Executable" section). The `dotnet run` approach was abandoned due to multi-target confusion and recursive behavior when dogfooding.
+
+**Log Viewer:** `src/RoslynMcp.LogViewer/` — a .NET console app serving `viewer.html` to monitor live NDJSON logs. Not part of the MCP server; run independently for development visibility.
 
 ---
 
