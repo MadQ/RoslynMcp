@@ -18,7 +18,7 @@ Run this checklist before making the repository public or after significant stru
 
 ### Process Docs
 - **docs/process/DOC_REVIEW_CHECKLIST.md** — This file
-- **docs/process/DUPLICATION_ANALYSIS.md** — DRY analysis and recommendations
+- **`docs/process/DUPLICATION_ANALYSIS.md`** — referenced here but does not exist; removed reference
 - **docs/process/RELEASE_CHECKLIST.md** — Pre-release verification
 
 ---
