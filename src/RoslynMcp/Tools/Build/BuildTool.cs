@@ -27,12 +27,12 @@ internal sealed class BuildTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_build_project", ReadOnly = true)]
 	[Description(
-		"Validates the project in two tiers. " +
-		"Tier 1 (always): Roslyn in-process — instant C# type/symbol errors, zero process spawn. " +
-		"Tier 2 (only when Roslyn is clean): 'dotnet build' — validates what Roslyn cannot see: " +
-		"NuGet restore, MSBuild targets/props, SDK version, and source generators. " +
-		"Prefer roslyn_get_diagnostics for fast C#-only checks during editing. " +
-		"Use this tool when you need confidence the project fully builds (e.g. before committing). " +
+		"Fully validate the project — use this before committing or when you need confidence it completely builds. " +
+		"Runs in two tiers: (1) Roslyn in-process C# type/symbol check — fast, no process spawn; " +
+		"if errors are found, dotnet build is skipped and the Roslyn errors are returned immediately. " +
+		"(2) 'dotnet build' when Roslyn is clean — catches what Roslyn cannot see: NuGet restore failures, " +
+		"MSBuild target errors, SDK version issues, and source generator problems. " +
+		"For quick C# error checks during editing, use roslyn_get_diagnostics instead. " +
 		"Requires a .csproj to be present.")]
 	public async Task<object> BuildProject(
 		[Description(ProjectPathDescription)] string projectPath,
@@ -61,7 +61,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			if(roslynErrors.Length > 0) {
 				
-				BuildDiagnostic[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
+				DiagnosticItem[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
 				
 				return scope.Error(new BuildResult(
 					Succeeded:     false,
@@ -90,8 +90,8 @@ internal sealed class BuildTool : RoslynMcpTool
 
 			return scope.Error(new BuildResult(
 				Succeeded:     false,
-				Errors:        (BuildDiagnostic[]) [],
-				Warnings:      (BuildDiagnostic[]) [],
+				Errors:        (DiagnosticItem[]) [],
+				Warnings:      (DiagnosticItem[]) [],
 				Source:        "msbuild",
 				Build_skipped: true,
 				Skip_reason:   ex.Message,
@@ -103,8 +103,8 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
 		var succeeded   = exitCode == 0;
-		BuildDiagnostic[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
-		BuildDiagnostic[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
+		DiagnosticItem[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
+		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
 
 		return scope.Outcome("msbuild", new BuildResult(
 			succeeded,
@@ -202,7 +202,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 	}
 	
-	private static BuildDiagnostic[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
+	private static DiagnosticItem[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
 	{
 		return [..
 			compilation.GetDiagnostics()
@@ -211,79 +211,56 @@ internal sealed class BuildTool : RoslynMcpTool
 				.Select(d => ConvertRoslynDiagnostic(d, rootPath))
 		];
 	}
-	
-	private static BuildDiagnostic ConvertRoslynDiagnostic(Diagnostic diagnostic, string rootPath)
+
+	private static DiagnosticItem ConvertRoslynDiagnostic(Diagnostic diagnostic, string rootPath)
 	{
 		var span     = diagnostic.Location.GetLineSpan();
-		var filePath = span.Path;
-		var relative = string.IsNullOrEmpty(filePath) ? "?" : TryMakeRelative(filePath, rootPath);
 		var severity = diagnostic.Severity == DiagnosticSeverity.Error ? "error" : "warning";
-		
-		return new BuildDiagnostic(
-			Severity: severity,
+
+		return new DiagnosticItem(
 			Code:     diagnostic.Id,
-			Message:  diagnostic.GetMessage(),
-			File:     relative,
+			Severity: severity,
+			File:     TryMakeRelative(span.Path, rootPath),
 			Line:     span.StartLinePosition.Line + 1,
-			Column:   span.StartLinePosition.Character + 1
+			Column:   span.StartLinePosition.Character + 1,
+			Message:  diagnostic.GetMessage()
 		);
 	}
 	
-	private static BuildDiagnostic[] ParseMSBuildDiagnostics(string output, string rootPath)
+	private static DiagnosticItem[] ParseMSBuildDiagnostics(string output, string rootPath)
 	{
-		var results = new List<BuildDiagnostic>();
-		
+		var results = new List<DiagnosticItem>();
+
 		foreach(var raw in output.Split('\n')) {
-			
+
 			var line = raw.Trim();
-			
+
 			if(line.Length == 0)
 				continue;
-			
+
 			var m = DiagnosticLine.Match(line);
-			
+
 			if(!m.Success)
 				continue;
-			
+
 			var code     = m.Groups["code"].Value;
 			var filePath = m.Groups["file"].Value.Trim();
 			var relative = TryMakeRelative(filePath, rootPath);
-			
+
 			// Skip non-actionable SDK/tooling diagnostics.
 			if(IgnoredDiagnostics.Contains(code))
 				continue;
-			
-			results.Add(new BuildDiagnostic(
-				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
+
+			results.Add(new DiagnosticItem(
 				Code:     code,
-				Message:  m.Groups["message"].Value.Trim(),
+				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
 				File:     relative,
 				Line:     int.Parse(m.Groups["line"].Value),
-				Column:   int.Parse(m.Groups["col"].Value)
+				Column:   int.Parse(m.Groups["col"].Value),
+				Message:  m.Groups["message"].Value.Trim()
 			));
 		}
-		
+
 		return [.. results];
 	}
-	
-	private static string TryMakeRelative(string path, string rootPath)
-	{
-		try {
-			return Path.GetRelativePath(rootPath, path);
-		}
-		catch(ArgumentException) {
-			
-			// Paths on different roots (e.g., different drives on Windows) — return absolute path.
-			return path;
-		}
-	}
-	
-	private sealed record BuildDiagnostic(
-		string Severity,
-		string Code,
-		string Message,
-		string File,
-		int    Line,
-		int    Column
-	);
 }

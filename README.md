@@ -182,7 +182,7 @@ When working with C# code, prefer roslyn_* MCP tools:
 - `roslyn_search_files` / `roslyn_semantic_search` for code discovery
 - `roslyn_preview_rename` + `roslyn_apply_rename` for semantic renames
 - `roslyn_get_file_outline` for file structure (don't read the whole file)
-- `roslyn_get_diagnostics` with `severity: "errors"` for fast error checks
+- `roslyn_get_diagnostics` with `take: 0` for a fast error count check (no items), or `severity: "errors"` to page through individual errors
 ```
 
 For complete instructions covering every tool, see [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) — includes a full version, a compact version, and guidance for subagent delegation (subagents don't inherit your instructions).
