@@ -286,7 +286,7 @@ Add to `~/.config/zed/settings.json`:
 
 ---
 
-
+## Direct CLI Usage
 
 Run RoslynMcp directly from the command line:
 
@@ -398,7 +398,7 @@ For large codebases (>100K LOC), consider:
 
 **Checklist:**
 1. Server process started successfully (check client logs)
-2. MCP session initialized (`tools/list` should return 31 tools, or 34 in Debug builds)
+2. ✅ MCP session initialized (`tools/list` should return 31 tools, or 33 in Debug builds)
 3. Target directory is correct (check server stderr for `Target: ...`)
 
 ---

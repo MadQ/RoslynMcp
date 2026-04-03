@@ -196,4 +196,4 @@ To add a new style check:
 
 ---
 
-**Last Updated:** 2026-01-XX
+**Last Updated:** 2026-03-31

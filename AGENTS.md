@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.7.1-alpha (pre-1.0) |
-| **Tool Count** | 34 MCP tools (27 stable + 2 refactoring + 1 experimental + 4 infrastructure) |
+| **Tool Count** | 33 MCP tools (31 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -103,8 +103,9 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - `Tools/Search/` — 3 file/content search tools (list files, text search, semantic search)
 - `Tools/Editing/` — 3 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
+- `Tools/Refactoring/` — 2 signature-change tools (`roslyn_change_signature` → `roslyn_apply_signature_change`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
-- `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RespawnTool.cs` (debug-only)
+- `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RoslynMcpTool.Discovery.cs`, `InfoTool.cs`, `RespawnTool.cs` (debug-only), `DebugAttachTool.cs` (debug-only)
 
 **File logging:** Every tool invocation, server start/stop, and workspace error is logged to a rolling file.
 - Default path: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`

@@ -44,7 +44,7 @@ This file contains Copilot-specific overrides and notes only.
 
 **All details in [`AGENTS.md`](../AGENTS.md):**
 - Project overview and architecture
-- All 34 tool descriptions
+- All 33 tool descriptions
 - Code style rules (braces, naming, blank lines, etc.)
 - MCP protocol patterns
 - Roslyn API patterns
