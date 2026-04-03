@@ -68,7 +68,8 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		}
 		else {
 			
-			diagnostics = compilation.GetDiagnostics();
+			diagnostics = compilation.GetDiagnostics()
+				.Where(d => IsUnderRoot(d, rootPath));
 		}
 		
 		var filtered = diagnostics

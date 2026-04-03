@@ -489,6 +489,18 @@ internal abstract partial class RoslynMcpTool
 		}
 	}
 
+	// Filters out diagnostics from files outside the project root — prevents external files
+	// open in the IDE (e.g. HTML, CSS from unrelated directories) from polluting results.
+	protected static bool IsUnderRoot(Diagnostic diagnostic, string rootPath)
+	{
+		var filePath = diagnostic.Location.SourceTree?.FilePath;
+
+		if(string.IsNullOrEmpty(filePath))
+			return true;
+
+		return filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
+	}
+
 	/// <summary>
 	///     Resolves a symbol by name from a compilation. When <paramref name="containingType"/> is
 	///     provided, searches that type's members. Otherwise tries type-first lookup (metadata name →
