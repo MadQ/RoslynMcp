@@ -12,21 +12,34 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 	public ProjectInfoTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	// Matches a TFM segment in a path like ...\net8.0\... or .../net11.0/...
-	private static readonly Regex TfmPattern = new(@"[/\\](net\d+\.\d+(?:-\w+)?)[/\\]", RegexOptions.Compiled);
+	private static readonly Regex TfmPattern = new(@"[/\\](net\d+\.\d+(?:-\w+)?)[/\\]", RegexOptions.Compiled)
+	;
 	
 	// Matches NuGet package paths: ...\.nuget\packages\<name>\<version>\...
-	private static readonly Regex NuGetPattern = new(@"[/\\]packages[/\\]([^/\\]+)[/\\]([^/\\]+)[/\\]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+	private static readonly Regex NuGetPattern = new(@"[/\\]packages[/\\]([^/\\]+)[/\\]([^/\\]+)[/\\]", RegexOptions.Compiled | RegexOptions.IgnoreCase)
+	;
 	
-	[McpServerTool(Name = "roslyn_get_project_info", ReadOnly = true), Description(
-		"Returns metadata about the loaded project: name, assembly name, target framework, language version, " +
-		"output kind, nullable setting, NuGet package references, and additional files. " +
-		"Use this to understand project configuration without reading the .csproj directly.")]
+	[
+		McpServerTool(Name = "roslyn_get_project_info", ReadOnly = true, Title = "Get Project Info", OpenWorld = false, Idempotent = true)
+	,	Description(
+			"Use this to inspect static project metadata — target framework, language version, nullable context, " +
+			"output kind, NuGet package references, and additional files — without opening the .csproj in an editor. " +
+			"Prefer this over reading the .csproj directly: it returns parsed, structured data and handles both " +
+			"MSBuildWorkspace and AdhocWorkspace gracefully. " +
+			"By default (directOnly=true) package references are read directly from the .csproj XML, returning only " +
+			"packages your project explicitly declares. Set directOnly=false to infer packages from resolved metadata " +
+			"references — useful when no .csproj is available, but may include transitive dependencies. " +
+			"Note: the target framework is inferred from the output path or metadata reference paths and may be null " +
+			"if the project has not been built. " +
+			"For build errors or NuGet restore issues, use roslyn_build_project instead.")
+	]
 	public object GetProjectInfo(
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("When true, only returns direct package references from the .csproj (not transitive). Default: true.")] bool directOnly = true)
+		[Description("When true (default), reads package references directly from the .csproj — fast and accurate for explicit references only. When false, infers packages from resolved metadata reference paths, which may include transitive dependencies.")] bool directOnly = true)
 	{
 		using var scope = BeginTool("roslyn_get_project_info");
 		if(!TryGetProject(projectPath, out var project, out var error))
+			
 			return error;
 		
 		var rootPath    = workspace.GetRootPath(projectPath);
@@ -72,20 +85,24 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		var candidate = project.OutputFilePath ?? project.FilePath;
 		
 		if(candidate is not null) {
+			
 			var m = TfmPattern.Match(candidate);
 			
 			if(m.Success)
+				
 				return m.Groups[1].Value;
 		}
 		
 		// Fall back: scan metadata reference paths for a consistent TFM segment.
 		foreach(var r in project.MetadataReferences) {
+			
 			if(r.Display is null)
 				continue;
 			
 			var m = TfmPattern.Match(r.Display);
 			
 			if(m.Success)
+				
 				return m.Groups[1].Value;
 		}
 		
@@ -96,13 +113,15 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 	{
 		// NuGet packages end up in the global packages cache — parse name+version from the path.
 		// Framework assemblies (from dotnet/shared/...) are not NuGet packages and are skipped.
+		
 		return [..
 			references
 				.Select(r => r.Display)
 				.Where(p => p is not null)
 				.Select(p => {
+					
 					var m = NuGetPattern.Match(p!);
-
+					
 					return m.Success
 						? new PackageRef(m.Groups[1].Value, m.Groups[2].Value)
 						: null;
@@ -111,15 +130,16 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 				.Select(p => p!)
 				.DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
 				.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-		];
+		]
+		;
 	}
 	
 	private static PackageRef[] ExtractDirectPackages(string csprojPath)
 	{
 		try {
-
+			
 			var doc = System.Xml.Linq.XDocument.Load(csprojPath);
-
+			
 			return [..
 				doc.Descendants("PackageReference")
 					.Select(e => new PackageRef(
@@ -128,13 +148,14 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 					))
 					.DistinctBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
 					.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
-			];
+			]
+			;
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) {
-
+			
 			return [];
 		}
 	}
-
+	
 	private sealed record PackageRef(string Name, string Version);
 }

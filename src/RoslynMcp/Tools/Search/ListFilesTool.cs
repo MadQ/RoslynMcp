@@ -8,16 +8,19 @@ namespace RoslynMcp.Tools;
 internal sealed class ListFilesTool : RoslynMcpTool
 {
 	public ListFilesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
-
-	[McpServerTool(Name = "roslyn_list_files", ReadOnly = true)]
+	
+	[McpServerTool(Name = "roslyn_list_files", ReadOnly = true, Title = "List Files", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Lists files matching a glob pattern. Returns relative paths without content. " +
-		"Use this to enumerate files by name/extension before analyzing them with other tools. " +
-		"Complements search_files (content search) with fast file enumeration."
+		"Lists files matching a glob pattern. Returns relative paths only — no content, no line numbers. " +
+		"Use this when looking for files by name or path pattern (e.g., find all .json config files, all *Tool.cs files). " +
+		"Supports standard glob wildcards: * (within a segment), ** (across segments), ? (single character), {a,b} (alternation). " +
+		"For content search (finding lines that match a regex), use roslyn_search_files instead. " +
+		"For C#-aware filtering by syntax context (comments, identifiers, strings, etc.), use roslyn_semantic_search instead. " +
+		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public object ListFiles(
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Glob pattern (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json'). Default: '**/*'.")] string? pattern = null,
+		[Description("Glob pattern (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). Default: '**/*'.")] string? pattern = null,
 		[Description("Include subdirectories. Default: true.")] bool recursive = true,
 		[Description("Number of files to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of results. Default: 100, max: 500.")] int take = 100,
@@ -26,19 +29,21 @@ internal sealed class ListFilesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_list_files", pattern);
 		pattern ??= "**/*";
-
+		
 		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 500);
 		if(cachedPage is not null)
+			
 			return cachedPage;
-
+		
 		var rootPath = workspace.GetRootPath(projectPath);
-
+		
 		var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
 		matcher.AddInclude(pattern);
-
+		
 		IEnumerable<string> allFiles;
-
+		
 		try {
+			
 			allFiles = Directory.EnumerateFiles(
 				rootPath,
 				"*",
@@ -46,21 +51,22 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			);
 		}
 		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
-
+			
 			return scope.Error(new ErrorResult($"Failed to enumerate files: {ex.Message}"));
 		}
-
+		
 		var allResults = allFiles
 			.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
 			.Where(relativePath => matcher.Match(relativePath.Replace('\\', '/')).HasMatches)
 			.ToArray()
 		;
-
+		
 		if(allResults.Length == 0)
+			
 			return scope.Error(new ListFilesEmptyResult([], 0, AdhocCaution(projectPath)));
-
+		
 		var result = PaginateAndStore(allResults, ref skip, take);
-
+		
 		return new ListFilesResult(
 			result.Items,
 			result.Total,

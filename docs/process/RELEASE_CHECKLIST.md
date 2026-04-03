@@ -55,12 +55,12 @@ Use this checklist when preparing a new release of RoslynMcp.
   - [ ] Move `[Unreleased]` items to new version section
   - [ ] Add release date
   - [ ] Add link to GitHub release
-- [ ] Commit version bump: `git commit -m "Release v0.X.Y"`
+- [ ] Commit version bump: `git commit -m "chore: bump version to v0.X.Y-alpha"`
 
 ### 2. Tag Release
 ```bash
-git tag -a v0.X.Y -m "Release v0.X.Y"
-git push origin v0.X.Y
+git tag -a v0.X.Y-alpha -m "Release v0.X.Y-alpha"
+git push origin v0.X.Y-alpha
 ```
 
 ### 3. Build Release Artifacts
@@ -134,6 +134,20 @@ If a critical bug is found post-release:
 - `-alpha`: Early development, unstable API
 - `-beta`: Feature-complete, testing phase
 - `-rc.N`: Release candidate N
+
+**Pre-1.0 conventions (current):**
+
+In pre-1.0, breaking changes can happen in any release. Use MINOR bumps (`0.X`) for anything notable enough to call out in release notes; use PATCH (`0.0.X`) for bug fixes and small enhancements.
+
+Guidelines for what gets which bump:
+- New tools or significant new surface area → MINOR (`0.X.0`)
+- Logging rework, protocol changes, major internal rewrites → MINOR
+- Description rewrites, attribute metadata, polish → PATCH
+- Bug fixes, correctness corrections → PATCH
+
+**Milestone naming:** Milestones omit the pre-release suffix (use `v0.7.2`, not `v0.7.2-alpha`) — the suffix is noise at the planning level.
+
+**Tags and releases:** Always include the suffix (e.g. `v0.7.2-alpha`). Mark GitHub releases as pre-release until v1.0.0-beta.
 
 ---
 

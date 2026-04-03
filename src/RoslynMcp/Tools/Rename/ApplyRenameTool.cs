@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -13,35 +13,42 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		this.approvals = approvals;
 	}
 	
-	[McpServerTool(Name = "roslyn_apply_rename", Destructive = true)]
+	[McpServerTool(Name = "roslyn_apply_rename", Destructive = true, Title = "Apply Rename", OpenWorld = false)]
 	[Description(
-		"Applies or rejects a rename previewed by preview_rename. " +
-		"approval: 'y' = apply once, 'session' = apply and auto-approve this symbol for the session, 'n' = reject."
-	)]
+		"Commits or cancels a rename previewed by roslyn_preview_rename — always call that tool first to obtain a token. " +
+		"This is step 2 of a two-step rename workflow; calling this without a valid token will fail. " +
+		"Pass approval 'y' to apply once, 'session' to apply and auto-approve the same symbol for all future renames this session, " +
+		"or 'n' to cancel without writing any files. " +
+		"Tokens are single-use — once consumed or rejected, run roslyn_preview_rename again if another rename is needed. " +
+		"On success, writes all changed files to disk and reports the number of files modified.")]
 	public async Task<string> ApplyRename(
-		[Description("The confirmation token returned by preview_rename."								)] string token,
-		[Description("'y' to apply, 'session' to apply and remember for this session, 'n' to reject."	)] string approval,
+		[Description("The confirmation token returned by roslyn_preview_rename. Tokens are single-use — they expire after being applied or rejected.")] string token,
+		[Description("'y' to apply this rename once; 'session' to apply and auto-approve the same symbol for all future renames in this session; 'n' to cancel without writing any files.")] string approval,
 		[Description(ProjectPathDescription)] string projectPath
 	)
 	{
 		using var scope = BeginTool("roslyn_apply_rename", $"{token} ({approval})");
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
+			
 			approvals.Reject(token);
+			
 			return scope.Failed("rejected", "Rename rejected. No files were changed.");
 		}
 		
 		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase)
 			&& !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
+			
 			return "Invalid approval value. Use 'y', 'session', or 'n'.";
 		
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
 		var op         = approvals.Consume(token, forSession);
 		
 		if(op is null)
+			
 			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run preview_rename again.");
 		
 		await SolutionDiff.ApplyToDiskAsync(op.BaseSolution, op.NewSolution);
-
+		
 		var filesChanged = op.NewSolution.GetChanges(op.BaseSolution)
 			.GetProjectChanges()
 			.SelectMany(p => p.GetChangedDocuments())

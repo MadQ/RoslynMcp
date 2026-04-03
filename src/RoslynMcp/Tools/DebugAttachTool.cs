@@ -9,24 +9,26 @@ namespace RoslynMcp.Tools;
 internal sealed class DebugAttachTool
 {
 	readonly FileLogger logger;
-
+	
 	public DebugAttachTool(FileLogger logger) { this.logger = logger; }
-
-	[McpServerTool(Name = "roslyn_debug_attach", Destructive = false)]
+	
+	[McpServerTool(Name = "roslyn_debug_attach", Title = "Debug Attach", OpenWorld = false, Destructive = false)]
 	[Description(
 		"DEBUG ONLY — do NOT call unless the user explicitly asks to attach a debugger. " +
 		"Launches the JIT debugger dialog so Visual Studio can attach to the running server process. " +
-		"The server pauses until a debugger attaches or the dialog is dismissed.")]
+		"The server BLOCKS until a debugger attaches or the dialog is dismissed — " +
+		"calling this unexpectedly will freeze the server for all subsequent tool calls.")]
 	public object DebugAttach()
 	{
 		var pid = Environment.ProcessId;
 		logger.LogTool("roslyn_debug_attach", 0, true, detail: $"launching debugger for PID {pid}");
-
+		
 		if(Debugger.IsAttached)
+			
 			return new DebugAlreadyAttachedResult(true, pid, "A debugger is already attached.");
-
+		
 		Debugger.Launch();
-
+		
 		return new DebugAttachResult(
 			Debugger.IsAttached,
 			pid,

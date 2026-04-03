@@ -25,13 +25,14 @@ internal sealed class BuildTool : RoslynMcpTool
 		RegexOptions.Compiled | RegexOptions.IgnoreCase
 	);
 	
-	[McpServerTool(Name = "roslyn_build_project", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_build_project", Title = "Build Project", OpenWorld = false, Destructive = false)]
 	[Description(
 		"Fully validate the project — use this before committing or when you need confidence it completely builds. " +
 		"Runs in two tiers: (1) Roslyn in-process C# type/symbol check — fast, no process spawn; " +
 		"if errors are found, dotnet build is skipped and the Roslyn errors are returned immediately. " +
 		"(2) 'dotnet build' when Roslyn is clean — catches what Roslyn cannot see: NuGet restore failures, " +
 		"MSBuild target errors, SDK version issues, and source generator problems. " +
+		"Does not modify source files. " +
 		"For quick C# error checks during editing, use roslyn_get_diagnostics instead. " +
 		"Requires a .csproj to be present.")]
 	public async Task<object> BuildProject(
@@ -48,12 +49,14 @@ internal sealed class BuildTool : RoslynMcpTool
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 		
 		if(csprojPath is null)
+			
 			return scope.Error(new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode."));
 		
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true).
 		if(!forceBuild) {
 			
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
+				
 				return error;
 			
 			var roslynDiagnostics = GetRoslynDiagnostics(compilation, rootPath);
@@ -77,7 +80,8 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		
 		// Slow path: run actual dotnet build.
-		var args = BuildArgs(csprojPath, targetFramework);
+		var args = BuildArgs(csprojPath, targetFramework)
+		;
 		
 		string output;
 		TimeSpan elapsed;
@@ -87,7 +91,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope);
 		}
 		catch(InvalidOperationException ex) {
-
+			
 			return scope.Error(new BuildResult(
 				Succeeded:     false,
 				Errors:        (DiagnosticItem[]) [],
@@ -104,8 +108,9 @@ internal sealed class BuildTool : RoslynMcpTool
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
 		var succeeded   = exitCode == 0;
 		DiagnosticItem[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
-		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
-
+		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")]
+		;
+		
 		return scope.Outcome("msbuild", new BuildResult(
 			succeeded,
 			errors,
@@ -121,7 +126,8 @@ internal sealed class BuildTool : RoslynMcpTool
 	private static string BuildArgs(string csprojPath, string? tfm)
 	{
 		// --no-restore: restore is separate; /v:quiet: only errors/warnings + summary line.
-		var tfmArg = tfm is not null ? $" -f {tfm}" : string.Empty;
+		var tfmArg = tfm is not null ? $" -f {tfm}" : string.Empty
+		;
 		
 		return $"build \"{csprojPath}\"{tfmArg} --no-restore /nologo /v:quiet";
 	}
@@ -165,14 +171,16 @@ internal sealed class BuildTool : RoslynMcpTool
 		try {
 			
 			// Read both streams concurrently to avoid deadlocks on large output.
-			var stdoutTask = process.StandardOutput.ReadToEndAsync();
+			var stdoutTask = process.StandardOutput.ReadToEndAsync()
+			;
 			var stderrTask = process.StandardError.ReadToEndAsync();
 			
 			await process.WaitForExitAsync();
 			sw.Stop();
 			
 			// Capture exit code BEFORE disposing.
-			exitCode = process.ExitCode;
+			exitCode = process.ExitCode
+			;
 			scope.Record($"exit={exitCode} elapsed={sw.Elapsed.TotalSeconds:F1}s");
 			
 			string stdout, stderr;
@@ -209,14 +217,15 @@ internal sealed class BuildTool : RoslynMcpTool
 				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
 				.Where(d => !IgnoredDiagnostics.Contains(d.Id))
 				.Select(d => ConvertRoslynDiagnostic(d, rootPath))
-		];
+		]
+		;
 	}
-
+	
 	private static DiagnosticItem ConvertRoslynDiagnostic(Diagnostic diagnostic, string rootPath)
 	{
 		var span     = diagnostic.Location.GetLineSpan();
 		var severity = diagnostic.Severity == DiagnosticSeverity.Error ? "error" : "warning";
-
+		
 		return new DiagnosticItem(
 			Code:     diagnostic.Id,
 			Severity: severity,
@@ -230,27 +239,27 @@ internal sealed class BuildTool : RoslynMcpTool
 	private static DiagnosticItem[] ParseMSBuildDiagnostics(string output, string rootPath)
 	{
 		var results = new List<DiagnosticItem>();
-
+		
 		foreach(var raw in output.Split('\n')) {
-
+			
 			var line = raw.Trim();
-
+			
 			if(line.Length == 0)
 				continue;
-
+			
 			var m = DiagnosticLine.Match(line);
-
+			
 			if(!m.Success)
 				continue;
-
+			
 			var code     = m.Groups["code"].Value;
 			var filePath = m.Groups["file"].Value.Trim();
 			var relative = TryMakeRelative(filePath, rootPath);
-
+			
 			// Skip non-actionable SDK/tooling diagnostics.
 			if(IgnoredDiagnostics.Contains(code))
 				continue;
-
+			
 			results.Add(new DiagnosticItem(
 				Code:     code,
 				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
@@ -260,7 +269,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				Message:  m.Groups["message"].Value.Trim()
 			));
 		}
-
+		
 		return [.. results];
 	}
 }
