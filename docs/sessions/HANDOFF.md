@@ -1,84 +1,95 @@
 # Session Handoff
 
-**2026-04-03 14:50 EDT (Eastern Daylight Time)**
+**2026-04-04 (UTC)**
 
 ---
 
 ## Executive Summary
 
-Long session finishing the logging initiative and polishing the LogViewer. Shipped NDJSON structured logging with a `response_peek` pipeline, then spent the bulk of the session iterating on the LogViewer UI: Win95 `[+]`/`[-]` boxes, tree lines, local time, double-click selection fix, and a full JSON + C# syntax highlighting system with rainbow bracket coloring. Also cleaned up docs (CHANGELOG, README, HANDOFF) and filed/updated issue #118.
+Shipped several quality and correctness fixes across the server. Key deliverables: git branch/commit metadata in `roslyn_local_history` backups (#122), `ToolResults.cs` naming normalization to idiomatic C# (#124), abstract `ToolErrorResult` base record with type-safe error flow (#125), and a `BuildLiteralRegex` newline-normalization bug fix (#126). Also fixed a missing `[McpServerTool]` attribute on `ListFilesTool` (tool count now 35, not 33), corrected README tool count, and did GitHub issue triage (milestones assigned, #105 closed as already fixed).
 
 ## Current State
 
-- **Branch:** `dev` — clean, pushed, up to date with origin
-- **Version:** `v0.7.2-alpha` (not yet tagged)
-- **Tests:** Not re-run this session (no server-side logic changes; LogViewer is pure HTML/JS)
+- **Branch:** `dev`
+- **Compiler:** 0 errors, 0 warnings
+- **Version:** `v0.7.2-alpha` (not yet bumped for these changes)
 - **Stash:** 27 files of pre-existing style changes stashed as `"style: semicolons-on-own-lines + blank line pass (suspended — resume later)"` — do NOT pop until style pass suspension is lifted
-- **pub.ps1:** Convenience publish script at repo root (kill RoslynMcpA.exe → dotnet publish → copy exe). Re-run after any server-side C# changes.
+- **pub.ps1:** Convenience publish script at repo root — re-run after server-side C# changes.
 
 ## Completed This Session
 
-### Feature Branch: `feature/logviewer-polish` (merged → dev, #118)
+### #122 — Git branch/commit context in backup metadata (commit `0242c07`)
+- `BackupStore` now records `gitBranch` and `gitCommit` at snapshot time.
+- `roslyn_local_history` list response includes `_caution` when any backup was taken on a different branch than the current one.
+- Tool descriptions for `roslyn_local_history` and `roslyn_write_file` updated with branch-agnostic caution notes.
 
-**Server-side (response_peek pipeline):**
-- `LogEntry.cs`: `ResponsePeek` property in shared NDJSON schema
-- `FileLogger.cs`: `responsePeek` param on `LogTool`
-- `RoslynMcpTool.ToolScope.cs`: `SerializeResponse<T>` captures peek (600 char cap); passed through `Outcome`/`Error`/`Failed`
-- `DiagnosticsTool.cs`: minor follow-on adjustment
+### #124 — `ToolResults.cs` naming normalization (commit `1fce983`)
+- All 51 result records use positional syntax + `[property: JsonPropertyName("snake_case")]`.
+- PascalCase C# names throughout.
+- `MetadataSymbolResult.Message` → `Error`; `SymbolDocumentationEmptyResult.Message` → `Error`.
 
-**Viewer (`viewer.html`) — UI polish:**
-- Expand chevron moved to leftmost column (tree-view layout)
-- Local time via `fmtLocalTime()` (was UTC slice)
-- Win95-style `[+]`/`[-]` boxes (Parchment only, pure CSS `:has()`, `position: absolute` pseudo-element for zero row-height impact)
-- Parchment dotted tree lines aligned to box center (`margin-left: calc(8px + 1ch)`)
-- Double-click clears accidental text selection (`removeAllRanges()`); text remains normally selectable
+### #125 — Abstract `ToolErrorResult` base record (commit `d1c6512`)
+- `ToolErrorResult` abstract base record added.
+- `ExtractDetail<T>()` switch deleted.
+- `ToolScope.Error<T>()` gains `where T : ToolErrorResult` constraint.
+- 5 result types now derive from `ToolErrorResult`.
 
-**Viewer — syntax highlighting:**
-- `renderJSON()`: recursive walker, colored `jk`/`js`/`jn`/`jb`/`jz` spans; multi-line string values → C# code blocks
-- `highlightCSharp()`: two-pass tokenizer — atomic pass strips strings/comments, `colorBetween()` applies keywords/numbers/rainbow brackets on raw segments
-- Rainbow brackets: `(`, `)`, `{`, `}`, `[`, `]` cycle 3 colors by nesting depth (`rb0`/`rb1`/`rb2`); `<`/`>` excluded (ambiguous with comparison operators)
-- `highlightJSON()`: full parse+render, falls back to regex coloring for truncated/invalid JSON
-- Response peek simplified: server caps at 600 chars, client threshold removed
-- "Show full" on raw log entry also uses `highlightJSON`
+### #126 — `BuildLiteralRegex` newline bug + `ToolErrorResult.Error` non-nullable (commits `b3117d2`, `f755c5e`, `10faedc`)
+- `.Replace("\n",...)` was a no-op (C# string literal `\n` != literal backslash-n in pattern strings); fixed to `.Replace(@"\n",...)`.
+- `ToolErrorResult.Error` made `string` (non-nullable); dead `?? "error"` fallback removed.
 
-**Tooling:**
-- `pub.ps1`: convenience publish script
-- `drLoop.cmd`: dev loop helper
+### ListFilesTool attribute fix
+- `[McpServerTool(Name = "roslyn_list_files"...)]` attribute was missing from the method — added it.
+- Tool count is now **35** (was incorrectly 33).
 
-### Docs
-- CHANGELOG.md: `[0.7.2-alpha]` section added (promoted from Unreleased + LogViewer additions)
-- README.md: "Log Viewer" section added
-- Issue #118 filed for LogViewer feature + remaining tweaks
+### README.md
+- "33 tools" in body text corrected to "35 tools".
 
-## Open Issues / Next Steps
+### GitHub issue triage
+- #114, #117, #99 → v0.8.0 milestone
+- #118 → v0.9.0
+- #86 → v1.0.0
+- #105 closed — was already fixed in commit `3e115df` (SolutionDiff infinite loop).
+- Milestones assigned to 5 previously unassigned issues.
 
-| # | Title | Notes |
-|---|-------|-------|
-| #118 | LogViewer polish (ongoing) | Nested JSON, filter bar, keyboard nav, more UI tweaks |
-| #116 | `roslyn_write_file` tool | Pending todo; atomic write, createNew flag, encoding detection |
-| #117 | Expose version/MSBuild props in `roslyn_get_project_info` | Enhancement |
-| #114 | Tighten `IsUnderRoot` (LocationKind + separator guard) | Small cleanup |
-| #110 | `roslyn_apply_code_fix` | Larger feature |
-| #105 | `change_signature` test hang | Performance/bug |
-| #86  | Shared workspace service (named pipes) | Architecture |
+## Open Issues
 
-**Most logical next:** `roslyn_write_file` (#116) — it's already tracked as a pending todo and is self-contained.
+| # | Milestone | Title |
+|---|-----------|-------|
+| #118 | v0.9.0 | LogViewer — NDJSON log viewer (**NOTE:** may already be shipped in v0.7.2; verify before closing) |
+| #117 | v0.8.0 | Expose version/MSBuild properties in `roslyn_get_project_info` |
+| #114 | v0.8.0 | Tighten `IsUnderRoot` diagnostic filter |
+| #110 | v1.0.0 | `roslyn_apply_code_fix` |
+| #99  | v0.8.0 | Making agents reliably choose roslyn_* tools |
+| #86  | v1.0.0 | Shared workspace service via named pipes |
+| #37  | v1.0.0-beta | Column alignment rebalancing |
+| #36  | v1.0.0-beta | `roslyn_preview_style` / `roslyn_apply_style` |
+| #35  | v0.9.0 | `preserveStyle` flag for `replace_in_code` |
+| #34  | v0.9.0 | `roslyn_get_style_profile` |
+| #33  | v0.8.0 | `roslyn_find_unused` |
+| #32  | v0.8.0 | Call graph tools |
+| #9   | v0.9.0 | Security: filesystem access boundaries |
 
-## Key Technical Decisions
+## Known Issues / Technical Debt
 
-- **`:has()` for stateful CSS**: `[data-theme="parchment"] .entry-wrap:has(.entry-detail:not(.hidden)) .col-expand::before { content: '-'; }` — switches `+`→`-` purely in CSS. Works in all modern browsers.
-- **`position: absolute` on `::before`**: Takes box out of document flow — zero row height inflation.
-- **`color: transparent !important`**: Needed to beat `.entry-wrap.selected * { color: #fff !important }` cascade in Parchment.
-- **`line-height: 1` in flex pseudo-elements**: Collapses font metric space so `align-items: center` is geometrically accurate.
-- **Two-pass C# highlighter**: HTML-escaping happens inside `colorBetween()` on raw text segments before span tags are added — prevents `class` keyword inside `<span class="...">` from being re-highlighted.
-- **Rainbow depth persists via closure**: `depth` variable is closed over by `colorBetween()` so bracket depth is consistent across multiple raw-text segments in one `highlightCSharp()` call.
+- **Working tree rollback bug:** After commits, disk files sometimes silently revert to pre-commit state. Always run `git status` after commits; fix with `git checkout -- <files>`. Occurred after #124 and #125.
+- **#118 status unclear:** LogViewer shipped in v0.7.2-alpha — the open issue may track further improvements. Verify before acting.
+- **CHANGELOG.md / ROADMAP.md / AGENTS.md:** A parallel agent in this session was syncing entries for #122–#126. Verify these are up to date before the next release.
+
+## Suggested Next Steps (v0.8.0 order)
+
+1. **#114** — Tighten `IsUnderRoot` filter (small, targeted)
+2. **#117** — Expose more MSBuild/SDK properties (small, tidy)
+3. **#32** — Call graph tools (bigger, novel)
+4. **#33** — `roslyn_find_unused` (bigger, novel)
+5. **#99** — Agent tool selection (documentation/hooks work)
 
 ## Context for Resuming
 
-- CWD: `J:\Projects\RoslynMcp` — never `cd`, it triggers permission prompts
-- Style passes suspended — do NOT run `Test-CodeStyle.ps1 -Fix`
-- `roslyn_build_project` has a known false-failure bug — use `roslyn_get_diagnostics` for error checks
-- `pub.ps1` at repo root: re-run after server-side C# changes to update `RoslynMcpA.exe`
+- CWD: `J:\Projects\RoslynMcp` — never `cd`
+- Style passes suspended — do NOT run `Test-CodeStyle.ps1 -Fix` or pop the style stash
+- Use `roslyn_get_diagnostics` for error checks; `roslyn_build_project` for full build validation
+- `pub.ps1` at repo root: re-run after server-side C# changes to update the published exe
 - Dogfood roslyn_* tools always; terminal is last resort
-- US Eastern time; `gh.exe` globally allowed
+- `gh.exe` globally available
 

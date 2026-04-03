@@ -97,6 +97,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `DebugAttachTool` | `roslyn_debug_attach` (DEBUG only) — launches the JIT debugger dialog so Visual Studio can attach; blocks the server until dismissed or attached |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `BackupStore` | Crash-safe backup store for file write operations; snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\`; supports multi-level undo with token-based restore and conflict detection |
+| `RoslynMcpJson` | Shared `JsonSerializerOptions` with a custom `JavaScriptEncoder` — passes through Unicode characters without `\uXXXX` escaping; used by all tools for consistent serialization |
+| `ToolErrorResult` | Abstract base record for all structured error responses; provides a non-nullable `Error` string property; enables the `where T : ToolErrorResult` generic constraint on `ToolScope.Error<T>()` |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 | `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
 | `PaginationCache` | Generic TTL-based token cache for paginated tool results; shared across all tools via DI |
@@ -143,6 +145,10 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 When editing C# code, **actively prefer `roslyn_replace_in_code`** over `roslyn_replace_in_file`:
 - `roslyn_replace_in_code` is semantically aware, validates syntax, preserves formatting/trivia
 - `roslyn_replace_in_file` is for text/config files or when you need literal text replacement
+
+For writing full file content (new files or wholesale rewrites), use `roslyn_write_file`:
+- Takes a crash-safe backup automatically before writing; returns a token usable with `roslyn_local_history` to undo
+- Set `createNew: true` to create a new file or overwrite; default requires the file to already exist
 
 When discovering files/content:
 - `roslyn_list_files` — fast glob enumeration (find files by name/path)

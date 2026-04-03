@@ -6,6 +6,21 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ---
 
+## Shipped Releases
+
+All milestones through v0.7.0 are complete. Highlights per release:
+
+| Release | Key additions |
+|---------|---------------|
+| v0.4.0 | Fixed 5 unregistered tools, pagination crash, GetRootPath, SolutionDiff `\r\n`, SemanticSearch duplicates |
+| v0.5.0 | Fixed wrong answers across analysis tools, TypeHierarchy for interfaces, rename workflow consistency, ReplaceInCode fallback, SemanticSearch correctness |
+| v0.6.0 | Fixed workspace infrastructure (LRU, lock, FSW loop), SolutionDiff O(n²) memory, GetTrivia bounds, DiagnosticsTool single-file scoping |
+| v0.7.0 | `roslyn_get_member_body`, hardened defaults for list_types and find_references, filtering parameters across tools, AGENTS.md update |
+| v0.7.1 | `roslyn_info`, `roslyn_insert_lines`, workspace mode CLI arg (`--workspace sdk\|vs\|adhoc\|auto`) |
+| v0.7.2 | `roslyn_write_file`, `roslyn_local_history`, `BackupStore` (crash-safe backup infrastructure with git branch/commit metadata), NDJSON log format with `response_peek` pipeline, `RoslynMcpJson` shared serializer options (no `\uXXXX` spam), `ToolResults.cs` normalized to PascalCase C# + snake_case JSON, `ToolErrorResult` abstract base record, structured `roslyn_get_diagnostics` response (#111), tool metadata improvements (#112) |
+
+---
+
 ## Milestones
 
 ### v0.4.0-alpha — Fix Crashes and Invisible Tools
@@ -73,10 +88,11 @@ The highest-value new tool, hardened defaults for existing tools, and updated co
 
 Semantic analysis tools that justify RoslynMcp's existence beyond convenience.
 
-| # | Type | Title | Scope | Audit refs |
-|---|------|-------|-------|------------|
-| 18 | feature | Implement call graph tools | `roslyn_find_callers` and `roslyn_get_call_graph` — shared IOperation walking infrastructure | — |
-| 19 | feature | Implement `roslyn_find_unused` and supporting analysis tools | `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`, `roslyn_check_syntax` | — |
+| # | Type | Title | Scope | Refs |
+|---|------|-------|-------|------|
+| 18 | feature | Implement call graph tools | `roslyn_find_callers` and `roslyn_get_call_graph` — shared IOperation walking infrastructure | #32 |
+| 19 | feature | Implement `roslyn_find_unused` and supporting analysis tools | `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`, `roslyn_check_syntax` | #33 |
+| — | enhancement | Additional scope assigned to this milestone | See GitHub issues #99, #114, #117 | #99, #114, #117 |
 
 **Theme:** The "wow" release. Capabilities that text search fundamentally cannot provide.
 
@@ -113,7 +129,7 @@ Whole-file style normalization — testable, inviting feedback, explicitly not b
 Everything from alpha and beta, battle-tested.
 
 **Entry criteria:**
-- All 23 issues closed
+- All planned v1.0.0 issues closed (original 23 audit items plus any subsequently added scope)
 - TestHarness passes on net8.0, net10.0, and net11.0
 - README updated with the full tool list and accurate descriptions
 - No open bugs marked as affecting correctness
