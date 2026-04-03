@@ -30,8 +30,6 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
 		
-		IEnumerable<Dictionary<List<HashSet<string>>, Tuple<int,Guid>>> xxx;
-		
 		// Stateless page token overrides skip/severity — agents don't need to track offsets manually.
 		if(page_token is not null) {
 			
