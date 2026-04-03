@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -81,14 +81,14 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		var result = PaginateAndStore(allMembers, ref skip, take);
 		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} member(s)", new TypeMembersResult(
-			Type_name:     type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-			Type_kind:     type.TypeKind.ToString().ToLowerInvariant(),
-			Total_members: result.Total,
+			TypeName:     type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+			TypeKind:     type.TypeKind.ToString().ToLowerInvariant(),
+			TotalMembers: result.Total,
 			Skip: skip, Take: take,
 			Members:    result.Items,
-			Page_token: result.PageToken,
-			Has_more:   result.HasMore,
-			_caution:   AdhocCaution(projectPath)
+			PageToken: result.PageToken,
+			HasMore:   result.HasMore,
+			Caution:   AdhocCaution(projectPath)
 		));
 	}
 	

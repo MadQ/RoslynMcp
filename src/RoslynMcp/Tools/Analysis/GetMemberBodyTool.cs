@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -80,15 +80,15 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 			));
 		}
 		
-		var totalLines = parts.Cast<MemberBodyPart>().Sum(p => p.End_line - p.Start_line + 1);
+		var totalLines = parts.Cast<MemberBodyPart>().Sum(p => p.EndLine - p.StartLine + 1);
 		
 		return scope.Outcome($"{totalLines} line(s)", syntaxRefs.Length == 1
 			? new MemberBodySingleResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
 				((MemberBodyPart) parts[0]).File,
-				((MemberBodyPart) parts[0]).Start_line,
-				((MemberBodyPart) parts[0]).End_line,
+				((MemberBodyPart) parts[0]).StartLine,
+				((MemberBodyPart) parts[0]).EndLine,
 				((MemberBodyPart) parts[0]).Body,
 				AdhocCaution(projectPath)
 			)

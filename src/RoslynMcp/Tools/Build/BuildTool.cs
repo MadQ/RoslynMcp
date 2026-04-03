@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -71,10 +71,10 @@ internal sealed class BuildTool : RoslynMcpTool
 					Errors:        roslynErrors,
 					Warnings:      roslynWarnings,
 					Source:        "roslyn",
-					Build_skipped: true,
-					Skip_reason:   "Roslyn reported errors — fix these first, then build will run automatically.",
-					Duration_ms:   0,
-					Exit_code:     null
+					BuildSkipped: true,
+					SkipReason:   "Roslyn reported errors — fix these first, then build will run automatically.",
+					DurationMs:   0,
+					ExitCode:     null
 				));
 			}
 		}
@@ -97,11 +97,11 @@ internal sealed class BuildTool : RoslynMcpTool
 				Errors:        (DiagnosticItem[]) [],
 				Warnings:      (DiagnosticItem[]) [],
 				Source:        "msbuild",
-				Build_skipped: true,
-				Skip_reason:   ex.Message,
-				Duration_ms:   0,
-				Exit_code:     null,
-				Error_details: ex.InnerException?.Message
+				BuildSkipped: true,
+				SkipReason:   ex.Message,
+				DurationMs:   0,
+				ExitCode:     null,
+				ErrorDetails: ex.InnerException?.Message
 			));
 		}
 		
@@ -116,10 +116,10 @@ internal sealed class BuildTool : RoslynMcpTool
 			errors,
 			warnings,
 			Source:        "msbuild",
-			Build_skipped: false,
-			Skip_reason:   null,
-			Duration_ms:   (int) elapsed.TotalMilliseconds,
-			Exit_code:     exitCode
+			BuildSkipped: false,
+			SkipReason:   null,
+			DurationMs:   (int) elapsed.TotalMilliseconds,
+			ExitCode:     exitCode
 		));
 	}
 	

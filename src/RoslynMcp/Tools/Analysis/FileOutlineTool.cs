@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -56,12 +56,12 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new FileOutlineResult(
 			File:        Path.GetRelativePath(rootPath, tree.FilePath),
-			Total_types: result.Total,
+			TotalTypes: result.Total,
 			Skip: skip, Take: take,
 			Types:      result.Items,
-			Page_token: result.PageToken,
-			Has_more:   result.HasMore,
-			_caution:   AdhocCaution(projectPath)
+			PageToken: result.PageToken,
+			HasMore:   result.HasMore,
+			Caution:   AdhocCaution(projectPath)
 		));
 	}
 	

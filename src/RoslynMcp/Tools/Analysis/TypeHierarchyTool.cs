@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -73,17 +73,17 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		var result   = PaginateAndStore(combined, ref skip, take);
 		
 		return scope.Outcome($"{result.Items.Length} interface(s)/derived", new TypeHierarchyResult(
-			Type_name:           type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-			Type_kind:           type.TypeKind.ToString().ToLowerInvariant(),
-			Base_types:          baseTypes,
-			Total_interfaces:    allInterfaces.Length,
-			Total_derived_types: allDerived.Length,
+			TypeName:           type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+			TypeKind:           type.TypeKind.ToString().ToLowerInvariant(),
+			BaseTypes:          baseTypes,
+			TotalInterfaces:    allInterfaces.Length,
+			TotalDerivedTypes: allDerived.Length,
 			Skip: skip,
 			Take: take,
-			Interfaces_and_derived: result.Items,
-			Page_token:          result.PageToken,
-			Has_more:            result.HasMore,
-			_caution:            AdhocCaution(projectPath)
+			InterfacesAndDerived: result.Items,
+			PageToken:          result.PageToken,
+			HasMore:            result.HasMore,
+			Caution:            AdhocCaution(projectPath)
 		));
 	}
 	

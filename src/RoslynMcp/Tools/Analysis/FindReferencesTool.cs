@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -102,13 +102,13 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		var result = PaginateAndStore(allResults, ref skip, take);
 		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", new FindReferencesResult(
-			Total_references: result.Total,
-			Symbols_searched: symbolsSearched,
+			TotalReferences: result.Total,
+			SymbolsSearched: symbolsSearched,
 			Skip: skip, Take: take,
 			References: result.Items,
-			Page_token: result.PageToken,
-			Has_more:   result.HasMore,
-			_caution:   AdhocCaution(projectPath)
+			PageToken: result.PageToken,
+			HasMore:   result.HasMore,
+			Caution:   AdhocCaution(projectPath)
 		));
 	}
 

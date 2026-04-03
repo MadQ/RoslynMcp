@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -61,12 +61,12 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		var result = PaginateAndStore(allResults, ref skip, take);
 		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new ListTypesResult(
-			Total_types: result.Total,
+			TotalTypes: result.Total,
 			Skip: skip, Take: take,
 			Types:      result.Items,
-			Page_token: result.PageToken,
-			Has_more:   result.HasMore,
-			_caution:   AdhocCaution(projectPath)
+			PageToken: result.PageToken,
+			HasMore:   result.HasMore,
+			Caution:   AdhocCaution(projectPath)
 		));
 	}
 	

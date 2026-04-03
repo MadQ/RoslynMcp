@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -81,7 +81,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		
 		return scope.Outcome($"{total} file(s)", new LineCountResult(
 			Files:    filesArr,
-			_caution: AdhocCaution(projectPath)
+			Caution: AdhocCaution(projectPath)
 		));
 	}
 

@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -90,11 +90,11 @@ internal sealed class ReadFileTool : RoslynMcpTool
         return scope.Outcome($"{result.Length}/{totalLines} line(s)", new ReadFileResult(
             File:        relative,
             Source:      isCs ? "roslyn" : "disk",
-            Total_lines: totalLines,
-            Start_line:  first,
-            End_line:    last,
+            TotalLines: totalLines,
+            StartLine:  first,
+            EndLine:    last,
             Lines:       result,
-            _caution:    AdhocCaution(projectPath)
+            Caution:    AdhocCaution(projectPath)
         ));
     }
 }

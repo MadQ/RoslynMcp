@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -73,14 +73,14 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var result = PaginateAndStore(allResults, ref skip, take);
 				
 				return scope.Outcome($"{result.Items.Length}/{result.Total} implementation(s)", new FindImplementationsResult(
-					Symbol_type:  typeKind,
-					Symbol_name:  typeName,
-					Total_implementations: result.Total,
+					SymbolType:  typeKind,
+					SymbolName:  typeName,
+					TotalImplementations: result.Total,
 					Skip: skip, Take: take,
 					Implementations: result.Items,
-					Page_token:      result.PageToken,
-					Has_more:        result.HasMore,
-					_caution:        AdhocCaution(projectPath)
+					PageToken:      result.PageToken,
+					HasMore:        result.HasMore,
+					Caution:        AdhocCaution(projectPath)
 				));
 			}
 			
@@ -109,14 +109,14 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var result = PaginateAndStore(allResults, ref skip, take);
 				
 				return scope.Outcome($"{result.Items.Length}/{result.Total} override(s)", new FindOverridesResult(
-					Symbol_type: "method",
-					Symbol_name: methodDisplay,
-					Total_overrides: result.Total,
+					SymbolType: "method",
+					SymbolName: methodDisplay,
+					TotalOverrides: result.Total,
 					Skip: skip, Take: take,
 					Overrides:  result.Items,
-					Page_token: result.PageToken,
-					Has_more:   result.HasMore,
-					_caution:   AdhocCaution(projectPath)
+					PageToken: result.PageToken,
+					HasMore:   result.HasMore,
+					Caution:   AdhocCaution(projectPath)
 				));
 			}
 			

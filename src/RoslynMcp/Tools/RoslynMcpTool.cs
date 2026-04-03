@@ -85,7 +85,7 @@ internal abstract partial class RoslynMcpTool
 				error = new PathErrorResult(
 					"invalid_project_path",
 					$"Path '{projectPath}' does not exist or is not rooted.",
-					Provided_path: projectPath,
+					ProvidedPath: projectPath,
 					Hint: "Use an absolute path (e.g., 'J:\\Projects\\MyProject') or ensure the relative path exists. If you have a valid full path, provide it and the server will cache the association."
 				);
 				logger.LogError("TryGetCompilation", $"Path does not exist: '{projectPath}'");
@@ -253,7 +253,7 @@ internal abstract partial class RoslynMcpTool
 		=> new PathErrorResult(
 			"project_not_found",
 			ex.Message,
-			Search_path: ex.SearchPath,
+			SearchPath: ex.SearchPath,
 			Hint: "Provide a valid projectPath pointing to a directory containing a .csproj file, or the .csproj file itself."
 		);
 	
@@ -265,7 +265,7 @@ internal abstract partial class RoslynMcpTool
 			"multiple_projects_found",
 			ex.Message,
 			Directory: ex.Directory,
-			Found_projects: foundProjects,
+			FoundProjects: foundProjects,
 			Hint: "Specify the exact .csproj file path instead of the directory."
 		);
 	}
@@ -274,8 +274,8 @@ internal abstract partial class RoslynMcpTool
 		=> new PathErrorResult(
 			"ambiguous_file",
 			ex.Message,
-			File_name: ex.FileName,
-			Found_in: ex.CsprojPaths,
+			FileName: ex.FileName,
+			FoundIn: ex.CsprojPaths,
 			Hint: "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
 		);
 	
@@ -283,7 +283,7 @@ internal abstract partial class RoslynMcpTool
 		=> new PathErrorResult(
 			"invalid_project_path",
 			ex.Message,
-			Provided_path: ex.Path,
+			ProvidedPath: ex.Path,
 			Hint: "Ensure the path exists and contains a valid .csproj file."
 		);
 	
@@ -353,8 +353,8 @@ internal abstract partial class RoslynMcpTool
 			Total:      cached.Length,
 			Skip:       skip,
 			Take:       take,
-			Page_token: pageToken!,
-			Has_more:   skip + page.Length < cached.Length
+			PageToken: pageToken!,
+			HasMore:   skip + page.Length < cached.Length
 		));
 	}
 

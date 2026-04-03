@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -92,10 +92,10 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			Diff:                result.Diff!,
 			Token:               token,
 			Message:             $"Review the diff, then call apply_signature_change with token '{token}' and approval 'y' or 'session'.",
-			Parameters_added:    result.ParametersAdded,
-			Deprecation_message: result.DeprecationMessage,
-			Files_affected:      result.FilesAffected,
-			_caution:            AdhocCaution(projectPath)
+			ParametersAdded:    result.ParametersAdded,
+			DeprecationMessage: result.DeprecationMessage,
+			FilesAffected:      result.FilesAffected,
+			Caution:            AdhocCaution(projectPath)
 		));
 	}
 }

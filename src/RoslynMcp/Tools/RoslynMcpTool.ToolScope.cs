@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text.Json;
 using RoslynMcp;
 
@@ -109,7 +109,7 @@ internal abstract partial class RoslynMcpTool
 			MetadataSymbolResult r     => r.Message,
 			ReplaceInFileResult r      => r.Message ?? "error",
 			ReplaceInCodeResult r      => r.Message ?? "error",
-			BuildResult r              => r.Error_details ?? "build failed",
+			BuildResult r              => r.ErrorDetails ?? "build failed",
 			CleanResult r              => r.Message,
 			RestoreResult r            => r.Message,
 			_                          => "error"
