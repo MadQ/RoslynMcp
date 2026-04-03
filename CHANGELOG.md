@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **`roslyn_get_diagnostics` — structured response, pagination, shared types** (#111)
+  - **Breaking:** response is now a structured JSON object instead of a flat `string[]`
+  - Always-present `summary`, `errors`, `warnings`, `total`, `returned`, `has_more`, `page_token`, `items`
+  - `items` is a paginated array of `{ code, severity, file, line, column, message }` objects
+  - `take: 0` fast path — returns summary counts with empty `items`, no compilation overhead
+  - Stateless `page_token` (base64-encoded `{ skip, severity }`) — no server-side cache needed
+  - `severity` filter: `"errors"`, `"warnings"`, or `"all"` (default: errors + warnings)
+  - File paths are now project-relative (consistent with `roslyn_build_project`)
+  - Improved `[Description]` attributes on tool and all parameters
+- **`roslyn_build_project`** — improved tool description; `Errors`/`Warnings` arrays now typed as `DiagnosticItem[]`
+- **`RoslynMcpTool` base class** — added `GetSeverityFilter` and `TryMakeRelative` as `protected static` helpers
+
+---
+
 ## [0.7.1-alpha] — 2026-03-31
 
 ### Added

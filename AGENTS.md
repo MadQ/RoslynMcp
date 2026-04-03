@@ -67,7 +67,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `InsertLinesTool` | `roslyn_insert_lines` — insert lines at a position or anchor pattern |
 | `RespawnTool` | `roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `TypeMembersTool` | `roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
-| `DiagnosticsTool` | `roslyn_get_diagnostics` — compiler errors and warnings for project or single file |
+| `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path |
 | `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
 | `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token |
@@ -142,8 +142,8 @@ When discovering files/content:
 - `roslyn_get_member_body` — use this to read a single method/property instead of `roslyn_read_file` on the whole file
 - `roslyn_find_references` — without `containingType`, searches ALL symbols matching the name (union of results). Use `containingType` to narrow.
 - `roslyn_list_types` — without `namespaceFilter`, returns only project-defined types (not framework). Use `namespaceFilter` for sub-namespace scoping.
-- `roslyn_get_diagnostics` — use `severity: "errors"` for fast error-only checks during editing
-- `roslyn_build_project` — checks Roslyn diagnostics first (~17ms). Only runs `dotnet build` if Roslyn is clean.
+- `roslyn_get_diagnostics` — use `severity: "errors"` or `take: 0` for a fast error-only check during editing
+- `roslyn_build_project` — checks Roslyn diagnostics first (fast, in-process). Only runs `dotnet build` if Roslyn is clean.
 - Paginated tools return `page_token` + `has_more` — pass the token back to get subsequent pages without re-executing the query.
 
 ---

@@ -2,6 +2,16 @@ namespace RoslynMcp.Tools;
 
 // ── Shared ──────────────────────────────────────────────────────────────────
 
+/// <summary>A single compiler diagnostic item returned by <c>roslyn_get_diagnostics</c> and <c>roslyn_build_project</c>.</summary>
+internal sealed record DiagnosticItem(
+	string  Code,
+	string  Severity,
+	string? File,
+	int     Line,
+	int     Column,
+	string  Message
+);
+
 /// <summary>Cached page response from <see cref="RoslynMcpTool.TryServeCachedPage{T}"/>.</summary>
 internal sealed record CachedPageResult<T>(
 	T[]    Items,
@@ -316,10 +326,12 @@ internal sealed record DiscoveryNoMatchResult(
 
 internal sealed record DetailedErrorResult(string Error, string Details);
 
+// ── Build tools ─────────────────────────────────────────────────────────────
+
 internal sealed record BuildResult(
-	bool     Succeeded,
-	object[] Errors,
-	object[] Warnings,
+	bool             Succeeded,
+	DiagnosticItem[] Errors,
+	DiagnosticItem[] Warnings,
 	string   Source,
 	bool     Build_skipped,
 	string?  Skip_reason,

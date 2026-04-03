@@ -461,6 +461,34 @@ internal abstract partial class RoslynMcpTool
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 
+	/// <summary>Returns a predicate for <see cref="Diagnostic"/> based on the severity string from a tool parameter.</summary>
+	protected static Func<Diagnostic, bool> GetSeverityFilter(string? severity) =>
+		severity?.ToLowerInvariant() switch {
+			"errors"   => static d => d.Severity == DiagnosticSeverity.Error,
+			"warnings" => static d => d.Severity == DiagnosticSeverity.Warning,
+
+			// Info and Hidden are deferred — see #111 and #110.
+			_          => static d => d.Severity >= DiagnosticSeverity.Warning
+		};
+
+	/// <summary>
+	///     Returns a project-relative path. Falls back to the original absolute path when
+	///     relativization fails (e.g. paths on different drives on Windows).
+	/// </summary>
+	protected static string? TryMakeRelative(string? path, string rootPath)
+	{
+		if(string.IsNullOrEmpty(path))
+			return null;
+
+		try {
+			return Path.GetRelativePath(rootPath, path);
+		}
+		catch(ArgumentException) {
+
+			return path;
+		}
+	}
+
 	/// <summary>
 	///     Resolves a symbol by name from a compilation. When <paramref name="containingType"/> is
 	///     provided, searches that type's members. Otherwise tries type-first lookup (metadata name →
