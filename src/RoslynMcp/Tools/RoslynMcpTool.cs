@@ -484,7 +484,7 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive = true)
 	{
-		var escaped = Regex.Escape(pattern).Replace("\n", @"\r?\n");
+		var escaped = Regex.Escape(pattern).Replace(@"\n", @"\r?\n");
 		var options = RegexOptions.Compiled;
 
 		if(!caseSensitive)
