@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
@@ -28,12 +28,12 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
 			
-			return scope.Error(new RestoreResult(false, "Failed to access project directory.", ex.Message));
+			return scope.Failed("Failed to access project directory.", new RestoreResult(false, "Failed to access project directory.", ex.Message));
 		}
 		
 		if(projectFile is null)
 			
-			return scope.Error(new RestoreResult(false, "No .csproj file found in target directory.", null));
+			return scope.Failed("No .csproj file found in target directory.", new RestoreResult(false, "No .csproj file found in target directory.", null));
 		
 		var startInfo = new ProcessStartInfo
 		{
@@ -53,11 +53,11 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 		}
 		catch(Win32Exception ex) {
 			
-			return scope.Error(new RestoreResult(false, "Failed to start dotnet process. Is dotnet installed and in PATH?", ex.Message));
+			return scope.Failed("Failed to start dotnet process. Is dotnet installed and in PATH?", new RestoreResult(false, "Failed to start dotnet process. Is dotnet installed and in PATH?", ex.Message));
 		}
 		catch(InvalidOperationException ex) {
 			
-			return scope.Error(new RestoreResult(false, "Failed to start dotnet restore process.", ex.Message));
+			return scope.Failed("Failed to start dotnet restore process.", new RestoreResult(false, "Failed to start dotnet restore process.", ex.Message));
 		}
 		
 		string output, error;
@@ -70,7 +70,7 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 		}
 		catch(IOException ex) {
 			
-			return scope.Error(new RestoreResult(false, "Failed to read process output.", ex.Message));
+			return scope.Failed("Failed to read process output.", new RestoreResult(false, "Failed to read process output.", ex.Message));
 		}
 		
 		var success = process.ExitCode == 0;

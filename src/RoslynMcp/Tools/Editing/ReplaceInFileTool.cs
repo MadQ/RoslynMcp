@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 
@@ -89,7 +89,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		if(matches.Count == 0) {
 			
-			return scope.Error(new ReplaceInFileResult(false, 0, [], "No matches found."));
+			return scope.Failed("No matches found.", new ReplaceInFileResult(false, 0, [], "No matches found."));
 		}
 		
 		if(dryRun) {

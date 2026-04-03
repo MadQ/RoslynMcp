@@ -70,10 +70,10 @@ internal abstract partial class RoslynMcpTool
 		public void Failed(string reason) { failed = true; detail = reason; }
 
 		/// <summary>Marks the invocation as failed, estimates tokens, and returns the error result for fluent use.</summary>
-		public T Error<T>(T returnValue)
+		public T Error<T>(T returnValue) where T : ToolErrorResult
 		{
 			failed                          = true;
-			detail                          = ExtractDetail(returnValue);
+			detail                          = returnValue.Error ?? "error";
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			return returnValue;
 		}
@@ -96,26 +96,8 @@ internal abstract partial class RoslynMcpTool
 			onDispose();
 		}
 
-		/// <summary>
-/// <summary>
-		///     Extracts a human-readable detail string from a failed tool result.
-		///     Handles concrete result types that carry a meaningful failure message beyond
-		///     the generic <see cref="ErrorResult"/> used by most error paths.
-		/// </summary>
-		static string ExtractDetail<T>(T returnValue) => returnValue switch {
-			ErrorResult r              => r.Error,
-			ReplaceInCodeSyntaxError r => r.Error,
-			DetailedErrorResult r      => r.Error,
-			MetadataSymbolResult r     => r.Message,
-			ReplaceInFileResult r      => r.Message ?? "error",
-			ReplaceInCodeResult r      => r.Message ?? "error",
-			BuildResult r              => r.ErrorDetails ?? "build failed",
-			CleanResult r              => r.Message,
-			RestoreResult r            => r.Message,
-			_                          => "error"
-		};
-
 		
+		/// <summary>
 		///     Serializes the response to JSON, returns the token estimate and a truncated peek string.
 		///     The peek is capped at 600 chars — enough for the log viewer to show meaningful content.
 		/// </summary>

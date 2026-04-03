@@ -112,7 +112,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		}
 
 		if(matchedNodes.Length == 0)
-			return scope.Error(new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
+			return scope.Failed("No matching nodes found.", new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
 
 		var changedNodeInfo = matchedNodes.Select(n => {
 

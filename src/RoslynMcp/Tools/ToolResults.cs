@@ -159,8 +159,8 @@ internal sealed record MetadataSymbolResult(
 	[property: JsonPropertyName("symbol_name")] string SymbolName,
 	[property: JsonPropertyName("symbol_kind")] string SymbolKind,
 	[property: JsonPropertyName("location")]    string Location,
-	[property: JsonPropertyName("message")]     string Message
-);
+	[property: JsonPropertyName("error")]       string Error
+) : ToolErrorResult;
 
 internal sealed record SymbolDefinitionResult(
 	[property: JsonPropertyName("symbol_name")] string  SymbolName,
@@ -188,8 +188,8 @@ internal sealed record SymbolDocumentationEmptyResult(
 	[property: JsonPropertyName("symbol_name")]  string  SymbolName,
 	[property: JsonPropertyName("symbol_kind")]  string  SymbolKind,
 	[property: JsonPropertyName("documentation")] string? Documentation,
-	[property: JsonPropertyName("message")]      string  Message
-);
+	[property: JsonPropertyName("error")]        string  Error
+) : ToolErrorResult;
 
 internal sealed record SymbolInfoResult(
 	[property: JsonPropertyName("kind")]             string  Kind,
@@ -240,7 +240,7 @@ internal sealed record GetTriviaNoMatchResult(
 	[property: JsonPropertyName("hint")]         string   Hint,
 	[property: JsonPropertyName("provided_kind")] string  ProvidedKind,
 	[property: JsonPropertyName("common_kinds")] string[] CommonKinds
-);
+) : ToolErrorResult;
 
 internal sealed record TriviaNodeSpan(
 	[property: JsonPropertyName("start")]      int Start,
@@ -350,7 +350,7 @@ internal sealed record DiscoveryNoMatchResult(
 internal sealed record DetailedErrorResult(
 	[property: JsonPropertyName("error")]   string Error,
 	[property: JsonPropertyName("details")] string Details
-);
+) : ToolErrorResult;
 
 // ── Build tools ─────────────────────────────────────────────────────────────
 
@@ -384,7 +384,7 @@ internal sealed record ReplaceInCodeSyntaxError(
 	[property: JsonPropertyName("error")]        string   Error,
 	[property: JsonPropertyName("details")]      string   Details,
 	[property: JsonPropertyName("changed_nodes")] object[]? ChangedNodes = null
-);
+) : ToolErrorResult;
 
 internal sealed record RespawnResult(
 	[property: JsonPropertyName("message")] string Message,

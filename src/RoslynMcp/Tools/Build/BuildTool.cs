@@ -66,11 +66,11 @@ internal sealed class BuildTool : RoslynMcpTool
 				
 				DiagnosticItem[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
 				
-				return scope.Error(new BuildResult(
-					Succeeded:     false,
-					Errors:        roslynErrors,
-					Warnings:      roslynWarnings,
-					Source:        "roslyn",
+				return scope.Failed("Roslyn reported errors — fix these first, then build will run automatically.", new BuildResult(
+					Succeeded:    false,
+					Errors:       roslynErrors,
+					Warnings:     roslynWarnings,
+					Source:       "roslyn",
 					BuildSkipped: true,
 					SkipReason:   "Roslyn reported errors — fix these first, then build will run automatically.",
 					DurationMs:   0,
@@ -92,7 +92,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		catch(InvalidOperationException ex) {
 			
-			return scope.Error(new BuildResult(
+			return scope.Failed(ex.Message, new BuildResult(
 				Succeeded:     false,
 				Errors:        (DiagnosticItem[]) [],
 				Warnings:      (DiagnosticItem[]) [],
