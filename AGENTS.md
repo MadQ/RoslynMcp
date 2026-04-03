@@ -37,7 +37,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Type** | Model Context Protocol (MCP) server — stdio transport |
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
-| **Version** | 0.7.1-alpha (pre-1.0) |
+| **Version** | 0.7.2-alpha (pre-1.0) |
 | **Tool Count** | 33 MCP tools (31 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
