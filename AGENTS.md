@@ -72,7 +72,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
 | `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token |
 | `ApplyRenameTool` | `roslyn_apply_rename` — approve/reject a pending rename by token |
-| `ChangeSignatureTool` | `roslyn_change_signature` — add parameters with non-breaking forwarding overload |
+| `ChangeSignatureTool` | `roslyn_change_signature` — preview adding parameters with a non-breaking forwarding overload; returns unified diff + token (ReadOnly — never writes) |
 | `ApplySignatureChangeTool` | `roslyn_apply_signature_change` — apply or reject a previewed signature change |
 | `ProjectInfoTool` | `roslyn_get_project_info` — project metadata (TFM, language version, packages, etc.) |
 | `BuildTool` | `roslyn_build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true` |
@@ -91,6 +91,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name; handles partial types |
 | `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `InfoTool` | `roslyn_info` — server version, PID, uptime, MSBuild discovery method, log markers |
+| `DebugAttachTool` | `roslyn_debug_attach` (DEBUG only) — launches the JIT debugger dialog so Visual Studio can attach; blocks the server until dismissed or attached |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 
@@ -141,10 +142,13 @@ When discovering files/content:
 
 **Tool tips:**
 - `roslyn_get_member_body` — use this to read a single method/property instead of `roslyn_read_file` on the whole file
+- `roslyn_get_file_outline` — use to understand a file's type/member structure (signatures only, no bodies); more token-efficient than `roslyn_read_file` for exploration
 - `roslyn_find_references` — without `containingType`, searches ALL symbols matching the name (union of results). Use `containingType` to narrow.
 - `roslyn_list_types` — without `namespaceFilter`, returns only project-defined types (not framework). Use `namespaceFilter` for sub-namespace scoping.
 - `roslyn_get_diagnostics` — use `severity: "errors"` or `take: 0` for a fast error-only check during editing
 - `roslyn_build_project` — checks Roslyn diagnostics first (fast, in-process). Only runs `dotnet build` if Roslyn is clean.
+- `roslyn_preview_rename` / `roslyn_apply_rename` — always call preview first; renames can affect dozens of files. The token from preview is required by apply.
+- `roslyn_change_signature` / `roslyn_apply_signature_change` — same two-step pattern as rename: preview returns a diff + token, apply commits it.
 - Paginated tools return `page_token` + `has_more` — pass the token back to get subsequent pages without re-executing the query.
 
 ---
