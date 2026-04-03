@@ -214,6 +214,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	{
 		return [..
 			compilation.GetDiagnostics()
+				.Where(d => IsUnderRoot(d, rootPath))
 				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
 				.Where(d => !IgnoredDiagnostics.Contains(d.Id))
 				.Select(d => ConvertRoslynDiagnostic(d, rootPath))
