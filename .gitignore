@@ -409,5 +409,9 @@ docs/github-issues/
 scripts/
 !scripts/enforce-roslyn-tools.sh
 
+# Developer convenience scripts (local only, not part of the repo)
+pub.ps1
+src/RoslynMcp.LogViewer/drLoop.cmd
+
 # Release artifacts
 RoslynMcp-v*.zip
