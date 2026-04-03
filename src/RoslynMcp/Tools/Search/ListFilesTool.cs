@@ -9,6 +9,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 {
 	public ListFilesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
+	[McpServerTool(Name = "roslyn_list_files", ReadOnly = true, Title = "List Files", OpenWorld = false, Idempotent = true)]
 	public object ListFiles(
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Glob pattern (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). Default: '**/*'.")] string? pattern = null,

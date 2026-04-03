@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 33 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 35 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
