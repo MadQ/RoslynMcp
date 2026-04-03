@@ -1,69 +1,84 @@
 # Session Handoff
 
-**2026-04-03 11:38 EDT (Eastern Daylight Time)**
+**2026-04-03 14:50 EDT (Eastern Daylight Time)**
 
 ---
 
 ## Executive Summary
 
-Two focused bug-fix sessions on `dev`. Shipped the description improvements initiative (#112, all 33 tools), then fixed two bugs discovered during TestHarness: external-file diagnostic noise (#113) and a `SolutionDiff.BuildHunkList` infinite loop (#115). Filed #114 (IsUnderRoot improvement) for a future pass. Also uncovered and fixed a stale TestHarness validator for the reworked `roslyn_get_diagnostics` response shape. TestHarness: 41/41 passing.
+Long session finishing the logging initiative and polishing the LogViewer. Shipped NDJSON structured logging with a `response_peek` pipeline, then spent the bulk of the session iterating on the LogViewer UI: Win95 `[+]`/`[-]` boxes, tree lines, local time, double-click selection fix, and a full JSON + C# syntax highlighting system with rainbow bracket coloring. Also cleaned up docs (CHANGELOG, README, HANDOFF) and filed/updated issue #118.
 
 ## Current State
 
 - **Branch:** `dev` — clean, pushed, up to date with origin
-- **Version:** `v0.7.1-alpha` (not yet tagged)
-- **Tests:** 41/41 passing
+- **Version:** `v0.7.2-alpha` (not yet tagged)
+- **Tests:** Not re-run this session (no server-side logic changes; LogViewer is pure HTML/JS)
 - **Stash:** 27 files of pre-existing style changes stashed as `"style: semicolons-on-own-lines + blank line pass (suspended — resume later)"` — do NOT pop until style pass suspension is lifted
-- **Next initiative:** Logging improvements (structured JSON format, log viewer readability)
+- **pub.ps1:** Convenience publish script at repo root (kill RoslynMcpA.exe → dotnet publish → copy exe). Re-run after any server-side C# changes.
 
 ## Completed This Session
 
-### Feature Branch: `feature/description-improvements` (merged, deleted)
-- t1–t4 complete: Title/OpenWorld/Idempotent/Destructive attributes + description rewrites across all 33 tools + AGENTS.md sync
-- GH issue #112 filed and closed, milestone `v0.7.2` created
-- RELEASE_CHECKLIST.md versioning conventions documented
-- CHANGELOG.md `[Unreleased]` section added for #112
+### Feature Branch: `feature/logviewer-polish` (merged → dev, #118)
 
-### Bug Fix: `feature/filter-external-diagnostics` (merged, deleted)
-- **#113**: `roslyn_get_diagnostics` and `roslyn_build_project` were surfacing diagnostics from files outside the project root (e.g. HTML/CSS open in VS from unrelated directories)
-- Fix: `IsUnderRoot(Diagnostic, string)` helper on `RoslynMcpTool` base class, filters by `SourceTree.FilePath.StartsWith(rootPath)`
-- **#114** filed (enhancement): tighten filter with `LocationKind` + path separator guard — not yet implemented, tracked for future
-- `IsUnderRoot` comment references #114 with the gap description and proposed logic
+**Server-side (response_peek pipeline):**
+- `LogEntry.cs`: `ResponsePeek` property in shared NDJSON schema
+- `FileLogger.cs`: `responsePeek` param on `LogTool`
+- `RoslynMcpTool.ToolScope.cs`: `SerializeResponse<T>` captures peek (600 char cap); passed through `Outcome`/`Error`/`Failed`
+- `DiagnosticsTool.cs`: minor follow-on adjustment
 
-### Bug Fix: `SolutionDiff.BuildHunkList` infinite loop (on `dev` directly)
-- **#115**: Infinite loop when new file is shorter than old — `inLcs[lcsIdx]` true but `ni` exhausted, neither branch fired
-- Fix: treat such old lines as deletions (`ni >= newLen` added to deletion guard)
-- Also cached `oldLen`/`newLen`/`lcsLen` locals, fixed indentation from bad prior insert
-- TestHarness `roslyn_get_diagnostics` validator updated (response shape changed from array → object in the diagnostics rework)
-- Issue #115 filed and immediately closed referencing commit `3e115df`
+**Viewer (`viewer.html`) — UI polish:**
+- Expand chevron moved to leftmost column (tree-view layout)
+- Local time via `fmtLocalTime()` (was UTC slice)
+- Win95-style `[+]`/`[-]` boxes (Parchment only, pure CSS `:has()`, `position: absolute` pseudo-element for zero row-height impact)
+- Parchment dotted tree lines aligned to box center (`margin-left: calc(8px + 1ch)`)
+- Double-click clears accidental text selection (`removeAllRanges()`); text remains normally selectable
 
-### Housekeeping
-- Stashed 27 style-only files; committed `Program.cs` grumble comment removal separately
-- Style passes remain suspended — do not run `Test-CodeStyle.ps1 -Fix`
+**Viewer — syntax highlighting:**
+- `renderJSON()`: recursive walker, colored `jk`/`js`/`jn`/`jb`/`jz` spans; multi-line string values → C# code blocks
+- `highlightCSharp()`: two-pass tokenizer — atomic pass strips strings/comments, `colorBetween()` applies keywords/numbers/rainbow brackets on raw segments
+- Rainbow brackets: `(`, `)`, `{`, `}`, `[`, `]` cycle 3 colors by nesting depth (`rb0`/`rb1`/`rb2`); `<`/`>` excluded (ambiguous with comparison operators)
+- `highlightJSON()`: full parse+render, falls back to regex coloring for truncated/invalid JSON
+- Response peek simplified: server caps at 600 chars, client threshold removed
+- "Show full" on raw log entry also uses `highlightJSON`
+
+**Tooling:**
+- `pub.ps1`: convenience publish script
+- `drLoop.cmd`: dev loop helper
+
+### Docs
+- CHANGELOG.md: `[0.7.2-alpha]` section added (promoted from Unreleased + LogViewer additions)
+- README.md: "Log Viewer" section added
+- Issue #118 filed for LogViewer feature + remaining tweaks
 
 ## Open Issues / Next Steps
 
-| # | Title | Status |
-|---|-------|--------|
-| #114 | tighten IsUnderRoot (LocationKind + separator guard) | open, enhancement, no milestone |
-| logging initiative | structured JSON log format, log viewer readability | not started |
+| # | Title | Notes |
+|---|-------|-------|
+| #118 | LogViewer polish (ongoing) | Nested JSON, filter bar, keyboard nav, more UI tweaks |
+| #116 | `roslyn_write_file` tool | Pending todo; atomic write, createNew flag, encoding detection |
+| #117 | Expose version/MSBuild props in `roslyn_get_project_info` | Enhancement |
+| #114 | Tighten `IsUnderRoot` (LocationKind + separator guard) | Small cleanup |
+| #110 | `roslyn_apply_code_fix` | Larger feature |
+| #105 | `change_signature` test hang | Performance/bug |
+| #86  | Shared workspace service (named pipes) | Architecture |
 
-### Logging Initiative (next up)
-Per prior ScratchPad notes: FileLogger output readability + structured JSON format for log viewer integration. No issue filed yet — create one at session start.
+**Most logical next:** `roslyn_write_file` (#116) — it's already tracked as a pending todo and is self-contained.
 
 ## Key Technical Decisions
 
-- **IsUnderRoot uses path prefix** (not `LocationKind`) — simpler, works for the common case. `LocationKind` approach deferred to #114.
-- **`SolutionDiff` fix**: treat LCS-matched-but-unreachable old lines as deletions — correct because the paired new line was already consumed.
-- **Style suspension**: stash over commit to keep history clean; lift explicitly when ready for a style pass.
-- **Git workflow**: direct push to `dev` from personal account (bypassing branch protection). Two-account fork PR flow available from work PC.
-- **Milestones**: `v0.7.2` (no suffix); tags use `v0.7.2-alpha`. Pre-1.0: MINOR for new surface, PATCH for polish/fixes.
+- **`:has()` for stateful CSS**: `[data-theme="parchment"] .entry-wrap:has(.entry-detail:not(.hidden)) .col-expand::before { content: '-'; }` — switches `+`→`-` purely in CSS. Works in all modern browsers.
+- **`position: absolute` on `::before`**: Takes box out of document flow — zero row height inflation.
+- **`color: transparent !important`**: Needed to beat `.entry-wrap.selected * { color: #fff !important }` cascade in Parchment.
+- **`line-height: 1` in flex pseudo-elements**: Collapses font metric space so `align-items: center` is geometrically accurate.
+- **Two-pass C# highlighter**: HTML-escaping happens inside `colorBetween()` on raw text segments before span tags are added — prevents `class` keyword inside `<span class="...">` from being re-highlighted.
+- **Rainbow depth persists via closure**: `depth` variable is closed over by `colorBetween()` so bracket depth is consistent across multiple raw-text segments in one `highlightCSharp()` call.
 
 ## Context for Resuming
 
 - CWD: `J:\Projects\RoslynMcp` — never `cd`, it triggers permission prompts
-- Kill any stale `RoslynMcp.exe` before running TestHarness (file lock on the exe)
-- `gh.exe` globally allowed; US Eastern time
+- Style passes suspended — do NOT run `Test-CodeStyle.ps1 -Fix`
+- `roslyn_build_project` has a known false-failure bug — use `roslyn_get_diagnostics` for error checks
+- `pub.ps1` at repo root: re-run after server-side C# changes to update `RoslynMcpA.exe`
 - Dogfood roslyn_* tools always; terminal is last resort
-- Do NOT run `Test-CodeStyle.ps1 -Fix` (style pass suspended)
-- MCP server auto-reconnects; rebuild/republish after source changes if using published exe
+- US Eastern time; `gh.exe` globally allowed
+

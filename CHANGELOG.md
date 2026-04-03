@@ -9,14 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
+---
 
+## [0.7.2-alpha] — 2026-04-03
+
+### Added
+- **NDJSON log viewer** — `src/RoslynMcp.LogViewer/viewer.html`: self-contained browser-based log viewer (#118)
+  - Tree-view expand/collapse with chevron-left layout
+  - Win95-style `[+]`/`[-]` expand boxes (Parchment theme, pure CSS `:has()`)
+  - Parchment dotted tree lines aligned to box center; local time display
+  - Double-click clears accidental text selection; text remains normally selectable
+  - JSON syntax highlighting: recursive `renderJSON()` walker with colored keys/strings/numbers/booleans/null
+  - C# syntax highlighting: two-pass tokenizer (atomic strings/comments first, then keywords/numbers/brackets)
+  - Rainbow bracket coloring: `(`, `)`, `{`, `}`, `[`, `]` cycle 3 colors by nesting depth
+  - Embedded C# code blocks (multi-line string values) detected and rendered as `<pre>` blocks
+  - Graceful fallback for truncated/invalid JSON in `highlightJSON()`
+- **`response_peek` pipeline** — tool responses now captured and surfaced in the log viewer (#118)
+  - `LogEntry.ResponsePeek` property in shared NDJSON schema
+  - `FileLogger.LogTool` gains `responsePeek` parameter
+  - `RoslynMcpTool.SerializeResponse<T>` captures peek (600 char cap, truncated with `…`)
+  - `Outcome`/`Error`/`Failed` all pass peek through to the logger
+
+### Changed
 - **Tool metadata improvements — all 33 tools** (#112)
   - Added `Title` (Title Case display names), `OpenWorld = false`, `Idempotent = true` (read-only tools), `Destructive = false` (additive/non-destructive tools) to all tool attributes
   - Rewrote all `[Description]` strings with agent-centric framing: concise first sentence, key parameters, return shape, performance notes, caveats
-  - Correctness fixes: `ChangeSignatureTool` `ReadOnly = true`, `InsertLinesTool` `Destructive = false`, `BuildTool` remove incorrect `ReadOnly = true`, `ReplaceInFileTool` remove stale XML doc
-  - AGENTS.md: added missing `DebugAttachTool` entry, clarified `ChangeSignatureTool` preview-only, added tool tips
-
+  - Correctness fixes: `ChangeSignatureTool` `ReadOnly = true`, `InsertLinesTool` `Destructive = false`, `BuildTool` remove incorrect `ReadOnly = true`, `ReplaceInFileTool` stale XML doc removed
+  - AGENTS.md: added missing `DebugAttachTool` entry, clarified `ChangeSignatureTool` as preview-only, added tool tips
 - **`roslyn_get_diagnostics` — structured response, pagination, shared types** (#111)
   - **Breaking:** response is now a structured JSON object instead of a flat `string[]`
   - Always-present `summary`, `errors`, `warnings`, `total`, `returned`, `has_more`, `page_token`, `items`
@@ -24,14 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `take: 0` fast path — returns summary counts with empty `items`, no compilation overhead
   - Stateless `page_token` (base64-encoded `{ skip, severity }`) — no server-side cache needed
   - `severity` filter: `"errors"`, `"warnings"`, or `"all"` (default: errors + warnings)
-  - File paths are now project-relative (consistent with `roslyn_build_project`)
-  - Improved `[Description]` attributes on tool and all parameters
+  - File paths now project-relative (consistent with `roslyn_build_project`)
 - **`roslyn_build_project`** — improved tool description; `Errors`/`Warnings` arrays now typed as `DiagnosticItem[]`
 - **`RoslynMcpTool` base class** — added `GetSeverityFilter` and `TryMakeRelative` as `protected static` helpers
 
+### Fixed
+- **External diagnostics noise** (#113) — `roslyn_get_diagnostics` and `roslyn_build_project` no longer surface diagnostics from files outside the project root (e.g. files open in VS from unrelated directories); `IsUnderRoot` helper added to `RoslynMcpTool` base class
+- **`SolutionDiff.BuildHunkList` infinite loop** (#115) — loop hung when new file is shorter than old; LCS-matched old lines with exhausted `ni` now correctly treated as deletions
+
 ---
 
-## [0.7.1-alpha] — 2026-03-31
+## [0.7.1-alpha]— 2026-03-31
 
 ### Added
 - **`roslyn_info` tool** — server version, PID, uptime, MSBuild discovery method, log markers. `roslyn_info clear` clears the LogViewer.
