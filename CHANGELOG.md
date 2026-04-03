@@ -9,23 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.7.3-alpha] — 2026-04-04
+
 ### Added
-- **`roslyn_write_file`** — atomically write or create any file within the project root (#116)
-  - Atomic write via temp-file + `File.Move(overwrite: true)` — no partial writes
-  - Automatic pre-write backup; returns a `backupToken` usable with `roslyn_local_history` for undo
-  - BOM-preserving: sniffs existing encoding on overwrite; new `.cs` files default to UTF-8 BOM (VS default)
-  - `createNew: true` mode for file creation; path traversal guard via `TryResolveTargetPath`
-  - SDK-style projects: new `.cs` files in the project directory are auto-included (no `.csproj` edit needed)
-- **`roslyn_local_history`** — crash-safe token-based undo for file write operations (#116)
-  - `action: list` — list backup snapshots for a file (or all files)
-  - `action: preview` — inspect a backup by token; includes `conflictRisk` flag if file was modified since backup
-  - `action: apply` — restore a file from a backup token; invalidates workspace cache on success; returns conflict details if the current file diverges
-- **`BackupStore`** — crash-recoverable backup infrastructure (#116)
-  - Snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\{path-hash}/`; override with `ROSLYNMCP_BACKUP_PATH` env var
-  - Token format: `{8-char-path-hash}_{unix-ms}` — unique, multi-level, crash-recoverable without server state
-  - File hash in `meta.json` for dedup (skip backup if identical content), conflict detection, and integrity checks
-  - Retention: max 10 snapshots per file; oldest pruned automatically on write
-  - `TryResolveTargetPath` added to `RoslynMcpTool` base class: validates path stays under root without requiring file existence
+- **`BackupStore`** — now records `gitBranch` and `gitCommit` at snapshot time via `git rev-parse` (#122)
+- **`RoslynMcpJson`** — new static class with shared `JsonSerializerOptions` used by all serialization (#123)
+  - Custom `JavaScriptEncoder` using `TextEncoderSettings` — allows all Unicode through instead of escaping as `\uXXXX`; still escapes what is actually necessary
+  - Literal `\n` in JSON string values now preserved (not double-escaped)
+- **`ToolErrorResult`** — abstract base record in `ErrorResult.cs`; all structured error types now derive from it, replacing the `ExtractDetail` switch (#125)
+
+### Changed
+- **`roslyn_local_history`** — `list` action now includes a `_caution` field when any backup was taken on a different branch than the current one (#122)
+- **`roslyn_local_history` and `roslyn_write_file`** — tool descriptions updated with branch-agnostic caution notes (#122)
+- **`ToolResults.cs`** — all ~51 result records converted to positional syntax with `[property: JsonPropertyName("snake_case")]` attributes; C# names normalized to PascalCase (#124)
+  - Snake_hybrid C# names (e.g. `Symbol_name`) → PascalCase (e.g. `SymbolName`)
+  - `_caution` → `Caution` in C# (JSON key `_caution` preserved via attribute)
+  - `MetadataSymbolResult.Message` → `Error`, JSON key `message` → `error`
+  - `SymbolDocumentationEmptyResult.Message` → `Error`, JSON key `message` → `error`
+- **`ToolScope.Error<T>()`** — gains `where T : ToolErrorResult` constraint; body simplified to `returnValue.Error` (#125)
+- **Operation-type results** — Build/Clean/Restore/ReplaceInFile/ReplaceInCode now use `scope.Failed(reason, result)` instead of `scope.Error(result)` (#125)
+- **`ExtractDetail<T>()` switch** — deleted entirely; replaced by `ToolErrorResult` abstract base record (#125)
+
+### Fixed
+- **`BuildLiteralRegex` newline normalization** — CRLF-tolerance was a no-op: `Regex.Escape` converts literal `\n` to the two-char sequence `\n`, so the subsequent `.Replace("\n", ...)` searching for the actual newline char never matched; fix: `.Replace(@"\n", @"\r?\n")` (#126)
+- **`ToolErrorResult.Error`** — made non-nullable (`string?` → `string`); aligns with all derived types; dead `?? "error"` fallback removed from `ToolScope.Error<T>()` (#126)
 
 ---
 
@@ -47,6 +56,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `FileLogger.LogTool` gains `responsePeek` parameter
   - `RoslynMcpTool.SerializeResponse<T>` captures peek (600 char cap, truncated with `…`)
   - `Outcome`/`Error`/`Failed` all pass peek through to the logger
+- **`roslyn_write_file`** — atomically write or create any file within the project root (#116)
+  - Atomic write via temp-file + `File.Move(overwrite: true)` — no partial writes
+  - Automatic pre-write backup; returns a `backupToken` usable with `roslyn_local_history` for undo
+  - BOM-preserving: sniffs existing encoding on overwrite; new `.cs` files default to UTF-8 BOM (VS default)
+  - `createNew: true` mode for file creation; path traversal guard via `TryResolveTargetPath`
+  - SDK-style projects: new `.cs` files in the project directory are auto-included (no `.csproj` edit needed)
+- **`roslyn_local_history`** — crash-safe token-based undo for file write operations (#116)
+  - `action: list` — list backup snapshots for a file (or all files)
+  - `action: preview` — inspect a backup by token; includes `conflictRisk` flag if file was modified since backup
+  - `action: apply` — restore a file from a backup token; invalidates workspace cache on success; returns conflict details if the current file diverges
+- **`BackupStore`** — crash-recoverable backup infrastructure (#116)
+  - Snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\{path-hash}/`; override with `ROSLYNMCP_BACKUP_PATH` env var
+  - Token format: `{8-char-path-hash}_{unix-ms}` — unique, multi-level, crash-recoverable without server state
+  - File hash in `meta.json` for dedup (skip backup if identical content), conflict detection, and integrity checks
+  - Retention: max 10 snapshots per file; oldest pruned automatically on write
+  - `TryResolveTargetPath` added to `RoslynMcpTool` base class: validates path stays under root without requiring file existence
 
 ### Changed
 - **Tool metadata improvements — all 33 tools** (#112)
