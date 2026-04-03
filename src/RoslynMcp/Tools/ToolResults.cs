@@ -1,4 +1,4 @@
-namespace RoslynMcp.Tools;
+﻿namespace RoslynMcp.Tools;
 
 // ── Shared ──────────────────────────────────────────────────────────────────
 
@@ -274,7 +274,7 @@ internal sealed record ListFilesResult(
 	string?  _caution
 );
 
-internal sealed record ListFilesEmptyResult(string[] Files, int Count, string? _caution);
+internal sealed record ListFilesEmptyResult(string[] Files, int Count, string[]? CloseMatches, string? _caution);
 
 internal sealed record SearchFilesResult(
 	object[] Matches,
