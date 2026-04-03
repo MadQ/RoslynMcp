@@ -1,8 +1,10 @@
 ﻿using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.RegularExpressions;
+using System.Text.Json;
 
 namespace RoslynMcp.LogViewer;
+
+using RoslynMcp;
 
 /// <summary>
 ///     Tails a RoslynMcp log file and yields parsed entries as they are appended.
@@ -11,24 +13,6 @@ namespace RoslynMcp.LogViewer;
 /// </summary>
 sealed class LogTailer
 {
-	// Format: [14:30:45.123] [12345] [TOOL  ] MSB OK  142ms get_type_members  WorkspaceManager — 18/18 member(s)
-	// Also supports old format without PID: [14:30:45.123] [TOOL  ] ...
-	static readonly Regex LinePattern = new(
-		@"^\[(\d{2}:\d{2}:\d{2}\.\d{3})\] (?:\[(\d+)\] )?\[(.{6})\] (.*)$",
-		RegexOptions.Compiled
-	);
-
-	// Parses the TOOL message body:
-	// Group 1: workspace mode (MSB, ADH, ---)
-	// Group 2: OK or ERROR
-	// Group 3: elapsed ms
-	// Group 4: tool name (short, without roslyn_ prefix)
-	// Group 5: rest — subject + optional detail after ' — '
-	static readonly Regex ToolPattern = new(
-		@"^(MSB|ADH) (OK\s*|ERROR)\s+(\d+)ms (\S+)\s*(.*)?$",
-		RegexOptions.Compiled
-	);
-	
 	readonly string logPath;
 	readonly int    tailLines;
 	
@@ -227,46 +211,27 @@ sealed class LogTailer
 			await tcs.Task.ConfigureAwait(false);
 	}
 	
+	static readonly JsonSerializerOptions JsonOptions = new() {
+		PropertyNameCaseInsensitive = true
+	};
+
 	static LogEntry Parse(string raw)
 	{
-		var m = LinePattern.Match(raw);
+		try {
+			var entry = JsonSerializer.Deserialize<LogEntry>(raw, JsonOptions);
 
-		if(!m.Success)
-			return new LogEntry("", null, "OTHER", raw, raw);
-
-		var timestamp = m.Groups[1].Value;
-		var pid       = m.Groups[2].Success ? m.Groups[2].Value : null;
-		var level     = m.Groups[3].Value.TrimEnd();
-		var message   = m.Groups[4].Value;
-
-		if(level == "TOOL") {
-
-			var t = ToolPattern.Match(message);
-
-			if(t.Success) {
-
-				// Group 5 is "subject — detail" or just "subject" or just "— detail" or empty.
-				var rest    = t.Groups[5].Value.Trim();
-				var dashIdx = rest.IndexOf(" — ", StringComparison.Ordinal);
-				var subject = dashIdx >= 0 ? rest[..dashIdx].Trim() : rest;
-				var detail  = dashIdx >= 0 ? rest[(dashIdx + 3)..].Trim() : null;
-
-				return new LogEntry(
-					Timestamp:     timestamp,
-					Pid:           pid,
-					Level:         level,
-					Message:       message,
-					Raw:           raw,
-					WorkspaceMode: t.Groups[1].Value,
-					ToolName:      t.Groups[4].Value,
-					ElapsedMs:     long.TryParse(t.Groups[3].Value, out var ms) ? ms : null,
-					Success:       t.Groups[2].Value.TrimEnd() == "OK",
-					Subject:       subject is { Length: > 0 } s ? s : null,
-					Detail:        detail is { Length: > 0 } d ? d : null
-				);
-			}
+			if(entry is not null)
+				return entry with { Raw = raw };
 		}
+		catch { }
 
-		return new LogEntry(timestamp, pid, level, message, raw);
+		// Unrecognized line (e.g. truncated write, non-JSON content).
+		return new LogEntry {
+			Timestamp = "",
+			Pid       = 0,
+			Level     = "OTHER",
+			Message   = raw,
+			Raw       = raw
+		};
 	}
 }

@@ -8,4 +8,8 @@
     <RootNamespace>RoslynMcp.LogViewer</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="..\..\src\RoslynMcp\LogEntry.cs" />
+  </ItemGroup>
+
 </Project>

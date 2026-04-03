@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Tool metadata improvements — all 33 tools** (#112)
+  - Added `Title` (Title Case display names), `OpenWorld = false`, `Idempotent = true` (read-only tools), `Destructive = false` (additive/non-destructive tools) to all tool attributes
+  - Rewrote all `[Description]` strings with agent-centric framing: concise first sentence, key parameters, return shape, performance notes, caveats
+  - Correctness fixes: `ChangeSignatureTool` `ReadOnly = true`, `InsertLinesTool` `Destructive = false`, `BuildTool` remove incorrect `ReadOnly = true`, `ReplaceInFileTool` remove stale XML doc
+  - AGENTS.md: added missing `DebugAttachTool` entry, clarified `ChangeSignatureTool` preview-only, added tool tips
+
 - **`roslyn_get_diagnostics` — structured response, pagination, shared types** (#111)
   - **Breaking:** response is now a structured JSON object instead of a flat `string[]`
   - Always-present `summary`, `errors`, `warnings`, `total`, `returned`, `has_more`, `page_token`, `items`

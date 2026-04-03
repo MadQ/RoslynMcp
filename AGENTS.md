@@ -113,7 +113,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - Override: set `ROSLYNMCP_LOG_PATH` env var to any path
 - Disable: set `ROSLYNMCP_LOG_PATH` to an empty string
 - Rotation: 10 MB cap, keeps last 3 files (`roslynmcp.log`, `.log.1`, `.log.2`, `.log.3`)
-- Format: `[yyyy-MM-dd HH:mm:ss.fffZ] [LEVEL ] message`
+- Format: NDJSON — one `LogEntry` object per line
+- Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `tool_name`, `workspace_mode` (MSB/ADH), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
