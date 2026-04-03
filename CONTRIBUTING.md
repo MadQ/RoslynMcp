@@ -70,7 +70,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (41 tests covering all tools)
+# Run the comprehensive test suite (39 tests covering all tools)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
@@ -137,17 +137,18 @@ Publish a Release build and configure your MCP client to use it:
        public MyNewTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
            : base(workspace, logger, paginationCache) { }
 
-       [McpServerTool, Description("...")]
+       [McpServerTool(Name = "roslyn_my_tool", ReadOnly = true)]
+       [Description("...")]
        public object MyToolMethod(
            [Description("...")] string parameter,
-           [Description(ProjectPathDescription)] string? projectPath = null)
+           [Description(ProjectPathDescription)] string projectPath)
        {
            if(!TryGetCompilation(projectPath, out var compilation, out var error))
                return error;
 
            // Use Roslyn APIs here
            // Typed result records are preferred over anonymous objects
-           return new { result = "..." };
+           return new MyToolResult(...);
        }
    }
    ```
@@ -157,9 +158,8 @@ Publish a Release build and configure your MCP client to use it:
 3. **Add tests** in `src/TestHarness/Program.cs`
 
 4. **Update documentation**:
-   - README.md (tools table)
-   - AGENTS.md (architecture table)
-   - `.github/copilot-instructions.md` (architecture table)
+   - README.md (tool catalog table)
+   - AGENTS.md (architecture table and tool count)
 
 ---
 

@@ -8,9 +8,9 @@ Use this checklist when preparing a new release of RoslynMcp.
 
 ### Code Quality
 - [ ] All source files follow code style guidelines (`.github/copilot-instructions.md`)
-- [ ] No compiler warnings (`dotnet build RoslynMcp/RoslynMcp.csproj`)
+- [ ] No compiler warnings (`dotnet build src/RoslynMcp/RoslynMcp.csproj`)
 - [ ] No Roslyn analyzer warnings
-- [ ] All tests pass (`dotnet run --project TestHarness/TestHarness.csproj`)
+- [ ] All tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj`)
 - [ ] Code coverage is adequate for new features
 
 ### Documentation
@@ -66,10 +66,10 @@ git push origin v0.X.Y
 ### 3. Build Release Artifacts
 ```bash
 # Build for all targets
-dotnet build RoslynMcp/RoslynMcp.csproj -c Release
+dotnet build src/RoslynMcp/RoslynMcp.csproj -c Release
 
 # Create NuGet package (if publishing)
-dotnet pack RoslynMcp/RoslynMcp.csproj -c Release -o artifacts/
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -c Release -o artifacts/
 
 # Verify package contents
 dotnet nuget verify artifacts/RoslynMcp.0.X.Y.nupkg

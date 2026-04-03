@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 34 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 33 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -74,13 +74,13 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 **Rename with confidence.** `roslyn_preview_rename` + `roslyn_apply_rename` performs semantic rename across your entire solution. It knows that `order.Status` and `IOrder.Status` are the same symbol. Grep doesn't.
 
-**Build without leaving the process.** `roslyn_build_project` checks Roslyn diagnostics first (~17ms). If there are errors, it returns them instantly without spawning MSBuild. Clean code triggers a real `dotnet build` for full validation.
+**Build without leaving the process.** `roslyn_build_project` checks Roslyn diagnostics first — fast, in-process, no MSBuild spawn. If there are errors, it returns them instantly. Clean code triggers a real `dotnet build` for full validation.
 
 ---
 
 ## Tool Catalog
 
-34 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
+33 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
