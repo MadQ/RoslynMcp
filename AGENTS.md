@@ -479,6 +479,20 @@ I trust you and I have git.
 
 **Branch naming:** `feature/<short-description>` for multi-file or non-trivial changes.
 
+### GitHub Issues — Body Formatting
+
+**⚠️ Never use `gh issue create --body "..."` or `gh issue edit --body "..."` with inline text.**
+
+The `gh` CLI passes the body string through JSON serialization, which interprets `\r`, `\n`, `\v`, `\f` as control characters. In a codebase full of `roslyn_*` tool names, this eats the `r`, `n`, `v` from backtick-wrapped names — `\roslyn_read_file\` becomes `\oslyn_read_file\`, `\viewer.html\` becomes a vertical tab, etc.
+
+**Always write the body to a temp file first:**
+```powershell
+# Write body to session state or temp location
+# Then:
+gh issue create --title "..." --body-file path\to\body.md
+gh issue edit 123 --body-file path\to\body.md
+```
+
 ---
 
 ## Terminal
