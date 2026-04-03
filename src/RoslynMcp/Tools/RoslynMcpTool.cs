@@ -491,6 +491,12 @@ internal abstract partial class RoslynMcpTool
 
 	// Filters out diagnostics from files outside the project root — prevents external files
 	// open in the IDE (e.g. HTML, CSS from unrelated directories) from polluting results.
+	// Diagnostics with no file path (global/assembly-level) always pass through.
+	//
+	// Known gaps (tracked in issue #114):
+	//   - Path prefix collision: "J:\Foo" incorrectly matches "J:\FooBar\file.cs".
+	//   - Non-C# files physically inside the root (e.g. wwwroot\index.html) pass through.
+	//   A future improvement can combine LocationKind filtering with a path separator guard.
 	protected static bool IsUnderRoot(Diagnostic diagnostic, string rootPath)
 	{
 		var filePath = diagnostic.Location.SourceTree?.FilePath;
