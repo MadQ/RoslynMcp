@@ -19,6 +19,7 @@ internal abstract partial class RoslynMcpTool
 
 		bool    failed;
 		string? detail;
+		string? responsePeek;
 		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
 		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
 		int     estimatedTokens;
@@ -44,7 +45,7 @@ internal abstract partial class RoslynMcpTool
 		public T Outcome<T>(string detail, T returnValue)
 		{
 			this.detail     = detail;
-			estimatedTokens = EstimateTokens(returnValue);
+			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			return returnValue;
 		}
 
@@ -54,18 +55,18 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Marks the invocation as failed, estimates tokens, and returns the error result for fluent use.</summary>
 		public T Error<T>(T returnValue)
 		{
-			failed          = true;
-			detail          = returnValue is ErrorResult err ? err.Error : "error";
-			estimatedTokens = EstimateTokens(returnValue);
+			failed                          = true;
+			detail                          = returnValue is ErrorResult err ? err.Error : "error";
+			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			return returnValue;
 		}
 
 		/// <summary>Marks the invocation as failed and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
 		public T Failed<T>(string reason, T returnValue)
 		{
-			failed          = true;
-			detail          = reason;
-			estimatedTokens = EstimateTokens(returnValue);
+			failed                          = true;
+			detail                          = reason;
+			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			return returnValue;
 		}
 
@@ -74,19 +75,25 @@ internal abstract partial class RoslynMcpTool
 
 		public void Dispose()
 		{
-			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag, estimatedTokens);
+			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag, estimatedTokens, responsePeek);
 			onDispose();
 		}
 
-		/// <summary>Rough token estimate: serialize to JSON, divide chars by 4.</summary>
-		static int EstimateTokens<T>(T value)
+		/// <summary>
+		///     Serializes the response to JSON, returns the token estimate and a truncated peek string.
+		///     The peek is capped at 600 chars — enough for the log viewer to show meaningful content.
+		/// </summary>
+		static (int tokens, string? peek) SerializeResponse<T>(T value)
 		{
 			try {
-				var json = JsonSerializer.Serialize(value);
-				return json.Length / 4;
+				var json   = JsonSerializer.Serialize(value);
+				var tokens = json.Length / 4;
+				var peek   = json.Length <= 600 ? json : json[..600] + "…";
+
+				return (tokens, peek);
 			}
 			catch {
-				return 0;
+				return (0, null);
 			}
 		}
 	}

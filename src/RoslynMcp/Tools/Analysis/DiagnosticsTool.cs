@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -29,6 +29,8 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
+		
+		IEnumerable<Dictionary<List<HashSet<string>>, Tuple<int,Guid>>> xxx;
 		
 		// Stateless page token overrides skip/severity — agents don't need to track offsets manually.
 		if(page_token is not null) {

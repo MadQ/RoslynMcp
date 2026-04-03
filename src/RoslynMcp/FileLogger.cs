@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace RoslynMcp;
 
@@ -82,7 +82,7 @@ internal sealed class FileLogger : IDisposable
 
 	/// <summary>Logs a tool invocation with outcome, elapsed time, and workspace mode indicator.</summary>
 	/// <param name="isMSBuild">True for MSBuildWorkspace, false for AdhocWorkspace.</param>
-	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0)
+	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0, string? responsePeek = null)
 	{
 		var instance  = Interlocked.Increment(ref instanceCounter);
 		var shortName = toolName.StartsWith("roslyn_", StringComparison.Ordinal)
@@ -108,7 +108,8 @@ internal sealed class FileLogger : IDisposable
 			Detail          = detail,
 			CacheTag        = cacheTag,
 			EstimatedTokens = estimatedTokens > 0 ? estimatedTokens : null,
-			SessionTokens   = estimatedTokens > 0 ? tokens : null
+			SessionTokens   = estimatedTokens > 0 ? tokens : null,
+			ResponsePeek    = responsePeek
 		});
 	}
 

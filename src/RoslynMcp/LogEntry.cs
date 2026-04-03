@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace RoslynMcp;
 
@@ -83,6 +83,13 @@ record LogEntry
     /// <summary>For TOOL entries: running session token total at time of this call.</summary>
     [JsonPropertyName("session_tokens")]
     public long? SessionTokens { get; init; }
+
+    /// <summary>
+    ///     For TOOL entries: truncated JSON preview of the response payload (first 600 chars).
+    ///     Gives the log viewer a glimpse of what was returned without ballooning the log file.
+    /// </summary>
+    [JsonPropertyName("response_peek")]
+    public string? ResponsePeek { get; init; }
 
     // ── Reader-only ───────────────────────────────────────────────────────
 
