@@ -411,7 +411,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_get_diagnostics: check for compiler errors",
 	"roslyn_get_diagnostics",
 	new { projectPath = targetPath },
-	data => data?.AsArray() is not null
+	data => data?["errors"] is not null && data?["summary"] is not null
 ));
 
 tests.Add(await RunTestAsync(

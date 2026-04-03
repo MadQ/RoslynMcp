@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using System.Text;
 
 namespace RoslynMcp;
@@ -156,52 +156,56 @@ internal static class SolutionDiff
 		var oi      = 0; // old index
 		var ni      = 0; // new index
 		var lcsIdx  = 0;
-		
-		while(oi < oldLines.Length || ni < newLines.Length) {
-			if(lcsIdx < inLcs.Length && inLcs[lcsIdx] && oi < oldLines.Length && ni < newLines.Length && oldLines[oi] == newLines[ni]) {
+		var oldLen  = oldLines.Length;
+		var newLen  = newLines.Length;
+		var lcsLen  = inLcs.Length;
+
+		while(oi < oldLen || ni < newLen) {
+			if(lcsIdx < lcsLen && inLcs[lcsIdx] && oi < oldLen && ni < newLen && oldLines[oi] == newLines[ni]) {
 				oi++;
 				ni++;
 				lcsIdx++;
 				continue;
 			}
-			
+
 			// Start of a changed region.
 			var hunkOldStart = Math.Max(0, oi - context);
 			var hunkNewStart = Math.Max(0, ni - context);
 			var lines        = new List<string>();
-			
+
 			// Leading context.
 			for(var c = hunkOldStart; c < oi; c++)
 				lines.Add(" " + oldLines[c]);
-			
+
 			// Changed lines.
 			var hunkOi = oi;
 			var hunkNi = ni;
-			
-			while(oi < oldLines.Length || ni < newLines.Length) {
-				var atLcs = lcsIdx < inLcs.Length && inLcs[lcsIdx]
-					&& oi < oldLines.Length && ni < newLines.Length
+
+			while(oi < oldLen || ni < newLen) {
+				var atLcs = lcsIdx < lcsLen && inLcs[lcsIdx]
+					&& oi < oldLen && ni < newLen
 					&& oldLines[oi] == newLines[ni];
-				
+
 				if(atLcs)
 					break;
-				
-				if(oi < oldLines.Length && (lcsIdx >= inLcs.Length || !inLcs[lcsIdx])) {
+
+				// If ni is exhausted, the LCS match can never be reached — treat as deletion.
+				if(oi < oldLen && (lcsIdx >= lcsLen || !inLcs[lcsIdx] || ni >= newLen)) {
 					lines.Add("-" + oldLines[oi++]);
 					lcsIdx++;
 				}
-				else if(ni < newLines.Length) {
+				else if(ni < newLen) {
 					lines.Add("+" + newLines[ni++]);
 				}
 			}
-			
+
 			// Trailing context.
-			for(var c = 0; c < context && oi < oldLines.Length; c++, oi++, ni++, lcsIdx++)
+			for(var c = 0; c < context && oi < oldLen; c++, oi++, ni++, lcsIdx++)
 				lines.Add(" " + oldLines[oi]);
-			
+
 			hunks.Add(new Hunk(hunkOldStart, oi - hunkOldStart, hunkNewStart, ni - hunkNewStart, lines));
 		}
-		
+
 		return hunks;
 	}
 }
