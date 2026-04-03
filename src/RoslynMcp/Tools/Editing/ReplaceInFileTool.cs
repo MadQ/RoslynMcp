@@ -4,11 +4,6 @@ using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
 
-/// <summary>
-///     Text-level find-and-replace tool. Works on any file type (code, config, markdown, etc.).
-///     For semantic C# code manipulation (modify syntax nodes, preserve formatting, validate edits),
-///     consider a future `replace_in_code` tool that uses Roslyn's syntax tree rewriting.
-/// </summary>
 [McpServerToolType]
 internal sealed class ReplaceInFileTool : RoslynMcpTool
 {

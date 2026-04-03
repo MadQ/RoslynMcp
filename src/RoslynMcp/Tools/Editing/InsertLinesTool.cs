@@ -9,7 +9,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 	public InsertLinesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
 		: base(workspace, logger, paginationCache) { }
 
-	[McpServerTool(Name = "roslyn_insert_lines", Destructive = true)]
+	[McpServerTool(Name = "roslyn_insert_lines", Destructive = false)]
 	[Description(
 		"Inserts one or more lines into a file at a specific location. " +
 		"Use this instead of replace_in_file when you need to ADD new lines rather than replace existing content — " +

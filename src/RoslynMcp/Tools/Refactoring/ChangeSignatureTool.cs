@@ -22,7 +22,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		this.approvals = approvals;
 	}
 
-	[McpServerTool(Name = "roslyn_change_signature", Destructive = true)]
+	[McpServerTool(Name = "roslyn_change_signature", ReadOnly = true)]
 	[Description(
 		"Changes a method signature by adding parameters. Creates a non-breaking forwarding overload " +
 		"with [Obsolete] attribute so existing call sites continue to work. " +

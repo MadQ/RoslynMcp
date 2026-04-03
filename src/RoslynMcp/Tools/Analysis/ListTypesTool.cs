@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -16,7 +16,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 	public object ListTypes(
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional namespace filter, e.g. 'RoslynMcp.Tools'. Types in this namespace and its sub-namespaces are returned.")] string? namespaceFilter = null,
-		[Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct'. Omit for all types.")] string? kindFilter = null,
+		[Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct', 'record'. Omit for all types.")] string? kindFilter = null,
 		[Description("Number of types to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of types to return. Default: 100, max: 500.")] int take = 100,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
