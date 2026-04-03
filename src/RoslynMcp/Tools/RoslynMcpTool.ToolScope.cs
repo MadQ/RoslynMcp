@@ -73,7 +73,7 @@ internal abstract partial class RoslynMcpTool
 		public T Error<T>(T returnValue) where T : ToolErrorResult
 		{
 			failed                          = true;
-			detail                          = returnValue.Error ?? "error";
+			detail                          = returnValue.Error;
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			return returnValue;
 		}
