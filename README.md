@@ -80,7 +80,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-33 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
+35 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -124,6 +124,8 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | `roslyn_replace_in_code` | Semantic C# editing -- replaces syntax nodes, validates syntax |
 | `roslyn_replace_in_file` | Text-level find-and-replace with regex (any file type) |
 | `roslyn_insert_lines` | Insert lines at a position or anchor pattern |
+| `roslyn_write_file` | Atomically write or create a file; returns a backup token for undo |
+| `roslyn_local_history` | Browse, preview, and restore crash-safe file backups (list/preview/apply) |
 
 ### Refactoring
 
