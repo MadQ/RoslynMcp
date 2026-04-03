@@ -11,11 +11,13 @@ internal sealed class RespawnTool
 	
 	public RespawnTool(FileLogger logger) { this.logger = logger; }
 	
-	[McpServerTool(Name = "roslyn_respawn", Title = "Respawn", OpenWorld = false, Destructive = true)]
+	[McpServerTool(Name = "roslyn_respawn", Title = "Respawn Server", OpenWorld = false, Destructive = true)]
 	[Description(
-		"DEBUG ONLY: Terminates the MCP server process, forcing the client to respawn it. " +
-		"Use this to reload code changes after rebuilding without restarting your IDE. " +
-		"The server will exit gracefully after responding.")]
+		"DEBUG ONLY — terminates the MCP server process so the client respawns it with a fresh executable. " +
+		"Use after rebuilding RoslynMcp to load the new binary without restarting your IDE. " +
+		"All cached workspace state is lost on exit; the client must reconnect and reload workspaces. " +
+		"Not fully reliable — if the client does not auto-respawn, the server will be unavailable. " +
+		"The server exits gracefully after responding to this call.")]
 	public object Respawn()
 	{
 		logger.LogTool("roslyn_respawn", 0, true, detail: "process terminating");
@@ -23,7 +25,7 @@ internal sealed class RespawnTool
 		
 		// Exit after a brief delay to let the response flush.
 		Task.Run(async () => {
-		
+			
 			await Task.Delay(150);
 			Environment.Exit(0);
 		});

@@ -13,30 +13,38 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_get_type_hierarchy", ReadOnly = true, Title = "Get Type Hierarchy", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns the inheritance hierarchy for a type: base types (chain to object/ValueType), implemented interfaces, " +
-		"and derived types found in the project. Use this to understand polymorphism and type relationships. " +
-		"Derived types and interfaces are paged; use skip/take for large hierarchies.")]
+		"Use this to understand where a type fits in the inheritance graph — its base type chain up to object, " +
+		"all interfaces it implements, and all types in the project that derive from it or implement it. " +
+		"Useful before refactoring a type to understand blast radius, or when navigating an unfamiliar class hierarchy. " +
+		"Base types (the chain up to object/ValueType) are always returned in full; interfaces and derived types " +
+		"are combined into a single paged list — use skip/take to paginate large hierarchies. " +
+		"For interface types, derived entries are concrete implementations; for class types, they are subclasses. " +
+		"The type_kind field in the response indicates which lookup was used. " +
+		"For just the concrete implementations of an interface, roslyn_find_implementations is more direct.")]
 	public async Task<object> GetTypeHierarchy(
-		[Description("The type name, e.g. 'WindowTracker' or 'RoslynMcp.WorkspaceManager'.")] string typeName,
+		[Description("The type to query, as a simple name (e.g. 'WorkspaceManager') or fully-qualified name (e.g. 'RoslynMcp.WorkspaceManager'). Simple names are resolved by scanning the global namespace.")] string typeName,
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
-		[Description("Number of derived types/interfaces to skip (for paging). Default: 0.")] int skip = 0,
-		[Description("Maximum number of derived types/interfaces to return. Default: 50, max: 200.")] int take = 50,
+		[Description("Number of items to skip in the paged interfaces-and-derived list. Default: 0.")] int skip = 0,
+		[Description("Maximum items to return from the paged interfaces-and-derived list. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName);
-
-
+		
+		
 		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
 		if(cachedPage is not null)
+			
 			return cachedPage;
-
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return error;
 		
 		var type        = FindType(compilation, typeName);
 		
 		if(type is null)
+			
 			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
 		
 		var baseTypes   = GetBaseTypeChain(type);
@@ -47,7 +55,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		];
 		
 		var solution    = workspace.GetSolution(projectPath);
-
+		
 		// FindDerivedClassesAsync only finds subclasses — for interfaces, use FindImplementationsAsync.
 		var derivedRefs = type.TypeKind == TypeKind.Interface
 			? (await RoslynSymbolFinder.FindImplementationsAsync(type, solution, cancellationToken: cancellationToken)).OfType<INamedTypeSymbol>()
@@ -63,7 +71,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		var combined = allInterfaces.Concat(allDerived).ToArray()
 		;
 		var result   = PaginateAndStore(combined, ref skip, take);
-
+		
 		return scope.Outcome($"{result.Items.Length} interface(s)/derived", new TypeHierarchyResult(
 			Type_name:           type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
 			Type_kind:           type.TypeKind.ToString().ToLowerInvariant(),
@@ -82,12 +90,15 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
 		// Try metadata name lookup first (handles fully-qualified names).
-		var direct = compilation.GetTypeByMetadataName(typeName);
+		var direct = compilation.GetTypeByMetadataName(typeName)
+		;
 		
 		if(direct is not null)
+			
 			return direct;
 		
 		// Fall back to simple name search.
+		
 		return compilation.GlobalNamespace
 			.Accept(new SimpleNameFinder<INamedTypeSymbol>(typeName))
 		;
@@ -99,7 +110,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		var current = type.BaseType;
 		
 		while(current is not null) {
-		
+			
 			chain.Add(current.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat));
 			current = current.BaseType;
 		}

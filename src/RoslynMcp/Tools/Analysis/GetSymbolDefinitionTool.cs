@@ -11,27 +11,34 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_get_symbol_definition", ReadOnly = true, Title = "Get Symbol Definition", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns the definition location and signature of a symbol (type, method, property, field, event). " +
-		"Shows where the symbol is declared, its full signature, and XML doc summary. " +
-		"Use this to navigate to a symbol's definition without reading multiple files.")]
+		"Returns the declaration location and full signature of a symbol (type, method, property, field, event) — " +
+		"file path (project-relative), line, column, formatted signature, and extracted XML doc summary as plain text. " +
+		"Use this to locate a symbol before reading its source with roslyn_get_member_body, or to verify " +
+		"its signature without opening the file. " +
+		"For full parsed documentation (parameters, returns, remarks), use roslyn_get_symbol_documentation. " +
+		"Returns a structured metadata error if the symbol is defined in a compiled assembly rather than " +
+		"project source — the definition is not available as source in that case.")]
 	public object GetSymbolDefinition(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null)
+		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_definition", symbolName);
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return error;
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
+			
 			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var location = symbol.Locations.FirstOrDefault(loc => loc.IsInSource);
 		
 		if(location is null)
+			
 			return scope.Error(new MetadataSymbolResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
@@ -70,18 +77,20 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 	private static string? ExtractDocSummary(string? xml)
 	{
 		if(string.IsNullOrWhiteSpace(xml))
+			
 			return null;
 		
 		try {
-		
+			
 			var doc = System.Xml.Linq.XDocument.Parse(xml);
 			var summary = doc.Root?.Element("summary")?.Value.Trim();
 			
 			return string.IsNullOrWhiteSpace(summary) ? null : summary;
 		}
 		catch(System.Xml.XmlException) {
-		
+			
 			// Malformed XML documentation — return null rather than failing the whole tool call.
+			
 			return null;
 		}
 	}

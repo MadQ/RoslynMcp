@@ -19,22 +19,24 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	public ReplaceInCodeTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_replace_in_code", Destructive = true, Title = "Replace In Code", OpenWorld = false)]
-	[Description(
-		"**PREFER THIS TOOL for C# code edits** — semantically aware, validates syntax, preserves formatting. " +
-		"Replaces C# syntax nodes matching a kind and optional text pattern. " +
-		"Uses Roslyn for semantic understanding. Works on C# files only. " +
-		"For text/config files or non-C# content, use replace_in_file instead. " +
-		"Node kinds: MethodDeclaration, FieldDeclaration, PropertyDeclaration, ClassDeclaration, IdentifierName, etc. " +
-		"textPattern matches the DECLARED NAME of declaration nodes (method/property/field/class/etc.) — not body content. " +
-		"If multiple nodes match and force is false (default), the tool returns the matches without applying."
+		[Description(
+		"Prefer this tool for all C# edits — uses Roslyn syntax tree parsing to find, validate, and replace " +
+		"C# syntax nodes by kind, preserving surrounding formatting trivia. " +
+		"Works on C# files only; for non-C# files or literal text replacement, use roslyn_replace_in_file instead; " +
+		"for inserting new lines without replacing existing content, use roslyn_insert_lines instead. " +
+		"Specify nodeKind (e.g., MethodDeclaration, PropertyDeclaration, ClassDeclaration) and an optional textPattern " +
+		"that filters by the declared name of the node — not body content. " +
+		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors. " +
+		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern or set force=true to proceed. " +
+		"Supports dryRun=true to preview which nodes would be replaced without writing."
 	)]
 	public async Task<object> ReplaceInCode(
-		[Description("Relative path to the C# file from workspace root.")] string filePath,
-		[Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'FieldDeclaration', 'IdentifierName').")] string nodeKind,
+		[Description("Relative path to the C# file from the workspace root.")] string filePath,
+		[Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'FieldDeclaration', 'IdentifierName'). Common aliases accepted: 'method', 'field', 'property', 'class', 'interface', 'struct', 'enum', 'identifier'.")] string nodeKind,
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
 		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Property/Field/Class etc.) matches the DECLARED NAME. For other nodes matches full text.")] string? textPattern = null,
-		[Description("Replacement text for the matched node. Must produce valid C# syntax.")] string replacement = "",
+		[Description("Replacement text for the matched node. Must be valid C# syntax for the target node kind. Default: empty string — omitting this deletes the matched node.")] string replacement = "",
 		[Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false,
 		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false
 	)
@@ -43,42 +45,48 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		var rootPath = workspace.GetRootPath(projectPath);
 		
 		var fullPath = ResolveFilePath(filePath, rootPath);
-
+		
 		if(fullPath is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+			
 			return scope.Error(new ErrorResult("File must be a C# source file (.cs)"));
 		
 		if(!TryParseSyntaxKind(nodeKind, out var kind))
+			
 			return scope.Error(new ErrorResult($"Unknown node kind: {nodeKind}.", Hint: "Examples: MethodDeclaration, FieldDeclaration, IdentifierName."));
 		
 		SourceText sourceText;
 		SyntaxTree syntaxTree;
-
+		
 		// Prefer the in-memory workspace document to avoid races with concurrent edits.
-		var solution = workspace.GetSolution(projectPath);
+		var solution = workspace.GetSolution(projectPath)
+		;
 		var docIds   = solution.GetDocumentIdsWithFilePath(fullPath);
-
+		
 		if(docIds.Length > 0) {
+			
 			var doc = solution.GetDocument(docIds[0])!;
 			sourceText = await doc.GetTextAsync(cancellationToken);
 			syntaxTree = (await doc.GetSyntaxTreeAsync(cancellationToken))!;
 		}
 		else {
-
+			
 			try {
+				
 				using var stream = File.OpenRead(fullPath);
 				sourceText = SourceText.From(stream, Encoding.UTF8);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-
+				
 				return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 			}
-
+			
 			syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
 		}
-
+		
 		var root = await syntaxTree.GetRootAsync(cancellationToken);
 		
 		var matchedNodes = root.DescendantNodes()
@@ -90,26 +98,29 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// For declaration nodes, match against the declared name only — not the full body.
 		// This prevents "ParseDocumentation" from matching every method that *calls* it.
 		if(!string.IsNullOrWhiteSpace(textPattern)) {
-
+			
 			matchedNodes = matchedNodes
 				.Where(n => {
+					
 					var name = GetDeclaredName(n);
+					
 					return name.Contains(textPattern, StringComparison.OrdinalIgnoreCase);
 				})
 				.ToArray()
 			;
 		}
-
+		
 		if(matchedNodes.Length == 0) {
-
+			
 			return scope.Error(new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
 		}
 		
 		SyntaxNode? replacementNode;
-
+		
 		try {
-
+			
 			replacementNode = kind switch {
+				
 				SyntaxKind.MethodDeclaration or
 				SyntaxKind.FieldDeclaration or
 				SyntaxKind.PropertyDeclaration or
@@ -119,7 +130,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				SyntaxKind.RecordDeclaration or
 				SyntaxKind.EnumDeclaration
 					=> (SyntaxNode?) SyntaxFactory.ParseMemberDeclaration(replacement),
-
+				
 				SyntaxKind.UsingDirective or
 				SyntaxKind.LocalDeclarationStatement or
 				SyntaxKind.ExpressionStatement or
@@ -129,23 +140,25 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				SyntaxKind.WhileStatement or
 				SyntaxKind.ThrowStatement
 					=> SyntaxFactory.ParseStatement(replacement),
-
+				
 				_ => (SyntaxNode?) SyntaxFactory.ParseExpression(replacement)
 			};
 			
 			if(replacementNode is null)
+				
 				return scope.Error(new ErrorResult("Failed to parse replacement text — parser returned null"));
 			
 			if(replacementNode.ContainsDiagnostics) {
-
+				
 				return scope.Error(new ReplaceInCodeSyntaxError(
 					"Replacement text contains syntax errors",
 					string.Join("; ", replacementNode.GetDiagnostics().Select(d => d.GetMessage()))
-				));
+				))
+				;
 			}
 		}
 		catch(Exception ex) {
-
+			
 			return scope.Error(new ReplaceInCodeSyntaxError(
 				"Failed to parse replacement text as valid C# syntax",
 				ex.Message
@@ -154,7 +167,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		// Collect change info before replacement.
 		var changedNodeInfo = matchedNodes.Select(n => {
-		
+			
 			var lineSpan = syntaxTree.GetLineSpan(n.Span);
 			
 			return new ReplaceInCodeNodeInfo(
@@ -166,13 +179,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		;
 		
 		if(dryRun) {
-
+			
 			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Dry run: {matchedNodes.Length} node(s) would be replaced.");
 		}
-
+		
 		// Safety guard: multiple matches require explicit opt-in via force=true.
 		if(matchedNodes.Length > 1 && !force) {
-
+			
 			return new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one.");
 		}
 		
@@ -192,7 +205,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		var syntaxValid = newDiagnostics.Length == 0;
 		
 		if(!syntaxValid) {
-
+			
 			return scope.Error(new ReplaceInCodeSyntaxError(
 				"Replacement would introduce syntax errors",
 				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
@@ -204,10 +217,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			await File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-
+			
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
-
+		
 		// Invalidate workspace cache
 		workspace.InvalidateFile(projectPath, fullPath);
 		
@@ -220,6 +233,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     Falls back to full node text for non-declaration nodes (e.g. IdentifierName).
 	/// </summary>
 	private static string GetDeclaredName(SyntaxNode node) => node switch {
+		
 		MethodDeclarationSyntax     m => m.Identifier.Text,
 		PropertyDeclarationSyntax   p => p.Identifier.Text,
 		FieldDeclarationSyntax      f => f.Declaration.Variables.FirstOrDefault()?.Identifier.Text ?? string.Empty,
@@ -230,15 +244,17 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		RecordDeclarationSyntax     r => r.Identifier.Text,
 		_                             => node.ToString()
 	};
-
+	
 	private static bool TryParseSyntaxKind(string kindName, out SyntaxKind kind)
 	{
 		// Try exact match first
 		if(Enum.TryParse<SyntaxKind>(kindName, ignoreCase: true, out kind))
+			
 			return true;
 		
 		// Common aliases/shortcuts
 		kind = kindName.ToLowerInvariant() switch {
+			
 			"method" => SyntaxKind.MethodDeclaration,
 			"field" => SyntaxKind.FieldDeclaration,
 			"property" => SyntaxKind.PropertyDeclaration,

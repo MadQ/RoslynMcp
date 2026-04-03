@@ -13,8 +13,14 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_find_implementations", ReadOnly = true, Title = "Find Implementations", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Finds all types that implement an interface or abstract class, or all methods that override an abstract/virtual member. " +
-		"Use this to discover concrete implementations of abstractions. Results are paged; use skip/take for large result sets.")]
+		"Use this to discover all concrete implementations of an interface or abstract class, or all overrides of an " +
+		"abstract or virtual method, across the entire project. " +
+		"This is the right tool when you need to know every type that fulfills a contract, or every method that overrides " +
+		"a base implementation — useful for impact analysis before refactoring. " +
+		"For interface and abstract class symbols, returns implementing types. " +
+		"For abstract or virtual method symbols, returns overriding methods with full signatures. " +
+		"Results are alphabetically ordered and paged. " +
+		"For the full inheritance graph of a type (base chain, all interfaces, all derived), use roslyn_get_type_hierarchy instead.")]
 	public async Task<object> FindImplementations(
 		[Description("The symbol name, e.g. 'IDisposable', 'SymbolVisitor', 'Accept'.")] string symbolName,
 		[Description(ProjectPathDescription)] string projectPath,
@@ -25,27 +31,30 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_find_implementations", symbolName);
-
-
+		
+		
 		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
 		if(cachedPage is not null)
+			
 			return cachedPage;
-
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return error;
 		
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
+			
 			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var solution = workspace.GetSolution(projectPath);
 		
 		// Handle type symbols (interface or abstract class).
 		if(symbol is INamedTypeSymbol typeSymbol) {
-
+			
 			if((typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class) && typeSymbol.IsAbstract) {
-
+					
 					var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = impls
 					.OfType<INamedTypeSymbol>()
@@ -53,15 +62,16 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					.Order()
 					.ToArray()
 				;
-
+				
 				var typeKind = typeSymbol.TypeKind.ToString().ToLowerInvariant();
 				var typeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
-
+				
 				if(allResults.Length == 0)
+					
 					return new FindImplementationsResult(typeKind, typeName, 0, skip, take, ["No implementations found."]);
-
+				
 				var result = PaginateAndStore(allResults, ref skip, take);
-
+				
 				return scope.Outcome($"{result.Items.Length}/{result.Total} implementation(s)", new FindImplementationsResult(
 					Symbol_type:  typeKind,
 					Symbol_name:  typeName,
@@ -76,12 +86,12 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 			
 			return scope.Error(new ErrorResult($"'{symbolName}' is not an interface or abstract class."));
 		}
-
+		
 		// Handle method symbols (abstract or virtual).
 		if(symbol is IMethodSymbol methodSymbol) {
-
+			
 			if(methodSymbol.IsAbstract || methodSymbol.IsVirtual || methodSymbol.IsOverride) {
-
+					
 					var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = overrides
 					.OfType<IMethodSymbol>()
@@ -89,14 +99,15 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					.Order()
 					.ToArray()
 				;
-
+				
 				var methodDisplay = FormatMethod(methodSymbol);
-
+				
 				if(allResults.Length == 0)
+					
 					return new FindOverridesResult("method", methodDisplay, 0, skip, take, ["No overrides found."]);
-
+				
 				var result = PaginateAndStore(allResults, ref skip, take);
-
+				
 				return scope.Outcome($"{result.Items.Length}/{result.Total} override(s)", new FindOverridesResult(
 					Symbol_type: "method",
 					Symbol_name: methodDisplay,
@@ -111,7 +122,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 			
 			return scope.Error(new ErrorResult($"'{symbolName}' is not an abstract, virtual, or override method."));
 		}
-
+		
 		return scope.Error(new ErrorResult($"'{symbolName}' is not a type or method — cannot find implementations."));
 	}
 	

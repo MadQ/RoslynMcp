@@ -12,23 +12,30 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true, Title = "Get File Outline", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns a structured outline of a file: types and their members (signatures only, no bodies). " +
-		"Saves tokens by avoiding full file reads. Results are paged; use skip/take for large files.")]
+		"Returns a structured outline of a C# file: all types with their kind (class, struct, interface, enum, record), " +
+		"name, and member signatures — without body content. " +
+		"Use this to understand a file's structure at a glance before deciding which members to read in full with " +
+		"roslyn_get_member_body, or to enumerate a type's API without fetching the whole file with roslyn_read_file. " +
+		"Significantly more token-efficient than a full file read when you only need signatures. " +
+		"Results are paged by type; use skip/take for files with many types. " +
+		"Only works on .cs files tracked in the Roslyn compilation — not on .json, .xml, or other files.")]
 	public async Task<object> GetFileOutline(
-		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
+		[Description("Relative path to a C# file in the compilation, e.g. 'Core/WindowTracker.cs'. Must be a .cs file.")] string filePath,
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Number of types to skip (for paging). Default: 0.")] int skip = 0,
+		[Description("Number of types to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_file_outline", filePath);
-
-
+		
+		
 		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 100);
 		if(cachedPage is not null)
+			
 			return cachedPage;
-
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return error;
 		
 		var rootPath   = workspace.GetRootPath(projectPath);
@@ -39,13 +46,14 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		;
 		
 		if(tree is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var root     = await tree.GetRootAsync();
 		var model    = compilation.GetSemanticModel(tree);
 		var allTypes = ExtractTypes(root, model);
 		var result   = PaginateAndStore(allTypes, ref skip, take);
-
+		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new FileOutlineResult(
 			File:        Path.GetRelativePath(rootPath, tree.FilePath),
 			Total_types: result.Total,
@@ -63,7 +71,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		
 		// Walk all type declarations: class, struct, interface, enum, record.
 		foreach(var typeDecl in root.DescendantNodes().OfType<BaseTypeDeclarationSyntax>()) {
-		
+			
 			var symbol = model.GetDeclaredSymbol(typeDecl) as INamedTypeSymbol;
 			
 			if(symbol is null)
@@ -84,12 +92,13 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		var results = new List<MemberOutline>();
 		
 		foreach(var member in type.GetMembers()) {
-		
+			
 			if(member.IsImplicitlyDeclared)
 				continue;
 			
 			var kind = member.Kind.ToString().ToLowerInvariant();
 			var signature = member switch {
+				
 				IMethodSymbol m => SymbolFormatter.FormatMethod(m),
 				IPropertySymbol p => SymbolFormatter.FormatProperty(p),
 				IFieldSymbol f => SymbolFormatter.FormatField(f),

@@ -12,16 +12,23 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_get_symbols_in_scope", ReadOnly = true, Title = "Get Symbols In Scope", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns all symbols accessible at a specific file location: locals, parameters, fields, properties, methods, types. " +
-		"Use when generating code to understand what's available in scope.")]
+		"Use this when generating or completing code and you need to know what names are accessible at a specific " +
+		"cursor position — locals, parameters, fields, properties, methods, and types visible at that exact location. " +
+		"Pass the 1-based line and column from roslyn_read_file to pinpoint the insertion point. " +
+		"Returns symbols grouped by kind: locals, parameters, fields, properties, methods, types, and other — " +
+		"each with name, kind, type, and containing type. " +
+		"Does not enumerate extension methods or names requiring additional using directives; only symbols " +
+		"resolvable via Roslyn's LookupSymbols at the given position are returned. " +
+		"For a type's declared members regardless of location, use roslyn_get_type_members instead.")]
 	public async Task<object> GetSymbolsInScope(
-		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
-		[Description("1-based line number.")] int line,
-		[Description("1-based column number.")] int column,
+		[Description("Relative path to the C# file, e.g. 'Core/WindowTracker.cs'. Use roslyn_list_files to discover file paths.")] string filePath,
+		[Description("1-based line number of the target position. Use roslyn_read_file to find line numbers.")] int line,
+		[Description("1-based column number of the target position. Use roslyn_read_file to find column offsets.")] int column,
 		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}");
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return error;
 		
 		
@@ -31,19 +38,22 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		;
 		
 		if(tree is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var text     = await tree.GetTextAsync();
 		var position = GetPosition(text, line, column);
 		
 		if(position < 0)
+			
 			return scope.Error(new ErrorResult($"Line {line}, column {column} is out of range."));
 		
 		var model   = compilation.GetSemanticModel(tree);
 		var symbols = model.LookupSymbols(position);
 		
 		// Group symbols by kind for easier consumption.
-		var locals     = new List<SymbolInfo>();
+		var locals     = new List<SymbolInfo>()
+		;
 		var parameters = new List<SymbolInfo>();
 		var fields     = new List<SymbolInfo>();
 		var properties = new List<SymbolInfo>();
@@ -52,13 +62,14 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		var other      = new List<SymbolInfo>();
 		
 		foreach(var symbol in symbols) {
-		
+			
 			if(symbol.IsImplicitlyDeclared)
 				continue;
 			
 			var info = FormatSymbol(symbol);
 			
 			switch(symbol) {
+				
 				case ILocalSymbol:
 					locals.Add(info);
 					break;
@@ -84,7 +95,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		}
 		
 		var rootPath = workspace.GetRootPath(projectPath);
-
+		
 		SymbolInfo[] localsArr     = [.. locals];
 		SymbolInfo[] parametersArr = [.. parameters];
 		SymbolInfo[] fieldsArr     = [.. fields];
@@ -92,7 +103,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		SymbolInfo[] methodsArr    = [.. methods];
 		SymbolInfo[] typesArr      = [.. types];
 		SymbolInfo[] otherArr      = [.. other];
-
+		
 		return new SymbolsInScopeResult(
 			Path.GetRelativePath(rootPath, tree.FilePath),
 			line,
@@ -111,6 +122,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 	private static int GetPosition(SourceText text, int line, int column)
 	{
 		if(line < 1 || line > text.Lines.Count)
+			
 			return -1;
 		
 		var lineSpan = text.Lines[line - 1];
@@ -123,6 +135,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		var kind = symbol.Kind.ToString().ToLowerInvariant();
 		var name = symbol.Name;
 		var type = symbol switch {
+			
 			ILocalSymbol l    => l.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 			IParameterSymbol p => p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 			IFieldSymbol f    => f.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
