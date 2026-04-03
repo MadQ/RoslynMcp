@@ -7,7 +7,7 @@
 /// </summary>
 internal abstract record ToolErrorResult
 {
-	public abstract string? Error { get; init; }
+	public abstract string Error { get; init; }
 }
 
 /// <summary>
