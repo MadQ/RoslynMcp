@@ -23,6 +23,7 @@ internal abstract partial class RoslynMcpTool
 		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
 		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
 		int     estimatedTokens;
+		string? args;              // Serialized input args; included in log only on failure.
 
 		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose)
 		{
@@ -37,6 +38,21 @@ internal abstract partial class RoslynMcpTool
 
 		/// <summary>Records whether a pagination cache hit or miss occurred.</summary>
 		internal void SetCacheTag(bool hit) => cacheTag = hit ? "HIT" : "MISS";
+
+		/// <summary>
+		///     Records key input arguments for failure diagnosis.
+		///     Serialized to compact JSON; included in the log entry only when the tool fails.
+		///     Truncate large string values before passing to avoid bloating the log.
+		/// </summary>
+		public void SetArgs<T>(T argsObj)
+		{
+			try {
+				args = JsonSerializer.Serialize(argsObj, new JsonSerializerOptions { WriteIndented = false });
+			}
+			catch {
+				args = null;
+			}
+		}
 
 		/// <summary>Records a success detail appended to the log line on dispose.</summary>
 		public void Outcome(string detail) => this.detail = detail;
@@ -75,7 +91,7 @@ internal abstract partial class RoslynMcpTool
 
 		public void Dispose()
 		{
-			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag, estimatedTokens, responsePeek);
+			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag, estimatedTokens, responsePeek, args);
 			onDispose();
 		}
 

@@ -82,7 +82,7 @@ internal sealed class FileLogger : IDisposable
 
 	/// <summary>Logs a tool invocation with outcome, elapsed time, and workspace mode indicator.</summary>
 	/// <param name="isMSBuild">True for MSBuildWorkspace, false for AdhocWorkspace.</param>
-	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0, string? responsePeek = null)
+	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0, string? responsePeek = null, string? args = null)
 	{
 		var instance  = Interlocked.Increment(ref instanceCounter);
 		var shortName = toolName.StartsWith("roslyn_", StringComparison.Ordinal)
@@ -109,7 +109,9 @@ internal sealed class FileLogger : IDisposable
 			CacheTag        = cacheTag,
 			EstimatedTokens = estimatedTokens > 0 ? estimatedTokens : null,
 			SessionTokens   = estimatedTokens > 0 ? tokens : null,
-			ResponsePeek    = responsePeek
+			ResponsePeek    = responsePeek,
+			// Args logged only on failure — avoids bloating successful call entries.
+			Args            = !success ? args : null
 		});
 	}
 
