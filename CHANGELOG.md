@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`roslyn_write_file`** — atomically write or create any file within the project root (#116)
+  - Atomic write via temp-file + `File.Move(overwrite: true)` — no partial writes
+  - Automatic pre-write backup; returns a `backupToken` usable with `roslyn_local_history` for undo
+  - BOM-preserving: sniffs existing encoding on overwrite; new `.cs` files default to UTF-8 BOM (VS default)
+  - `createNew: true` mode for file creation; path traversal guard via `TryResolveTargetPath`
+  - SDK-style projects: new `.cs` files in the project directory are auto-included (no `.csproj` edit needed)
+- **`roslyn_local_history`** — crash-safe token-based undo for file write operations (#116)
+  - `action: list` — list backup snapshots for a file (or all files)
+  - `action: preview` — inspect a backup by token; includes `conflictRisk` flag if file was modified since backup
+  - `action: apply` — restore a file from a backup token; invalidates workspace cache on success; returns conflict details if the current file diverges
+- **`BackupStore`** — crash-recoverable backup infrastructure (#116)
+  - Snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\{path-hash}/`; override with `ROSLYNMCP_BACKUP_PATH` env var
+  - Token format: `{8-char-path-hash}_{unix-ms}` — unique, multi-level, crash-recoverable without server state
+  - File hash in `meta.json` for dedup (skip backup if unchanged), conflict detection, and integrity checks
+  - Retention: max 10 snapshots per file; oldest pruned automatically on write
+  - `TryResolveTargetPath` added to `RoslynMcpTool` base class: validates path stays under root without requiring file existence
+
 ---
 
 ## [0.7.2-alpha] — 2026-04-03
