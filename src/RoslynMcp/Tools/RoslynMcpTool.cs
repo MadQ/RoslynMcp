@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 
@@ -404,6 +404,55 @@ internal abstract partial class RoslynMcpTool
 		catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) { }
 
 		return null;
+	}
+
+		/// <summary>
+	///     Resolves where a file <em>would</em> be created — does not require the file to exist.
+	///     Returns false with an error message if the path escapes the root or is otherwise invalid.
+	/// </summary>
+	protected static bool TryResolveTargetPath(
+		string filePath,
+		string rootPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out string? fullPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
+	{
+		fullPath = null;
+		error    = null;
+
+		try {
+
+			if(Path.IsPathRooted(filePath)) {
+
+				// Absolute path — verify it stays under root.
+				if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)) {
+
+					error = $"Path '{filePath}' is outside the project root.";
+					return false;
+				}
+
+				fullPath = filePath;
+				return true;
+			}
+
+			var normalized = NormalizePath(filePath);
+			var candidate  = Path.GetFullPath(Path.Combine(rootPath, normalized));
+
+			// Under-root guard — prevent path traversal (e.g. ../../etc/passwd).
+			if(!candidate.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
+				(candidate.Length > rootPath.Length && candidate[rootPath.Length] is not '\\' and not '/')) {
+
+				error = $"Path '{filePath}' resolves outside the project root.";
+				return false;
+			}
+
+			fullPath = candidate;
+			return true;
+		}
+		catch(Exception ex) when(ex is ArgumentException or IOException) {
+
+			error = $"Invalid path '{filePath}': {ex.Message}";
+			return false;
+		}
 	}
 
 	protected static string FormatModifiers(ISymbol symbol)

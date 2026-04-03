@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.7.2-alpha (pre-1.0) |
-| **Tool Count** | 33 MCP tools (31 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
+| **Tool Count** | 35 MCP tools (33 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -66,7 +66,9 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `ReplaceInFileTool` | `roslyn_replace_in_file` — text-level find/replace with regex support (any file type) |
 | `ReplaceInCodeTool` | `roslyn_replace_in_code` — semantic C# node replacement using Roslyn (validates syntax, preserves formatting) |
 | `InsertLinesTool` | `roslyn_insert_lines` — insert lines at a position or anchor pattern |
-| `RespawnTool` | `roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
+| `WriteFileTool` | `roslyn_write_file` — write or create files atomically with automatic pre-write backup; returns a backup token usable with `roslyn_local_history` |
+| `LocalHistoryTool` | `roslyn_local_history` — list, preview, and apply crash-safe file backup snapshots; token-based undo for write operations (actions: `list`, `preview`, `apply`) |
+| `RespawnTool` |`roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `TypeMembersTool` | `roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
 | `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path |
 | `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |
@@ -94,6 +96,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `InfoTool` | `roslyn_info` — server version, PID, uptime, MSBuild discovery method, log markers |
 | `DebugAttachTool` | `roslyn_debug_attach` (DEBUG only) — launches the JIT debugger dialog so Visual Studio can attach; blocks the server until dismissed or attached |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
+| `BackupStore` | Crash-safe backup store for file write operations; snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\`; supports multi-level undo with token-based restore and conflict detection |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 | `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
 | `PaginationCache` | Generic TTL-based token cache for paginated tool results; shared across all tools via DI |
@@ -108,7 +111,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
 - `Tools/Analysis/` — 17 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
 - `Tools/Search/` — 3 file/content search tools (list files, text search, semantic search)
-- `Tools/Editing/` — 3 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`)
+- `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
 - `Tools/Refactoring/` — 2 signature-change tools (`roslyn_change_signature` → `roslyn_apply_signature_change`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
