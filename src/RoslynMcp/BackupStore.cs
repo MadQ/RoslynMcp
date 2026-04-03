@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -65,6 +65,7 @@ internal sealed class BackupStore
 		string   absolutePath,
 		string   projectPath,
 		string   operation,
+		byte[]   newContent,
 		int[]?   changedLineHint = null)
 	{
 		if(backupRoot is null)
@@ -73,20 +74,26 @@ internal sealed class BackupStore
 		if(!File.Exists(absolutePath))
 			return null;
 
-		byte[] content;
+		byte[] current;
 
 		try {
-			content = File.ReadAllBytes(absolutePath);
+			current = File.ReadAllBytes(absolutePath);
 		}
 		catch {
 			return null;
 		}
 
-		var pathHash   = ComputePathHash(absolutePath);
-		var dir        = Path.Combine(backupRoot, pathHash);
-		var unixMs     = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		var token      = $"{pathHash}_{unixMs}";
-		var preHash    = ComputeContentHash(content);
+		var preHash        = ComputeContentHash(current);
+		var newContentHash = ComputeContentHash(newContent);
+
+		// Skip backup when writing identical bytes — nothing to restore.
+		if(preHash == newContentHash)
+			return null;
+
+		var pathHash = ComputePathHash(absolutePath);
+		var dir      = Path.Combine(backupRoot, pathHash);
+		var unixMs   = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		var token    = $"{pathHash}_{unixMs}";
 
 		lock(syncRoot) {
 
@@ -94,25 +101,19 @@ internal sealed class BackupStore
 
 				Directory.CreateDirectory(dir);
 
-				// Skip if the file hasn't changed since the last backup.
-				var lastPostHash = ReadLastPostHash(dir);
-
-				if(lastPostHash is not null && lastPostHash == preHash)
-					return null;
-
 				var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}.bak");
 				var metaFile = Path.Combine(dir, MetaFileName);
 
-				File.WriteAllBytes(bakFile, content);
+				File.WriteAllBytes(bakFile, current);
 
 				var meta = new BackupMeta {
 					AbsolutePath    = absolutePath,
 					ProjectPath     = projectPath,
 					Operation       = operation,
 					Timestamp       = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-					FileSizeBytes   = content.Length,
+					FileSizeBytes   = current.Length,
 					PreWriteHash    = preHash,
-					// PostWriteHash filled by caller via UpdatePostHash() after the write succeeds.
+					PostWriteHash   = newContentHash,
 					ChangedLineHint = changedLineHint
 				};
 
@@ -127,27 +128,6 @@ internal sealed class BackupStore
 		}
 	}
 
-	/// <summary>
-	///     Records the hash of the file content after the write completed.
-	///     Call this immediately after the atomic rename succeeds.
-	/// </summary>
-	public void UpdatePostHash(string token, string absolutePath)
-	{
-		if(backupRoot is null)
-			return;
-
-		try {
-
-			var content  = File.ReadAllBytes(absolutePath);
-			var postHash = ComputeContentHash(content);
-			var dir      = Path.Combine(backupRoot, token.Split('_')[0]);
-			var metaFile = Path.Combine(dir, MetaFileName);
-
-			lock(syncRoot)
-				PatchPostHash(metaFile, token, postHash);
-		}
-		catch { }
-	}
 
 	/// <summary>
 	///     Lists all backup entries, optionally filtered to a specific file by <paramref name="absolutePath"/>.
@@ -284,21 +264,6 @@ internal sealed class BackupStore
 		return Convert.ToHexString(bytes).ToLowerInvariant();
 	}
 
-	string? ReadLastPostHash(string dir)
-	{
-		var metaFile = Path.Combine(dir, MetaFileName);
-
-		if(!File.Exists(metaFile))
-			return null;
-
-		var entries = ReadAllMetaEntries(metaFile);
-
-		// Most recent entry = largest unix_ms token suffix.
-		return entries
-			.OrderByDescending(kv => kv.Key)
-			.Select(kv => kv.Value.PostWriteHash)
-			.FirstOrDefault();
-	}
 
 	// meta.json is a JSON object: { "token": BackupMeta, ... }
 	static Dictionary<string, BackupMeta> ReadAllMetaEntries(string metaFile)
@@ -323,16 +288,6 @@ internal sealed class BackupStore
 		File.WriteAllText(metaFile, JsonSerializer.Serialize(entries, JsonOptions));
 	}
 
-	static void PatchPostHash(string metaFile, string token, string postHash)
-	{
-		var entries = ReadAllMetaEntries(metaFile);
-
-		if(entries.TryGetValue(token, out var meta)) {
-
-			entries[token] = meta with { PostWriteHash = postHash };
-			File.WriteAllText(metaFile, JsonSerializer.Serialize(entries, JsonOptions));
-		}
-	}
 
 	static void RemoveMetaEntry(string metaFile, string token)
 	{

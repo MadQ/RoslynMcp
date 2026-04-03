@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text;
 using ModelContextProtocol.Server;
 using RoslynMcp.Tools;
@@ -97,11 +97,15 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			);
 		}
 
+		// Compute the exact bytes that will land on disk so we can pass them to BackupStore.
+		// This lets Save() do correct dedup (skip if identical) and store PostWriteHash upfront.
+		byte[] writeBytes = [..targetEncoding.GetPreamble(), ..targetEncoding.GetBytes(normalizedContent)];
+
 		// Take backup before writing (existing files only).
 		string? backupToken = null;
 
 		if(!isNewFile)
-			backupToken = backups.Save(fullPath, projectPath, "roslyn_write_file");
+			backupToken = backups.Save(fullPath, projectPath, "roslyn_write_file", writeBytes);
 
 		// Atomic write: temp file in the same directory → rename.
 		var dir     = Path.GetDirectoryName(fullPath)!;
@@ -110,7 +114,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		try {
 
 			Directory.CreateDirectory(dir);
-			await File.WriteAllTextAsync(tmpFile, normalizedContent, targetEncoding);
+			await File.WriteAllBytesAsync(tmpFile, writeBytes);
 			File.Move(tmpFile, fullPath, overwrite: true);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -118,10 +122,6 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			TryDeleteTemp(tmpFile);
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
-
-		// Record the post-write hash so conflict detection works in local history.
-		if(backupToken is not null)
-			backups.UpdatePostHash(backupToken, fullPath);
 
 		// Invalidate Roslyn workspace so subsequent tools see the new source.
 		workspace.InvalidateFile(projectPath, fullPath);

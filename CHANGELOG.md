@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`BackupStore`** — crash-recoverable backup infrastructure (#116)
   - Snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\{path-hash}/`; override with `ROSLYNMCP_BACKUP_PATH` env var
   - Token format: `{8-char-path-hash}_{unix-ms}` — unique, multi-level, crash-recoverable without server state
-  - File hash in `meta.json` for dedup (skip backup if unchanged), conflict detection, and integrity checks
+  - File hash in `meta.json` for dedup (skip backup if identical content), conflict detection, and integrity checks
   - Retention: max 10 snapshots per file; oldest pruned automatically on write
   - `TryResolveTargetPath` added to `RoslynMcpTool` base class: validates path stays under root without requiring file existence
 
