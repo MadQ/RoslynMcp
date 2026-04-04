@@ -1,4 +1,4 @@
-
+﻿
 using System.Collections.Immutable;
 using System.Composition;
 using Microsoft.CodeAnalysis;
@@ -176,6 +176,12 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 
 		var original = returnStatement.Expression!;
 
+		// null / null! can't satisfy the generic T constraint — substitute a typed ErrorResult instead.
+		var result = IsNullExpression(original)
+			? BuildErrorResult(returnStatement)
+			: original.WithoutTrivia()
+			;
+
 		var wrappedExpr = terminal switch {
 
 			"Outcome" => (ExpressionSyntax) SyntaxFactory.InvocationExpression(
@@ -187,14 +193,14 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 							SyntaxFactory.Literal(detailName)
 						)
 					),
-					SyntaxFactory.Argument(original.WithoutTrivia())
+					SyntaxFactory.Argument(result)
 				}))
 			),
 
 			"Error" => SyntaxFactory.InvocationExpression(
 				ScopeMemberAccess("Error"),
 				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
-					SyntaxFactory.Argument(original.WithoutTrivia())
+					SyntaxFactory.Argument(result)
 				}))
 			),
 
@@ -207,7 +213,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 							SyntaxFactory.Literal(detailName)
 						)
 					),
-					SyntaxFactory.Argument(original.WithoutTrivia())
+					SyntaxFactory.Argument(result)
 				}))
 			)
 		};
@@ -220,6 +226,47 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 
 		return document.WithSyntaxRoot(newRoot);
 	}
+
+	private static bool IsNullExpression(ExpressionSyntax expr)
+	{
+		if(expr.IsKind(SyntaxKind.NullLiteralExpression))
+			return true;
+
+		return expr.IsKind(SyntaxKind.SuppressNullableWarningExpression)
+			&& expr is PostfixUnaryExpressionSyntax suppress
+			&& suppress.Operand.IsKind(SyntaxKind.NullLiteralExpression);
+	}
+
+	// Builds `new ErrorResult(<arg>)` where <arg> is the first scope.Record() string in the method,
+	// or "TODO" if no Record call is found. This avoids the CS0411 type-inference failure that
+	// occurs when the original return expression is null or null!.
+	private static ExpressionSyntax BuildErrorResult(ReturnStatementSyntax returnStatement)
+	{
+		var method    = returnStatement.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+		var recordArg = method?.DescendantNodes()
+			.OfType<InvocationExpressionSyntax>()
+			.Where(inv => inv.Expression is MemberAccessExpressionSyntax ma
+				&& ma.Name.Identifier.Text == "Record")
+			.Select(inv => inv.ArgumentList.Arguments.FirstOrDefault()?.Expression)
+			.FirstOrDefault(arg => arg is not null)
+			;
+
+		var errorArg = recordArg is not null
+			? (ExpressionSyntax) recordArg.WithoutTrivia()
+			: SyntaxFactory.LiteralExpression(
+				SyntaxKind.StringLiteralExpression,
+				SyntaxFactory.Literal("TODO")
+			  )
+			;
+
+		return SyntaxFactory.ObjectCreationExpression(
+			SyntaxFactory.IdentifierName("ErrorResult")).WithArgumentList(
+			SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
+				SyntaxFactory.Argument(errorArg)
+			}))
+		);
+	}
+
 
 	// RMCP005: The diagnostic is on Arguments[0] of the BeginTool call (ArgumentSyntax node).
 	// Fix: replace the string literal with the value from [McpServerTool(Name = "...")].

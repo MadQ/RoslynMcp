@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RMCP005** — upgraded from Warning to Error; a `BeginTool` name that mismatches `[McpServerTool(Name)]` makes log correlation impossible — it is factually incorrect, not cosmetic
 - **RMCP004 code fix** — `scope.Outcome` and `scope.Failed` fixes now infer the `detail`/`reason` label from `[McpServerTool(Name)]` (e.g., `roslyn_info` → `"info"`) instead of always using `"TODO: describe outcome"`; `scope.Failed` always uses `"failed"` as the reason; `scope.Error` is unchanged (no string arg)
 
+### Fixed
+- **RMCP004 code fix** — wrapping a `null` or `null!` return expression no longer produces uncompilable code (CS0411 type-inference failure on `scope.Failed<T>` / `scope.Outcome<T>` / `scope.Error<T>`); the fix now substitutes `new ErrorResult(<arg>)` where `<arg>` is the first `scope.Record(...)` string argument in the method, or `"TODO"` if none is found
+
 ---
 
 ## [0.7.4-alpha] — 2026-04-04
