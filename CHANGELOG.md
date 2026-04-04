@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.7.4-alpha] — 2026-04-04
+
 ### Changed
 - **`ToolScopeAnalyzer` RMCP003** — expression-bodied `[McpServerTool]` methods now fail RMCP003 immediately rather than being skipped; the pattern is one class / one tool method and expression bodies cannot satisfy the `using var scope = BeginTool(...)` requirement
 
@@ -22,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.7.3-alpha] — 2026-04-04
+## [0.7.3-alpha]— 2026-04-04
 
 ### Added
 - **`RoslynMcp.Analyzers` — ToolScopeAnalyzer (RMCP003/RMCP004/RMCP005)** — three analyzer rules that enforce the `BeginTool`/`ToolScope` pattern on all `[McpServerTool]` methods (#127)

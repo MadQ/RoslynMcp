@@ -19,6 +19,7 @@ All milestones through v0.7.3 are complete; additional work has shipped in dev p
 | v0.7.1 | `roslyn_info`, `roslyn_insert_lines`, workspace mode CLI arg (`--workspace sdk\|vs\|adhoc\|auto`) |
 | v0.7.2 | `roslyn_write_file`, `roslyn_local_history`, `BackupStore` (crash-safe backup infrastructure), NDJSON log format with `response_peek` pipeline, structured `roslyn_get_diagnostics` response (#111), tool metadata improvements (#112) |
 | v0.7.3 | `BackupStore` gains git branch/commit metadata in snapshots (#122), `RoslynMcpJson` shared serializer options — no `\uXXXX` spam (#123), `ToolResults.cs` normalized to PascalCase C# + snake_case JSON (#124), `ToolErrorResult` abstract base record — replaces `ExtractDetail` switch; `PathErrorResult`/`UnexpectedErrorResult` inherit it (#125), `BuildLiteralRegex` CRLF fix (#126), `ToolScopeAnalyzer` RMCP003/004/005 + code fix provider (#127, #128), `roslyn_get_project_info` MSBuild-derived fields (#117), `roslyn_build_project` MSBuild tail on exit-code failures (#131), retry with exponential backoff on file write contention (#129), `TryServeCachedPage` moved to `ToolScope` (#130), `roslyn_get_diagnostics` success/locked-file fix (#114) |
+| v0.7.4 | `FileEncoding` shared BOM-detection helper; BOM fixes in `roslyn_write_file` and `roslyn_replace_in_code`; `ToolScopeAnalyzer` RMCP003 now fires on expression-bodied tool methods; `TryServeCachedPage` gains `[NotNullWhen(true)]`, eliminating 10× CS8603 warnings |
 
 ---
 
