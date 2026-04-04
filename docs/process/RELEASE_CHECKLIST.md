@@ -154,7 +154,7 @@ Guidelines for what gets which bump:
 ## First Public Release (v1.0.0) Criteria
 
 Before declaring v1.0.0, ensure:
-- [ ] All 18 MVP tools stable and well-tested
+- [ ] All 33 public tools stable and well-tested (35 total including 2 debug-only)
 - [ ] Comprehensive test coverage (>80%)
 - [ ] Documentation complete and polished
 - [ ] CI/CD pipeline operational

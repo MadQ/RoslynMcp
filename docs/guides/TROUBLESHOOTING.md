@@ -104,13 +104,13 @@ Common issues and solutions when setting up and using RoslynMcp.
    - .NET SDK (includes MSBuild) — recommended
    - Visual Studio (includes MSBuild)
 
-2. **Or set environment variable:**
+2. **Or set environment variable** to point to your .NET SDK install location:
    ```bash
    # Windows
-   set MSBUILD_EXE_PATH=C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe
+   set DOTNET_ROOT=C:\Program Files\dotnet
 
    # macOS/Linux
-   export MSBUILD_EXE_PATH=/path/to/msbuild
+   export DOTNET_ROOT=/usr/local/share/dotnet
    ```
 
 3. **Fallback behavior:**

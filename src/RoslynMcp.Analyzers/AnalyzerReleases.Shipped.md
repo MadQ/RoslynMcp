@@ -4,9 +4,9 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
-RMCP003 | Usage | Error | [McpServerTool] method must begin with 'using var scope = BeginTool(...)'
-RMCP004 | Usage | Error | [McpServerTool] method return must go through scope.Outcome/Error/Failed
-RMCP005 | Usage | Warning | BeginTool name argument must match [McpServerTool(Name = ...)]
+RMCP003 | RoslynMcp.Tools | Error | [McpServerTool] method must begin with 'using var scope = BeginTool(...)'
+RMCP004 | RoslynMcp.Tools | Error | [McpServerTool] method return must go through scope.Outcome/Error/Failed
+RMCP005 | RoslynMcp.Tools | Warning | BeginTool name argument must match [McpServerTool(Name = ...)]
 
 ## Release 0.2.0
 

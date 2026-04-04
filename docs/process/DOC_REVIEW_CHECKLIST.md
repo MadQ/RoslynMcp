@@ -4,6 +4,47 @@ Run this checklist before making the repository public or after significant stru
 
 ---
 
+## AI Agent: Running a Full Sweep
+
+When a user says `/doc-sweep`, "doc sweep", or "doc↔code sync", the `doc-sweep` extension
+(`.github/extensions/doc-sweep/extension.mjs`) fires automatically and injects the full briefing.
+If the extension isn't loaded, tell the user to type `/doc-sweep` or paste this summary manually.
+
+**Scope:** Read EVERY `.md` and EVERY `.cs` file in the solution. Fix only `.md` files — code is truth.
+- `docs/ScratchPad*.md` — read as reference context, not authoritative
+- `docs/plans/` — historical; update if obviously stale, otherwise leave alone
+- Skip `scratch/ScratchA.cs` and `.test_*_temp.cs` (scratch/temp files)
+
+**Subagent grouping (launch in parallel):**
+| Agent | Docs | Key .cs source |
+|-------|------|----------------|
+| A | README.md + INSTALLATION.md | Program.cs, all Tools/ |
+| B | AGENTS.md | All Tools/, WorkspaceManager*, WorkspaceResolver |
+| C | CHANGELOG.md + ROADMAP.md | git log, GitHub issues/milestones |
+| D | CONTRIBUTING.md + SECURITY.md + CODE_OF_CONDUCT.md | CONTRIBUTING conventions |
+| E | WORKSPACE_MODES.md + TROUBLESHOOTING.md + DISCOVERY_PATTERN.md | WorkspaceManager*, MSBuildBootstrap |
+| F | CODE_STYLE_ENFORCEMENT.md + DOC_REVIEW_CHECKLIST.md + RELEASE_CHECKLIST.md | scripts/Test-CodeStyle.ps1 |
+| G | docs/tools/*.md + docs/reference/tools-assessment.md | Relevant tool .cs files |
+| H | HANDOFF.md + .github/copilot-instructions.md + AGENT-INSTRUCTIONS.md | Current state of everything |
+| I | docs/plans/*.md + battle-test-results.md + MSBUILD_API_ANALYSIS.md | Historical; flag stale claims |
+| J | .github/PULL_REQUEST_TEMPLATE.md + ISSUE_TEMPLATE/*.md | GitHub workflow accuracy |
+
+**Every subagent must include this constraint block verbatim:**
+```
+MANDATORY TOOL CONSTRAINTS — do NOT violate these:
+- Use roslyn_* MCP tools for ALL C# file operations.
+- Do NOT use cd — the CWD is already correct.
+- Do NOT use roslyn_read_file on non-.cs files — use the view tool instead.
+- Do NOT run Test-CodeStyle.ps1 — style passes are suspended. Violators get the dunce cap. 🎓
+- Do NOT reformat, reorder, or restyle any code while fixing docs — you are a doc editor, not a formatter.
+- Do NOT commit without being explicitly asked.
+- Build check: roslyn_get_diagnostics (severity: errors) only — never dotnet build.
+```
+
+**Commit when done:** `docs: audit and fix documentation drift`
+
+---
+
 ## Documentation Structure (v0.3.0+)
 
 ### Primary User-Facing Docs

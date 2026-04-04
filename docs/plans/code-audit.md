@@ -7,21 +7,9 @@ Audit date: 2026-03-27.
 
 ## Critical Issues (likely bugs)
 
-### 1. `WorkspaceResolver.GetRootPath` returns wrong directory for AdhocWorkspace
+### 1. `WorkspaceResolver.GetRootPath` returns wrong directory for AdhocWorkspace — **Fixed**
 
-**File:** `WorkspaceResolver.cs:63-65`
-
-```csharp
-public string GetRootPath(string projectPath)
-{
-    var (resolved, _) = ResolveWithKind(projectPath);
-    return Path.GetDirectoryName(resolved)!;
-}
-```
-
-When the resolved path is an Adhoc workspace (a directory, no .csproj), `Path.GetDirectoryName("C:\Projects\MyApp")` returns `"C:\Projects"` — the **parent** directory. This means all relative paths computed by every tool using `GetRootPath` are wrong for AdhocWorkspace scenarios. Compare with `WorkspaceManager.WorkspaceInstance.RootPath` which correctly stores the directory itself (`this.rootPath = directoryPath`).
-
-For MSBuild workspaces (resolved = `.csproj` file), `GetDirectoryName` correctly returns the project directory.
+**File:** `WorkspaceResolver.cs` (fixed: now delegates to `GetWorkspaceInfo` which returns the correct `rootPath` directly)
 
 ---
 
@@ -233,17 +221,9 @@ For two 10,000-line files, this allocates a 100M-element array (~400 MB). Large 
 
 ---
 
-### 18. `GetTriviaTool` — no bounds checking on `startLine`/`endLine`
+### 18. `GetTriviaTool` — no bounds checking on `startLine`/`endLine` — **Fixed**
 
-**File:** `GetTriviaTool.cs:62-63`
-
-```csharp
-var start = startLine.HasValue
-    ? sourceText.Lines[startLine.Value - 1].Start   // IndexOutOfRangeException if <= 0 or > line count
-    : 0;
-```
-
-No validation that `startLine`/`endLine` are within `[1, sourceText.Lines.Count]`.
+**File:** `GetTriviaTool.cs` (fixed: now uses `Math.Clamp` to clamp both values into `[1, lineCount]` before indexing)
 
 ---
 

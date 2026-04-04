@@ -123,7 +123,7 @@ Publish a Release build and configure your MCP client to use it:
 
 **PRs that add `.editorconfig` files will not be approved.** These create the same conflicts with the project's intentional style choices.
 
-**Custom analyzers are acceptable** if they enforce narrow, high-value rules. Example: `RoslynMcp.Analyzers` suggests modern C# alternatives (all warnings, never errors).
+**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes both error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal) and warning-severity rules (RMCP005: `BeginTool` name mismatch). New analyzer contributions follow the same pattern.
 
 ---
 
@@ -143,19 +143,25 @@ Publish a Release build and configure your MCP client to use it:
            [Description("...")] string parameter,
            [Description(ProjectPathDescription)] string projectPath)
        {
-           if(!TryGetCompilation(projectPath, out var compilation, out var error))
-               return error;
+           using var scope = BeginTool("roslyn_my_tool", parameter);
+
+           if(!TryGetCompilation(projectPath, out var compilation, out ToolErrorResult? error))
+               return scope.Error(error!);
 
            // Use Roslyn APIs here
            // Typed result records are preferred over anonymous objects
-           return new MyToolResult(...);
+           return scope.Outcome("summary of result", new MyToolResult(...));
        }
    }
    ```
 
+   **Required scope rules (enforced by RMCP003/RMCP004 analyzer errors):**
+   - `using var scope = BeginTool(...)` must be the **first statement** — ensures every exit path logs timing
+   - Every return must flow through `scope.Error(error)`, `scope.Outcome(detail, value)`, or `scope.Failed(reason, value)` — bare `return` bypasses logging
+
 2. **No manual DI registration needed** — `WithToolsFromAssembly()` in `Program.cs` auto-discovers all `[McpServerToolType]` classes
 
-3. **Add tests** in `src/TestHarness/Program.cs`
+3. **Add tests** in `src/TestHarness/TestHarnessProgram.cs`
 
 4. **Update documentation**:
    - README.md (tool catalog table)

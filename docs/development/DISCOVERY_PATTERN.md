@@ -23,7 +23,7 @@ public object MyTool(
 
     // Handle discovery requests using Try pattern
     if(TryHandleDiscovery(listSyntaxKinds, false, false, false, false, out var discovery))
-        return discovery;
+        return scope.Outcome("discovery", discovery);
 
     // Normal tool execution...
 }

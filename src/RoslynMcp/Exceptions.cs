@@ -1,4 +1,4 @@
-namespace RoslynMcp.Tools;
+﻿namespace RoslynMcp.Tools;
 
 /// <summary>
 ///     Thrown when no .csproj file can be found in or above the specified path.

@@ -58,7 +58,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | Component | Responsibility |
 |-----------|----------------|
 | `WorkspaceManager` | LRU-cached workspace instances; auto-detects `.csproj` → `MSBuildWorkspace` or directory → `AdhocWorkspace`; exposes `GetCompilation()`, `GetSolution()`, `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()`; smart path resolution |
-| `WorkspaceResolver` | Per-tool facade over `WorkspaceManager`; provides `TryGetCompilation()`, `TryGetProject()`, `GetRootPath()`, `GetSolution()`, `InvalidateFile()` with structured error handling |
+| `WorkspaceResolver` | Per-tool facade over `WorkspaceManager`; exposes `GetCompilation()`, `GetProject()`, `GetRootPath()`, `GetSolution()`, `GetWorkspaceInfo()`, `InvalidateFile()`; throws on path resolution failure (caught and structured by `RoslynMcpTool.TryGetCompilation`/`TryGetProject`) |
 | `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines `ProjectPathDescription` constant |
 | `SearchFilesTool` | `roslyn_search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
 | `SemanticSearchTool` | `roslyn_semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
@@ -106,7 +106,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `SymbolVisitors` | Roslyn symbol tree visitors (`SimpleNameFinder`, `AllSymbolsFinder`, `AnySymbolFinder`) used by reference and rename tools |
 | `Exceptions` | Project-specific exception types for workspace path resolution (`ProjectNotFoundException`, `MultipleProjectsFoundException`, `InvalidProjectPathException`, `AmbiguousFileException`) |
 
-**Data flow:** stdio MCP request → tool → `WorkspaceResolver.TryGetCompilation(projectPath, ...)` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
+**Data flow:** stdio MCP request → tool → `RoslynMcpTool.TryGetCompilation(projectPath, ...)` → `WorkspaceResolver.GetCompilation()` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
 **Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging), `LogEntry.cs` (shared NDJSON log schema — linked into both `RoslynMcp` and `RoslynMcp.LogViewer`).
 
@@ -352,31 +352,21 @@ When you deviate from convention because you've *thought it through*, that's not
 
 All communication is JSON-RPC 2.0 over stdin/stdout. **Never write to stdout except protocol messages** — all logging goes to stderr or is suppressed entirely.
 
-**Tool registration pattern** (in `Program.cs`):
+The server uses the C# MCP SDK (`ModelContextProtocol.Server` NuGet package). All protocol routing (`tools/list`, `tools/call`) is handled by the SDK automatically — there is no manual JSON-RPC switch.
+
+**Host setup** (in `Program.cs`):
 ```csharp
-"tools/list" => new {
-    tools = new[] {
-        new {
-            name = "roslyn_get_type_members",
-            description = "Returns all member names of a type...",
-            inputSchema = new { ... }
-        }
-    }
-}
+builder.Services
+    .AddSingleton<WorkspaceManager>()
+    .AddSingleton<WorkspaceResolver>()
+    // ... other singletons ...
+    .AddMcpServer()
+    .WithStdioServerTransport()
+    .WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions(...))
+;
 ```
 
-**Tool invocation pattern:**
-```csharp
-"tools/call" => {
-    var toolName = requestObj["params"]?["name"]?.ToString();
-    var args = requestObj["params"]?["arguments"];
-
-    return toolName switch {
-        "roslyn_get_type_members" => TypeMembersTool.Execute(args),
-        _ => new { error = "Unknown tool" }
-    };
-}
-```
+**Tool discovery** — `WithToolsFromAssembly()` scans the assembly for all classes marked `[McpServerToolType]` and registers methods marked `[McpServerTool]` as callable tools. Tools are constructed via DI.
 
 ---
 
@@ -500,16 +490,16 @@ public object MyToolMethod(..., string projectPath)
 }
 ```
 
-`using var scope = BeginTool(...)` **must be the first statement in every `[McpServerTool]` method.** This is enforced by RMCP003 (planned analyzer). Reasons:
+`using var scope = BeginTool(...)` **must be the first statement in every `[McpServerTool]` method.** This is enforced by RMCP003. Reasons:
 
 - **`using`** — ensures `scope.Dispose()` is called on every exit path: normal return, early `return`, and unhandled exception. `Dispose()` writes the NDJSON log entry. Without it, the invocation is invisible in logs and timing is lost.
 - **First statement** — any code before `BeginTool` is unlogged. Failures in parameter validation before `BeginTool` produce no log trace — impossible to diagnose remotely.
-- **`name` arg** — must exactly match `[McpServerTool(Name = "...")]`. RMCP005 will enforce this syntactically.
+- **`name` arg** — must exactly match `[McpServerTool(Name = "...")]`. RMCP005 enforces this syntactically.
 - **`subject` arg** — the primary identifier shown in the log (e.g., `symbolName`, `filePath`, `pattern`). Pass `null` for tools with no obvious primary key.
 
 ##### Scope Terminal Methods — Every `return` Must Use One
 
-Every `return` statement that carries a value must go through a scope terminal. This is enforced by RMCP004 (planned analyzer).
+Every `return` statement that carries a value must go through a scope terminal. This is enforced by RMCP004.
 
 | Method | When to use |
 |--------|-------------|

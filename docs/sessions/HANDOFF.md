@@ -1,88 +1,84 @@
 # Session Handoff
 
-**2026-04-04 (UTC)**
+**2026-04-04 00:27 EDT (Eastern Daylight Time)**
 
 ---
 
 ## Executive Summary
 
-Shipped several quality and correctness fixes across the server. Key deliverables: git branch/commit metadata in `roslyn_local_history` backups (#122), `ToolResults.cs` naming normalization to idiomatic C# (#124), abstract `ToolErrorResult` base record with type-safe error flow (#125), and a `BuildLiteralRegex` newline-normalization bug fix (#126). Also fixed a missing `[McpServerTool]` attribute on `ListFilesTool` (tool count now 35, not 33), corrected README tool count, and did GitHub issue triage (milestones assigned, #105 closed as already fixed).
+Shipped `ToolScopeAnalyzer` — a new Roslyn analyzer (`RoslynMcp.Analyzers`) with three diagnostics (RMCP003/004/005) enforcing the `BeginTool`/`ToolScope` pattern across all tool implementations (#127). Resolved all violations in the codebase (every tool file updated). Updated `AnalyzerReleases.Shipped.md` with Release 0.3.0. Opened three follow-up issues (#128/129/130) targeting v0.9.0. Completed a doc↔code sweep of assigned `.md` files.
 
 ## Current State
 
-- **Branch:** `dev`
+- **Branch:** `dev` (commit `f136e28`)
+- **Last commit:** `feat: ToolScopeAnalyzer (RMCP003/004/005) + resolve all violations (#127)`
 - **Compiler:** 0 errors, 0 warnings
-- **Version:** `v0.7.2-alpha` (not yet bumped for these changes)
+- **Tool count:** 35 (33 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`)
+- **Version:** `v0.7.3-alpha` (CHANGELOG updated for #122–#126; #127 not yet reflected)
 - **Stash:** 27 files of pre-existing style changes stashed as `"style: semicolons-on-own-lines + blank line pass (suspended — resume later)"` — do NOT pop until style pass suspension is lifted
 - **pub.ps1:** Convenience publish script at repo root — re-run after server-side C# changes.
 
 ## Completed This Session
 
-### #122 — Git branch/commit context in backup metadata (commit `0242c07`)
-- `BackupStore` now records `gitBranch` and `gitCommit` at snapshot time.
-- `roslyn_local_history` list response includes `_caution` when any backup was taken on a different branch than the current one.
-- Tool descriptions for `roslyn_local_history` and `roslyn_write_file` updated with branch-agnostic caution notes.
+### #127 — ToolScopeAnalyzer: RMCP003/004/005 (commits `e7342f9`, `f136e28`)
 
-### #124 — `ToolResults.cs` naming normalization (commit `1fce983`)
-- All 51 result records use positional syntax + `[property: JsonPropertyName("snake_case")]`.
-- PascalCase C# names throughout.
-- `MetadataSymbolResult.Message` → `Error`; `SymbolDocumentationEmptyResult.Message` → `Error`.
+Three new analyzer diagnostics in `RoslynMcp.Analyzers`:
 
-### #125 — Abstract `ToolErrorResult` base record (commit `d1c6512`)
-- `ToolErrorResult` abstract base record added.
-- `ExtractDetail<T>()` switch deleted.
-- `ToolScope.Error<T>()` gains `where T : ToolErrorResult` constraint.
-- 5 result types now derive from `ToolErrorResult`.
+- **RMCP003** — Tool method must call `BeginTool()`/`BeginToolAsync()` (enforces scope entry)
+- **RMCP004** — `BeginTool` result must be awaited (prevents silent fire-and-forget on async paths)
+- **RMCP005** — Tool result must be returned through the `ToolScope` (prevents bypassing structured response flow)
 
-### #126 — `BuildLiteralRegex` newline bug + `ToolErrorResult.Error` non-nullable (commits `b3117d2`, `f755c5e`, `10faedc`)
-- `.Replace("\n",...)` was a no-op (C# string literal `\n` != literal backslash-n in pattern strings); fixed to `.Replace(@"\n",...)`.
-- `ToolErrorResult.Error` made `string` (non-nullable); dead `?? "error"` fallback removed.
+All violations in the main project resolved; every tool file updated to comply. `AnalyzerReleases.Shipped.md` updated with Release 0.3.0.
 
-### ListFilesTool attribute fix
-- `[McpServerTool(Name = "roslyn_list_files"...)]` attribute was missing from the method — added it.
-- Tool count is now **35** (was incorrectly 33).
+### Follow-up issues opened (all v0.9.0)
 
-### README.md
-- "33 tools" in body text corrected to "35 tools".
+- **#128** — Code fixers for RMCP003/RMCP004/RMCP005 analyzer diagnostics
+- **#129** — Retry with exponential backoff on file write contention (`IOException`)
+- **#130** — Refactor: move `TryServeCachedPage` from `RoslynMcpTool` to `ToolScope`
 
-### GitHub issue triage
-- #114, #117, #99 → v0.8.0 milestone
-- #118 → v0.9.0
-- #86 → v1.0.0
-- #105 closed — was already fixed in commit `3e115df` (SolutionDiff infinite loop).
-- Milestones assigned to 5 previously unassigned issues.
+### Doc sweep (this session)
+
+- **HANDOFF.md** — Refreshed with current state (this document).
+- **PULL_REQUEST_TEMPLATE.md** — Fixed TestHarness path (`TestHarness/` → `src/TestHarness/`).
+- **RELEASE_CHECKLIST.md** — Updated "18 MVP tools" criterion to reflect actual public tool count (33).
+- **copilot-instructions.md** — Already accurate (35 tools); no change needed.
+- **AGENT-INSTRUCTIONS.md**, **feature_request.md**, **bug_report.md** — No inaccuracies found.
 
 ## Open Issues
 
 | # | Milestone | Title |
 |---|-----------|-------|
-| #118 | v0.9.0 | LogViewer — NDJSON log viewer (**NOTE:** may already be shipped in v0.7.2; verify before closing) |
-| #117 | v0.8.0 | Expose version/MSBuild properties in `roslyn_get_project_info` |
-| #114 | v0.8.0 | Tighten `IsUnderRoot` diagnostic filter |
-| #110 | v1.0.0 | `roslyn_apply_code_fix` |
-| #99  | v0.8.0 | Making agents reliably choose roslyn_* tools |
-| #86  | v1.0.0 | Shared workspace service via named pipes |
-| #37  | v1.0.0-beta | Column alignment rebalancing |
+| #130 | v0.9.0 | Refactor: move `TryServeCachedPage` from `RoslynMcpTool` to `ToolScope` |
+| #129 | v0.9.0 | Fix: retry with exponential backoff on file write contention |
+| #128 | v0.9.0 | Feat: code fixers for RMCP003/RMCP004/RMCP005 |
+| #118 | v0.9.0 | Feat: LogViewer — NDJSON log viewer with syntax highlighting |
+| #117 | v0.8.0 | Feat: expose version/MSBuild properties in `roslyn_get_project_info` |
+| #114 | v0.8.0 | Improve: tighten `IsUnderRoot` diagnostic filter |
+| #110 | v1.0.0 | Feat: `roslyn_apply_code_fix` |
+| #99  | v0.8.0 | Help wanted: making agents reliably choose roslyn_* tools |
+| #86  | v1.0.0 | Feat: shared workspace service via named pipes |
+| #37  | v1.0.0-beta | Full file-wide column alignment rebalancing |
 | #36  | v1.0.0-beta | `roslyn_preview_style` / `roslyn_apply_style` |
-| #35  | v0.9.0 | `preserveStyle` flag for `replace_in_code` |
-| #34  | v0.9.0 | `roslyn_get_style_profile` |
-| #33  | v0.8.0 | `roslyn_find_unused` |
-| #32  | v0.8.0 | Call graph tools |
-| #9   | v0.9.0 | Security: filesystem access boundaries |
+| #35  | v0.9.0 | Add `preserveStyle` flag to `replace_in_code` |
+| #34  | v0.9.0 | Implement `roslyn_get_style_profile` |
+| #33  | v0.8.0 | Implement `roslyn_find_unused` |
+| #32  | v0.8.0 | Implement call graph tools |
+| #9   | v0.9.0 | Security: implement filesystem access boundaries |
 
-## Known Issues / Technical Debt
+## Suggested Next Steps
 
-- **Working tree rollback bug:** After commits, disk files sometimes silently revert to pre-commit state. Always run `git status` after commits; fix with `git checkout -- <files>`. Occurred after #124 and #125.
-- **#118 status unclear:** LogViewer shipped in v0.7.2-alpha — the open issue may track further improvements. Verify before acting.
-- **CHANGELOG.md / ROADMAP.md / AGENTS.md:** A parallel agent in this session was syncing entries for #122–#126. Verify these are up to date before the next release.
-
-## Suggested Next Steps (v0.8.0 order)
-
+### v0.8.0 (near-term)
 1. **#114** — Tighten `IsUnderRoot` filter (small, targeted)
-2. **#117** — Expose more MSBuild/SDK properties (small, tidy)
-3. **#32** — Call graph tools (bigger, novel)
-4. **#33** — `roslyn_find_unused` (bigger, novel)
+2. **#117** — Expose more MSBuild/SDK properties in `roslyn_get_project_info`
+3. **#32** — Call graph tools (`find_callers`, `get_call_graph`)
+4. **#33** — `roslyn_find_unused`
 5. **#99** — Agent tool selection (documentation/hooks work)
+
+### v0.9.0 (style-aware editing milestone)
+1. **#128** — Code fixers for RMCP003/004/005 (natural follow-on from this session)
+2. **#130** — Move `TryServeCachedPage` into `ToolScope`
+3. **#129** — File write retry with exponential backoff
+4. **#35** / **#34** — `preserveStyle` flag and `roslyn_get_style_profile`
 
 ## Context for Resuming
 
@@ -92,4 +88,5 @@ Shipped several quality and correctness fixes across the server. Key deliverable
 - `pub.ps1` at repo root: re-run after server-side C# changes to update the published exe
 - Dogfood roslyn_* tools always; terminal is last resort
 - `gh.exe` globally available
+- CHANGELOG.md not yet updated for #127 — add before next version bump
 

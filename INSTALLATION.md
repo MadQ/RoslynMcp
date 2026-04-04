@@ -11,7 +11,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 > **Configuration reference:** See [README.md](README.md) for detailed examples and troubleshooting.
 
-> All 35 tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
+> All 33 tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
 
 > **Quick start:** Most clients use one of two patterns:
 > - **Workspace config**: `.mcp.json` or similar file in your project root
@@ -344,7 +344,7 @@ RoslynMcp automatically falls back to AdhocWorkspace (source-only mode) if MSBui
 
 ### Multi-project workspaces
 
-All 35 tools require a `projectPath` parameter, enabling multi-project workflows without restarting the server.
+All 33 tools require a `projectPath` parameter, enabling multi-project workflows without restarting the server.
 
 RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point the command-line argument at the solution directory or primary project directory for pre-loading.
 
@@ -367,10 +367,10 @@ For large codebases (>100K LOC), consider:
 
 ## Next Steps
 
-- Try the [tools reference](README.md#tools) to see what RoslynMcp can do
+- Try the [tools reference](README.md#tool-catalog) to see what RoslynMcp can do
 - Read [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for MSBuildWorkspace vs AdhocWorkspace details
 - Check [Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md) for common issues
-- Review [write operations](README.md#write-operations) for rename previewing and applying
+- Review [refactoring tools](README.md#refactoring) for rename previewing and applying
 
 ---
 

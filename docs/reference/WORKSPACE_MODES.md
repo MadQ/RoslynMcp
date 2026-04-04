@@ -273,7 +273,7 @@ RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.c
 
 - **Cache key:** Solution path (or .csproj/directory if no solution found)
 - **Cache size:** Configurable via `ROSLYNMCP_MAX_CACHED_WORKSPACES` (default 5)
-- **Thread-safety:** Lock-free cache lookups; loading outside lock to avoid contention
+- **Thread-safety:** Lock-protected cache lookups with short critical section; loading outside lock to avoid contention
 - **Invalidation:** FileSystemWatcher (both MSBuild and Adhoc) + manual via `InvalidateFile()`
 - **Per-project compilation cache** — each project in a solution has its own cached compilation
 

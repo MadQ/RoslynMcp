@@ -35,19 +35,23 @@
 ```json
 {
   "file": "MyFile.cs",
-  "totalNodes": 47,
-  "filteredNodes": 12,
+  "total_nodes": 47,
+  "filtered_nodes": 12,
+  "skip": 0,
+  "take": 100,
   "results": [
     {
-      "nodeKind": "IfStatement",
-      "nodeSpan": { "start": 234, "end": 456, "startLine": 12, "endLine": 18 },
-      "nodeText": "if(condition)",
-      "leadingTrivia": [
+      "node_kind": "IfStatement",
+      "node_span": { "start": 234, "end": 456, "start_line": 12, "end_line": 18 },
+      "node_text": "if(condition)",
+      "leading_trivia": [
         { "kind": "WhitespaceTrivia", "text": "\t\t", "span": {...} }
       ],
-      "trailingTrivia": [ ... ]
+      "trailing_trivia": [ ... ]
     }
-  ]
+  ],
+  "page_token": "abc123",
+  "has_more": false
 }
 ```
 
@@ -95,7 +99,8 @@ If you use an invalid kind name, the tool returns suggestions:
   "error": "no_matching_nodes",
   "message": "No syntax nodes of kind 'if' found...",
   "hint": "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
-  "commonKinds": [ "IfStatement", "ForEachStatement", ... ]
+  "provided_kind": "if",
+  "common_kinds": [ "IfStatement", "ForEachStatement", ... ]
 }
 ```
 

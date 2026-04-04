@@ -1,5 +1,7 @@
 # RoslynMcp v0.4.0-alpha: Implementation Plan
 
+> **Status: Shipped as of v0.4.0**
+
 ## Step 1 — Fix High-Priority Bugs
 
 ### 1a. Missing `[McpServerTool]` on `GetSymbolsInScopeTool`

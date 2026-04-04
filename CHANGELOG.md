@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`RoslynMcp.Analyzers` — ToolScopeAnalyzer (RMCP003/RMCP004/RMCP005)** — three analyzer rules that enforce the `BeginTool`/`ToolScope` pattern on all `[McpServerTool]` methods (#127)
+  - **RMCP003** (Error): `[McpServerTool]` method must begin with `using var scope = BeginTool(...)`
+  - **RMCP004** (Error): all return paths in a `[McpServerTool]` method must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
+  - **RMCP005** (Warning): the `name` argument passed to `BeginTool` must match `[McpServerTool(Name = ...)]`
+- **`AnalyzerReleases.Shipped.md`** — Release 0.3.0 block added documenting RMCP003/RMCP004/RMCP005 (#127)
+
+### Changed
+- **All tool files** — all RMCP003/004/005 violations resolved; every `[McpServerTool]` method now opens with `using var scope = BeginTool(...)` and all return paths go through `scope` (#127)
+
 ---
 
 ## [0.7.3-alpha] — 2026-04-04
@@ -19,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Custom `JavaScriptEncoder` using `TextEncoderSettings` — allows all Unicode through instead of escaping as `\uXXXX`; still escapes what is actually necessary
   - Literal `\n` in JSON string values now preserved (not double-escaped)
 - **`ToolErrorResult`** — abstract base record in `ErrorResult.cs`; all structured error types now derive from it, replacing the `ExtractDetail` switch (#125)
+  - `PathErrorResult` and `UnexpectedErrorResult` in `ToolResults.cs` now inherit `: ToolErrorResult`, completing the structured error hierarchy
+  - `TryGetCompilation` and `TryGetProject` `out` parameters typed as `out ToolErrorResult?`, enabling callers to handle structured errors without casting
 
 ### Changed
 - **`roslyn_local_history`** — `list` action now includes a `_caution` field when any backup was taken on a different branch than the current one (#122)
