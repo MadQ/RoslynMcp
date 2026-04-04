@@ -221,17 +221,22 @@ internal sealed record GetUsingsResult(
 );
 
 internal sealed record ProjectInfoResult(
-	[property: JsonPropertyName("name")]                 string   Name,
-	[property: JsonPropertyName("assembly_name")]        string   AssemblyName,
-	[property: JsonPropertyName("file_path")]            string?  FilePath,
-	[property: JsonPropertyName("target_framework")]     string?  TargetFramework,
-	[property: JsonPropertyName("language_version")]     string   LanguageVersion,
-	[property: JsonPropertyName("output_kind")]          string   OutputKind,
-	[property: JsonPropertyName("nullable")]             string   Nullable,
-	[property: JsonPropertyName("is_msbuild_workspace")] bool     IsMsbuildWorkspace,
-	[property: JsonPropertyName("package_references")]   object[] PackageReferences,
-	[property: JsonPropertyName("additional_files")]     string[] AdditionalFiles,
-	[property: JsonPropertyName("_caution")]             string?  Caution
+	[property: JsonPropertyName("name")]                 string    Name,
+	[property: JsonPropertyName("assembly_name")]        string    AssemblyName,
+	[property: JsonPropertyName("file_path")]            string?   FilePath,
+	[property: JsonPropertyName("target_framework")]     string?   TargetFramework,
+	[property: JsonPropertyName("language_version")]     string    LanguageVersion,
+	[property: JsonPropertyName("output_kind")]          string    OutputKind,
+	[property: JsonPropertyName("nullable")]             string    Nullable,
+	[property: JsonPropertyName("is_msbuild_workspace")] bool      IsMsbuildWorkspace,
+	[property: JsonPropertyName("package_references")]   object[]  PackageReferences,
+	[property: JsonPropertyName("additional_files")]     string[]  AdditionalFiles,
+	[property: JsonPropertyName("version")]               string?   Version,
+	[property: JsonPropertyName("root_namespace")]        string?   RootNamespace,
+	[property: JsonPropertyName("target_frameworks")]     string[]? TargetFrameworks,
+	[property: JsonPropertyName("allow_unsafe_blocks")]   bool?     AllowUnsafeBlocks,
+	[property: JsonPropertyName("warnings_as_errors")]    bool?     WarningsAsErrors,
+	[property: JsonPropertyName("_caution")]              string?   Caution
 );
 
 internal sealed record GetTriviaNoMatchResult(
