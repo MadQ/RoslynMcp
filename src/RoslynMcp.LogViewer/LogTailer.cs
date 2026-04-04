@@ -67,17 +67,20 @@ sealed class LogTailer
 			
 			// Live tail.
 			while(!ct.IsCancellationRequested) {
-			
+				
 				var line = await reader!.ReadLineAsync(ct).ConfigureAwait(false);
 				
 				if(line is not null) {
+					
 					yield return Parse(line);
 					continue;
 				}
 				
 				// Check for log rotation: file was truncated/replaced.
 				try {
+					
 					if(File.Exists(logPath) && new FileInfo(logPath).Length < stream!.Position) {
+						
 						try {
 							// Under RoslynMcp's rotation strategy, the original stream
 							// now points at the renamed old file. Reopen so we follow
@@ -132,6 +135,7 @@ sealed class LogTailer
 		string? line;
 		
 		while((line = reader.ReadLine()) is not null) {
+			
 			ct.ThrowIfCancellationRequested();
 			ring[ringHead] = line;
 			ringHead       = (ringHead + 1) % count;
@@ -141,7 +145,10 @@ sealed class LogTailer
 		}
 		
 		// stream/reader are now at EOF — ready for live tail without a seek.
-		var start = ringSize < count ? 0 : ringHead;
+		var start = ringSize < count
+			? 0
+			: ringHead
+		;
 		
 		for(var i = 0; i < ringSize; i++)
 			yield return Parse(ring[(start + i) % count]);
@@ -185,6 +192,7 @@ sealed class LogTailer
 		var dir      = Path.GetDirectoryName(fullPath);
 		
 		if(dir is null || !Directory.Exists(dir)) {
+			
 			while(!File.Exists(logPath))
 				await Task.Delay(1000, ct).ConfigureAwait(false);
 			
@@ -214,17 +222,17 @@ sealed class LogTailer
 	static readonly JsonSerializerOptions JsonOptions = new() {
 		PropertyNameCaseInsensitive = true
 	};
-
+	
 	static LogEntry Parse(string raw)
 	{
 		try {
 			var entry = JsonSerializer.Deserialize<LogEntry>(raw, JsonOptions);
-
+			
 			if(entry is not null)
 				return entry with { Raw = raw };
 		}
 		catch { }
-
+		
 		// Unrecognized line (e.g. truncated write, non-JSON content).
 		return new LogEntry {
 			Timestamp = "",

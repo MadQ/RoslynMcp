@@ -39,41 +39,36 @@ internal sealed class GetTriviaTool : RoslynMcpTool
     {
         using var scope = BeginTool("roslyn_get_trivia", filePath);
 
-
         if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds: false, listTypeKinds: false, listSearchContexts: false, out var discovery))
-
-            return discovery;
+            return scope.Outcome("discovery", discovery);
 
         var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 500);
+		
         if(cachedPage is not null)
-
-            return cachedPage;
+            return scope.Outcome("cached page", cachedPage);
 
         if(string.IsNullOrEmpty(filePath))
-
             return scope.Error(new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds"));
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
-
-            return error;
+            return scope.Error(error!);
 
         if(take <= 0 || take > 500)
-
             return scope.Error(new ErrorResult("take must be between 1 and 500"));
 
         var normalizedPath = NormalizePath(filePath);
-        var tree = compilation.SyntaxTrees.FirstOrDefault(t =>
+        var tree		   = compilation.SyntaxTrees.FirstOrDefault(t =>
             t.FilePath.EndsWith(normalizedPath, StringComparison.OrdinalIgnoreCase)
         );
 
         if(tree is null)
-
             return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
 
-        var root = tree.GetRoot();
+        var root	   = tree.GetRoot();
         var sourceText = tree.GetText();
 
         TextSpan span;
+		
         if(startLine.HasValue || endLine.HasValue) {
 
             var lineCount = sourceText.Lines.Count;
@@ -85,9 +80,8 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             span = TextSpan.FromBounds(start, end);
         }
-        else {
+        else
             span = root.FullSpan;
-        }
 
         // ToList() is intentional — nodesInSpan may be reassigned in-place below when filtering by syntaxKind.
         var nodesInSpan = root
@@ -113,7 +107,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         }
 
         var totalNodes = nodesInSpan.Count;
-        var results = new List<object>();
+        var results	   = new List<object>();
 
         foreach(var node in nodesInSpan) {
 
@@ -147,7 +141,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         object[] allResults = [.. results];
         var result = PaginateAndStore(allResults, ref skip, take);
 
-        return new GetTriviaResult(
+        return scope.Outcome("trivia", new GetTriviaResult(
             filePath,
             totalNodes,
             allResults.Length,
@@ -155,7 +149,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             result.Items,
             result.PageToken,
             result.HasMore
-        );
+        ));
     }
 
     private static object[] FilterTrivia(SyntaxTriviaList triviaList, string? kindFilter)
@@ -163,7 +157,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         var filtered = kindFilter is not null
             ? triviaList.Where(t => t.Kind().ToString() == kindFilter)
             : triviaList
-;
+		;
 
         return [..
             filtered.Select(t => new TriviaEntry(
@@ -178,7 +172,6 @@ internal sealed class GetTriviaTool : RoslynMcpTool
     private static string TruncateText(string text, int maxLength)
     {
         if(text.Length <= maxLength)
-
             return text;
 
         return text.Substring(0, maxLength) + "…";

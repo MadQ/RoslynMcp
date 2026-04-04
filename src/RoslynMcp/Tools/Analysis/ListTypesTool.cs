@@ -30,13 +30,12 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		
 		
 		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 500);
+		
 		if(cachedPage is not null)
-			
-			return cachedPage;
+			return scope.Outcome("cached page", cachedPage);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var allTypes = new List<INamedTypeSymbol>();
 		
@@ -55,8 +54,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		;
 		
 		if(allResults.Length == 0)
-			
-			return new[] { "No types found matching the filters." };
+			return scope.Outcome("no types", new[] { "No types found matching the filters." });
 		
 		var result = PaginateAndStore(allResults, ref skip, take);
 		
@@ -76,6 +74,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 			
 			if(member is INamedTypeSymbol type)
 				collector.Add(type);
+			
 			else if(member is INamespaceSymbol childNs)
 				CollectTypes(childNs, collector);
 		}
@@ -84,25 +83,21 @@ internal sealed class ListTypesTool : RoslynMcpTool
 	private static bool MatchesNamespace(INamedTypeSymbol type, string? filter)
 	{
 		if(filter is null)
-			
 			return true;
 		
 		var ns = type.ContainingNamespace?.ToDisplayString();
 		
 		if(ns is null)
-			
 			return false;
 		
 		// Match exact namespace or sub-namespace.
 		
-		return ns.Equals(filter, StringComparison.Ordinal)
-			|| ns.StartsWith(filter + ".", StringComparison.Ordinal);
+		return ns.Equals(filter, StringComparison.Ordinal) || ns.StartsWith(filter + ".", StringComparison.Ordinal);
 	}
 	
 	private static bool MatchesKind(INamedTypeSymbol type, string? filter)
 	{
 		if(filter is null)
-			
 			return true;
 		
 		return filter.ToLowerInvariant() switch {

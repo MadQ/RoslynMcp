@@ -10,13 +10,13 @@ internal sealed class WorkspaceResolver
 {
 	readonly WorkspaceManager  manager;
 	readonly PaginationCache   paginationCache;
-
+	
 	public WorkspaceResolver(WorkspaceManager manager, PaginationCache paginationCache)
 	{
 		this.manager         = manager;
 		this.paginationCache = paginationCache;
 	}
-
+	
 	/// <summary>
 	///     Resolves a project path and returns both the resolved path and how it was resolved.
 	/// </summary>
@@ -24,7 +24,7 @@ internal sealed class WorkspaceResolver
 	{
 		return manager.ResolveProjectPath(projectPath);
 	}
-
+	
 	/// <summary>
 	///     Returns how the given projectPath would be resolved (explicit, directory, file walk-up, inferred, or adhoc).
 	///     Tools use this to annotate log entries when non-obvious resolution occurred.
@@ -32,6 +32,7 @@ internal sealed class WorkspaceResolver
 	public ResolutionKind GetResolutionKind(string projectPath)
 	{
 		var (_, kind) = ResolveWithKind(projectPath);
+		
 		return kind;
 	}
 	
@@ -41,7 +42,7 @@ internal sealed class WorkspaceResolver
 	public Compilation GetCompilation(string projectPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-
+		
 		return manager.GetCompilation(resolved);
 	}
 	
@@ -51,7 +52,7 @@ internal sealed class WorkspaceResolver
 	public Solution GetSolution(string projectPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-
+		
 		return manager.GetSolution(resolved);
 	}
 	
@@ -62,6 +63,7 @@ internal sealed class WorkspaceResolver
 	public string GetRootPath(string projectPath)
 	{
 		var (rootPath, _, _) = GetWorkspaceInfo(projectPath);
+		
 		return rootPath;
 	}
 	
@@ -71,7 +73,7 @@ internal sealed class WorkspaceResolver
 	public Project GetProject(string projectPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-
+		
 		return manager.GetProject(resolved);
 	}
 	
@@ -81,7 +83,7 @@ internal sealed class WorkspaceResolver
 	public (string RootPath, bool IsMSBuild, string? CsprojPath) GetWorkspaceInfo(string projectPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-
+		
 		return manager.GetWorkspaceInfo(resolved);
 	}
 	
@@ -92,10 +94,10 @@ internal sealed class WorkspaceResolver
 	public bool IsAdhoc(string projectPath)
 	{
 		var (_, isMSBuild, _) = GetWorkspaceInfo(projectPath);
-
+		
 		return !isMSBuild;
 	}
-
+	
 	/// <summary>
 	///     Invalidates the cached compilation for a file after edits.
 	///     Tools that modify files should call this to ensure fresh diagnostics on subsequent queries.
@@ -103,7 +105,7 @@ internal sealed class WorkspaceResolver
 	public void InvalidateFile(string projectPath, string fullPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-
+		
 		manager.InvalidateFile(resolved, fullPath);
 		paginationCache.InvalidateAll();
 	}

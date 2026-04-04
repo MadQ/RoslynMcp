@@ -30,13 +30,12 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		
 		
 		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 100);
+		
 		if(cachedPage is not null)
-			
-			return cachedPage;
+			return scope.Outcome("cached page", cachedPage);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var rootPath   = workspace.GetRootPath(projectPath);
 		var normalized = NormalizePath(filePath);
@@ -46,7 +45,6 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		;
 		
 		if(tree is null)
-			
 			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var root     = await tree.GetRootAsync();

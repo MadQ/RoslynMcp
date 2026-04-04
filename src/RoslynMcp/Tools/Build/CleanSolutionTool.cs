@@ -20,6 +20,7 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_clean_solution");
+		
 		var rootPath = workspace.GetRootPath(projectPath);
 		
 		string? projectFile;
@@ -28,12 +29,10 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 			projectFile = FindProjectFile(rootPath);
 		}
 		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
-			
 			return scope.Failed("Failed to access project directory.", new CleanResult(false, "Failed to access project directory.", ex.Message));
 		}
 		
 		if(projectFile is null)
-			
 			return scope.Failed("No .csproj file found in target directory.", new CleanResult(false, "No .csproj file found in target directory.", null));
 		
 		var startInfo = new ProcessStartInfo
@@ -53,24 +52,20 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 			process = Process.Start(startInfo) ?? throw new InvalidOperationException("Process.Start returned null.");
 		}
 		catch(Win32Exception ex) {
-			
 			return scope.Failed("Failed to start dotnet process. Is dotnet installed and in PATH?", new CleanResult(false, "Failed to start dotnet process. Is dotnet installed and in PATH?", ex.Message));
 		}
 		catch(InvalidOperationException ex) {
-			
 			return scope.Failed("Failed to start dotnet clean process.", new CleanResult(false, "Failed to start dotnet clean process.", ex.Message));
 		}
 		
 		string output, error;
 		
 		try {
-			
 			output = await process.StandardOutput.ReadToEndAsync();
 			error  = await process.StandardError.ReadToEndAsync();
 			await process.WaitForExitAsync();
 		}
 		catch(IOException ex) {
-			
 			return scope.Failed("Failed to read process output.", new CleanResult(false, "Failed to read process output.", ex.Message));
 		}
 		
@@ -81,13 +76,12 @@ internal sealed class CleanSolutionTool : RoslynMcpTool
 		
 		var details = string.IsNullOrWhiteSpace(error) ? output : error;
 		
-		return new CleanResult(success, message, details);
+		return scope.Outcome(message, new CleanResult(success, message, details));
 	}
 	
 	private static string? FindProjectFile(string directory)
 	{
 		try {
-			
 			var csprojFiles = Directory.GetFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly);
 			
 			return csprojFiles.Length > 0 ? csprojFiles[0] : null;

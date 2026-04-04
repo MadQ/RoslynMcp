@@ -21,17 +21,21 @@ namespace RoslynMcp.Analyzers;
 public sealed class PreferNintOverIntPtrCodeFixProvider : CodeFixProvider
 {
 	public override ImmutableArray<string> FixableDiagnosticIds =>
-		["RMCP001", "RMCP002"];
+		["RMCP001", "RMCP002"]
+		;
 	
 	public override FixAllProvider GetFixAllProvider() =>
-		WellKnownFixAllProviders.BatchFixer;
+		WellKnownFixAllProviders.BatchFixer
+		;
 	
 	public override async Task RegisterCodeFixesAsync(CodeFixContext context)
 	{
 		var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken)
-			.ConfigureAwait(false);
+			.ConfigureAwait(false)
+			;
 		
 		if(root is null)
+			
 			return;
 		
 		var diagnostic = context.Diagnostics.First();
@@ -39,9 +43,11 @@ public sealed class PreferNintOverIntPtrCodeFixProvider : CodeFixProvider
 		
 		var node = root.FindToken(diagnosticSpan.Start).Parent?.AncestorsAndSelf()
 			.OfType<IdentifierNameSyntax>()
-			.FirstOrDefault();
+			.FirstOrDefault()
+			;
 		
 		if(node is null)
+			
 			return;
 		
 		var replacement = diagnostic.Id switch
@@ -52,6 +58,7 @@ public sealed class PreferNintOverIntPtrCodeFixProvider : CodeFixProvider
 		};
 		
 		if(replacement is null)
+			
 			return;
 		
 		var title = $"Replace with '{replacement}'";
@@ -79,14 +86,17 @@ public sealed class PreferNintOverIntPtrCodeFixProvider : CodeFixProvider
 	)
 	{
 		var root = await document.GetSyntaxRootAsync(cancellationToken)
-			.ConfigureAwait(false);
+			.ConfigureAwait(false)
+			;
 		
 		if(root is null)
+			
 			return document;
 		
 		// Create the new identifier name (nint or nuint)
 		var newIdentifier = SyntaxFactory.IdentifierName(replacement)
-			.WithTriviaFrom(identifierName);
+			.WithTriviaFrom(identifierName)
+			;
 		
 		var newRoot = root.ReplaceNode(identifierName, newIdentifier);
 		

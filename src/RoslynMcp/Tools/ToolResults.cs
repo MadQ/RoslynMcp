@@ -416,13 +416,13 @@ internal sealed record PathErrorResult(
 	[property: JsonPropertyName("found_projects")] string[]? FoundProjects = null,
 	[property: JsonPropertyName("found_in")]       string[]? FoundIn       = null,
 	[property: JsonPropertyName("hint")]           string?   Hint          = null
-);
+) : ToolErrorResult;
 
 internal sealed record UnexpectedErrorResult(
 	[property: JsonPropertyName("error")]   string Error,
 	[property: JsonPropertyName("message")] string Message,
 	[property: JsonPropertyName("type")]    string Type
-);
+) : ToolErrorResult;
 
 // ── Editing tools ───────────────────────────────────────────────────────────
 

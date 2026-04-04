@@ -38,11 +38,11 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		[Description("When true (default), reads package references directly from the .csproj — fast and accurate for explicit references only. When false, infers packages from resolved metadata reference paths, which may include transitive dependencies.")] bool directOnly = true)
 	{
 		using var scope = BeginTool("roslyn_get_project_info");
-		if(!TryGetProject(projectPath, out var project, out var error))
-			
-			return error;
 		
-		var rootPath    = workspace.GetRootPath(projectPath);
+		if(!TryGetProject(projectPath, out var project, out var error))
+			return scope.Error(error);
+		
+		var rootPath		  = workspace.GetRootPath(projectPath);
 		var (_, isMSBuild, _) = workspace.GetWorkspaceInfo(projectPath);
 		
 		var compOpts  = project.CompilationOptions  as CSharpCompilationOptions;
@@ -89,7 +89,6 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			var m = TfmPattern.Match(candidate);
 			
 			if(m.Success)
-				
 				return m.Groups[1].Value;
 		}
 		
@@ -102,7 +101,6 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			var m = TfmPattern.Match(r.Display);
 			
 			if(m.Success)
-				
 				return m.Groups[1].Value;
 		}
 		
@@ -152,7 +150,6 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			;
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) {
-			
 			return [];
 		}
 	}

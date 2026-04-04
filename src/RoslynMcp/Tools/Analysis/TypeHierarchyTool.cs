@@ -31,23 +31,21 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName);
 		
-		
 		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
+		
 		if(cachedPage is not null)
-			
-			return cachedPage;
+			return scope.Outcome("cached page", cachedPage);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
-		var type        = FindType(compilation, typeName);
+		var type = FindType(compilation, typeName);
 		
 		if(type is null)
-			
 			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
 		
 		var baseTypes   = GetBaseTypeChain(type);
+		
 		string[] allInterfaces = [..
 			type.AllInterfaces
 				.Select(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
@@ -68,8 +66,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		];
 		
 		// Page both interfaces
-		var combined = allInterfaces.Concat(allDerived).ToArray()
-		;
+		var combined = allInterfaces.Concat(allDerived).ToArray();
 		var result   = PaginateAndStore(combined, ref skip, take);
 		
 		return scope.Outcome($"{result.Items.Length} interface(s)/derived", new TypeHierarchyResult(
@@ -90,11 +87,9 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
 		// Try metadata name lookup first (handles fully-qualified names).
-		var direct = compilation.GetTypeByMetadataName(typeName)
-		;
+		var direct = compilation.GetTypeByMetadataName(typeName);
 		
 		if(direct is not null)
-			
 			return direct;
 		
 		// Fall back to simple name search.

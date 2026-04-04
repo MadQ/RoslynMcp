@@ -39,8 +39,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 
             // .cs files: serve from in-memory compilation — no disk I/O, always reflects unsaved edits.
             if(!TryGetCompilation(projectPath, out var compilation, out var error))
-
-                return error;
+                return scope.Error(error!);
 
             var tree = compilation.SyntaxTrees
                 .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
@@ -56,11 +55,9 @@ internal sealed class ReadFileTool : RoslynMcpTool
         else {
 
             // Non-.cs: fall back to disk.
-            var fullPath = ResolveFilePath(filePath, rootPath)
-;
+            var fullPath = ResolveFilePath(filePath, rootPath);
 
             if(fullPath is null)
-
                 return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 
             sourceText    = SourceText.From(await File.ReadAllTextAsync(fullPath));
@@ -72,12 +69,10 @@ internal sealed class ReadFileTool : RoslynMcpTool
         var totalLines = lines.Count;
 
         // Clamp range to actual file bounds.
-        var first = Math.Clamp(startLine, 1, totalLines)
-;
+        var first = Math.Clamp(startLine, 1, totalLines);
         var last  = Math.Clamp(endLine,   1, totalLines);
 
         if(first > last)
-
             return scope.Failed("invalid range", new ErrorResult($"startLine ({startLine}) must be ≤ endLine ({endLine})."));
 
         var result = new string[last - first + 1];

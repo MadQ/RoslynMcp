@@ -24,14 +24,13 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_get_usings", filePath);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var rootPath   = workspace.GetRootPath(projectPath);
 		var normalized = NormalizePath(filePath);
-		
-		var tree = compilation.SyntaxTrees
+		var tree       = compilation.SyntaxTrees
 			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
 		;
 		

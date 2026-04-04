@@ -6,11 +6,10 @@ namespace RoslynMcp.Tools;
 
 #if DEBUG
 [McpServerToolType]
-internal sealed class DebugAttachTool
+internal sealed class DebugAttachTool : RoslynMcpTool
 {
-	readonly FileLogger logger;
-	
-	public DebugAttachTool(FileLogger logger) { this.logger = logger; }
+	public DebugAttachTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
+		: base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_debug_attach", Title = "Debug Attach", OpenWorld = false, Destructive = false)]
 	[Description(
@@ -20,22 +19,22 @@ internal sealed class DebugAttachTool
 		"calling this unexpectedly will freeze the server for all subsequent tool calls.")]
 	public object DebugAttach()
 	{
+		using var scope = BeginTool("roslyn_debug_attach");
+		
 		var pid = Environment.ProcessId;
-		logger.LogTool("roslyn_debug_attach", 0, true, detail: $"launching debugger for PID {pid}");
 		
 		if(Debugger.IsAttached)
-			
-			return new DebugAlreadyAttachedResult(true, pid, "A debugger is already attached.");
+			return scope.Outcome("already attached", new DebugAlreadyAttachedResult(true, pid, "A debugger is already attached."));
 		
 		Debugger.Launch();
 		
-		return new DebugAttachResult(
+		return scope.Outcome(Debugger.IsAttached ? "attached" : "dismissed", new DebugAttachResult(
 			Debugger.IsAttached,
 			pid,
 			Debugger.IsAttached
 				? "Debugger attached. Set breakpoints and invoke the next tool."
 				: "Debugger dialog was dismissed without attaching."
-		);
+		));
 	}
 }
 #endif

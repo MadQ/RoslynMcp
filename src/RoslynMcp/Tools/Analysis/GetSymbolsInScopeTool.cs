@@ -27,10 +27,9 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}");
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
 		
+		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			return scope.Error(error!);
 		
 		var normalized = NormalizePath(filePath);
 		var tree = compilation.SyntaxTrees
@@ -38,14 +37,12 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		;
 		
 		if(tree is null)
-			
 			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var text     = await tree.GetTextAsync();
 		var position = GetPosition(text, line, column);
 		
 		if(position < 0)
-			
 			return scope.Error(new ErrorResult($"Line {line}, column {column} is out of range."));
 		
 		var model   = compilation.GetSemanticModel(tree);
@@ -104,7 +101,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		SymbolInfo[] typesArr      = [.. types];
 		SymbolInfo[] otherArr      = [.. other];
 		
-		return new SymbolsInScopeResult(
+		return scope.Outcome("symbols in scope", new SymbolsInScopeResult(
 			Path.GetRelativePath(rootPath, tree.FilePath),
 			line,
 			column,
@@ -116,13 +113,12 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 			typesArr,
 			otherArr,
 			AdhocCaution(projectPath)
-		);
+		));
 	}
 	
 	private static int GetPosition(SourceText text, int line, int column)
 	{
 		if(line < 1 || line > text.Lines.Count)
-			
 			return -1;
 		
 		var lineSpan = text.Lines[line - 1];

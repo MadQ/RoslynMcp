@@ -31,23 +31,20 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_insert_lines", filePath);
+		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var fullPath = ResolveFilePath(filePath, rootPath);
 		
 		if(fullPath is null)
-			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		// Exactly one location specifier required.
-		var specCount = (atLine.HasValue ? 1 : 0) + (insertAfter is not null ? 1 : 0) + (insertBefore is not null ? 1 : 0)
-		;
+		var specCount = (atLine.HasValue ? 1 : 0) + (insertAfter is not null ? 1 : 0) + (insertBefore is not null ? 1 : 0);
 		
 		if(specCount == 0)
-			
 			return scope.Failed("no location", new ErrorResult("Specify exactly one of: atLine, insertAfter, or insertBefore."));
 		
 		if(specCount > 1)
-			
 			return scope.Failed("multiple locations", new ErrorResult("Specify only one of: atLine, insertAfter, or insertBefore."));
 		
 		string[] lines;
@@ -56,20 +53,16 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			lines = File.ReadAllLines(fullPath);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			
 			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 		}
 		
 		// Resolve insertion index (0-based, insert BEFORE this index).
-		int insertIndex
-		;
+		int insertIndex;
 		
-		if(atLine.HasValue) {
-			
+		if(atLine.HasValue)
 			// atLine is 1-based, clamp to valid range [1, lines.Length + 1].
-			insertIndex = Math.Clamp(atLine.Value, 1, lines.Length + 1) - 1
-			;
-		}
+			insertIndex = Math.Clamp(atLine.Value, 1, lines.Length + 1) - 1;
+		
 		else if(insertAfter is not null) {
 			
 			var matchIndex = Array.FindIndex(lines, l => l.Contains(insertAfter, StringComparison.Ordinal));
@@ -80,12 +73,11 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			
 			insertIndex = matchIndex + 1;
 		}
+		
 		else {
-			
 			var matchIndex = Array.FindIndex(lines, l => l.Contains(insertBefore!, StringComparison.Ordinal));
 			
 			if(matchIndex < 0)
-				
 				return scope.Failed("anchor not found", new ErrorResult($"insertBefore pattern not found: {insertBefore}"));
 			
 			insertIndex = matchIndex;
@@ -102,25 +94,21 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		resultLines.AddRange(lines[insertIndex..]);
 		
 		// 1-based line numbers of inserted lines.
-		var insertedLines = Enumerable.Range(insertIndex + 1, newLines.Length).ToArray()
-		;
+		var insertedLines = Enumerable.Range(insertIndex + 1, newLines.Length).ToArray();
 		
-		if(dryRun) {
-			
-			return new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
-				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}.");
-		}
+		if(dryRun)
+			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
+				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
 		try {
 			File.WriteAllLines(fullPath, resultLines);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
 		
 		workspace.InvalidateFile(projectPath, fullPath);
 		
-		return new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines);
+		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines));
 	}
 }

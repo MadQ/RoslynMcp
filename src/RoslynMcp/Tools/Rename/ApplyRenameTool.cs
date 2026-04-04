@@ -28,28 +28,24 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_apply_rename", $"{token} ({approval})");
+		
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
-			
 			approvals.Reject(token);
-			
 			return scope.Failed("rejected", "Rename rejected. No files were changed.");
 		}
 		
-		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase)
-			&& !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
-			
-			return "Invalid approval value. Use 'y', 'session', or 'n'.";
+		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase) && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
+			return scope.Failed("invalid approval", "Invalid approval value. Use 'y', 'session', or 'n'.");
 		
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-		var op         = approvals.Consume(token, forSession);
+		var operation  = approvals.Consume(token, forSession);
 		
-		if(op is null)
-			
+		if(operation is null)
 			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run preview_rename again.");
 		
-		await SolutionDiff.ApplyToDiskAsync(op.BaseSolution, op.NewSolution);
+		await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution);
 		
-		var filesChanged = op.NewSolution.GetChanges(op.BaseSolution)
+		var filesChanged = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()
 			.SelectMany(p => p.GetChangedDocuments())
 			.Count()

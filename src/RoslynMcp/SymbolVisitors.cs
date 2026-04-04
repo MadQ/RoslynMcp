@@ -11,33 +11,35 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 		? name[(name.LastIndexOf('.') + 1)..]
 		: name
 	;
-
+	
 	public override T? VisitNamespace(INamespaceSymbol symbol)
 	{
 		foreach(var m in symbol.GetMembers()) {
+			
 			var r = m.Accept(this);
+			
 			if(r is not null)
 				return r;
 		}
-
+		
 		return null;
 	}
-
+	
 	public override T? VisitNamedType(INamedTypeSymbol symbol)
 	{
-		if(symbol is T t && symbol.Name == simpleName) {
-
+		if(symbol is T t && symbol.Name == simpleName)
 			// When a dotted name was provided, verify the full qualification matches.
 			if(!isDotted || symbol.ToDisplayString().EndsWith(name, StringComparison.Ordinal))
 				return t;
-		}
-
+		
 		foreach(var n in symbol.GetTypeMembers()) {
+			
 			var r = n.Accept(this);
+			
 			if(r is not null)
 				return r;
 		}
-
+		
 		return null;
 	}
 }
@@ -52,28 +54,27 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 internal sealed class AllSymbolsFinder(string name)
 {
 	readonly List<ISymbol> results = [];
-
+	
 	public IReadOnlyList<ISymbol> Results => results;
-
+	
 	public void Visit(INamespaceSymbol ns)
 	{
-		foreach(var m in ns.GetMembers()) {
-
+		foreach(var m in ns.GetMembers()) 
 			if(m is INamespaceSymbol childNs)
 				Visit(childNs);
 			else if(m is INamedTypeSymbol type)
 				VisitType(type);
-		}
+		
 	}
-
+	
 	void VisitType(INamedTypeSymbol type)
 	{
 		if(type.Name == name)
 			results.Add(type);
-
+		
 		foreach(var member in type.GetMembers(name))
 			results.Add(member);
-
+		
 		foreach(var nested in type.GetTypeMembers())
 			VisitType(nested);
 	}
@@ -85,7 +86,9 @@ internal sealed class AnySymbolFinder(string name) : SymbolVisitor<ISymbol?>
 	public override ISymbol? VisitNamespace(INamespaceSymbol symbol)
 	{
 		foreach(var m in symbol.GetMembers()) {
+			
 			var r = m.Accept(this);
+			
 			if(r is not null)
 				return r;
 		}
@@ -104,7 +107,9 @@ internal sealed class AnySymbolFinder(string name) : SymbolVisitor<ISymbol?>
 			return member;
 		
 		foreach(var n in symbol.GetTypeMembers()) {
+			
 			var r = n.Accept(this);
+			
 			if(r is not null)
 				return r;
 		}

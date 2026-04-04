@@ -25,15 +25,14 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_member_body", symbolName);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var symbol   = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			
 			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var syntaxRefs = symbol.DeclaringSyntaxReferences;
@@ -60,8 +59,7 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 			var endLine   = span.EndLinePosition.Line;
 			
 			// Extract source lines with 1-based line numbers.
-			var lines = new string[endLine - startLine + 1]
-			;
+			var lines = new string[endLine - startLine + 1];
 			
 			for(var ln = startLine; ln <= endLine; ln++)
 				lines[ln - startLine] = text.Lines[ln].ToString();

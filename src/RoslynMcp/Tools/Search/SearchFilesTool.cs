@@ -32,17 +32,18 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_search_files", pattern);
+		
 		filePattern ??= "*.cs";
 		
 		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 200);
+		
 		if(cachedPage is not null)
-			
-			return cachedPage;
+
+			return scope.Outcome("cached page", cachedPage!);
 		
 		Regex regex;
 		
 		try {
-			
 			var options = RegexOptions.Compiled;
 			
 			if(!caseSensitive)
@@ -51,7 +52,6 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			regex = new Regex(pattern, options);
 		}
 		catch(ArgumentException ex) {
-			
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
 		
@@ -114,7 +114,6 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	private static bool MatchesGlob(string fileName, string pattern)
 	{
 		if(pattern is "*" or "*.*")
-			
 			return true;
 		
 		// Fast-path for the common *.ext form.

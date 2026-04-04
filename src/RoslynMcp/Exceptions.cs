@@ -1,4 +1,4 @@
-﻿namespace RoslynMcp.Tools;
+namespace RoslynMcp.Tools;
 
 /// <summary>
 ///     Thrown when no .csproj file can be found in or above the specified path.
@@ -36,7 +36,7 @@ internal sealed class MultipleProjectsFoundException : Exception
 internal sealed class InvalidProjectPathException : Exception
 {
 	public string Path { get; }
-
+	
 	public InvalidProjectPathException(string path, string reason)
 		: base($"Invalid project path '{path}': {reason}")
 	{
@@ -52,7 +52,7 @@ internal sealed class AmbiguousFileException : Exception
 {
 	public string   FileName     { get; }
 	public string[] CsprojPaths  { get; }
-
+	
 	public AmbiguousFileException(string fileName, string[] csprojPaths)
 		: base($"'{fileName}' exists in {csprojPaths.Length} loaded projects — specify which .csproj to use.")
 	{

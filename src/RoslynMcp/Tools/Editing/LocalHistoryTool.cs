@@ -9,13 +9,13 @@ namespace RoslynMcp.Tools;
 internal sealed class LocalHistoryTool : RoslynMcpTool
 {
 	readonly BackupStore backups;
-
+	
 	public LocalHistoryTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache, BackupStore backups)
 		: base(workspace, logger, paginationCache)
 	{
 		this.backups = backups;
 	}
-
+	
 	[McpServerTool(Name = "roslyn_local_history", Destructive = false, Title = "Local History", OpenWorld = false)]
 	[Description(
 		"Browse and restore crash-safe file backups created automatically before destructive writes. " +
@@ -44,38 +44,42 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action);
-
-		return action.ToLowerInvariant() switch {
-			"list"    => HandleList(scope, projectPath, token, filePath),
-			"preview" => HandlePreview(scope, token),
-			"apply"   => HandleApply(scope, projectPath, token, force),
-			_         => scope.Failed("unknown action", new ErrorResult(
-				$"Unknown action '{action}'. Valid values: list, preview, apply."))
+		
+		object result = action.ToLowerInvariant() switch {
+			
+			"list"    => HandleList(projectPath, token, filePath),
+			"preview" => HandlePreview(token),
+			"apply"   => HandleApply(projectPath, token, force),
+			_         => new ErrorResult($"Unknown action '{action}'. Valid values: list, preview, apply.")
 		};
+		
+		return result is ToolErrorResult err
+			? scope.Error(err)
+			: scope.Outcome(action, result);
 	}
-
+	
 	// ── Action handlers ────────────────────────────────────────────────────
-
-	object HandleList(ToolScope scope, string projectPath, string? token, string? filePath)
+	
+	object HandleList(string projectPath, string? token, string? filePath)
 	{
 		string? absolutePath = null;
-
+		
 		if(filePath is not null) {
-
 			var rootPath = workspace.GetRootPath(projectPath);
 			absolutePath = ResolveFilePath(filePath, rootPath);
 		}
+		
 		else if(token is not null) {
-
+			
 			// Token used as a file-scope filter: extract path from backup metadata.
 			var entries = backups.List();
 			absolutePath = entries.FirstOrDefault(e => e.Token == token)?.Meta.AbsolutePath;
 		}
-
+		
 		var all           = backups.List(absolutePath);
 		var rootDir       = workspace.GetRootPath(projectPath);
 		var currentBranch = backups.GetCurrentBranch(rootDir);
-
+		
 		var items = all.Select(e => new LocalHistoryEntry(
 			Token:           e.Token,
 			AbsolutePath:    e.Meta.AbsolutePath,
@@ -86,26 +90,26 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			ChangedLineHint: e.Meta.ChangedLineHint,
 			GitBranch:       e.Meta.GitBranch
 		)).ToArray();
-
+		
 		string? caution = null;
-
+		
 		if(currentBranch is not null && all.Any(e => e.Meta.GitBranch is not null && e.Meta.GitBranch != currentBranch))
 			caution = "One or more backups were taken on a different branch. Verify branch context before restoring.";
-
+		
 		return new LocalHistoryListResult(items, items.Length, caution);
 	}
-
-	object HandlePreview(ToolScope scope, string? token)
+	
+	object HandlePreview(string? token)
 	{
 		if(token is null)
-			return scope.Failed("token required", new ErrorResult("token is required for action: preview."));
-
+			return new ErrorResult("token is required for action: preview.");
+		
 		var entries = backups.List();
 		var entry   = entries.FirstOrDefault(e => e.Token == token);
-
+		
 		if(entry is null)
-			return scope.Failed("not found", new ErrorResult($"No backup found for token '{token}'."));
-
+			return new ErrorResult($"No backup found for token '{token}'.");
+		
 		return new LocalHistoryPreviewResult(
 			Token:          entry.Token,
 			AbsolutePath:   entry.Meta.AbsolutePath,
@@ -117,27 +121,26 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 				: "No conflict detected — safe to apply."
 		);
 	}
-
-	object HandleApply(ToolScope scope, string projectPath, string? token, bool force)
+	
+	object HandleApply(string projectPath, string? token, bool force)
 	{
 		if(token is null)
-			return scope.Failed("token required", new ErrorResult("token is required for action: apply."));
-
+			return new ErrorResult("token is required for action: apply.");
+		
 		var result = backups.TryRestore(token, force);
-
+		
 		if(result.Restored) {
-
 			workspace.InvalidateFile(projectPath, result.AbsolutePath!);
-
+			
 			return new LocalHistoryApplyResult(
 				Restored:     true,
 				AbsolutePath: result.AbsolutePath!,
 				Message:      $"Restored '{result.AbsolutePath}' from backup."
-			);
+			)
+			;
 		}
-
-		if(result.IsConflict) {
-
+		
+		if(result.IsConflict)
 			return new LocalHistoryConflictResult(
 				Conflict:     true,
 				AbsolutePath: result.AbsolutePath!,
@@ -145,12 +148,11 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 				CurrentHash:  result.CurrentHash,
 				BackupHash:   result.BackupHash
 			);
-		}
-
+		
 		if(result.IsDisabled)
-			return scope.Failed("disabled", new ErrorResult(result.ErrorMessage!));
-
-		return scope.Failed("restore failed", new ErrorResult(result.ErrorMessage ?? "Restore failed."));
+			return new ErrorResult(result.ErrorMessage!);
+		
+		return new ErrorResult(result.ErrorMessage ?? "Restore failed.");
 	}
 }
 

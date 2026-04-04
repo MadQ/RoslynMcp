@@ -24,9 +24,9 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_get_line_count", filePaths);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var paths    = filePaths
@@ -41,32 +41,29 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 			
 			if(isCs) {
-				
 				var tree = compilation.SyntaxTrees
 					.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
 				;
 				
 				if(tree is null) {
-					
 					results.Add(new LineCountEntry(filePath, null, "not found in compilation"));
 					continue;
 				}
 				
 				var text = await tree.GetTextAsync();
+				
 				results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, tree.FilePath), text.Lines.Count, null));
 			}
+			
 			else {
-				
 				var fullPath = ResolveFilePath(filePath, rootPath);
 				
 				if(fullPath is null) {
-					
 					results.Add(new LineCountEntry(filePath, null, "file not found on disk"));
 					continue;
 				}
 				
 				try {
-					
 					var lineCount = await CountLinesAsync(fullPath);
 					results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, fullPath), lineCount, null));
 				}

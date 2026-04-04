@@ -26,21 +26,26 @@ Console.WriteLine($"Target:  {targetPath}");
 Console.WriteLine();
 
 // Build the server first — dotnet run's build output goes to stdout and breaks the MCP stdio protocol.
-Console.Write("Building server... ");
+Console.Write("Building server... ")
+;
 var buildProc = Process.Start(new ProcessStartInfo("dotnet") {
+	
 	Arguments       = $"build \"{serverProj}\" -f net10.0 --nologo -v q",
 	UseShellExecute = false,
 })!;
 buildProc.WaitForExit();
 
 if(buildProc.ExitCode != 0) {
+	
 	Console.Error.WriteLine($"Server build failed (exit code {buildProc.ExitCode}).");
+	
 	return 1;
 }
 
 Console.WriteLine("done.");
 
 var psi = new ProcessStartInfo("dotnet") {
+	
 	Arguments              = $"run --no-build --project \"{serverProj}\" -f net10.0",
 	RedirectStandardInput  = true,
 	RedirectStandardOutput = true,
@@ -51,6 +56,7 @@ var psi = new ProcessStartInfo("dotnet") {
 using var proc = Process.Start(psi)!;
 
 proc.ErrorDataReceived += (_, e) => {
+	
 	if(e.Data is not null)
 		Console.Error.WriteLine($"[stderr] {e.Data}");
 };
@@ -74,6 +80,7 @@ async Task<JsonNode?> ReceiveAsync(int timeoutMs = 60_000)
 	using var cts = new CancellationTokenSource(timeoutMs);
 	
 	try {
+		
 		var line = await reader.ReadLineAsync(cts.Token);
 		
 		return line is not null ? JsonNode.Parse(line) : null;
@@ -82,6 +89,7 @@ async Task<JsonNode?> ReceiveAsync(int timeoutMs = 60_000)
 		return null; // Timeout.
 	}
 	catch(Exception ex) {
+		
 		Console.Error.WriteLine($"[recv error] {ex.Message}");
 		
 		return null; // Pipe closed or other I/O error.
@@ -94,6 +102,7 @@ async Task<(bool pass, string message)> RunTestAsync(string testName, string too
 	var sw = Stopwatch.StartNew();
 	
 	await SendAsync(new {
+		
 		jsonrpc = "2.0",
 		id      = reqId++,
 		method  = "tools/call",
@@ -124,7 +133,7 @@ async Task<(bool pass, string message)> RunTestAsync(string testName, string too
 	JsonNode? data;
 	
 	if(expectJson) {
-	
+		
 		try {
 			data = JsonNode.Parse(content);
 		}
@@ -147,10 +156,12 @@ async Task<(bool pass, string message)> RunTestAsync(string testName, string too
 // ── MCP Session Initialization ──────────────────────────────────────────────
 
 await SendAsync(new {
+	
 	jsonrpc = "2.0",
 	id      = reqId++,
 	method  = "initialize",
 	@params = new {
+		
 		protocolVersion = "2024-11-05",
 		capabilities    = new { },
 		clientInfo      = new { name = "TestHarness", version = "1.0" }
@@ -160,8 +171,10 @@ await SendAsync(new {
 var initResponse = await ReceiveAsync();
 
 if(initResponse is null) {
+	
 	await Task.Delay(200); // Allow stderr to flush.
-	Console.Error.WriteLine("\n[FATAL] Server did not respond to initialize — check stderr above for crash details.");
+	Console.Error.WriteLine("\n[FATAL] Server did not respond to initialize — check stderr above for crash details.")
+	;
 	proc.Kill(entireProcessTree: true);
 	
 	return 1;
@@ -299,14 +312,15 @@ tests.Add(await RunTestAsync(
 {
 	Console.Write($"  {"roslyn_find_references: pagination token (page 1)",-50} ");
 	var sw1 = System.Diagnostics.Stopwatch.StartNew();
-
+	
 	await SendAsync(new {
+		
 		jsonrpc = "2.0",
 		id      = reqId++,
 		method  = "tools/call",
 		@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = targetPath, take = 2 } }
 	});
-
+	
 	var resp1 = await ReceiveAsync();
 	sw1.Stop();
 	var content1 = resp1?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
@@ -314,38 +328,43 @@ tests.Add(await RunTestAsync(
 	var token = page1?["page_token"]?.GetValue<string>();
 	var hasMore = page1?["has_more"]?.GetValue<bool>() == true;
 	var page1Refs = page1?["references"]?.AsArray();
-
+	
 	if(token is not null && hasMore && page1Refs?.Count == 2) {
+		
 		tests.Add((true, $"PASS  [{sw1.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"PASS  [{sw1.ElapsedMilliseconds}ms]");
 	}
 	else {
+		
 		tests.Add((false, $"FAIL  (no page_token or has_more) [{sw1.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"FAIL  (no page_token or has_more) [{sw1.ElapsedMilliseconds}ms]");
 	}
-
+	
 	Console.Write($"  {"roslyn_find_references: pagination token (page 2)",-50} ");
 	var sw2 = System.Diagnostics.Stopwatch.StartNew();
-
+	
 	await SendAsync(new {
+		
 		jsonrpc = "2.0",
 		id      = reqId++,
 		method  = "tools/call",
 		@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = targetPath, skip = 2, take = 2, page_token = token ?? "" } }
 	});
-
+	
 	var resp2 = await ReceiveAsync();
 	sw2.Stop();
 	var content2 = resp2?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
 	var page2 = content2 is not null ? System.Text.Json.Nodes.JsonNode.Parse(content2) : null;
 	var page2Items = page2?["items"]?.AsArray();
 	var page2Token = page2?["page_token"]?.GetValue<string>();
-
+	
 	if(page2Items?.Count > 0 && page2Token == token) {
+		
 		tests.Add((true, $"PASS  [{sw2.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"PASS  [{sw2.ElapsedMilliseconds}ms]");
 	}
 	else {
+		
 		tests.Add((false, $"FAIL  (page 2 missing items or wrong token) [{sw2.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"FAIL  (page 2 missing items or wrong token) [{sw2.ElapsedMilliseconds}ms]");
 	}
@@ -438,6 +457,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: add parameter with default",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		addParameters  = "[{\"name\":\"toLower\",\"type\":\"bool\",\"defaultValue\":\"false\"}]",
@@ -454,6 +474,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject non-method symbol",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "WorkspaceManager",
 		addParameters  = "[{\"name\":\"x\",\"type\":\"int\"}]",
 		projectPath    = targetPath
@@ -466,6 +487,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject empty addParameters",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		projectPath    = targetPath
@@ -478,6 +500,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject invalid JSON",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		addParameters  = "not valid json",
@@ -491,6 +514,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject duplicate parameter name",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		addParameters  = "[{\"name\":\"filePath\",\"type\":\"string\"}]",
@@ -620,6 +644,6 @@ if(!proc.HasExited)
 	proc.Kill();
 
 return failed == 0 ? 0 : 1;
-
+	
 	}
 }

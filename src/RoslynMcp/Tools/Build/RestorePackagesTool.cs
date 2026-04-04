@@ -19,6 +19,7 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_restore_packages");
+		
 		var rootPath = workspace.GetRootPath(projectPath);
 		
 		string? projectFile;
@@ -27,12 +28,10 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 			projectFile = FindProjectFile(rootPath);
 		}
 		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
-			
 			return scope.Failed("Failed to access project directory.", new RestoreResult(false, "Failed to access project directory.", ex.Message));
 		}
 		
 		if(projectFile is null)
-			
 			return scope.Failed("No .csproj file found in target directory.", new RestoreResult(false, "No .csproj file found in target directory.", null));
 		
 		var startInfo = new ProcessStartInfo
@@ -52,41 +51,37 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 			process = Process.Start(startInfo) ?? throw new InvalidOperationException("Process.Start returned null.");
 		}
 		catch(Win32Exception ex) {
-			
 			return scope.Failed("Failed to start dotnet process. Is dotnet installed and in PATH?", new RestoreResult(false, "Failed to start dotnet process. Is dotnet installed and in PATH?", ex.Message));
 		}
 		catch(InvalidOperationException ex) {
-			
 			return scope.Failed("Failed to start dotnet restore process.", new RestoreResult(false, "Failed to start dotnet restore process.", ex.Message));
 		}
 		
 		string output, error;
 		
 		try {
-			
 			output = await process.StandardOutput.ReadToEndAsync();
 			error  = await process.StandardError.ReadToEndAsync();
 			await process.WaitForExitAsync();
 		}
 		catch(IOException ex) {
-			
 			return scope.Failed("Failed to read process output.", new RestoreResult(false, "Failed to read process output.", ex.Message));
 		}
 		
 		var success = process.ExitCode == 0;
 		var message = success
 			? "Packages restored successfully."
-			: $"Restore failed with exit code {process.ExitCode}.";
+			: $"Restore failed with exit code {process.ExitCode}."
+		;
 		
 		var details = string.IsNullOrWhiteSpace(error) ? output : error;
 		
-		return new RestoreResult(success, message, details);
+		return scope.Outcome(message, new RestoreResult(success, message, details));
 	}
 	
 	private static string? FindProjectFile(string directory)
 	{
 		try {
-			
 			var csprojFiles = Directory.GetFiles(directory, "*.csproj", SearchOption.TopDirectoryOnly);
 			
 			return csprojFiles.Length > 0 ? csprojFiles[0] : null;

@@ -19,7 +19,7 @@ internal static class RoslynMcpJson
 		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
 		Encoder                = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
-
+	
 	/// <summary>
 	///     For compact single-line serialization: tool args, response peeks, diagnostic
 	///     previews. No indent; includes null properties for faithful value representation.
@@ -27,7 +27,7 @@ internal static class RoslynMcpJson
 	internal static readonly JsonSerializerOptions Compact = new() {
 		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
-
+	
 	/// <summary>
 	///     For <see cref="BackupStore"/> meta.json files — indented, camelCase, omits nulls.
 	/// </summary>

@@ -35,18 +35,13 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}");
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return new PreviewRenameResult(
-				null, null,
-				JsonSerializer.Serialize(error, RoslynMcpJson.Compact),
-				false
-			);
 		
-		var symbol      = FindSymbol(compilation, symbolName, containingType);
+		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			return scope.Failed("workspace error", new PreviewRenameResult(null, null, JsonSerializer.Serialize(error, RoslynMcpJson.Compact), false));
+		
+		var symbol = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			
 			return scope.Failed("symbol not found", new PreviewRenameResult(
 				null, null,
 				$"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name.",
@@ -60,12 +55,12 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		var token       = approvals.Register(solution, newSolution, diff, symbolKey);
 		var preConfirmed = approvals.IsSessionApproved(symbolKey);
 		
-		return new PreviewRenameResult(token, diff,
+		return scope.Outcome("preview ready", new PreviewRenameResult(token, diff,
 			preConfirmed
 				? $"Session-approved. Call apply_rename with token '{token}' to apply, or 'n' to reject."
 				: $"Review the diff, then call apply_rename with token '{token}' and approval 'y' or 'session'.",
 			preConfirmed
-		);
+		));
 	}
 	
 	

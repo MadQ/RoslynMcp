@@ -31,24 +31,19 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
 		
 		// Stateless page token overrides skip/severity — agents don't need to track offsets manually.
-		if(page_token is not null) {
-			
+		if(page_token is not null)
 			try {
-				
 				var decoded = JsonSerializer.Deserialize<PageTokenData>(Convert.FromBase64String(page_token));
 				
 				if(decoded is not null) {
-					
 					skip     = decoded.Skip;
 					severity = decoded.Severity;
 				}
 			}
 			catch { /* malformed token — fall through to explicit params */ }
-		}
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		IEnumerable<Diagnostic> diagnostics;
@@ -56,8 +51,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		if(filePath is not null) {
 			
 			// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
-			var normalized = NormalizePath(filePath)
-			;
+			var normalized = NormalizePath(filePath);
 			var tree = compilation.SyntaxTrees
 				.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
 			;
@@ -66,11 +60,10 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 				? compilation.GetSemanticModel(tree).GetDiagnostics()
 				: [];
 		}
-		else {
-			
+		else
 			diagnostics = compilation.GetDiagnostics()
-				.Where(d => IsUnderRoot(d, rootPath));
-		}
+				.Where(d => IsUnderRoot(d, rootPath))
+			;
 		
 		var filtered = diagnostics
 			.Where(GetSeverityFilter(severity))
@@ -93,9 +86,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		
 		// take: 0 fast path — return counts only, no items, no page token needed.
 		if(take == 0) {
-			
 			return scope.Outcome(summary, new {
-				
 				summary,
 				errors   = errorCount,
 				warnings = warningCount,
@@ -123,7 +114,6 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		;
 		
 		return scope.Outcome(summary, new {
-			
 			summary,
 			errors   = errorCount,
 			warnings = warningCount,

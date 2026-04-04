@@ -27,7 +27,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_symbol_info", $"{filePath}:{line}");
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
-			return error;
+			return scope.Error(error!);
 		
 		var tree = FindSyntaxTree(compilation, filePath);
 		

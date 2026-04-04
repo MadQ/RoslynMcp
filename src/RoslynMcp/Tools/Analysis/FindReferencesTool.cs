@@ -35,12 +35,10 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		
 		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
 		if(cachedPage is not null)
-			
-			return cachedPage;
+			return scope.Outcome("cached page", cachedPage!);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var solution = workspace.GetSolution(projectPath);
 		var rootPath = workspace.GetRootPath(projectPath);
@@ -52,19 +50,17 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		;
 		
 		if(containingType is not null) {
-			
 			var symbol = FindSymbol(compilation, symbolName, containingType);
 			symbols = symbol is not null ? [symbol] : [];
 		}
+		
 		else {
-			
 			var finder = new AllSymbolsFinder(symbolName);
 			finder.Visit(compilation.Assembly.GlobalNamespace);
 			symbols = [.. finder.Results];
 		}
 		
 		if(symbols.Length == 0)
-			
 			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var allLocations = new List<string>();
@@ -94,8 +90,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		;
 		
 		if(allResults.Length == 0)
-			
-			return new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], "", false, AdhocCaution(projectPath));
+			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], "", false, AdhocCaution(projectPath)));
 		
 		string[] symbolsSearched = [.. symbols.Select(s => FormatSymbolName(s)).Distinct()];
 		

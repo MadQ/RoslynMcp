@@ -36,32 +36,30 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_replace_in_file", filePath);
+		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var fullPath = ResolveFilePath(filePath, rootPath);
 		
 		if(fullPath is null)
-			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		Regex regex;
 		
 		try {
+
+			if(!useRegex)
+				regex = BuildLiteralRegex(pattern, caseSensitive);
 			
-			if(useRegex) {
-				
+			else {
 				var options = RegexOptions.Compiled;
-				
+
 				if(!caseSensitive)
 					options |= RegexOptions.IgnoreCase;
-				
+
 				regex = new Regex(pattern, options);
-			}
-			else {
-				regex = BuildLiteralRegex(pattern, caseSensitive);
 			}
 		}
 		catch(ArgumentException ex) {
-			
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
 		
@@ -71,13 +69,11 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			originalContent = File.ReadAllText(fullPath);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			
 			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 		}
 		
 		// Split into lines to compute 1-based line numbers for each match position.
-		var lines        = originalContent.Split('\n')
-		;
+		var lines        = originalContent.Split('\n');
 		var lineStarts   = BuildLineStartMap(lines);
 		var matches      = regex.Matches(originalContent);
 		int[] changedLines = [..
@@ -87,16 +83,12 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 				.Order()
 		];
 		
-		if(matches.Count == 0) {
-			
+		if(matches.Count == 0)
 			return scope.Failed("No matches found.", new ReplaceInFileResult(false, 0, [], "No matches found."));
-		}
 		
-		if(dryRun) {
-			
-			return new ReplaceInFileResult(false, matches.Count, changedLines,
-				$"Dry run: {matches.Count} replacement(s) would be made.");
-		}
+		if(dryRun)
+			return scope.Outcome("dry run", new ReplaceInFileResult(false, matches.Count, changedLines, Message: $"Dry run: {matches.Count} replacement(s) would be made."));
+		
 		
 		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
@@ -109,11 +101,9 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
 		
-		// Invalidate the workspace so subsequent Roslyn tools see the updated source.
-		workspace.InvalidateFile(projectPath, fullPath)
-		;
+		workspace.InvalidateFile(projectPath, fullPath);
 		
-		return new ReplaceInFileResult(true, matches.Count, changedLines);
+		return scope.Outcome($"{matches.Count} replacement(s)", new ReplaceInFileResult(true, matches.Count, changedLines));
 	}
 	
 	// Builds a sorted array of character offsets where each line starts.

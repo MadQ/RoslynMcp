@@ -5,8 +5,11 @@ using ModelContextProtocol.Server;
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]
-internal sealed class InfoTool(FileLogger logger)
+internal sealed class InfoTool : RoslynMcpTool
 {
+	public InfoTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
+		: base(workspace, logger, paginationCache) { }
+	
 	[McpServerTool(Name = "roslyn_info", Title = "Server Info", ReadOnly = true, OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns server metadata: version, build hash, process ID, uptime, and MSBuild discovery method. " +
@@ -15,22 +18,24 @@ internal sealed class InfoTool(FileLogger logger)
 	public object Info(
 		[Description("Optional label for the log marker, e.g. 'benchmark test 1 start'.")] string? marker = null)
 	{
+		using var scope = BeginTool("roslyn_info", marker);
+		
 		var asm     = typeof(InfoTool).Assembly;
 		var version = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
 		var pid     = Environment.ProcessId;
 		var uptime  = Environment.TickCount64 / 1000;
 		var msbuild = MSBuildBootstrap.DiscoveryMethod;
 		
-		var msg = marker is not null ? $"INFO marker: {marker}" : "INFO requested";
-		logger.LogInfo("Info", msg);
+		if(marker is not null)
+			scope.Record($"marker: {marker}");
 		
-		return new {
+		return scope.Outcome("info", new {
 			
 			version,
 			pid,
-			uptime_seconds = uptime,
+			uptime_seconds    = uptime,
 			msbuild_discovery = msbuild,
 			marker
-		};
+		});
 	}
 }

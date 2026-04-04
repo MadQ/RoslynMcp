@@ -32,30 +32,26 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_find_implementations", symbolName);
 		
-		
 		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
+		
 		if(cachedPage is not null)
-			
-			return cachedPage;
+			return scope.Outcome("cached page", cachedPage!);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
+			return scope.Error(error!);
 		
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			
 			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var solution = workspace.GetSolution(projectPath);
 		
 		// Handle type symbols (interface or abstract class).
 		if(symbol is INamedTypeSymbol typeSymbol) {
-			
 			if((typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class) && typeSymbol.IsAbstract) {
 					
-					var impls = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution, cancellationToken: cancellationToken);
+				var impls	   = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = impls
 					.OfType<INamedTypeSymbol>()
 					.Select(t => t.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
@@ -67,8 +63,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var typeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 				
 				if(allResults.Length == 0)
-					
-					return new FindImplementationsResult(typeKind, typeName, 0, skip, take, ["No implementations found."]);
+					return scope.Outcome("no implementations", new FindImplementationsResult(typeKind, typeName, 0, skip, take, ["No implementations found."]));
 				
 				var result = PaginateAndStore(allResults, ref skip, take);
 				
@@ -89,10 +84,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		// Handle method symbols (abstract or virtual).
 		if(symbol is IMethodSymbol methodSymbol) {
-			
 			if(methodSymbol.IsAbstract || methodSymbol.IsVirtual || methodSymbol.IsOverride) {
 					
-					var overrides = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution, cancellationToken: cancellationToken);
+				var overrides  = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = overrides
 					.OfType<IMethodSymbol>()
 					.Select(m => FormatMethod(m))
@@ -103,8 +97,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var methodDisplay = FormatMethod(methodSymbol);
 				
 				if(allResults.Length == 0)
-					
-					return new FindOverridesResult("method", methodDisplay, 0, skip, take, ["No overrides found."]);
+					return scope.Outcome("no overrides", new FindOverridesResult("method", methodDisplay, 0, skip, take, ["No overrides found."]));
 				
 				var result = PaginateAndStore(allResults, ref skip, take);
 				

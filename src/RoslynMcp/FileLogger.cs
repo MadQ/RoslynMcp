@@ -12,24 +12,19 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class FileLogger : IDisposable
 {
-	//
-	// Could be using ILogger, but thus far I have not been able to like it one bit.
-	// Did we really need a whole new DSL just to log structured messages?
-	//
-
 	const int    MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
 	const int    MaxRotatedFiles  = 3;
 	const string EnvVar           = "ROSLYNMCP_LOG_PATH";
-
+	
 	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Log;
-
+	
 	readonly string? logPath;
 	readonly object  writeLock = new();
 	readonly int     pid       = Environment.ProcessId;
-
+	
 	int  instanceCounter;
 	long sessionTokens;
-
+	
 	public bool IsEnabled => logPath is not null;
 	
 	public FileLogger()
@@ -38,9 +33,7 @@ internal sealed class FileLogger : IDisposable
 		
 		// Explicitly set to empty → disabled.
 		if(envValue is not null && envValue.Length == 0) {
-			
 			logPath = null;
-			
 			return;
 		}
 		
@@ -68,7 +61,7 @@ internal sealed class FileLogger : IDisposable
 			Level     = "START",
 			Message   = $"cwd=\"{Environment.CurrentDirectory}\" log=\"{logPath}\""
 		});
-
+	
 	/// <summary>Logs server stop.</summary>
 	public void LogStop()
 		=> Write(new LogEntry {
@@ -77,7 +70,7 @@ internal sealed class FileLogger : IDisposable
 			Level     = "STOP",
 			Message   = "Server stopping"
 		});
-
+	
 	/// <summary>Logs a tool invocation with outcome, elapsed time, and workspace mode indicator.</summary>
 	/// <param name="isMSBuild">True for MSBuildWorkspace, false for AdhocWorkspace.</param>
 	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0, string? responsePeek = null, string? args = null)
@@ -87,12 +80,12 @@ internal sealed class FileLogger : IDisposable
 			? toolName[7..]
 			: toolName
 		;
-
+		
 		long tokens = 0;
-
+		
 		if(estimatedTokens > 0)
 			tokens = Interlocked.Add(ref sessionTokens, estimatedTokens);
-
+		
 		Write(new LogEntry {
 			Timestamp       = Timestamp(),
 			Pid             = pid,
@@ -108,11 +101,11 @@ internal sealed class FileLogger : IDisposable
 			EstimatedTokens = estimatedTokens > 0 ? estimatedTokens : null,
 			SessionTokens   = estimatedTokens > 0 ? tokens : null,
 			ResponsePeek    = responsePeek,
-			// Args logged only on failure — avoids bloating successful call entries.
-			Args            = !success ? args : null
+			// Args logged only on failure — avoids bloating successful call entries. // Meh! Do it anyway.
+			Args            = args
 		});
 	}
-
+	
 	/// <summary>Logs an error outside of a tool call (e.g. workspace load failure).</summary>
 	public void LogError(string context, string message)
 		=> Write(new LogEntry {
@@ -121,7 +114,7 @@ internal sealed class FileLogger : IDisposable
 			Level     = "ERROR",
 			Message   = $"{context} — {message}"
 		});
-
+	
 	/// <summary>Logs informational diagnostic messages (verbose logging).</summary>
 	public void LogInfo(string context, string message)
 		=> Write(new LogEntry {
@@ -130,27 +123,25 @@ internal sealed class FileLogger : IDisposable
 			Level     = "INFO",
 			Message   = $"{context} — {message}"
 		});
-
+	
 	void Write(LogEntry entry)
 	{
 		if(logPath is null)
 			return;
-
+		
 		var line = JsonSerializer.Serialize(entry, JsonOptions) + Environment.NewLine;
-
-		lock(writeLock) {
-
+		
+		lock(writeLock)
 			try {
-
+				
 				RotateIfNeeded();
 				File.AppendAllText(logPath, line);
 			}
 			catch {
 				// Never crash the server over a logging failure.
 			}
-		}
 	}
-
+	
 	static string Timestamp() => DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 	
 	void RotateIfNeeded()

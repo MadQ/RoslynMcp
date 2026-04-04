@@ -26,20 +26,18 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName);
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return error;
 		
-		var symbol      = FindSymbol(compilation, symbolName, containingType);
+		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			return scope.Error(error!);
+		
+		var symbol = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			
 			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
 		
 		var xml = symbol.GetDocumentationCommentXml();
 		
 		if(string.IsNullOrWhiteSpace(xml))
-			
 			return scope.Error(new SymbolDocumentationEmptyResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
@@ -71,7 +69,6 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			var root = doc.Root;
 			
 			if(root is null)
-				
 				return new DocumentationComment();
 			
 			var summary    = GetElementText(root, "summary");
@@ -101,7 +98,6 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		var element = root.Element(elementName);
 		
 		if(element is null)
-			
 			return null;
 		
 		var text = element.Value.Trim();

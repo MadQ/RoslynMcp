@@ -46,18 +46,17 @@ internal sealed class BuildTool : RoslynMcpTool
 		)] bool forceBuild = false)
 	{
 		using var scope = BeginTool("roslyn_build_project");
+		
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 		
 		if(csprojPath is null)
-			
 			return scope.Error(new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode."));
 		
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true).
 		if(!forceBuild) {
 			
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
-				
-				return error;
+				return scope.Error(error!);
 			
 			var roslynDiagnostics = GetRoslynDiagnostics(compilation, rootPath);
 			var roslynErrors      = roslynDiagnostics.Where(d => d.Severity == "error").ToArray();
@@ -80,12 +79,11 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		
 		// Slow path: run actual dotnet build.
-		var args = BuildArgs(csprojPath, targetFramework)
-		;
+		var args = BuildArgs(csprojPath, targetFramework);
 		
-		string output;
-		TimeSpan elapsed;
-		int exitCode;
+		string		output;
+		TimeSpan	elapsed;
+		int			exitCode;
 		
 		try {
 			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope);
@@ -107,9 +105,9 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
 		var succeeded   = exitCode == 0;
+		
 		DiagnosticItem[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
-		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")]
-		;
+		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
 		
 		return scope.Outcome("msbuild", new BuildResult(
 			succeeded,
@@ -126,8 +124,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	private static string BuildArgs(string csprojPath, string? tfm)
 	{
 		// --no-restore: restore is separate; /v:quiet: only errors/warnings + summary line.
-		var tfmArg = tfm is not null ? $" -f {tfm}" : string.Empty
-		;
+		var tfmArg = tfm is not null ? $" -f {tfm}" : "";
 		
 		return $"build \"{csprojPath}\"{tfmArg} --no-restore /nologo /v:quiet";
 	}
@@ -143,25 +140,21 @@ internal sealed class BuildTool : RoslynMcpTool
 			WorkingDirectory       = workingDirectory
 		};
 		
-		Process? process = null;
-		int exitCode = -1;
+		Process?	process	 = null;
+		int			exitCode = -1;
 		
 		try {
-			
 			scope.Record($"dotnet {args}");
 			scope.Record($"cwd={workingDirectory}");
 			
 			process = new Process { StartInfo = psi };
 			
-			if(!process.Start()) {
-				
+			if(!process.Start())
 				throw new InvalidOperationException("Process.Start() returned false — process did not start.");
-			}
 			
 			scope.Record($"pid={process.Id}");
 		}
 		catch(Exception ex) when(ex is Win32Exception or InvalidOperationException) {
-			
 			scope.Record($"start failed: {ex.GetType().Name}");
 			throw new InvalidOperationException("Failed to start dotnet process. Is dotnet installed and in PATH?", ex);
 		}
@@ -171,28 +164,26 @@ internal sealed class BuildTool : RoslynMcpTool
 		try {
 			
 			// Read both streams concurrently to avoid deadlocks on large output.
-			var stdoutTask = process.StandardOutput.ReadToEndAsync()
-			;
+			var stdoutTask = process.StandardOutput.ReadToEndAsync();
 			var stderrTask = process.StandardError.ReadToEndAsync();
 			
 			await process.WaitForExitAsync();
+			
 			sw.Stop();
 			
 			// Capture exit code BEFORE disposing.
-			exitCode = process.ExitCode
-			;
+			exitCode = process.ExitCode;
+			
 			scope.Record($"exit={exitCode} elapsed={sw.Elapsed.TotalSeconds:F1}s");
 			
 			string stdout, stderr;
 			
 			try {
-				
 				stdout = await stdoutTask;
 				stderr = await stderrTask;
 				scope.Record($"stdout={stdout.Length} stderr={stderr.Length} chars");
 			}
 			catch(IOException ex) {
-				
 				scope.Record($"read failed: {ex.Message}");
 				throw new InvalidOperationException("Failed to read build output.", ex);
 			}
@@ -218,8 +209,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
 				.Where(d => !IgnoredDiagnostics.Contains(d.Id))
 				.Select(d => ConvertRoslynDiagnostic(d, rootPath))
-		]
-		;
+		];
 	}
 	
 	private static DiagnosticItem ConvertRoslynDiagnostic(Diagnostic diagnostic, string rootPath)

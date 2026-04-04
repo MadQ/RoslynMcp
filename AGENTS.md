@@ -269,36 +269,41 @@ This is a **pragmatic exception** to the dogfooding rule. Not every problem need
   - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block (Yeah, weird one, IK. High-maintenance bipedals: feel free to ignore this)
 - **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies) (Just recently started test-driving this one - liking it so far.)
 
-### Performance & Allocation
+## Performance & Allocation
 
-- **Prefer modern zero-allocation APIs** when practical:
-  - `Span<T>` / `ReadOnlySpan<T>` / `Memory<T>` over substring/array allocations
-  - `stackalloc` for small, short-lived buffers (< 1KB)
-  - `ArrayPool<T>.Shared` for larger temporary buffers
-  - String interpolation handlers (when targeting .NET 6+)
+- **Prefer modern [zero-allocation APIs](#the-right-code-principle)** [when practical](#the-right-code-principle):
+  - `Span<T>` / `ReadOnlySpan<T>` / `Memory<T>` [over substring/array allocations](#the-right-code-principle)
+  - `stackalloc` [for small, short-lived buffers (< 1KB)](#the-right-code-principle)
+  - `ArrayPool<T>.Shared` [for larger temporary buffers](#the-right-code-principle)
+  - [String interpolation handlers](#the-right-code-principle) (when targeting .NET 6+)
 - **Avoid string allocations in hot paths:**
-  - Use `AsSpan()` for prefix/suffix checks instead of `Substring()`
-  - Use `Span<char>.StartsWith()` instead of string concatenation for comparisons
-  - Cache frequently used strings (e.g., normalized paths, common error messages)
-- **LINQ is fine** — but be aware of multiple enumeration:
-  - Materialize with `.ToList()` / `.ToArray()` if enumerating more than once
-  - Avoid in tight loops (use `foreach` + manual logic instead)
-- **Don't prematurely optimize:**
-  - Write clear code first
-  - Profile if performance matters
-  - But when writing *new* code, default to zero-allocation patterns if equally readable
-  - Example: `path.AsSpan().StartsWith(root.AsSpan())` vs `path.StartsWith(root)` — same readability, zero allocations
+  - Use [`AsSpan()` for prefix/suffix checks instead of `Substring()`](#the-right-code-principle)
+  - Use [`Span<char>.StartsWith()` instead of string concatenation for comparisons](#the-right-code-principle)
+  - [Cache frequently used strings](#the-right-code-principle) (e.g., normalized paths, common error messages)
+- [**LINQ is fine**](#the-right-code-principle) — but [be aware of multiple enumeration](#the-right-code-principle).
+  - [Never](#the-right-code-principle) terminate LINQ queries with `.ToList()`, `.ToArray()`, or `.ToAnything()`. [Ever](#the-right-code-principle).
+  - [Except](#the-right-code-principle):
+    - Materialize with `.ToList()` **ONLY** if the intent is to return a `List<T>` to caller. And even then it's only valid if a `List<T>` is even the [Right](#the-right-code-principle) choice for the API.
+	- [_Maybe_](#the-right-code-principle) materialize with `.ToArray()` if you need to enumerate multiple times and the source is an `IEnumerable<T>` that would otherwise re-enumerate (e.g., multiple passes for count + paged slice). But prefer [`AsSpan()` slicing](#the-right-code-principle) of a materialized array when performance matters.
+  - Consider if the [Right way](#the-right-code-principle) is to avoid in tight loops (maybe use `foreach` + manual logic instead)
+- [**Don't prematurely optimize:**](#the-right-code-principle)
+  - Write [clear code](#the-right-code-principle) first
+  - [Profile if performance matters](#the-right-code-principle)
+  - But when writing *new* code, [default to zero-allocation patterns if equally readable](#the-right-code-principle)
+    - Example: [`path.AsSpan().StartsWith(root.AsSpan())`](#the-right-code-principle) vs `path.StartsWith(root)` — same readability, zero allocations
 
 **Rationale:** Modern C# provides powerful zero-allocation tools. Using them from the start avoids "death by a thousand allocations" and makes future optimizations easier. Anti-patterns compound. That said, readability always wins over micro-optimizations when there's a meaningful trade-off.
 
-### The "Right Code" Principle
+---
 
-**Question convention.** Not every "idiomatic" pattern exists for good reasons—some are just cargo-culted from contexts that don't apply here. Before accepting "this is how it's done," ask:
+# The "*Right Code*" Principle
+
+**Question convention.** Not every "idiomatic" pattern exists for good reasons — some are just cargo-culted from contexts that don't apply here. Before accepting "this is how it's done," ask:
 - **Why** is this the idiom? (Historical accident? Valid reasoning? Marketing?)
 - **Should** this be the idiom *here*? (Different constraints, different answers)
 - **What** problem does this pattern actually solve? (If unclear, maybe it doesn't)
 
-*Inspired by the Buddhist concept of [Right Intention](https://en.wikipedia.org/wiki/Noble_Eightfold_Path#Right_Intention) from the Noble Eightfold Path—applying mindful discernment to code decisions.*
+***Inspired by the Buddhist concept of [Right Intention](https://en.wikipedia.org/wiki/Noble_Eightfold_Path#Short_description_of_the_eight_divisions) from the [Noble Eightfold Path](https://en.wikipedia.org/wiki/Noble_Eightfold_Path)*: applying mindful discernment to code decisions.**
 
 **Examples of healthy skepticism:**
 - "Lambdas are idiomatic for callbacks" — *Sure, but for I/O where disk latency is 1000x the lambda allocation cost, does the 32-byte overhead matter? Or is readability the real win here?*
@@ -309,12 +314,14 @@ This is a **pragmatic exception** to the dogfooding rule. Not every problem need
 
 When you deviate from convention because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on.
 
-- If/When we start using unit tests, rule #1: No tautological tests (Did I just do the thing that I just did?). Tests must verify meaningful behavior, not just "does it compile" or "does it return the same thing as the code it's testing". All tests shall have extensive XML doc comments describing the reason for their existence, the specific behavior they verify, and the rationale for the chosen inputs and expected outputs. Tests without such documentation are not valid tests. Not everyone is a unit test SME... complicated mock setups tend to look like opaque black boxes (to some of us) that may as well be testing the test framework itself. So, all mock setups must also be documented with the same level of detail as the tests they support. Rule #2: Unit tests are a secondary concern. No non-test code shall be written with the primary goal of making it easier to test. There shall be no interface extractions for the sole purpose of testing. Not everything is inherently testable. Accept it and move on.
+
+#### Unit Tests
+- If/When we start using unit tests, rule **#1**: **No tautological tests** (Did I just do the thing that I just did?). Tests must verify meaningful behavior, not just "does it compile" or "does it return the same thing as the code it's testing". All tests shall have extensive XML doc comments describing the reason for their existence, the specific behavior they verify, and the rationale for the chosen inputs and expected outputs. Tests without such documentation are not valid tests. Not everyone is a unit test SME... complicated mock setups tend to look like opaque black boxes (to some of us) that may as well be testing the test framework itself. So, all mock setups must also be documented with the same level of detail as the tests they support. Rule **#2**: **Unit tests are a secondary concern.** No non-test code shall be written with the primary goal of making it easier to test. There shall be no interface extractions for the sole purpose of testing. Not everything is inherently testable. Accept it and move on.
   - Also... Wow! Opine much?
 
 ---
 
-> **Consistency is overrated. Embrace diversity.** *(For everyone—AI and humans)*
+# **Consistency is overrated. Embrace diversity.** *(For everyone—AI and humans)*
 >
 > **What this means for AI agents:**
 > - **Style/formatting:** Follow the rules (that's the easy part)
@@ -329,9 +336,15 @@ When you deviate from convention because you've *thought it through*, that's not
 > - The guidelines exist because someone already walked that mile—but if your mile leads somewhere new, the map gets updated
 > - Just don't go completely feral on us 🏴‍☠️
 >
-> **Bottom line:** Code should *look* consistent (formatting). Code should *think* rebelliously (design). When you deviate from convention because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on. That comment might even be the Treasure (Arrrr!). 💎
+> **Bottom line:** Code should *look* ~~consistent~~ [habitual routine](https://share.google/aimode/88Q5P4mDuICTTmPEo) (formatting). Code should *think* rebelliously (design). When you deviate from ~~convention~~ [wonted](https://www.merriam-webster.com/dictionary/wonted#:~:text=usual%20or%20ordinary%20especially%20by%20reason%20of%20established%20habit) because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on. That comment might even be the Treasure (Arrrr!). 💎
 
-# **AI: When doing style audits, remember to use ALL of the above, from [Code Style](#code-style) down.**
+~~# AI: When doing style audits, remember to use ALL of the above, from [Code Style](#code-style) down.~~ Never mind. *AI* is just not *I* enough to handle this level of nuance in style decisions. For now, style audits are a human-only thing. But...
+### AI: **ALWAYS** respect and adhere to everything from here, up to and including [Key Points](#key-points) **And:**
+ - Remember and apply the "Right Code" principle to every code decision.
+ - Always use the RoslynMcp tools for C# file operations, no exceptions. This is non-negotiable. If the server is down, say so explicitly and explain why you're falling back to terminal commands.
+ - **NEVER** use `dotnet build` in a terminal when `roslyn_build_project` exists. Always prefer the RoslynMcp tools for accurate semantic understanding and to avoid permission prompts.
+ - **NEVER** use `CD` when the CWD is already correct.
+ - Also remember and apply everything below.
 
 ---
 
@@ -396,9 +409,11 @@ var newSolution = await Renamer.RenameSymbolAsync(
 
 **Key rule:** always use `await` for Roslyn APIs that return `Task` — they may do I/O or background work.
 
-**Tool Implementation Pattern:**
+### Tool Implementation Guide
 
-All tools inherit from `RoslynMcpTool` base class and follow a consistent pattern:
+Every tool in RoslynMcp follows a strict structural contract. Deviations cause silent failures, log gaps, and AI misuse. This section documents the full contract with the reasoning behind each decision.
+
+#### Class Anatomy
 
 ```csharp
 [McpServerToolType]
@@ -407,35 +422,156 @@ internal sealed class MyTool : RoslynMcpTool
     public MyTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
         : base(workspace, logger, paginationCache) { }
 
-    [McpServerTool(Name = "roslyn_my_tool", ReadOnly = true), Description("...")]
-    public object MyToolMethod(
-        [Description("...")] string requiredParam,
-        [Description(ProjectPathDescription)] string projectPath)
-    {
-        // For tools that need compilation
-        if(!TryGetCompilation(projectPath, out var compilation, out var error))
-            return error;
-
-        // OR for tools that need project metadata
-        if(!TryGetProject(projectPath, out var project, out var error))
-            return error;
-
-        // Use workspace.GetSolution(projectPath), workspace.GetRootPath(projectPath) as needed
-        var rootPath = workspace.GetRootPath(projectPath);
-
-        // Tool logic using compilation/project/solution
-        // ...
-
-        return new { /* structured response */ };
-    }
+    // ... tool methods
 }
 ```
 
-**Key points:**
-- `projectPath` is always the last parameter, **REQUIRED** (agent must explicitly specify)
-- `TryGetCompilation`/`TryGetProject` return structured error objects on failure
-- Use `ProjectPathDescription` constant for consistent parameter documentation
-- Tools that modify files must call `workspace.InvalidateFile(projectPath, fullPath)` after changes
+- **`[McpServerToolType]`** — marks the class as a tool container. The MCP SDK scans for this attribute at startup to discover all tools. Without it, the tool silently doesn't register.
+- **`internal sealed`** — tools are implementation details, never subclassed. `sealed` prevents accidental inheritance and enables devirtualization.
+- **Constructor** — always the same three-argument form, forwarded to `base(...)`. Tools are registered in the DI container by `Program.cs` and constructed automatically. Never add extra constructor parameters — they won't be resolved.
+
+#### Method-Level Attributes
+
+```csharp
+[McpServerTool(Name = "roslyn_my_tool", ReadOnly = true, Title = "My Tool", OpenWorld = false, Idempotent = true)]
+[Description(
+    "First sentence: what the tool returns or does. " +
+    "Second sentence: when to use it (vs. alternatives). " +
+    "Additional sentences: output structure, edge cases, important caveats.")]
+public object MyToolMethod(...)
+```
+
+The `[McpServerTool]` attribute properties each have a specific contract:
+
+| Property | Values | Meaning |
+|----------|--------|---------|
+| `Name` | `"roslyn_snake_case"` | The name exposed to the AI. **Must exactly match** the first argument passed to `BeginTool()`. Adding one without updating the other produces mismatched log entries and breaks RMCP005. Must also match the Architecture table entry in this file. |
+| `ReadOnly` | `true` / `false` | `true` = the tool only reads; never writes files, never triggers builds. `false` = may write. Mutually exclusive with `Destructive`. Used by MCP clients for safety decisions. |
+| `Destructive` | `true` / `false` | `true` = the tool may destructively overwrite or delete content (writing tools). When set, `ReadOnly` must be absent/false. |
+| `Title` | short string | Human-readable display name for UIs and log viewers. PascalCase words. Not seen by the AI. |
+| `OpenWorld` | `true` / `false` | `false` for all tools in this codebase — they only touch the local workspace. `true` would imply network calls, external APIs, etc. Always `false` here. |
+| `Idempotent` | `true` / `false` | `true` = calling the tool twice with the same args produces the same result; no side effects. Query tools: `true`. Write/build tools: `false`. |
+
+#### Description Text — Writing for the AI
+
+The `[Description]` text on a tool method is **not documentation for humans**. It is the capability signal the AI model uses to decide:
+- Whether to invoke this tool at all
+- Which tool to choose when multiple seem relevant
+- What to expect in the response
+
+**Bad description (vague, tool-centric):**
+> "Gets the member body."
+
+**Good description (outcome-centric, with disambiguation):**
+> "Returns the full source code of a single method, property, field, or type by name — including file path and start/end line numbers. Use this instead of roslyn_read_file when you need only one specific declaration rather than the whole file..."
+
+Rules for writing good descriptions:
+1. **Lead with what is returned**, not what the tool does — the AI maps return values to its next action.
+2. **Include disambiguation** — tell the AI when to use *this* tool vs. adjacent ones (`roslyn_read_file`, `roslyn_get_file_outline`, etc.).
+3. **Document edge cases** in the description — "Returns a structured metadata error if the symbol is defined in a compiled assembly" is useful signal.
+4. **Multi-line concatenation** for long descriptions: `"..." + "..." + "..."` — easier to read and diff than one long string.
+5. Never say "this tool" — just describe the behavior. The AI already knows it's a tool.
+
+Parameter descriptions follow the same principle — write for the AI to understand valid inputs, not as code comments.
+
+**Always use `ProjectPathDescription`** for the `projectPath` parameter — it's a constant with the canonical, full description. Inline text drifts and diverges. Never duplicate it.
+
+#### Parameter Conventions
+
+```csharp
+public object MyToolMethod(
+    [Description("...")] string requiredParam,           // required params first
+    [Description(ProjectPathDescription)] string projectPath,  // always last, always required
+    [Description("...")] string? optionalParam = null)   // optional params after projectPath? No — see below.
+```
+
+Actually: `projectPath` is **declared last among required parameters**, but optional parameters with defaults come after it in the method signature. The AI is always expected to provide `projectPath` explicitly — it has no default, so the AI can't omit it.
+
+**Why `projectPath` is always required (no default):**
+The workspace resolution is the heaviest operation. Forcing the AI to specify it explicitly prevents lazy omission that would cause the server to guess the wrong project when multiple workspaces are cached.
+
+#### The `BeginTool` / Scope Lifecycle
+
+```csharp
+public object MyToolMethod(..., string projectPath)
+{
+    using var scope = BeginTool("roslyn_my_tool", subject);
+    // ... all tool logic
+}
+```
+
+`using var scope = BeginTool(...)` **must be the first statement in every `[McpServerTool]` method.** This is enforced by RMCP003 (planned analyzer). Reasons:
+
+- **`using`** — ensures `scope.Dispose()` is called on every exit path: normal return, early `return`, and unhandled exception. `Dispose()` writes the NDJSON log entry. Without it, the invocation is invisible in logs and timing is lost.
+- **First statement** — any code before `BeginTool` is unlogged. Failures in parameter validation before `BeginTool` produce no log trace — impossible to diagnose remotely.
+- **`name` arg** — must exactly match `[McpServerTool(Name = "...")]`. RMCP005 will enforce this syntactically.
+- **`subject` arg** — the primary identifier shown in the log (e.g., `symbolName`, `filePath`, `pattern`). Pass `null` for tools with no obvious primary key.
+
+##### Scope Terminal Methods — Every `return` Must Use One
+
+Every `return` statement that carries a value must go through a scope terminal. This is enforced by RMCP004 (planned analyzer).
+
+| Method | When to use |
+|--------|-------------|
+| `scope.Outcome(detail, returnValue)` | Normal success. `detail` is a short log annotation ("12 results", "3 files changed"). Serializes the return value for log peek and token estimate. **Use this for successful returns.** |
+| `scope.Outcome(detail)` | Success with no return value (rare — only for `void`-adjacent paths before final `return`). |
+| `scope.Error<T>(returnValue)` | Structured error. `T` must derive from `ToolErrorResult` (has a non-null `Error` string). Marks the invocation failed, logs the error message. **Prefer over `Failed` when the error type is a known `ToolErrorResult` subtype.** |
+| `scope.Failed(reason, returnValue)` | Unstructured failure. Use when the error is a raw string (e.g., caught exception message) and no `ToolErrorResult` type exists. |
+| `scope.Failed(reason)` | Failure with no return value — marks the call failed and sets the log detail. Used before a `return` that returns void or before an exception. |
+
+The ternary form `return cond ? scope.Outcome(x, a) : scope.Error(b)` is valid — both branches are terminals.
+
+##### Scope Non-Terminal Methods — Annotate Without Concluding
+
+These may be called at any point before the terminal call:
+
+| Method | When to use |
+|--------|-------------|
+| `scope.SetArgs(obj)` | Call early, right after `BeginTool`. Records key input arguments serialized to compact JSON. **Only included in the log entry on failure** — helps diagnose what inputs caused a problem. Truncate large values before passing. |
+| `scope.Record(note)` | Append a mid-scope annotation. Useful for recording intermediate outcomes ("cache hit", "2 workspaces merged") that don't change the final outcome. Appended with `;` to any existing detail. |
+| `scope.SetCacheTag(bool hit)` | Record whether a pagination cache hit or miss occurred. Called by `TryServeCachedPage`. |
+| `scope.SetWorkspaceMode(bool isMSBuild)` | Record whether MSBuildWorkspace or AdhocWorkspace was used. Called by `TryGetCompilation` / `TryGetProject` internally — tools generally don't call this directly. |
+
+#### Workspace Access Patterns
+
+```csharp
+// For tools that need semantic analysis (type resolution, symbol lookup, references):
+if(!TryGetCompilation(projectPath, out var compilation, out var error))
+    return error;
+
+// For tools that need project structure but not full compilation:
+if(!TryGetProject(projectPath, out var project, out var error))
+    return error;
+
+// For tools that only need the file system root (no Roslyn at all):
+var rootPath = workspace.GetRootPath(projectPath);
+
+// For multi-project aware tools:
+var solution = workspace.GetSolution(projectPath);
+```
+
+`TryGetCompilation` and `TryGetProject` return a structured `ToolErrorResult` on failure — pass it directly as the return value. Never unwrap or re-wrap.
+
+#### File Mutation — Invalidate After Write
+
+Any tool that writes to a file on disk **must** call `workspace.InvalidateFile(projectPath, fullPath)` afterward:
+
+```csharp
+await File.WriteAllTextAsync(fullPath, newContent);
+workspace.InvalidateFile(projectPath, fullPath);
+```
+
+Without this, subsequent Roslyn tools see the stale in-memory source tree, not the updated file. `InvalidateFile` evicts the cached workspace entry so the next access forces a reload.
+
+#### Key Points (Summary)
+
+- `projectPath` is always the last required parameter, always non-optional
+- `using var scope = BeginTool(...)` is always the first statement
+- `Name` in `[McpServerTool]` must match `BeginTool`'s first argument exactly
+- Every `return` with a value must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
+- Use `[Description(ProjectPathDescription)]` — never inline text for `projectPath`
+- Use `scope.Error<T>` when `T : ToolErrorResult`; use `scope.Failed` otherwise
+- Mutation tools: call `workspace.InvalidateFile` after every successful write
 
 ---
 
