@@ -109,6 +109,14 @@ internal sealed class BuildTool : RoslynMcpTool
 		DiagnosticItem[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
 		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
 		
+		// When the build fails but no structured diagnostics were extracted (e.g. a locked output
+		// file, linker failure, NuGet restore error without a CS code), surface the raw output tail
+		// so agents can understand why without running dotnet build directly.
+		var errorDetails = !succeeded && errors.Length == 0
+			? TailLines(output, 30)
+			: null
+		;
+		
 		return scope.Outcome("msbuild", new BuildResult(
 			succeeded,
 			errors,
@@ -117,7 +125,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			BuildSkipped: false,
 			SkipReason:   null,
 			DurationMs:   (int) elapsed.TotalMilliseconds,
-			ExitCode:     exitCode
+			ExitCode:     exitCode,
+			ErrorDetails: errorDetails
 		));
 	}
 	
@@ -263,4 +272,27 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		return [.. results];
 	}
+
+	private static string TailLines(string output, int count)
+	{
+		ReadOnlySpan<char> span  = output.AsSpan().Trim();
+		var                lines = new List<Range>(count + 4);
+		var                start = 0;
+		
+		for(var i = 0; i <= span.Length; i++) {
+			
+			if(i == span.Length || span[i] == '\n') {
+				lines.Add(new Range(start, i));
+				start = i + 1;
+			}
+		}
+		
+		var tail = lines.Count <= count
+			? span
+			: span[lines[^count].Start..]
+		;
+		
+		return tail.Trim().ToString();
+	}
+
 }
