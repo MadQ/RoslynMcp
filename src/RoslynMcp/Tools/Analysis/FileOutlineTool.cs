@@ -29,10 +29,8 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_file_outline", filePath);
 		
 		
-		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 100);
-		
-		if(cachedPage is not null)
-			return scope.Outcome("cached page", cachedPage);
+		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 100, out var cached))
+			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);

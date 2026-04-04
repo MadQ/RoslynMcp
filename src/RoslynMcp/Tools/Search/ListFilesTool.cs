@@ -23,10 +23,8 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		
 		pattern ??= "**/*";
 		
-		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 500);
-		
-		if(cachedPage is not null)
-			return scope.Outcome("cached page", cachedPage);
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 500, out var cached))
+			return scope.Outcome("cached page", cached);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		

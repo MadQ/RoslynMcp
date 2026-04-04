@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
@@ -42,10 +42,8 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds: false, listTypeKinds: false, listSearchContexts: false, out var discovery))
             return scope.Outcome("discovery", discovery);
 
-        var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 500);
-		
-        if(cachedPage is not null)
-            return scope.Outcome("cached page", cachedPage);
+        if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 500, out var cached))
+            return scope.Outcome("cached page", cached);
 
         if(string.IsNullOrEmpty(filePath))
             return scope.Error(new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds"));

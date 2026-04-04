@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -35,11 +35,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		
 		filePattern ??= "*.cs";
 		
-		var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 200);
-		
-		if(cachedPage is not null)
-
-			return scope.Outcome("cached page", cachedPage!);
+		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 200, out var cached))
+			return scope.Outcome("cached page", cached);
 		
 		Regex regex;
 		

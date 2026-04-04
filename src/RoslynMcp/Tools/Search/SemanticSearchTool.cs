@@ -68,10 +68,8 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		context     ??= "all";
 		filePattern ??= "*.cs";
 		
-		var cachedPage = TryServeCachedPage<SemanticMatchResult>(scope, page_token, ref skip, ref take, 200);
-		
-		if(cachedPage is not null)
-			return scope.Outcome("cached page", cachedPage!);
+		if(scope.TryServeCachedPage<SemanticMatchResult>(page_token, ref skip, ref take, 200, out var cached))
+			return scope.Outcome("cached page", cached);
 		
 		// Validate context parameter
 		var validContexts = new[] { "comments", "strings", "identifiers", "code", "xmldocs", "all" };

@@ -34,7 +34,7 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected ToolScope BeginTool(string name, string? subject = null)
 	{
-		var scope  = new ToolScope(name, subject, logger, () => activeScope = null);
+		var scope  = new ToolScope(name, subject, logger, () => activeScope = null, paginationCache);
 		activeScope = scope;
 		
 		return scope;
@@ -331,32 +331,6 @@ internal abstract partial class RoslynMcpTool
 		return items.Slice(skip, Math.Min(take, items.Length - skip)).ToArray();
 	}
 	
-	/// <summary>
-	///     Cache-hit path: if the token is valid, returns a standardized paged response directly.
-	///     Returns null on miss — caller should compute results and call <see cref="PaginateAndStore{T}"/>.
-	///     Subsequent-page responses use a common shape (items/total/page_token/has_more);
-	///     tool-specific metadata is only included in the first-page response.
-	/// </summary>
-	protected object? TryServeCachedPage<T>(ToolScope scope, string? pageToken, ref int skip, ref int take, int maxTake)
-	{
-		take = Math.Clamp(take, 1, maxTake);
-		
-		if(pageToken is null || !paginationCache.TryGet<T>(pageToken, out var cached))
-			return null;
-		
-		scope.SetCacheTag(hit: true);
-		
-		var page = Paginate(cached, ref skip, take);
-		
-		return scope.Outcome($"{page.Length}/{cached.Length}", new CachedPageResult<T>(
-			Items:      page,
-			Total:      cached.Length,
-			Skip:       skip,
-			Take:       take,
-			PageToken: pageToken!,
-			HasMore:   skip + page.Length < cached.Length
-		));
-	}
 	
 	/// <summary>
 	///     Cache-miss path: stores <paramref name="allResults"/> in the pagination cache and
