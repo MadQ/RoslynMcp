@@ -64,11 +64,11 @@ protected static bool TryHandleDiscovery(
 ```csharp
 // Single discovery type
 if(TryHandleDiscovery(listSyntaxKinds, false, false, false, false, out var discovery))
-    return discovery;
+    return scope.Outcome("discovery", discovery);
 
 // Multiple discovery types
 if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, false, false, false, out var discovery))
-    return discovery;
+    return scope.Outcome("discovery", discovery);
 
 // All discovery types
 if(TryHandleDiscovery(
@@ -78,7 +78,7 @@ if(TryHandleDiscovery(
     listTypeKinds, 
     listSearchContexts, 
     out var discovery))
-    return discovery;
+    return scope.Outcome("discovery", discovery);
 ```
 
 ## Available Error Helpers

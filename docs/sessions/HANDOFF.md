@@ -14,7 +14,7 @@ Shipped `ToolScopeAnalyzer` — a new Roslyn analyzer (`RoslynMcp.Analyzers`) wi
 - **Last commit:** `feat: ToolScopeAnalyzer (RMCP003/004/005) + resolve all violations (#127)`
 - **Compiler:** 0 errors, 0 warnings
 - **Tool count:** 35 (33 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`)
-- **Version:** `v0.7.3-alpha` (CHANGELOG updated for #122–#126; #127 not yet reflected)
+- **Version:** `v0.7.4-alpha` (CHANGELOG updated for #122–#126; #127 not yet reflected in CHANGELOG)
 - **Stash:** 27 files of pre-existing style changes stashed as `"style: semicolons-on-own-lines + blank line pass (suspended — resume later)"` — do NOT pop until style pass suspension is lifted
 - **pub.ps1:** Convenience publish script at repo root — re-run after server-side C# changes.
 

@@ -25,7 +25,7 @@ This comment is **incorrect**. `MSBuildWorkspace` is a snapshot workspace — it
 
 ---
 
-### 3. Five tool methods are missing `[McpServerTool]` attributes — silently unregistered
+### 3. Five tool methods are missing `[McpServerTool]` attributes — silently unregistered — **Fixed**
 
 These tools have `[McpServerToolType]` on the class but **no** `[McpServerTool]` on the method, so the MCP framework never registers them:
 

@@ -93,7 +93,7 @@ Semantic analysis tools that justify RoslynMcp's existence beyond convenience.
 |---|------|-------|-------|------|
 | 18 | feature | Implement call graph tools | `roslyn_find_callers` and `roslyn_get_call_graph` — shared IOperation walking infrastructure | #32 |
 | 19 | feature | Implement `roslyn_find_unused` and supporting analysis tools | `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`, `roslyn_check_syntax` | #33 |
-| — | enhancement | Additional scope assigned to this milestone | See GitHub issues #99, #114, #117 | #99, #114, #117 |
+| — | enhancement | Additional scope assigned to this milestone | See GitHub issue #99 | #99 |
 
 **Theme:** The "wow" release. Capabilities that text search fundamentally cannot provide.
 

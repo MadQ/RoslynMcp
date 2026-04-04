@@ -326,4 +326,4 @@ Subsequent calls are instant because the workspace is cached.
 
 ---
 
-**Last Updated:** 2026-04-03 (v0.7.2-alpha)
+**Last Updated:** 2026-04-03 (v0.7.4-alpha)

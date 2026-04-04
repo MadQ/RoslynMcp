@@ -76,6 +76,11 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_insert_lines` — Insert lines at a specific location (by line number
   or anchor pattern). Use when ADDING new lines rather than replacing existing
   content -- no need to construct surrounding-context patterns.
+- `roslyn_write_file` — Write or create files atomically with automatic
+  pre-write backup. Use for wholesale file rewrites or creating new files.
+  Returns a backup token usable with `roslyn_local_history` to undo.
+- `roslyn_local_history` — List, preview, and restore crash-safe file backup
+  snapshots created by `roslyn_write_file`. Use to undo destructive writes.
 
 ### Refactoring
 
@@ -125,6 +130,7 @@ are more accurate than grep/Read/Edit.
 - Types: `roslyn_get_type_members` / `roslyn_get_type_hierarchy` > reading files
 - Editing: `roslyn_replace_in_code` (C#) / `roslyn_replace_in_file` (any) > Edit
 - Insert: `roslyn_insert_lines` (by line or anchor) > Edit with context patterns
+- Write/Undo: `roslyn_write_file` (create/rewrite) + `roslyn_local_history` (undo)
 - Rename: `roslyn_preview_rename` + `roslyn_apply_rename` > find-and-replace
 - Build: `roslyn_build_project` > NEVER `dotnet build` in terminal
 - Diagnostics: `roslyn_get_diagnostics` for fast error checks

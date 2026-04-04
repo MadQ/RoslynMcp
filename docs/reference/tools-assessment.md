@@ -1,6 +1,6 @@
 # Roslyn MCP Tools: Honest Assessment
 
-> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.2-alpha.
+> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.4-alpha.
 
 ## Tools That Work Well
 
@@ -50,7 +50,7 @@ Where normal tools win:
 
 ## Bottom Line
 
-The design philosophy is right — Roslyn semantics are genuinely better than text search for C# navigation. `get_type_members`, `get_symbol_definition`, `get_symbol_info`, and `get_type_hierarchy` are all things worth reaching for first. ~~Three issues that would reliably break an AI agent:~~ Status as of v0.7.2-alpha:
+The design philosophy is right — Roslyn semantics are genuinely better than text search for C# navigation. `get_type_members`, `get_symbol_definition`, `get_symbol_info`, and `get_type_hierarchy` are all things worth reaching for first. ~~Three issues that would reliably break an AI agent:~~ Status as of v0.7.4-alpha:
 
 1. ~~`list_types` needs a namespace filter~~ — **fixed v0.7.0 (#29)**
 2. ~~`semantic_search` duplication~~ — **fixed v0.4.0 (#18)**

@@ -69,9 +69,9 @@ Cached arrays are returned as `ReadOnlyMemory<T>` — callers can slice but not 
 | `file_outline` | ✅ `page_token` parameter + cache |
 | `search_files` | ✅ `page_token` parameter + cache |
 | `semantic_search` | ✅ `page_token` parameter + cache |
-| `list_files` | Needs `skip` parameter first |
+| `list_files` | ✅ `page_token` parameter + cache |
 | `get_trivia` | ✅ `page_token` parameter + cache |
-| `list_types` | Needs `skip`/`take` parameters first |
+| `list_types` | ✅ `page_token` parameter + cache |
 
 ### Token Lifecycle
 
