@@ -1,0 +1,318 @@
+﻿
+using System.Collections.Immutable;
+using System.Composition;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CodeActions;
+using Microsoft.CodeAnalysis.CodeFixes;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+namespace RoslynMcp.Analyzers;
+
+// Roslyn reports RS1038 for code fix providers that are not in an analyzer package.
+// This project IS the analyzer package — the warning is a false positive here.
+#pragma warning disable RS1038
+
+/// <summary>
+/// Code fix provider for RMCP003 (missing BeginTool scope), RMCP004 (bare return that bypasses
+/// a scope terminal), and RMCP005 (BeginTool name does not match [McpServerTool(Name = "...")] ).
+/// </summary>
+[ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(ToolScopeCodeFixProvider)), Shared]
+public sealed class ToolScopeCodeFixProvider : CodeFixProvider
+{
+	public override ImmutableArray<string> FixableDiagnosticIds =>
+		["RMCP003", "RMCP004", "RMCP005"]
+		;
+
+	public override FixAllProvider GetFixAllProvider() =>
+		WellKnownFixAllProviders.BatchFixer
+		;
+
+	public override async Task RegisterCodeFixesAsync(CodeFixContext context)
+	{
+		var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken)
+			.ConfigureAwait(false)
+			;
+
+		if(root is null)
+			return;
+
+		foreach(var diagnostic in context.Diagnostics) {
+
+			switch(diagnostic.Id) {
+
+				case "RMCP003":
+				RegisterFix003(context, diagnostic, root);
+				break;
+
+				case "RMCP004":
+				RegisterFix004(context, diagnostic, root);
+				break;
+
+				case "RMCP005":
+				RegisterFix005(context, diagnostic, root);
+				break;
+			}
+		}
+	}
+
+	// RMCP003: The diagnostic is on the method identifier token.
+	// Fix: insert `using var scope = BeginTool("toolName");` as the first statement.
+	private static void RegisterFix003(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
+	{
+		var method = root.FindToken(diagnostic.Location.SourceSpan.Start).Parent
+			as MethodDeclarationSyntax
+			;
+
+		if(method?.Body is null)
+			return;
+
+		context.RegisterCodeFix(
+			CodeAction.Create(
+				"Insert 'using var scope = BeginTool(...)'",
+				ct => InsertBeginToolAsync(context.Document, method, ct),
+				equivalenceKey: "RMCP003"
+			),
+			diagnostic
+		);
+	}
+
+	private static async Task<Document> InsertBeginToolAsync(
+		Document document,
+		MethodDeclarationSyntax method,
+		CancellationToken cancellationToken)
+	{
+		var root = await document.GetSyntaxRootAsync(cancellationToken)
+			.ConfigureAwait(false)
+			;
+
+		if(root is null)
+			return document;
+
+		var body     = method.Body!;
+		var toolName = GetMcpToolName(method) ?? "TODO: set tool name";
+
+		// Mirror the leading trivia of the first existing statement so indentation is correct.
+		// If the body is empty, fall back to two tabs.
+		var indent = body.Statements.Count > 0
+			? body.Statements[0].GetLeadingTrivia()
+			: SyntaxFactory.TriviaList(
+				SyntaxFactory.ElasticEndOfLine("\n"),
+				SyntaxFactory.ElasticWhitespace("\t\t")
+			)
+			;
+
+		var statement = SyntaxFactory.ParseStatement($"using var scope = BeginTool(\"{toolName}\");")
+			.WithLeadingTrivia(indent)
+			;
+
+		var newBody = body.WithStatements(body.Statements.Insert(0, statement));
+		var newRoot = root.ReplaceNode(body, newBody);
+
+		return document.WithSyntaxRoot(newRoot);
+	}
+
+	// RMCP004: The diagnostic is on the `return` keyword token.
+	// Fix (3 alternatives): wrap the return expression in a scope terminal call.
+	private static void RegisterFix004(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
+	{
+		var returnStatement = root.FindToken(diagnostic.Location.SourceSpan.Start).Parent
+			as ReturnStatementSyntax
+			;
+
+		if(returnStatement?.Expression is null)
+			return;
+
+		context.RegisterCodeFix(
+			CodeAction.Create(
+				"Wrap with scope.Outcome(\"TODO: describe outcome\", ...)",
+				ct => WrapReturnAsync(context.Document, returnStatement, "Outcome", ct),
+				equivalenceKey: "RMCP004_Outcome"
+			),
+			diagnostic
+		);
+
+		context.RegisterCodeFix(
+			CodeAction.Create(
+				"Wrap with scope.Error(...)",
+				ct => WrapReturnAsync(context.Document, returnStatement, "Error", ct),
+				equivalenceKey: "RMCP004_Error"
+			),
+			diagnostic
+		);
+
+		context.RegisterCodeFix(
+			CodeAction.Create(
+				"Wrap with scope.Failed(\"TODO: describe failure\", ...)",
+				ct => WrapReturnAsync(context.Document, returnStatement, "Failed", ct),
+				equivalenceKey: "RMCP004_Failed"
+			),
+			diagnostic
+		);
+	}
+
+	private static async Task<Document> WrapReturnAsync(
+		Document document,
+		ReturnStatementSyntax returnStatement,
+		string terminal,
+		CancellationToken cancellationToken)
+	{
+		var root = await document.GetSyntaxRootAsync(cancellationToken)
+			.ConfigureAwait(false)
+			;
+
+		if(root is null)
+			return document;
+
+		var original = returnStatement.Expression!;
+
+		var wrappedExpr = terminal switch {
+
+			"Outcome" => (ExpressionSyntax) SyntaxFactory.InvocationExpression(
+				ScopeMemberAccess("Outcome"),
+				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
+					SyntaxFactory.Argument(
+						SyntaxFactory.LiteralExpression(
+							SyntaxKind.StringLiteralExpression,
+							SyntaxFactory.Literal("TODO: describe outcome")
+						)
+					),
+					SyntaxFactory.Argument(original.WithoutTrivia())
+				}))
+			),
+
+			"Error" => SyntaxFactory.InvocationExpression(
+				ScopeMemberAccess("Error"),
+				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
+					SyntaxFactory.Argument(original.WithoutTrivia())
+				}))
+			),
+
+			_ => SyntaxFactory.InvocationExpression(
+				ScopeMemberAccess("Failed"),
+				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
+					SyntaxFactory.Argument(
+						SyntaxFactory.LiteralExpression(
+							SyntaxKind.StringLiteralExpression,
+							SyntaxFactory.Literal("TODO: describe failure")
+						)
+					),
+					SyntaxFactory.Argument(original.WithoutTrivia())
+				}))
+			)
+		};
+
+		var newReturn = returnStatement.WithExpression(
+			wrappedExpr.WithTriviaFrom(original)
+		);
+
+		var newRoot = root.ReplaceNode(returnStatement, newReturn);
+
+		return document.WithSyntaxRoot(newRoot);
+	}
+
+	// RMCP005: The diagnostic is on Arguments[0] of the BeginTool call (ArgumentSyntax node).
+	// Fix: replace the string literal with the value from [McpServerTool(Name = "...")].
+	private static void RegisterFix005(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
+	{
+		var arg = root
+			.FindNode(diagnostic.Location.SourceSpan, getInnermostNodeForTie: true)
+			.AncestorsAndSelf()
+			.OfType<ArgumentSyntax>()
+			.FirstOrDefault()
+			;
+
+		if(arg is null)
+			return;
+
+		var method = arg.Ancestors()
+			.OfType<MethodDeclarationSyntax>()
+			.FirstOrDefault()
+			;
+
+		var toolName = method is not null ? GetMcpToolName(method) : null;
+
+		if(toolName is null)
+			return;
+
+		context.RegisterCodeFix(
+			CodeAction.Create(
+				$"Fix BeginTool name to \"{toolName}\"",
+				ct => FixBeginToolNameAsync(context.Document, arg, toolName, ct),
+				equivalenceKey: "RMCP005"
+			),
+			diagnostic
+		);
+	}
+
+	private static async Task<Document> FixBeginToolNameAsync(
+		Document document,
+		ArgumentSyntax wrongArg,
+		string correctName,
+		CancellationToken cancellationToken)
+	{
+		var root = await document.GetSyntaxRootAsync(cancellationToken)
+			.ConfigureAwait(false)
+			;
+
+		if(root is null)
+			return document;
+
+		var correctLiteral = SyntaxFactory
+			.LiteralExpression(
+				SyntaxKind.StringLiteralExpression,
+				SyntaxFactory.Literal(correctName)
+			)
+			.WithTriviaFrom(wrongArg.Expression)
+			;
+
+		var newArg  = wrongArg.WithExpression(correctLiteral);
+		var newRoot = root.ReplaceNode(wrongArg, newArg);
+
+		return document.WithSyntaxRoot(newRoot);
+	}
+
+	// Mirrors ToolScopeAnalyzer.TryGetMcpToolName — syntactic extraction of [McpServerTool(Name = "...")].
+	private static string? GetMcpToolName(MethodDeclarationSyntax method)
+	{
+		foreach(var attrList in method.AttributeLists)
+		foreach(var attr in attrList.Attributes) {
+
+			var attrName = attr.Name switch {
+				IdentifierNameSyntax id              => id.Identifier.Text,
+				QualifiedNameSyntax { Right: var r } => r.Identifier.Text,
+				_                                    => null
+			};
+
+			if(attrName is not ("McpServerTool" or "McpServerToolAttribute"))
+				continue;
+
+			if(attr.ArgumentList is null)
+				return null;
+
+			foreach(var arg in attr.ArgumentList.Arguments) {
+
+				if(arg.NameEquals?.Name.Identifier.Text != "Name")
+					continue;
+
+				return arg.Expression is LiteralExpressionSyntax lit
+					&& lit.IsKind(SyntaxKind.StringLiteralExpression)
+					? lit.Token.ValueText
+					: null
+					;
+			}
+
+			return null;
+		}
+
+		return null;
+	}
+
+	private static MemberAccessExpressionSyntax ScopeMemberAccess(string memberName) =>
+		SyntaxFactory.MemberAccessExpression(
+			SyntaxKind.SimpleMemberAccessExpression,
+			SyntaxFactory.IdentifierName("scope"),
+			SyntaxFactory.IdentifierName(memberName)
+		)
+		;
+}
