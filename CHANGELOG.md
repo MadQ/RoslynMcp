@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`ToolScopeRefactoringProvider`** — new `CodeRefactoringProvider` (cursor-triggered, no diagnostic) offering quick conversions between `scope.Outcome`, `scope.Error`, `scope.Failed`, and `scope.Record`; all 6 terminal↔terminal pairs plus Record↔terminal; Record conversions include a warning in the action title since they drop or add the `return` keyword
+- **RMCP006** — new Warning diagnostic: first string argument to `scope.Outcome()` or `scope.Failed()` contains the placeholder text `"TODO"`; code fix replaces the placeholder with the tool name inferred from `[McpServerTool(Name)]` (e.g., `roslyn_info` → `"info"`)
+- **`ToolScopeHelpers`** — new internal static class shared by `ToolScopeAnalyzer`, `ToolScopeCodeFixProvider`, and `ToolScopeRefactoringProvider`; provides `HasMcpServerToolAttribute`, `GetMcpToolName`, and `InferDetailName`
+
+### Changed
+- **RMCP005** — upgraded from Warning to Error; a `BeginTool` name that mismatches `[McpServerTool(Name)]` makes log correlation impossible — it is factually incorrect, not cosmetic
+- **RMCP004 code fix** — `scope.Outcome` and `scope.Failed` fixes now infer the `detail`/`reason` label from `[McpServerTool(Name)]` (e.g., `roslyn_info` → `"info"`) instead of always using `"TODO: describe outcome"`; `scope.Failed` always uses `"failed"` as the reason; `scope.Error` is unchanged (no string arg)
+
 ---
 
 ## [0.7.4-alpha] — 2026-04-04
