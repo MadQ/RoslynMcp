@@ -64,19 +64,21 @@ MANDATORY TOOL CONSTRAINTS — do NOT violate these:
 Start now with Step 1.
 `.trim();
 
-let fired = false;
+// Sentinel injected into the sweep prompt so re-entrant hook calls can
+// detect that the sweep is already in progress and bail out immediately.
+const SENTINEL = '<!-- issue-sweep-active -->';
 
 const session = await joinSession({
     hooks: {
         onUserPromptSubmitted: async (input) => {
-            if(fired)
+            // Already running (sentinel present in conversation) — skip.
+            if(input.prompt.includes(SENTINEL))
                 return;
 
             if(!TRIGGERS.some((re) => re.test(input.prompt)))
                 return;
 
-            fired = true;
-            session.send({ prompt: ISSUE_SWEEP_PROMPT });
+            session.send({ prompt: `${SENTINEL}\n${ISSUE_SWEEP_PROMPT}` });
         },
     },
     tools: [],

@@ -160,19 +160,21 @@ Start now. Launch the subagent fleet.
 // Session wiring
 // ---------------------------------------------------------------------------
 
-let fired = false;
+// Sentinel injected into the sweep prompt so re-entrant hook calls can
+// detect that the sweep is already in progress and bail out immediately.
+const SENTINEL = '<!-- doc-sweep-active -->';
 
 const session = await joinSession({
     hooks: {
         onUserPromptSubmitted: async (input) => {
-            if(fired)
+            // Already running (sentinel present in conversation) — skip.
+            if(input.prompt.includes(SENTINEL))
                 return;
 
             if(!TRIGGERS.some((re) => re.test(input.prompt)))
                 return;
 
-            fired = true;
-            session.send({ prompt: SWEEP_PROMPT });
+            session.send({ prompt: `${SENTINEL}\n${SWEEP_PROMPT}` });
         },
     },
     tools: [],
