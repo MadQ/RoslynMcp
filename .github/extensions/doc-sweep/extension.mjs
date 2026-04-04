@@ -94,11 +94,11 @@ src/RoslynMcp.LogViewer/:
 
 Before auditing any docs, run this search to get the real tool count from the source:
 
-  roslyn_search_files(pattern: `\[McpServerToolType\]`, projectPath: "src/RoslynMcp/RoslynMcp.csproj")
+  roslyn_search_files(pattern: '\[McpServerToolType\]', projectPath: "src/RoslynMcp/RoslynMcp.csproj")
 
 Count the distinct matches. That is the authoritative total. Cross-reference:
-- `[McpServerTool(... ReadOnly = false)]` → public tools
-- `roslyn_respawn` and `roslyn_debug_attach` → the 2 debug-only tools
+- '[McpServerTool(... ReadOnly = false)]' → public tools
+- 'roslyn_respawn' and 'roslyn_debug_attach' → the 2 debug-only tools
 
 Use only this computed count when fixing doc files. Do NOT trust any hardcoded number, including this prompt.
 
