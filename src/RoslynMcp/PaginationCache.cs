@@ -1,4 +1,4 @@
-namespace RoslynMcp;
+﻿namespace RoslynMcp;
 
 /// <summary>
 ///     Caches paginated query results keyed by token. Agents pass the token back

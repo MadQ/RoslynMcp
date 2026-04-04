@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using System.ComponentModel;
 using System.Xml;
 using Microsoft.CodeAnalysis;

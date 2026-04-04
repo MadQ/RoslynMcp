@@ -1,4 +1,4 @@
-namespace RoslynMcp;
+﻿namespace RoslynMcp;
 
 /// <summary>
 ///     Controls which MSBuild engine is used for workspace loading.
