@@ -172,10 +172,7 @@ const session = await joinSession({
                 return;
 
             fired = true;
-            setTimeout(() => {
-                fired = false;
-                session.send({ prompt: SWEEP_PROMPT });
-            }, 100);
+            session.send({ prompt: SWEEP_PROMPT });
         },
     },
     tools: [],

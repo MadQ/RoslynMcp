@@ -76,10 +76,7 @@ const session = await joinSession({
                 return;
 
             fired = true;
-            setTimeout(() => {
-                fired = false;
-                session.send({ prompt: ISSUE_SWEEP_PROMPT });
-            }, 100);
+            session.send({ prompt: ISSUE_SWEEP_PROMPT });
         },
     },
     tools: [],
