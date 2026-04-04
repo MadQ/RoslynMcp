@@ -50,7 +50,8 @@ Use this checklist when preparing a new release of RoslynMcp.
 ## Release Process
 
 ### 1. Version Bump
-- [ ] Update version in `.csproj` files
+- [ ] Update version in `Directory.Build.props`
+- [ ] Confirm the GitHub milestone `vX.Y.Z` exists (omit pre-release suffix — use `v0.7.4`, not `v0.7.4-alpha`)
 - [ ] Update CHANGELOG.md
   - [ ] Move `[Unreleased]` items to new version section
   - [ ] Add release date
@@ -58,6 +59,8 @@ Use this checklist when preparing a new release of RoslynMcp.
 - [ ] Commit version bump: `git commit -m "chore: bump version to v0.X.Y-alpha"`
 
 ### 2. Tag Release
+- [ ] Confirm HEAD is the version-bump commit before tagging
+
 ```bash
 git tag -a v0.X.Y-alpha -m "Release v0.X.Y-alpha"
 git push origin v0.X.Y-alpha
