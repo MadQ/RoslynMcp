@@ -145,7 +145,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			}
 			
 			try {
-				await File.WriteAllTextAsync(fullPath, deletedRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8);
+				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
@@ -223,7 +223,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			));
 		
 		try {
-			await File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8);
+			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));

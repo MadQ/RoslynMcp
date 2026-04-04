@@ -94,7 +94,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
 		try {
-			await File.WriteAllTextAsync(fullPath, newContent);
+			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newContent));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
