@@ -9,21 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.7.3-alpha] — 2026-04-04
+
 ### Added
 - **`RoslynMcp.Analyzers` — ToolScopeAnalyzer (RMCP003/RMCP004/RMCP005)** — three analyzer rules that enforce the `BeginTool`/`ToolScope` pattern on all `[McpServerTool]` methods (#127)
   - **RMCP003** (Error): `[McpServerTool]` method must begin with `using var scope = BeginTool(...)`
   - **RMCP004** (Error): all return paths in a `[McpServerTool]` method must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
   - **RMCP005** (Warning): the `name` argument passed to `BeginTool` must match `[McpServerTool(Name = ...)]`
 - **`AnalyzerReleases.Shipped.md`** — Release 0.3.0 block added documenting RMCP003/RMCP004/RMCP005 (#127)
-
-### Changed
-- **All tool files** — all RMCP003/004/005 violations resolved; every `[McpServerTool]` method now opens with `using var scope = BeginTool(...)` and all return paths go through `scope` (#127)
-
----
-
-## [0.7.3-alpha] — 2026-04-04
-
-### Added
+- **`ToolScopeCodeFixProvider`** — IDE lightbulb code fixes for RMCP003/004/005 (#128)
+  - RMCP003: inserts `using var scope = BeginTool("toolName");` as the first statement; tool name read from `[McpServerTool(Name = "...")]`
+  - RMCP004: offers three alternatives — `scope.Outcome(...)`, `scope.Error(...)`, `scope.Failed(...)`; the wrong choice produces a compile-time generic constraint error, guiding the developer to the right one
+  - RMCP005: replaces the mismatched name literal with the value from `[McpServerTool(Name = "...")]`
+- **`roslyn_get_project_info`** — exposes MSBuild-derived project properties (#117)
+  - New fields: `version`, `root_namespace`, `target_frameworks`, `allow_unsafe_blocks`, `warnings_as_errors`
+  - Parsed from `.csproj` XML; `_caution` is populated whenever any MSBuild property is returned, noting that `Condition` attributes are not evaluated
+- **`roslyn_build_project`** — populates `error_details` with the last 30 lines of raw MSBuild output when the build fails with exit code ≠ 0 but zero C# diagnostics (#131)
+  - Prevents `succeeded: false` with empty `errors` from leaving agents without actionable context
 - **`BackupStore`** — now records `gitBranch` and `gitCommit` at snapshot time via `git rev-parse` (#122)
 - **`RoslynMcpJson`** — new static class with shared `JsonSerializerOptions` used by all serialization (#123)
   - Custom `JavaScriptEncoder` using `TextEncoderSettings` — allows all Unicode through instead of escaping as `\uXXXX`; still escapes what is actually necessary
@@ -43,10 +47,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ToolScope.Error<T>()`** — gains `where T : ToolErrorResult` constraint; body simplified to `returnValue.Error` (#125)
 - **Operation-type results** — Build/Clean/Restore/ReplaceInFile/ReplaceInCode now use `scope.Failed(reason, result)` instead of `scope.Error(result)` (#125)
 - **`ExtractDetail<T>()` switch** — deleted entirely; replaced by `ToolErrorResult` abstract base record (#125)
+- **All tool files** — all RMCP003/004/005 violations resolved; every `[McpServerTool]` method now opens with `using var scope = BeginTool(...)` and all return paths go through `scope` (#127)
+- **`TryServeCachedPage<T>`** — moved from `RoslynMcpTool` to `ToolScope`; signature changed to `bool + out object?` (no longer calls `scope.Outcome` internally); callers receive the cached result directly and call `scope.Outcome` themselves (#130)
 
 ### Fixed
 - **`BuildLiteralRegex` newline normalization** — CRLF-tolerance was a no-op: `Regex.Escape` converts literal `\n` to the two-char sequence `\n`, so the subsequent `.Replace("\n", ...)` searching for the actual newline char never matched; fix: `.Replace(@"\n", @"\r?\n")` (#126)
 - **`ToolErrorResult.Error`** — made non-nullable (`string?` → `string`); aligns with all derived types; dead `?? "error"` fallback removed from `ToolScope.Error<T>()` (#126)
+- **`IsUnderRoot` filter** — tightened to also check `LocationKind` and use path-separator-aware comparison, eliminating false positives for external files with overlapping path prefixes (#114)
+- **`roslyn_write_file`** — retries with exponential backoff (up to 3 attempts) on `IOException` due to file contention, preventing transient lock failures from surfacing as errors (#129)
 
 ---
 
