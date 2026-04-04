@@ -81,10 +81,8 @@ public sealed class ToolScopeAnalyzer : DiagnosticAnalyzer
 		if(!TryGetMcpToolName(method, out var attributeName))
 			return;
 		
-		// TODO: consider whether we just plain error0out on expression-bodied methods. They can't satisfy RMCP003,
-		//       but they also can't satisfy the intent of the contract at all unless they are just forwarders.
-		// Expression-bodied methods can't satisfy RMCP003 — skip rather than spam false positives.
-		// A block body is required for the using-var pattern.
+		// Expression-bodied methods are intentionally skipped — they can't satisfy RMCP003 by design,
+		// and they're legitimately used for simple forwarders. Flagging them would be noise.
 		if(method.Body is not { } body)
 			return;
 		

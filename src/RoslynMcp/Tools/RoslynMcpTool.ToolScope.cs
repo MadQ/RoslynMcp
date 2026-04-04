@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using RoslynMcp;
 
@@ -47,7 +48,7 @@ internal abstract partial class RoslynMcpTool
 		///     the page slice to <paramref name="result"/> and returns <see langword="true"/>.
 		///     Always clamps <paramref name="take"/> to <paramref name="maxTake"/>.
 		/// </summary>
-		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int maxTake, out object? result)
+		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int maxTake, [NotNullWhen(true)] out object? result)
 		{
 			take = Math.Clamp(take, 1, maxTake);
 			

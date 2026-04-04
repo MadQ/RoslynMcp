@@ -18,8 +18,7 @@ All milestones through v0.7.3 are complete; additional work has shipped in dev p
 | v0.7.0 | `roslyn_get_member_body`, hardened defaults for list_types and find_references, filtering parameters across tools, AGENTS.md update |
 | v0.7.1 | `roslyn_info`, `roslyn_insert_lines`, workspace mode CLI arg (`--workspace sdk\|vs\|adhoc\|auto`) |
 | v0.7.2 | `roslyn_write_file`, `roslyn_local_history`, `BackupStore` (crash-safe backup infrastructure), NDJSON log format with `response_peek` pipeline, structured `roslyn_get_diagnostics` response (#111), tool metadata improvements (#112) |
-| v0.7.3 | `BackupStore` gains git branch/commit metadata in snapshots (#122), `RoslynMcpJson` shared serializer options — no `\uXXXX` spam (#123), `ToolResults.cs` normalized to PascalCase C# + snake_case JSON (#124), `ToolErrorResult` abstract base record — replaces `ExtractDetail` switch; `PathErrorResult`/`UnexpectedErrorResult` inherit it (#125), `BuildLiteralRegex` CRLF fix (#126) |
-| dev | `ToolScopeAnalyzer` (RMCP003/RMCP004/RMCP005) — enforces `BeginTool`/`ToolScope` pattern on all `[McpServerTool]` methods; all violations resolved; analyzer rules documented in `AnalyzerReleases.Shipped.md` Release 0.3.0 (#127) |
+| v0.7.3 | `BackupStore` gains git branch/commit metadata in snapshots (#122), `RoslynMcpJson` shared serializer options — no `\uXXXX` spam (#123), `ToolResults.cs` normalized to PascalCase C# + snake_case JSON (#124), `ToolErrorResult` abstract base record — replaces `ExtractDetail` switch; `PathErrorResult`/`UnexpectedErrorResult` inherit it (#125), `BuildLiteralRegex` CRLF fix (#126), `ToolScopeAnalyzer` RMCP003/004/005 + code fix provider (#127, #128), `roslyn_get_project_info` MSBuild-derived fields (#117), `roslyn_build_project` MSBuild tail on exit-code failures (#131), retry with exponential backoff on file write contention (#129), `TryServeCachedPage` moved to `ToolScope` (#130), `roslyn_get_diagnostics` success/locked-file fix (#114) |
 
 ---
 
@@ -108,9 +107,6 @@ Agents that use RoslynMcp don't just understand code — they respect the author
 |---|------|-------|-------|------------|
 | 20 | feature | Implement `roslyn_get_style_profile` | StyleSampler helper; trivia-based style inference; returns named style properties | #34 |
 | 21 | feature | Add `preserveStyle` flag to `replace_in_code` | StyleNormalizer helper; contextual trivia normalization during targeted edits | #35 |
-| — | feature | Code fixers for RMCP003/RMCP004/RMCP005 | Auto-fix `BeginTool`/`ToolScope` violations in one click; companion to the ToolScopeAnalyzer shipped in dev | #128 |
-| — | fix | Retry with exponential backoff on file write contention | `IOException` on write → retry loop with exponential backoff; prevents tool failures on locked files | #129 |
-| — | refactor | Move `TryServeCachedPage` from `RoslynMcpTool` to `ToolScope` | Pagination helper belongs in scope lifecycle, not the tool base class | #130 |
 
 **Theme:** Respect. The author's column alignment, blank line patterns, and comment placement survive AI-assisted editing.
 

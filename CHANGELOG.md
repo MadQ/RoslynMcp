@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`roslyn_write_file`** — new `.cs` files no longer get a UTF-8 BOM; was incorrectly using `encoderShouldEmitUTF8Identifier: true` as a "VS default" for C# files
+- **`roslyn_replace_in_code`** — no longer uses the Roslyn workspace's cached `SourceText.Encoding` when writing; now peeks at the actual on-disk bytes to detect the BOM, preventing BOM-pollution when the workspace loaded a file before the encoding setting was corrected
+
+### Refactored
+- **`FileEncoding`** — new shared static helper (`FileEncoding.Detect(ReadOnlySpan<byte>)` + `FileEncoding.Peek(string)`) centralises BOM detection; replaces duplicated logic in `WriteFileTool` and `ReplaceInCodeTool`
+
 ---
 
 ## [0.7.3-alpha] — 2026-04-04
