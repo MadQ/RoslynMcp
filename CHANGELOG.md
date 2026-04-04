@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **RMCP004 code fix** — wrapping a `null` or `null!` return expression no longer produces uncompilable code (CS0411 type-inference failure on `scope.Failed<T>` / `scope.Outcome<T>` / `scope.Error<T>`); the fix now substitutes `new ErrorResult(<arg>)` where `<arg>` is the first `scope.Record(...)` string argument in the method, or `"TODO"` if none is found
+- **`ToolScopeRefactoringProvider`** — Record→terminal conversions ("Convert to return scope.Failed(...)") now also substitute `new ErrorResult(<Record arg>)` instead of the uncompilable `null!`
 
 ---
 

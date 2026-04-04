@@ -1,4 +1,4 @@
-
+﻿
 using System.Collections.Generic;
 using System.Composition;
 using System.Threading;
@@ -195,10 +195,19 @@ public sealed class ToolScopeRefactoringProvider : CodeRefactoringProvider
 		if(root is null)
 			return document;
 
-		var nullBang = SyntaxFactory.Argument(
-			SyntaxFactory.PostfixUnaryExpression(
-				SyntaxKind.SuppressNullableWarningExpression,
-				SyntaxFactory.LiteralExpression(SyntaxKind.NullLiteralExpression)
+		// The Record's first arg is the most meaningful payload for the error result.
+		// Using null! here would cause CS0411 (T cannot be inferred from null).
+		var recordArgExpr = invocation.ArgumentList.Arguments.Count > 0
+			? (ExpressionSyntax) invocation.ArgumentList.Arguments[0].Expression.WithoutTrivia()
+			: SyntaxFactory.LiteralExpression(SyntaxKind.StringLiteralExpression, SyntaxFactory.Literal("TODO"))
+			;
+
+		var errorResultArg = SyntaxFactory.Argument(
+			SyntaxFactory.ObjectCreationExpression(
+				SyntaxFactory.IdentifierName("ErrorResult")).WithArgumentList(
+				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
+					SyntaxFactory.Argument(recordArgExpr)
+				}))
 			)
 		);
 
@@ -208,9 +217,9 @@ public sealed class ToolScopeRefactoringProvider : CodeRefactoringProvider
 
 		SeparatedSyntaxList<ArgumentSyntax> newArgs = targetName switch {
 
-			"Outcome" => SyntaxFactory.SeparatedList(new[] { BuildStringArg(detailName), nullBang }),
-			"Error"   => SyntaxFactory.SeparatedList(new[] { nullBang }),
-			_         => SyntaxFactory.SeparatedList(new[] { BuildStringArg("failed"), nullBang })
+			"Outcome" => SyntaxFactory.SeparatedList(new[] { BuildStringArg(detailName), errorResultArg }),
+			"Error"   => SyntaxFactory.SeparatedList(new[] { errorResultArg }),
+			_         => SyntaxFactory.SeparatedList(new[] { BuildStringArg("failed"), errorResultArg })
 		};
 
 		var newMa = ((MemberAccessExpressionSyntax) invocation.Expression)
