@@ -1,4 +1,4 @@
-﻿
+
 using System.Collections.Immutable;
 using System.Composition;
 using Microsoft.CodeAnalysis;
@@ -15,13 +15,14 @@ namespace RoslynMcp.Analyzers;
 
 /// <summary>
 /// Code fix provider for RMCP003 (missing BeginTool scope), RMCP004 (bare return that bypasses
-/// a scope terminal), and RMCP005 (BeginTool name does not match [McpServerTool(Name = "...")] ).
+/// a scope terminal), RMCP005 (BeginTool name does not match [McpServerTool(Name = "...")] ),
+/// and RMCP006 (placeholder 'TODO' detail in scope.Outcome/Failed).
 /// </summary>
 [ExportCodeFixProvider(LanguageNames.CSharp, Name = nameof(ToolScopeCodeFixProvider)), Shared]
 public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 {
 	public override ImmutableArray<string> FixableDiagnosticIds =>
-		["RMCP003", "RMCP004", "RMCP005"]
+		["RMCP003", "RMCP004", "RMCP005", "RMCP006"]
 		;
 
 	public override FixAllProvider GetFixAllProvider() =>
@@ -51,6 +52,10 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 
 				case "RMCP005":
 				RegisterFix005(context, diagnostic, root);
+				break;
+
+				case "RMCP006":
+				RegisterFix006(context, diagnostic, root);
 				break;
 			}
 		}
@@ -123,10 +128,14 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		if(returnStatement?.Expression is null)
 			return;
 
+		// Walk up to the enclosing method to infer the detail name from [McpServerTool(Name)].
+		var method = returnStatement.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+		var detailName = ToolScopeHelpers.InferDetailName(method);
+
 		context.RegisterCodeFix(
 			CodeAction.Create(
-				"Wrap with scope.Outcome(\"TODO: describe outcome\", ...)",
-				ct => WrapReturnAsync(context.Document, returnStatement, "Outcome", ct),
+				$"Wrap with scope.Outcome(\"{detailName}\", ...)",
+				ct => WrapReturnAsync(context.Document, returnStatement, "Outcome", detailName, ct),
 				equivalenceKey: "RMCP004_Outcome"
 			),
 			diagnostic
@@ -135,7 +144,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		context.RegisterCodeFix(
 			CodeAction.Create(
 				"Wrap with scope.Error(...)",
-				ct => WrapReturnAsync(context.Document, returnStatement, "Error", ct),
+				ct => WrapReturnAsync(context.Document, returnStatement, "Error", detailName, ct),
 				equivalenceKey: "RMCP004_Error"
 			),
 			diagnostic
@@ -143,8 +152,8 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 
 		context.RegisterCodeFix(
 			CodeAction.Create(
-				"Wrap with scope.Failed(\"TODO: describe failure\", ...)",
-				ct => WrapReturnAsync(context.Document, returnStatement, "Failed", ct),
+				$"Wrap with scope.Failed(\"failed\", ...)",
+				ct => WrapReturnAsync(context.Document, returnStatement, "Failed", "failed", ct),
 				equivalenceKey: "RMCP004_Failed"
 			),
 			diagnostic
@@ -155,6 +164,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		Document document,
 		ReturnStatementSyntax returnStatement,
 		string terminal,
+		string detailName,
 		CancellationToken cancellationToken)
 	{
 		var root = await document.GetSyntaxRootAsync(cancellationToken)
@@ -174,7 +184,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 					SyntaxFactory.Argument(
 						SyntaxFactory.LiteralExpression(
 							SyntaxKind.StringLiteralExpression,
-							SyntaxFactory.Literal("TODO: describe outcome")
+							SyntaxFactory.Literal(detailName)
 						)
 					),
 					SyntaxFactory.Argument(original.WithoutTrivia())
@@ -194,7 +204,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 					SyntaxFactory.Argument(
 						SyntaxFactory.LiteralExpression(
 							SyntaxKind.StringLiteralExpression,
-							SyntaxFactory.Literal("TODO: describe failure")
+							SyntaxFactory.Literal(detailName)
 						)
 					),
 					SyntaxFactory.Argument(original.WithoutTrivia())
@@ -273,40 +283,61 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 	}
 
 	// Mirrors ToolScopeAnalyzer.TryGetMcpToolName — syntactic extraction of [McpServerTool(Name = "...")].
-	private static string? GetMcpToolName(MethodDeclarationSyntax method)
+	private static void RegisterFix006(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
 	{
-		foreach(var attrList in method.AttributeLists)
-		foreach(var attr in attrList.Attributes) {
+		var arg = root
+			.FindNode(diagnostic.Location.SourceSpan, getInnermostNodeForTie: true)
+			.AncestorsAndSelf()
+			.OfType<ArgumentSyntax>()
+			.FirstOrDefault()
+			;
 
-			var attrName = attr.Name switch {
-				IdentifierNameSyntax id              => id.Identifier.Text,
-				QualifiedNameSyntax { Right: var r } => r.Identifier.Text,
-				_                                    => null
-			};
+		if(arg?.Expression is not LiteralExpressionSyntax lit)
+			return;
 
-			if(attrName is not ("McpServerTool" or "McpServerToolAttribute"))
-				continue;
+		var method = arg.Ancestors()
+			.OfType<MethodDeclarationSyntax>()
+			.FirstOrDefault()
+			;
 
-			if(attr.ArgumentList is null)
-				return null;
+		var inferredName = ToolScopeHelpers.InferDetailName(method);
 
-			foreach(var arg in attr.ArgumentList.Arguments) {
-
-				if(arg.NameEquals?.Name.Identifier.Text != "Name")
-					continue;
-
-				return arg.Expression is LiteralExpressionSyntax lit
-					&& lit.IsKind(SyntaxKind.StringLiteralExpression)
-					? lit.Token.ValueText
-					: null
-					;
-			}
-
-			return null;
-		}
-
-		return null;
+		context.RegisterCodeFix(
+			CodeAction.Create(
+				$"Replace placeholder with \"{inferredName}\"",
+				ct => ReplaceStringArgAsync(context.Document, lit, inferredName, ct),
+				equivalenceKey: "RMCP006"
+			),
+			diagnostic
+		);
 	}
+
+	private static async Task<Document> ReplaceStringArgAsync(
+		Document document,
+		LiteralExpressionSyntax literal,
+		string newValue,
+		CancellationToken cancellationToken)
+	{
+		var root = await document.GetSyntaxRootAsync(cancellationToken)
+			.ConfigureAwait(false)
+			;
+
+		if(root is null)
+			return document;
+
+		var newLiteral = SyntaxFactory.LiteralExpression(
+			SyntaxKind.StringLiteralExpression,
+			SyntaxFactory.Literal(newValue)
+		).WithTriviaFrom(literal);
+
+		var newRoot = root.ReplaceNode(literal, newLiteral);
+
+		return document.WithSyntaxRoot(newRoot);
+	}
+
+
+	private static string? GetMcpToolName(MethodDeclarationSyntax method)
+		=> ToolScopeHelpers.GetMcpToolName(method);
 
 	private static MemberAccessExpressionSyntax ScopeMemberAccess(string memberName) =>
 		SyntaxFactory.MemberAccessExpression(
