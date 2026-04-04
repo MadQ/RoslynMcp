@@ -102,6 +102,19 @@ Count the distinct matches. That is the authoritative total. Cross-reference:
 
 Use only this computed count when fixing doc files. Do NOT trust any hardcoded number, including this prompt.
 
+## Step 0b: Verify the .md file list
+
+This extension contains a hardcoded list of .md files. It may be stale. Before launching agents:
+
+1. Run: roslyn_list_files(pattern: "**/*.md", projectPath: "src/RoslynMcp/RoslynMcp.csproj")
+   Also run it on the repo root (use projectPath: ".") to catch root-level and docs/ .md files.
+2. Compare the result against the list in this prompt.
+3. Report to the user:
+   - Any .md files found on disk that are NOT in the list below (newly added — sweep these too)
+   - Any .md files in the list below that do NOT exist on disk (deleted — skip them)
+4. Tell the user: "The doc-sweep extension file list may need updating — see above for the delta."
+5. Proceed with the union of both lists (prompt list + discovered files) for the sweep itself.
+
 ## What to check (from DOC_REVIEW_CHECKLIST.md)
 
 - Tool count accurate everywhere (use the count you computed in Step 0)
