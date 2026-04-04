@@ -12,11 +12,12 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected sealed class ToolScope : IDisposable
 	{
-		readonly string     name;
-		readonly string?    subject;
-		readonly FileLogger log;
-		readonly Stopwatch  sw = Stopwatch.StartNew();
-		readonly Action     onDispose;
+		readonly string          name;
+		readonly string?         subject;
+		readonly FileLogger      log;
+		readonly Stopwatch       sw              = Stopwatch.StartNew();
+		readonly Action          onDispose;
+		readonly PaginationCache paginationCache;
 		
 		bool    failed;
 		string? detail;
@@ -26,12 +27,13 @@ internal abstract partial class RoslynMcpTool
 		int     estimatedTokens;
 		string? args;              // Serialized input args; included in log only on failure.
 		
-		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose)
+		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose, PaginationCache paginationCache)
 		{
-			this.name      = name;
-			this.subject   = subject;
-			this.log       = log;
-			this.onDispose = onDispose;
+			this.name            = name;
+			this.subject         = subject;
+			this.log             = log;
+			this.onDispose       = onDispose;
+			this.paginationCache = paginationCache;
 		}
 		
 		/// <summary>Records the workspace mode so the log line can show MSB/ADH.</summary>
@@ -39,6 +41,38 @@ internal abstract partial class RoslynMcpTool
 		
 		/// <summary>Records whether a pagination cache hit or miss occurred.</summary>
 		internal void SetCacheTag(bool hit) => cacheTag = hit ? "HIT" : "MISS";
+		
+		/// <summary>
+		///     Checks the pagination cache for <paramref name="pageToken"/> and, on a hit, writes
+		///     the page slice to <paramref name="result"/> and returns <see langword="true"/>.
+		///     Always clamps <paramref name="take"/> to <paramref name="maxTake"/>.
+		/// </summary>
+		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int maxTake, out object? result)
+		{
+			take = Math.Clamp(take, 1, maxTake);
+			
+			if(pageToken is null || !paginationCache.TryGet<T>(pageToken, out var cached)) {
+				result = null;
+				return false;
+			}
+			
+			SetCacheTag(hit: true);
+			
+			skip = Math.Clamp(skip, 0, cached.Length);
+			
+			var page = cached.Slice(skip, Math.Min(take, cached.Length - skip)).ToArray();
+			
+			result = new CachedPageResult<T>(
+				Items:     page,
+				Total:     cached.Length,
+				Skip:      skip,
+				Take:      take,
+				PageToken: pageToken!,
+				HasMore:   skip + page.Length < cached.Length
+			);
+			
+			return true;
+		}
 		
 		/// <summary>
 		///     Records key input arguments for failure diagnosis.

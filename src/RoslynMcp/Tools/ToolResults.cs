@@ -14,7 +14,7 @@ internal sealed record DiagnosticItem(
 	[property: JsonPropertyName("message")]  string  Message
 );
 
-/// <summary>Cached page response from <see cref="RoslynMcpTool.TryServeCachedPage{T}"/>.</summary>
+/// <summary>Cached page response from <see cref="RoslynMcpTool.ToolScope.TryServeCachedPage{T}"/>.</summary>
 internal sealed record CachedPageResult<T>(
 	[property: JsonPropertyName("items")]      T[]    Items,
 	[property: JsonPropertyName("total")]      int    Total,

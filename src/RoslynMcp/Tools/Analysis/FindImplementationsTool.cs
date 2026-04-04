@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -32,10 +32,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_find_implementations", symbolName);
 		
-		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
-		
-		if(cachedPage is not null)
-			return scope.Outcome("cached page", cachedPage!);
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);

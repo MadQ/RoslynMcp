@@ -33,9 +33,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_find_references", symbolName);
 		
 		
-		var cachedPage = TryServeCachedPage<string>(scope, page_token, ref skip, ref take, 200);
-		if(cachedPage is not null)
-			return scope.Outcome("cached page", cachedPage!);
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);
