@@ -90,9 +90,21 @@ src/TestHarness/:
 src/RoslynMcp.LogViewer/:
 - ViewerHtml.cs, LogViewerProgram.cs, LogTailer.cs, LogEntry.cs
 
+## Step 0: Resolve the authoritative tool count
+
+Before auditing any docs, run this search to get the real tool count from the source:
+
+  roslyn_search_files(pattern: `\[McpServerToolType\]`, projectPath: "src/RoslynMcp/RoslynMcp.csproj")
+
+Count the distinct matches. That is the authoritative total. Cross-reference:
+- `[McpServerTool(... ReadOnly = false)]` → public tools
+- `roslyn_respawn` and `roslyn_debug_attach` → the 2 debug-only tools
+
+Use only this computed count when fixing doc files. Do NOT trust any hardcoded number, including this prompt.
+
 ## What to check (from DOC_REVIEW_CHECKLIST.md)
 
-- Tool count accurate everywhere (currently 35 tools: 33 public + 2 debug-only: roslyn_respawn, roslyn_debug_attach)
+- Tool count accurate everywhere (use the count you computed in Step 0)
 - Architecture tables list all tools and components correctly
 - Component descriptions match actual implementation
 - Version numbers, milestone assignments, feature status
