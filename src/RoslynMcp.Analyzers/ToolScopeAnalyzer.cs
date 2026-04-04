@@ -81,12 +81,14 @@ public sealed class ToolScopeAnalyzer : DiagnosticAnalyzer
 		if(!TryGetMcpToolName(method, out var attributeName))
 			return;
 		
-		// Expression-bodied methods are intentionally skipped — they can't satisfy RMCP003 by design,
-		// and they're legitimately used for simple forwarders. Flagging them would be noise.
-		if(method.Body is not { } body)
-			return;
-		
 		var methodName = method.Identifier.Text;
+		
+		// Expression-bodied methods can never satisfy RMCP003 — flag immediately.
+		if(method.Body is not { } body) {
+			context.ReportDiagnostic(Diagnostic.Create(Rule003, method.Identifier.GetLocation(), methodName));
+			return;
+		}
+		
 		var statements = body.Statements;
 		
 		InvocationExpressionSyntax? beginToolInvocation = null;

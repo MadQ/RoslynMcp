@@ -37,7 +37,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Type** | Model Context Protocol (MCP) server — stdio transport |
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
-| **Version** | 0.7.2-alpha (pre-1.0) |
+| **Version** | 0.7.4-alpha (pre-1.0) |
 | **Tool Count** | 35 MCP tools (33 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
@@ -69,7 +69,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `WriteFileTool` | `roslyn_write_file` — write or create files atomically with automatic pre-write backup; returns a backup token usable with `roslyn_local_history` |
 | `LocalHistoryTool` | `roslyn_local_history` — list, preview, and apply crash-safe file backup snapshots; token-based undo for write operations (actions: `list`, `preview`, `apply`) |
 | `RespawnTool` |`roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
-| `TypeMembersTool` | `roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
+| `FileEncoding` | Static BOM-detection helper; `Detect(ReadOnlySpan<byte>)` identifies encoding from raw bytes; `Peek(string path)` peeks first 4 bytes from disk; used by `WriteFileTool` and `ReplaceInCodeTool` to preserve existing file encoding |
+| `TypeMembersTool` |`roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
 | `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path |
 | `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |

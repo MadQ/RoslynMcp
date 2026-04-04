@@ -9,7 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`ToolScopeAnalyzer` RMCP003** — expression-bodied `[McpServerTool]` methods now fail RMCP003 immediately rather than being skipped; the pattern is one class / one tool method and expression bodies cannot satisfy the `using var scope = BeginTool(...)` requirement
+
 ### Fixed
+- **`TryServeCachedPage`** — added `[NotNullWhen(true)]` to the `out` parameter; eliminates 10× CS8603 nullable-return warnings project-wide
 - **`roslyn_write_file`** — new `.cs` files no longer get a UTF-8 BOM; was incorrectly using `encoderShouldEmitUTF8Identifier: true` as a "VS default" for C# files
 - **`roslyn_replace_in_code`** — no longer uses the Roslyn workspace's cached `SourceText.Encoding` when writing; now peeks at the actual on-disk bytes to detect the BOM, preventing BOM-pollution when the workspace loaded a file before the encoding setting was corrected
 
