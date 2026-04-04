@@ -537,28 +537,28 @@ tests.Add(await RunTestAsync(
 	"roslyn_replace_in_file: dry run literal replacement",
 	"roslyn_replace_in_file",
 	new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = true, projectPath = targetPath },
-	data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false
+	data => data?["match_count"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_replace_in_file: apply literal replacement",
 	"roslyn_replace_in_file",
 	new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = false, projectPath = targetPath },
-	data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true
+	data => data?["match_count"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_replace_in_file: regex replacement with capture groups",
 	"roslyn_replace_in_file",
 	new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = targetPath },
-	data => data?["matchCount"]?.GetValue<int>() == 1 && data?["changedLines"]?.AsArray()[0]?.GetValue<int>() == 2
+	data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_lines"]?.AsArray()[0]?.GetValue<int>() == 2
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_replace_in_code: dry run identifier replacement",
 	"roslyn_replace_in_code",
 	new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true, projectPath = targetPath },
-	data => data?["error"] is null && data?["changeCount"] is not null
+	data => data?["error"] is null && data?["change_count"] is not null
 ));
 
 tests.Add(await RunTestAsync(
@@ -578,28 +578,28 @@ tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: dry run insertAfter",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "inserted line", insertAfter = "line one", dryRun = true, projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == false && data?["insertedAt"]?.GetValue<int>() == 2 && data?["lineCount"]?.GetValue<int>() == 1
+	data => data?["applied"]?.GetValue<bool>() == false && data?["inserted_at"]?.GetValue<int>() == 2 && data?["line_count"]?.GetValue<int>() == 1
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: apply insertAfter",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "after one", insertAfter = "line one", projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 2
+	data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 2
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: apply insertBefore",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "before three", insertBefore = "line three", projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 4
+	data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 4
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: apply atLine",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "at line 1", atLine = 1, projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 1
+	data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 1
 ));
 
 tests.Add(await RunTestAsync(
