@@ -553,12 +553,66 @@ internal abstract partial class RoslynMcpTool
 	//   A future improvement can combine LocationKind filtering with a path separator guard.
 	protected static bool IsUnderRoot(Diagnostic diagnostic, string rootPath)
 	{
-		var filePath = diagnostic.Location.SourceTree?.FilePath;
+		var location = diagnostic.Location;
+		
+		if(location.Kind == LocationKind.None)
+			return true;
+		
+		// ExternalFile / MetadataFile / XmlFile — not project source; exclude them.
+		if(location.Kind != LocationKind.SourceFile)
+			return false;
+		
+		var filePath = location.SourceTree?.FilePath;
 		
 		if(string.IsNullOrEmpty(filePath))
 			return true;
 		
-		return filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase);
+		if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+			return false;
+		
+		// Guard against prefix collisions (e.g. "Foo" matching "FooBar\file.cs").
+		return filePath.Length == rootPath.Length || filePath[rootPath.Length] is '\\' or '/';
+	}
+	
+	// Retries transient file-lock IOExceptions with exponential backoff.
+	// Three attempts: immediate, ~50ms, ~150ms cumulative — absorbs parallel write contention windows.
+	// The final attempt is unguarded so the IOException propagates to the caller's catch block.
+	protected static async Task WriteWithRetryAsync(Func<Task> writeAction, int maxAttempts = 3)
+	{
+		var delay = 50;
+		
+		for(var attempt = 0; attempt < maxAttempts - 1; attempt++) {
+			
+			try {
+				await writeAction();
+				return;
+			}
+			catch(IOException) {
+				await Task.Delay(delay);
+				delay *= 2;
+			}
+		}
+		
+		await writeAction();
+	}
+	
+	protected static void WriteWithRetry(Action writeAction, int maxAttempts = 3)
+	{
+		var delay = 50;
+		
+		for(var attempt = 0; attempt < maxAttempts - 1; attempt++) {
+			
+			try {
+				writeAction();
+				return;
+			}
+			catch(IOException) {
+				Thread.Sleep(delay);
+				delay *= 2;
+			}
+		}
+		
+		writeAction();
 	}
 	
 	/// <summary>
