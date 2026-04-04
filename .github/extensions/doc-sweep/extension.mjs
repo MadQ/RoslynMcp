@@ -148,7 +148,7 @@ MANDATORY TOOL CONSTRAINTS — do NOT violate these:
 2. Each agent reads its assigned .md files AND reads the relevant .cs source
 3. Each agent fixes drift in its .md files only
 4. After all agents complete, run a final diagnostics check: roslyn_get_diagnostics (severity: errors)
-5. Once the doc fleet is done, also run the issues sweep — same rules as /issue-sweep:
+5. Once the doc fleet is done, also run a GitHub issues sweep:
    list all open issues, cross-reference against current codebase, ask before editing any.
    For recently closed issues (last 90 days): report inaccuracies but ask before touching anything.
 6. Commit: \`docs: audit and fix documentation drift\`
