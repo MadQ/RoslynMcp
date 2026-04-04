@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4)](https://dotnet.microsoft.com/)
-[![MCP](https://img.shields.io/badge/MCP-1.1.0-blue)](https://modelcontextprotocol.io/)
+[![MCP](https://img.shields.io/badge/MCP-1.2.0-blue)](https://modelcontextprotocol.io/)
 [![Alpha](https://img.shields.io/badge/status-alpha-orange)]()
 
 **Give your AI agent a C# compiler instead of grep.**
