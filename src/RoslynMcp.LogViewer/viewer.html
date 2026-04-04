@@ -704,6 +704,9 @@
 	const statusEl   = document.getElementById('status');
 	const autoScroll = document.getElementById('autoScroll');
 	const emptyEl    = document.getElementById('empty');
+	
+	const pids		= new Map(); // pid → "#N" sequential label
+	
 	let   filter       = 'ALL';
 	let   count        = 0;
 	let   scrolledUp   = false;
@@ -879,6 +882,9 @@
 
 	// ── Append entry ──────────────────────────────────────────────────────
 	function addEntry(e) {
+		
+		var uniquePidId = pids.getOrInsertComputed(e.pid, () => `#${pids.size + 1}`);
+		
 	  emptyEl.style.display = 'none';
 	  const level  = e.level || 'OTHER';
 	  const isFail = level === 'TOOL' && e.success === false;
@@ -902,7 +908,7 @@
 	  row.appendChild(chev);
 
 	  // #instance
-	  const inst = mk('span', 'col-inst', e.instance != null ? '#' + e.instance : '');
+	  const inst = mk('span', 'col-inst', uniquePidId);
 	  row.appendChild(inst);
 
 	  // time — local HH:mm:ss.fff
