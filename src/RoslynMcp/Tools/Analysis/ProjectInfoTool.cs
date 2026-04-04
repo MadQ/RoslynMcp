@@ -26,6 +26,8 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			"output kind, NuGet package references, and additional files — without opening the .csproj in an editor. " +
 			"Prefer this over reading the .csproj directly: it returns parsed, structured data and handles both " +
 			"MSBuildWorkspace and AdhocWorkspace gracefully. " +
+			"When an MSBuildWorkspace is active, also returns version, root_namespace, target_frameworks (plural, for multi-targeting), allow_unsafe_blocks, and warnings_as_errors — all read directly from the .csproj XML. " +
+			"Condition attributes in the XML are NOT evaluated; values reflect the first matching element verbatim, regardless of build configuration or platform. " +
 			"By default (directOnly=true) package references are read directly from the .csproj XML, returning only " +
 			"packages your project explicitly declares. Set directOnly=false to infer packages from resolved metadata " +
 			"references — useful when no .csproj is available, but may include transitive dependencies. " +
@@ -62,6 +64,17 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 				.Order()
 		];
 		
+		var props = isMSBuild && project.FilePath is not null
+			? ReadMsbuildProps(project.FilePath)
+			: new MsbuildProps(null, null, null, null, null)
+		;
+		
+		// Let the agent know that property values are not condition-evaluated.
+		var caution = props.HasValues
+			? "MSBuild-derived properties (version, root_namespace, etc.) are read verbatim from the .csproj XML — Condition attributes are not evaluated. Values may differ from the effective resolved values for a given build configuration."
+			: AdhocCaution(projectPath)
+		;
+		
 		return scope.Outcome(project.Name, new ProjectInfoResult(
 			project.Name,
 			project.AssemblyName,
@@ -75,7 +88,12 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			isMSBuild,
 			packages,
 			extraFiles,
-			AdhocCaution(projectPath)
+			props.Version,
+			props.RootNamespace,
+			props.TargetFrameworks,
+			props.AllowUnsafeBlocks,
+			props.WarningsAsErrors,
+			caution
 		));
 	}
 	
@@ -132,6 +150,64 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		;
 	}
 	
+	private sealed record MsbuildProps(
+		string?   Version,
+		string?   RootNamespace,
+		string[]? TargetFrameworks,
+		bool?     AllowUnsafeBlocks,
+		bool?     WarningsAsErrors)
+	{
+		// True when at least one MSBuild-derived property was successfully read.
+		public bool HasValues =>
+			Version is not null || RootNamespace is not null ||
+			TargetFrameworks is not null || AllowUnsafeBlocks is not null ||
+			WarningsAsErrors is not null
+		;
+	}
+	
+	private static MsbuildProps ReadMsbuildProps(string csprojPath)
+	{
+		try {
+			
+			var doc = System.Xml.Linq.XDocument.Load(csprojPath);
+			
+			string? Prop(string name) =>
+				doc.Descendants(name).FirstOrDefault()?.Value?.Trim() is { Length: > 0 } v ? v : null
+			;
+			
+			// Version resolution follows MSBuild order: Version → VersionPrefix[-VersionSuffix] → AssemblyVersion.
+			var version = Prop("Version");
+			var prefix  = Prop("VersionPrefix");
+			var suffix  = Prop("VersionSuffix");
+			
+			if(version is null && prefix is not null)
+				version = suffix is not null ? $"{prefix}-{suffix}" : prefix;
+			
+			if(version is null)
+				version = Prop("AssemblyVersion");
+			
+			var tfmsRaw = Prop("TargetFrameworks");
+			var tfms    = tfmsRaw?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+			
+			bool? ParseBool(string name) =>
+				Prop(name) is string v ? v.Equals("true", StringComparison.OrdinalIgnoreCase) : null
+			;
+			
+			return new MsbuildProps(
+				version,
+				Prop("RootNamespace"),
+				tfms is { Length: > 0 } ? tfms : null,
+				ParseBool("AllowUnsafeBlocks"),
+				ParseBool("TreatWarningsAsErrors")
+			);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) {
+			
+			return new MsbuildProps(null, null, null, null, null);
+		}
+	}
+	
+
 	private static PackageRef[] ExtractDirectPackages(string csprojPath)
 	{
 		try {
