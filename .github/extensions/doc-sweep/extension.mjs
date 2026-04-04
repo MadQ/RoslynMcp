@@ -50,6 +50,7 @@ docs/:
 - docs/plans/code-audit.md
 - docs/plans/change-signature-tool.md
 - docs/sessions/HANDOFF.md (if it exists)
+- docs/sessions/roslyn-api-audit.md
 - docs/ScratchPad.md (reference only, not authoritative)
 - docs/ScratchPad2.md (reference only, not authoritative)
 
@@ -58,6 +59,7 @@ docs/:
 - .github/PULL_REQUEST_TEMPLATE.md
 - .github/ISSUE_TEMPLATE/feature_request.md
 - .github/ISSUE_TEMPLATE/bug_report.md
+- .github/agents/roslyn-compliance-reviewer.agent.md
 
 src/:
 - src/RoslynMcp.Analyzers/AnalyzerReleases.Shipped.md
