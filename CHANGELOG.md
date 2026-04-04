@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.7.4-alpha] — 2026-04-05
+## [0.7.4-alpha] — 2026-04-05 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.7.4-alpha)
 
 ### Added
 - **`ToolScopeRefactoringProvider`** — new `CodeRefactoringProvider` (cursor-triggered, no diagnostic) offering quick conversions between `scope.Outcome`, `scope.Error`, `scope.Failed`, and `scope.Record`; all 6 terminal↔terminal pairs plus Record↔terminal; Record conversions include a warning in the action title since they drop or add the `return` keyword

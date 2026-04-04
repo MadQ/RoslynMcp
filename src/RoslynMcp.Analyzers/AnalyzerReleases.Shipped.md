@@ -1,3 +1,17 @@
+## Release 0.4.0
+
+### New Rules
+
+Rule ID | Category | Severity | Notes
+--------|----------|----------|-------
+RMCP006 | RoslynMcp.Tools | Warning | scope.Outcome/Failed first argument contains placeholder text 'TODO'
+
+### Changed Rules
+
+Rule ID | New Severity | Old Severity | Notes
+--------|-------------|-------------|-------
+RMCP005 | Error | Warning | BeginTool name mismatch is factually incorrect, not cosmetic
+
 ## Release 0.3.0
 
 ### New Rules
