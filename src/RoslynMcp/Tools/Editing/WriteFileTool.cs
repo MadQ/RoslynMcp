@@ -69,7 +69,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		
 		if(!isNewFile) {
 			var existingBytes    = await ReadBytesAsync(fullPath);
-			targetEncoding       = DetectEncoding(existingBytes, fullPath);
+			targetEncoding       = FileEncoding.Detect(existingBytes);
 			var existingContent  = targetEncoding.GetString(existingBytes);
 			var hasCrlf          = existingContent.Contains("\r\n");
 			
@@ -77,8 +77,8 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		}
 		
 		else {
-			// New file: BOM for .cs (VS default), no-BOM UTF-8 for everything else.
-			targetEncoding    = IsCSharpFile(fullPath) ? new UTF8Encoding(encoderShouldEmitUTF8Identifier: true) : new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
+			// New file: UTF-8 without BOM — the universal modern default.
+			targetEncoding    = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
 			;
 			normalizedContent = NormalizeContentLineEndings(content, hasCrlf: true); // CRLF for new files on Windows
 		}
@@ -143,29 +143,6 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			return [];
 		}
 	}
-	
-	// Manual BOM sniff — avoids StreamReader encoding ambiguity.
-	static Encoding DetectEncoding(byte[] bytes, string path)
-	{
-		if(bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-			return new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
-		
-		if(bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE)
-			return Encoding.Unicode; // UTF-16 LE
-		
-		if(bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF)
-			return Encoding.BigEndianUnicode;
-		
-		// No BOM — default to UTF-8 no-BOM for most files; BOM for .cs to match VS default.
-		
-		return IsCSharpFile(path)
-			? new UTF8Encoding(encoderShouldEmitUTF8Identifier: true)
-			: new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-		;
-	}
-	
-	static bool IsCSharpFile(string path)
-		=> path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 	
 	static string NormalizeContentLineEndings(string content, bool hasCrlf)
 	{

@@ -145,7 +145,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			}
 			
 			try {
-				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8));
+				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedRoot.ToFullString(), FileEncoding.Peek(fullPath)));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
@@ -223,7 +223,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			));
 		
 		try {
-			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), sourceText.Encoding ?? Encoding.UTF8));
+			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), FileEncoding.Peek(fullPath)));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
@@ -235,11 +235,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		return scope.Outcome($"replaced {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));
 	}
 	
-	/// <summary>
-	///     Returns the declared identifier name for declaration nodes so textPattern
-	///     matches the name only — not body content that may contain the pattern as a call site.
-	///     Falls back to full node text for non-declaration nodes (e.g. IdentifierName).
-	/// </summary>
+
 	private static string GetDeclaredName(SyntaxNode node) => node switch {
 		
 		MethodDeclarationSyntax     m => m.Identifier.Text,
