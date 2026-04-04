@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.7.4-alpha] — 2026-04-05
+
 ### Added
 - **`ToolScopeRefactoringProvider`** — new `CodeRefactoringProvider` (cursor-triggered, no diagnostic) offering quick conversions between `scope.Outcome`, `scope.Error`, `scope.Failed`, and `scope.Record`; all 6 terminal↔terminal pairs plus Record↔terminal; Record conversions include a warning in the action title since they drop or add the `return` keyword
 - **RMCP006** — new Warning diagnostic: first string argument to `scope.Outcome()` or `scope.Failed()` contains the placeholder text `"TODO"`; code fix replaces the placeholder with the tool name inferred from `[McpServerTool(Name)]` (e.g., `roslyn_info` → `"info"`)
@@ -17,22 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **RMCP005** — upgraded from Warning to Error; a `BeginTool` name that mismatches `[McpServerTool(Name)]` makes log correlation impossible — it is factually incorrect, not cosmetic
 - **RMCP004 code fix** — `scope.Outcome` and `scope.Failed` fixes now infer the `detail`/`reason` label from `[McpServerTool(Name)]` (e.g., `roslyn_info` → `"info"`) instead of always using `"TODO: describe outcome"`; `scope.Failed` always uses `"failed"` as the reason; `scope.Error` is unchanged (no string arg)
+- **`ToolScopeAnalyzer` RMCP003** — expression-bodied `[McpServerTool]` methods now fail RMCP003 immediately rather than being skipped; the pattern is one class / one tool method and expression bodies cannot satisfy the `using var scope = BeginTool(...)` requirement
+- **`ModelContextProtocol`** — updated from 1.1.0 to 1.2.0; breaking changes (SSE disabled by default, `RequestContext` constructor obsoleted) are non-issues for this stdio server
+- **`Microsoft.Extensions.Hosting` / `Logging.Console`** — updated from `10.0.0-preview.3` to `10.0.5` (preview → stable)
 
 ### Fixed
 - **RMCP004 code fix** — wrapping a `null` or `null!` return expression no longer produces uncompilable code (CS0411 type-inference failure on `scope.Failed<T>` / `scope.Outcome<T>` / `scope.Error<T>`); the fix now substitutes `new ErrorResult(<arg>)` where `<arg>` is the first `scope.Record(...)` string argument in the method, or `"TODO"` if none is found
 - **`ToolScopeRefactoringProvider`** — Record→terminal conversions ("Convert to return scope.Failed(...)") now also substitute `new ErrorResult(<Record arg>)` instead of the uncompilable `null!`
-
----
-
-## [0.7.4-alpha] — 2026-04-04
-
-### Changed
-- **`ToolScopeAnalyzer` RMCP003** — expression-bodied `[McpServerTool]` methods now fail RMCP003 immediately rather than being skipped; the pattern is one class / one tool method and expression bodies cannot satisfy the `using var scope = BeginTool(...)` requirement
-
-### Fixed
 - **`TryServeCachedPage`** — added `[NotNullWhen(true)]` to the `out` parameter; eliminates 10× CS8603 nullable-return warnings project-wide
 - **`roslyn_write_file`** — new `.cs` files no longer get a UTF-8 BOM; was incorrectly using `encoderShouldEmitUTF8Identifier: true` as a "VS default" for C# files
 - **`roslyn_replace_in_code`** — no longer uses the Roslyn workspace's cached `SourceText.Encoding` when writing; now peeks at the actual on-disk bytes to detect the BOM, preventing BOM-pollution when the workspace loaded a file before the encoding setting was corrected
+- **Log viewer** — instance column now shows a unique per-PID sequential label (`#1`, `#2`, …) instead of the global call counter, making multi-process log sessions easier to follow
+- **TestHarness** — 8 pre-existing test failures fixed; validators were using camelCase field names (`matchCount`, `changedLines`, `insertedAt`, `lineCount`) but tool responses use snake_case; now passes 41/41
 
 ### Refactored
 - **`FileEncoding`** — new shared static helper (`FileEncoding.Detect(ReadOnlySpan<byte>)` + `FileEncoding.Peek(string)`) centralises BOM detection; replaces duplicated logic in `WriteFileTool` and `ReplaceInCodeTool`
