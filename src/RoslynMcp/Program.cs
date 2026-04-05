@@ -82,6 +82,11 @@ if(ServerArgs.Current.PreloadPaths.Length > 0) {
 
     foreach(var path in ServerArgs.Current.PreloadPaths) {
 
+        if(!Directory.Exists(path) && !File.Exists(path)) {
+            logger.LogInfo("Preload", $"path not found, skipping: {path}");
+            continue;
+        }
+
         try {
 
             resolver.GetCompilation(path);
