@@ -5,45 +5,43 @@ namespace RoslynMcp;
 /// <summary>
 ///     Lightweight file logger with rotation. All writes are thread-safe via a lock.
 ///     Outputs one <see cref="LogEntry"/> as NDJSON per line.
-///     Controlled by the <c>ROSLYNMCP_LOG_PATH</c> environment variable:
-///     - Not set → default path (%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log)
-///     - Set to empty string → logging disabled
-///     - Set to a path → logs to that file
+///     Logging is configured via <see cref="ServerArgs.Current"/>:
+///     - <c>null</c> → default path (%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log)
+///     - empty string → logging disabled
+///     - path → logs to that file
 /// </summary>
 internal sealed class FileLogger : IDisposable
 {
-	const int    MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
-	const int    MaxRotatedFiles  = 3;
-	const string EnvVar           = "ROSLYNMCP_LOG_PATH";
-	
+	const int MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
+	const int MaxRotatedFiles  = 3;
+
 	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Log;
-	
+
 	readonly string? logPath;
 	readonly object  writeLock = new();
 	readonly int     pid       = Environment.ProcessId;
-	
+
 	int  instanceCounter;
 	long sessionTokens;
-	
+
 	public bool IsEnabled => logPath is not null;
-	
+
 	public FileLogger()
 	{
-		var envValue = Environment.GetEnvironmentVariable(EnvVar);
-		
+		var configured = ServerArgs.Current.LogPath;
+
 		// Explicitly set to empty → disabled.
-		if(envValue is not null && envValue.Length == 0) {
+		if(configured is not null && configured.Length == 0) {
 			logPath = null;
 			return;
 		}
-		
-		logPath = envValue is not null
-			? envValue
-			: Path.Combine(
+
+		logPath = configured
+			?? Path.Combine(
 				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
 				"RoslynMcp", "logs", "roslynmcp.log"
 			);
-		
+
 		try {
 			Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 		}

@@ -287,7 +287,8 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		static void AutoDetectAndBootstrap(string path, FileLogger logger)
 		{
-			var mode = MSBuildBootstrap.ResolvedMode;
+			// Start from the user's explicit choice; auto-detect only if not specified.
+			var mode = ServerArgs.Current.WorkspaceMode;
 			
 			if(mode == WorkspaceMode.Auto) {
 				
