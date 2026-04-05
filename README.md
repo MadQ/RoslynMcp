@@ -254,7 +254,7 @@ RoslynMcp works. We use it daily for C# development with AI agents. But it is al
 
 **Multi-agent resource usage.** Each subagent spawns its own MCP server process with its own Roslyn workspace (~100MB+ RAM, ~10s load time). Parallel subagents multiply this cost. We're designing a shared Workspace Service via named pipes — one workspace per solution, shared across all agents. See [#86](https://github.com/MadQ/RoslynMcp/issues/86) and the [design doc](docs/plans/multi-instance-architecture.md).
 
-**Benchmarks in progress.** We're actively benchmarking token usage and correctness across real-world repos — RoslynMcp vs built-in tools, across different model tiers. Results will be published before the first binary release.
+**Benchmarks in progress.** We're actively benchmarking token usage and correctness across real-world repos — RoslynMcp vs built-in tools, across different model tiers. Results will be published before the first binary release. See [initial battle-test results](docs/battle-test-results.md).
 
 If any of this sounds interesting, [open an issue](https://github.com/MadQ/RoslynMcp/issues) or submit a PR.
 
