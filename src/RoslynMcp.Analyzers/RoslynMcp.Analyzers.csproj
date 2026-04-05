@@ -9,7 +9,6 @@
     <IsRoslynComponent>true</IsRoslynComponent>
 
     <!-- Package metadata -->
-    <Version>0.2.0-alpha</Version>
     <Authors>Quinten Martens</Authors>
     <Description>Code analyzers for RoslynMcp style guidelines</Description>
     <PackageProjectUrl>https://github.com/MadQ/RoslynMcp</PackageProjectUrl>
