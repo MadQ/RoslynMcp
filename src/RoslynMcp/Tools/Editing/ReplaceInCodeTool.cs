@@ -144,22 +144,34 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				));
 			}
 			
-			try {
-				var deletedText = deletedRoot.ToFullString();
-				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)), log: logger, filePath: fullPath);
-
-				if(deletedText.Length > 4 && new FileInfo(fullPath).Length <= 4)
-					return scope.Error(new ErrorResult(
-						$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
-						"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-						"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
-					));
+			// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
+			// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
+			// for untracked files (e.g. AdhocWorkspace or files outside the project).
+			if(docIds.Length > 0) {
+				
+				var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(deletedRoot);
+				var newSolution = newDoc.Project.Solution;
+				workspace.ApplyChanges(projectPath, newSolution);
 			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			else {
+				
+				try {
+					var deletedText = deletedRoot.ToFullString();
+					await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)), log: logger, filePath: fullPath);
+					
+					if(deletedText.Length > 4 && new FileInfo(fullPath).Length <= 4)
+						return scope.Error(new ErrorResult(
+							$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
+							"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+							"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
+						));
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+				}
+				
+				workspace.InvalidateFile(projectPath, fullPath);
 			}
-			
-			workspace.InvalidateFile(projectPath, fullPath);
 			
 			return scope.Outcome($"deleted {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));
 		}
@@ -230,23 +242,34 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				changedNodeInfo
 			));
 		
-		try {
-			var newText = newRoot.ToFullString();
-			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)));
-
-			if(newText.Length > 4 && new FileInfo(fullPath).Length <= 4)
-				return scope.Error(new ErrorResult(
-					$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
-					"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-					"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
-				));
+		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
+		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
+		// for untracked files (e.g. AdhocWorkspace or files outside the project).
+		if(docIds.Length > 0) {
+			
+			var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(newRoot);
+			var newSolution = newDoc.Project.Solution;
+			workspace.ApplyChanges(projectPath, newSolution);
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+		else {
+			
+			try {
+				var newText = newRoot.ToFullString();
+				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)));
+				
+				if(newText.Length > 4 && new FileInfo(fullPath).Length <= 4)
+					return scope.Error(new ErrorResult(
+						$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
+						"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+						"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
+					));
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			}
+			
+			workspace.InvalidateFile(projectPath, fullPath);
 		}
-		
-		// Invalidate workspace cache
-		workspace.InvalidateFile(projectPath, fullPath);
 		
 		return scope.Outcome($"replaced {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));
 	}

@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
 
@@ -199,6 +199,32 @@ internal sealed partial class WorkspaceManager : IDisposable
 		}
 	}
 	
+
+	/// <summary>
+	///     Applies an updated solution to the workspace and writes changed documents to disk
+	///     (MSBuildWorkspace only). FSW events are suppressed during the write to prevent
+	///     reload loops. Use this instead of direct file I/O + <see cref="InvalidateFile"/>
+	///     for tools that already hold the updated <see cref="Solution"/> in memory.
+	/// </summary>
+	public void ApplyChanges(string resolvedProjectPath, Solution newSolution)
+	{
+		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var entry)) {
+				
+				entry.Instance.ApplyChangesWithFswSuppressed(newSolution);
+				
+				return;
+			}
+			
+			if(cache.TryGetValue(normalizedPath, out var directEntry))
+				directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution);
+		}
+	}
+
 	public void Dispose()
 	{
 		lock(cacheLock) {

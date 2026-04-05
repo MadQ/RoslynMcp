@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
 
@@ -102,6 +102,18 @@ internal sealed class WorkspaceResolver
 	///     Invalidates the cached compilation for a file after edits.
 	///     Tools that modify files should call this to ensure fresh diagnostics on subsequent queries.
 	/// </summary>
+	/// <summary>
+	///     Applies an updated solution and writes changed documents to disk (MSBuild only).
+	///     Prefer this over direct file I/O + <see cref="InvalidateFile"/> when the caller
+	///     already holds the updated <see cref="Solution"/> in memory.
+	/// </summary>
+	public void ApplyChanges(string projectPath, Solution newSolution)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		manager.ApplyChanges(resolved, newSolution);
+	}
+	
+
 	public void InvalidateFile(string projectPath, string fullPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);

@@ -46,6 +46,10 @@ internal sealed partial class WorkspaceManager
 #endif
 		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
 		private readonly HashSet<string>  pendingDeletes = new(StringComparer.OrdinalIgnoreCase);
+		// Tracks file sizes written by RM's own TryApplyChanges calls so FlushMSBuild
+		// can skip reloading files that are already up to date in the workspace.
+		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase);
+		private const    int                       MaxRmOwnedWriteSizes = 50;
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
 		
@@ -271,8 +275,10 @@ internal sealed partial class WorkspaceManager
 		{
 			watcher?.Dispose();
 			
-			lock(debounceLock)
+			lock(debounceLock) {
 				debounceTimer?.Dispose();
+				rmOwnedWriteSizes.Clear();
+			}
 			
 			@lock.Dispose();
 			workspace.Dispose();
@@ -530,8 +536,26 @@ internal sealed partial class WorkspaceManager
 		///     MSBuildWorkspace.TryApplyChanges writes text back to disk, which would
 		///     re-trigger the FSW. See issue #49.
 		/// </summary>
-		void ApplyChangesWithFswSuppressed(Solution newSolution)
+		internal void ApplyChangesWithFswSuppressed(Solution newSolution)
 		{
+			// Collect changed document paths before TryApplyChanges overwrites them
+			// (MSBuild only — Adhoc.TryApplyChanges is in-memory only, no disk write).
+			// We record expected post-write sizes so FlushMSBuild can skip reloading
+			// files that are already up to date from our own writes.
+			string[] ownedPaths = [];
+			
+			if(isMSBuild) {
+				
+				ownedPaths = newSolution.GetChanges(workspace.CurrentSolution)
+					.GetProjectChanges()
+					.SelectMany(p => p.GetChangedDocuments())
+					.Select(id => newSolution.GetDocument(id)?.FilePath)
+					.Where(p => p is not null)
+					.Cast<string>()
+					.ToArray()
+				;
+			}
+			
 			if(watcher is not null)
 				watcher.EnableRaisingEvents = false;
 			
@@ -541,6 +565,30 @@ internal sealed partial class WorkspaceManager
 			finally {
 				if(watcher is not null)
 					watcher.EnableRaisingEvents = true;
+			}
+			
+			// Record sizes after the write so FlushMSBuild can detect our own FSW events.
+			if(ownedPaths.Length > 0) {
+				
+				lock(debounceLock) {
+					
+					// Safety cap — clear rather than evict individual entries to keep it simple.
+					// These entries are short-lived (consumed by the next FSW flush), so this
+					// branch is only reached if FSW events are being lost or unusually delayed.
+					if(rmOwnedWriteSizes.Count + ownedPaths.Length > MaxRmOwnedWriteSizes)
+						rmOwnedWriteSizes.Clear();
+					
+					foreach(var path in ownedPaths) {
+						
+						try {
+							rmOwnedWriteSizes[path] = new FileInfo(path).Length;
+						}
+						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+							// File gone or locked — skip recording; FlushMSBuild will reload normally.
+							_ = ex;
+						}
+					}
+				}
 			}
 			
 			InvalidateCompilation();
@@ -632,6 +680,25 @@ internal sealed partial class WorkspaceManager
 			
 			foreach(var path in changed) {
 				
+				// Skip reload if this is a write RM made itself — workspace is already up to date
+				// from the TryApplyChanges call that triggered the FSW event.
+				lock(debounceLock) {
+					
+					if(rmOwnedWriteSizes.TryGetValue(path, out var expected)) {
+						
+						rmOwnedWriteSizes.Remove(path);
+						
+						try {
+							if(new FileInfo(path).Length == expected)
+								continue;
+						}
+						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+							// Can't read size — fall through to normal reload.
+							_ = ex;
+						}
+					}
+				}
+				
 				try {
 					
 					var docIds = newSolution.GetDocumentIdsWithFilePath(path);
@@ -646,7 +713,7 @@ internal sealed partial class WorkspaceManager
 					}
 					
 					using var stream = File.OpenRead(path);
-			var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+					var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 					
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);

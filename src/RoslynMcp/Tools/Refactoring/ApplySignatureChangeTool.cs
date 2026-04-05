@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -43,7 +43,11 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		if(operation is null)
 			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run change_signature again.");
 		
-		await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution);
+		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
+		if(!workspace.IsAdhoc(projectPath))
+			workspace.ApplyChanges(projectPath, operation.NewSolution);
+		else
+			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution);
 		
 		var filesChanged = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()

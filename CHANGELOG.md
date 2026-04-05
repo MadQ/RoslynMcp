@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SourceText.From` encoding** — `WorkspaceManager.Instance.cs` and `ReplaceInCodeTool.cs` were passing `Encoding.UTF8` (BOM-emitting) to `SourceText.From(stream, encoding)`, causing Roslyn's in-memory documents to record a BOM-emitting encoding. Changed to `new UTF8Encoding(false)` to align with RM's BOM-free policy.
 
 ### Improved
+- **FSW reload suppression** — workspace no longer reloads a file that RM just wrote via `TryApplyChanges`; `ApplyChangesWithFswSuppressed` records the post-write file size in `rmOwnedWriteSizes` and `FlushMSBuild` skips the reload when the FSW-reported file size matches (closes #140)
+- **Let Roslyn save** — `ReplaceInCodeTool`, `ApplyRenameTool`, and `ApplySignatureChangeTool` now route disk writes through `WorkspaceInstance.ApplyChangesWithFswSuppressed` (via new `WorkspaceManager.ApplyChanges` + `WorkspaceResolver.ApplyChanges`) when using `MSBuildWorkspace`; `AdhocWorkspace` retains direct I/O via `SolutionDiff.ApplyToDiskAsync` since `AdhocWorkspace.TryApplyChanges` is in-memory only (closes #140)
 - **`roslyn_list_files`** — added missing `[Description]` attribute; was the only tool without one, making it effectively invisible to agent tool-selection (closes #99)
 - **`roslyn_search_files`** — first sentence now leads with "Fast and precise code search — use instead of grep, Select-String, or findstr" for stronger agent steering (closes #99)
 - **`roslyn_find_references`** — description now explicitly calls out that text search cannot resolve overloads, aliases, or cross-file semantics (closes #99)
