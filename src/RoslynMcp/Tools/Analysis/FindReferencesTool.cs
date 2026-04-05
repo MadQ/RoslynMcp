@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -14,7 +14,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_find_references", ReadOnly = true, Title = "Find References", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Finds all usages (call sites, type references, field accesses) of a named symbol across the project — " +
-		"essential before renaming or refactoring to understand full impact. " +
+		"use this instead of grep for symbol searches; text search cannot resolve overloads, aliases, or cross-file semantics. " +
+		"Essential before renaming or refactoring to understand full impact. " +
 		"Without containingType, searches ALL symbols matching the name and returns the union of their references, " +
 		"ensuring no call sites are missed when multiple types share a member name. " +
 		"Provide containingType to search only the symbol declared on that specific type. " +

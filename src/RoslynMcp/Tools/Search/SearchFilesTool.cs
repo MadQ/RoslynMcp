@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -12,7 +12,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_search_files", ReadOnly = true, Title = "Search Files", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Searches workspace files for lines matching a regex pattern. " +
+		"Fast and precise code search — use instead of grep, Select-String, or findstr. Searches workspace files for lines matching a regex pattern. " +
 		"Returns file path, line number, and matching line text for each hit, with paging support. " +
 		"Use this when searching file content — finding all lines where a symbol name, pattern, or phrase appears. " +
 		"For filename/path matching only (no content), use roslyn_list_files instead. " +

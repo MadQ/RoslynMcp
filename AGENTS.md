@@ -467,6 +467,11 @@ Rules for writing good descriptions:
 
 Parameter descriptions follow the same principle — write for the AI to understand valid inputs, not as code comments.
 
+**Both are enforced at compile time:**
+- **RMCP007** — every `[McpServerTool]` method must have a `[Description]` attribute (Error)
+- **RMCP008** — every parameter on a `[McpServerTool]` method must have `[Description]`, except `CancellationToken` (Error)
+- **RMCP009** — `string projectPath` parameters must use `[Description(ProjectPathDescription)]` specifically — inline strings drift; the constant is the single source of truth (Error)
+
 **Always use `ProjectPathDescription`** for the `projectPath` parameter — it's a constant with the canonical, full description. Inline text drifts and diverges. Never duplicate it.
 
 #### Parameter Conventions

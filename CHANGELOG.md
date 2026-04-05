@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Call graph tools** — two new analysis tools for navigating the call graph in both directions: `roslyn_find_callers` returns all methods that call a named symbol (with `isDirect` filter for direct vs. interface/delegate dispatch); `roslyn_get_call_graph` returns all methods directly invoked within a method body by walking the Roslyn IOperation tree (closes #32)
 - **Write-retry telemetry** — `WriteWithRetryAsync` and `WriteWithRetry` now emit structured `INFO` log entries when file-lock retries occur: one entry per caught `IOException` (attempt number, delay applied, hint message, file name) and a recovery entry when a non-final attempt succeeds; if all retries are exhausted, an `ERROR` entry is logged before re-throwing (closes #136)
+- **RMCP007** — new Error diagnostic: every `[McpServerTool]` method must have a `[Description]` attribute; without it the tool is invisible to agent decision-making
+- **RMCP008** — new Error diagnostic: every parameter on a `[McpServerTool]` method must have a `[Description]` attribute; `CancellationToken` parameters are exempt (infrastructure, not surfaced in agent schema)
+- **RMCP009** — new Error diagnostic: `string projectPath` parameter must use `[Description(ProjectPathDescription)]` specifically, not an inline string; inline strings drift across tools
+- **`ToolDescriptionAnalyzer`** — new analyzer class enforcing RMCP007, RMCP008, and RMCP009; no fixer (descriptions require human judgment)
+
+### Improved
+- **`roslyn_list_files`** — added missing `[Description]` attribute; was the only tool without one, making it effectively invisible to agent tool-selection (closes #99)
+- **`roslyn_search_files`** — first sentence now leads with "Fast and precise code search — use instead of grep, Select-String, or findstr" for stronger agent steering (closes #99)
+- **`roslyn_find_references`** — description now explicitly calls out that text search cannot resolve overloads, aliases, or cross-file semantics (closes #99)
 
 ---
 

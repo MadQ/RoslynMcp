@@ -145,7 +145,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			}
 			
 			try {
-				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedRoot.ToFullString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)), log: logger, filePath: fullPath);
+				var deletedText = deletedRoot.ToFullString();
+				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)), log: logger, filePath: fullPath);
+
+				if(deletedText.Length > 4 && new FileInfo(fullPath).Length <= 4)
+					return scope.Error(new ErrorResult(
+						$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
+						"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+						"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
+					));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
@@ -223,7 +231,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			));
 		
 		try {
-			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newRoot.ToFullString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)));
+			var newText = newRoot.ToFullString();
+			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)));
+
+			if(newText.Length > 4 && new FileInfo(fullPath).Length <= 4)
+				return scope.Error(new ErrorResult(
+					$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
+					"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+					"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
+				));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
