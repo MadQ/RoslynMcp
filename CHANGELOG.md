@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.7.5-alpha] — 2026-04-05
+
 ### Fixed
 - **RMCP003 code fix** — `InsertBeginToolAsync` now detects the end-of-line style from the method body's opening brace and applies it as trailing trivia on the inserted `using var scope = BeginTool(...);` statement; previously the next statement ran on the same line immediately after the semicolon
 
