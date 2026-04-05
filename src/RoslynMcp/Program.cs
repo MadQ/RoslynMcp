@@ -10,25 +10,25 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
 
-var workspaceMode    = WorkspaceModeParser.Resolve(args);
-var projectsToPreload = WorkspaceModeParser.StripWorkspaceArg(args);
+ServerArgs.Initialize(args);
 
 // Log unhandled exceptions before the host/DI is available.
 // This is the last line of defence — catches crashes that occur before tool handlers run.
 AppDomain.CurrentDomain.UnhandledException += (_, e) => {
-	
-	var path = Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH")
-		?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RoslynMcp", "logs", "roslynmcp.log");
-	
-	if(!string.IsNullOrEmpty(path)) {
-		
-		try {
-			
-			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-			File.AppendAllText(path, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fffZ}] [FATAL ] Unhandled exception: {e.ExceptionObject}\n");
-		}
-		catch { /* nowhere left to report */ }
-	}
+
+    // ServerArgs.Initialize is called first, so Current is always available here.
+    var path = ServerArgs.Current.LogPath
+        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RoslynMcp", "logs", "roslynmcp.log");
+
+    if(!string.IsNullOrEmpty(path)) {
+
+        try {
+
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.AppendAllText(path, $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fffZ}] [FATAL ] Unhandled exception: {e.ExceptionObject}\n");
+        }
+        catch { /* nowhere left to report */ }
+    }
 };
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -67,30 +67,30 @@ var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 lifetime.ApplicationStarted.Register(() => {
 	
 	logger.LogStart();
-	logger.LogInfo("Workspace", $"mode={workspaceMode}");
+	logger.LogInfo("Workspace", $"mode={ServerArgs.Current.WorkspaceMode}");
 
 });
 lifetime.ApplicationStopping.Register(() => logger.LogStop());
 
 
 // Pre-warm cache if projects specified.
-if(projectsToPreload.Length > 0) {
-	
-	var resolver = host.Services.GetRequiredService<WorkspaceResolver>();
-	
-	Console.Error.WriteLine($"Pre-loading {projectsToPreload.Length} project(s)...");
-	
-	foreach(var path in projectsToPreload) {
-		
-		try {
-			
-			resolver.GetCompilation(path);
-			Console.Error.WriteLine($"✓ Loaded: {path}");
-		}
-		catch(Exception ex) {
-			Console.Error.WriteLine($"✗ Failed to load {path}: {ex.Message}");
-		}
-	}
+if(ServerArgs.Current.PreloadPaths.Length > 0) {
+
+    var resolver = host.Services.GetRequiredService<WorkspaceResolver>();
+
+    Console.Error.WriteLine($"Pre-loading {ServerArgs.Current.PreloadPaths.Length} project(s)...");
+
+    foreach(var path in ServerArgs.Current.PreloadPaths) {
+
+        try {
+
+            resolver.GetCompilation(path);
+            Console.Error.WriteLine($"✓ Loaded: {path}");
+        }
+        catch(Exception ex) {
+            Console.Error.WriteLine($"✗ Failed to load {path}: {ex.Message}");
+        }
+    }
 }
 
 await host.RunAsync();

@@ -13,34 +13,32 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class BackupStore
 {
-	const string EnvVar         = "ROSLYNMCP_BACKUP_PATH";
-	const int    MaxPerFile     = 10;
-	const string MetaFileName   = "meta.json";
-	
+	const int    MaxPerFile   = 10;
+	const string MetaFileName = "meta.json";
+
 	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Backup;
-	
+
 	readonly string? backupRoot;
 	readonly object  syncRoot = new();
-	
+
 	public bool IsEnabled => backupRoot is not null;
-	
+
 	public BackupStore()
 	{
-		var envValue = Environment.GetEnvironmentVariable(EnvVar);
-		
+		var configured = ServerArgs.Current.BackupPath;
+
 		// Explicitly empty → disabled.
-		if(envValue is not null && envValue.Length == 0) {
+		if(configured is not null && configured.Length == 0) {
 			backupRoot = null;
 			return;
 		}
-		
-		backupRoot = envValue is not null
-			? envValue
-			: Path.Combine(
+
+		backupRoot = configured
+			?? Path.Combine(
 				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
 				"RoslynMcp", "backups"
 			);
-		
+
 		try {
 			Directory.CreateDirectory(backupRoot);
 		}

@@ -40,12 +40,8 @@ internal sealed partial class WorkspaceManager : IDisposable
 	
 	public WorkspaceManager(FileLogger logger)
 	{
-		this.logger = logger;
-		
-		maxCachedWorkspaces = int.TryParse(
-			Environment.GetEnvironmentVariable("ROSLYNMCP_MAX_CACHED_WORKSPACES"),
-			out var val
-		) ? val : 5;
+		this.logger         = logger;
+		maxCachedWorkspaces = ServerArgs.Current.MaxCachedWorkspaces;
 	}
 	
 	// ── Cache helper ─────────────────────────────────────────────────────────

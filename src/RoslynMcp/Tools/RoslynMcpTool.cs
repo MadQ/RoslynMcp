@@ -40,15 +40,13 @@ internal abstract partial class RoslynMcpTool
 		return scope;
 	}
 	
-	// Static cache for path inference: maps relative/bare paths to resolved full paths.
+	// Static cache for project path inference: maps relative/bare paths to resolved full paths.
 	// Enabled by default; disable via ROSLYNMCP_DISABLE_PATH_CACHE=true env var.
 	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
 	static readonly object pathCacheLock = new();
-	static readonly bool pathCacheEnabled = !string.Equals(
-		Environment.GetEnvironmentVariable("ROSLYNMCP_DISABLE_PATH_CACHE"),
-		"true",
-		StringComparison.OrdinalIgnoreCase
-	);
+
+	// Computed on every access so the read is guaranteed to happen after ServerArgs.Initialize().
+	static bool pathCacheEnabled => !ServerArgs.Current.DisablePathCache;
 	
 	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
