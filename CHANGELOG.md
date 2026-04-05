@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`Microsoft.CodeAnalysis.CSharp` / `CSharp.Workspaces` / `Analyzers`** — upgraded from 4.11.0 / 4.11.0 / 3.11.0 to 5.3.0 in `RoslynMcp.Analyzers`; also fixes RS2007 (`AnalyzerReleases.Shipped.md` headers no longer carry the `-alpha` pre-release suffix, which 5.3.0 now rejects)
+- **`Microsoft.Build.Locator`** — upgraded from 1.7.8 to 1.11.2; added explicit `Microsoft.Build.Framework` reference with `ExcludeAssets="runtime" PrivateAssets="all"` to satisfy the new MSBL001 diagnostic
+- **`Microsoft.Build.Framework`** — pinned to 18.4.0 (was implicit 17.11.48 via transitive reference); build-time only — MSBuild itself is still discovered at runtime via `Build.Locator`
+
+Closes [#134](https://github.com/MadQ/RoslynMcp/issues/134)
+
 ---
 
 ## [0.7.4-alpha] — 2026-04-05 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/r0.7.4.1-alpha)
