@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RMCP003 code fix** — `InsertBeginToolAsync` now detects the end-of-line style from the method body's opening brace and applies it as trailing trivia on the inserted `using var scope = BeginTool(...);` statement; previously the next statement ran on the same line immediately after the semicolon
 
 ### Changed
-- **`Microsoft.CodeAnalysis.CSharp` / `CSharp.Workspaces` / `Analyzers`** — upgraded from 4.11.0 / 4.11.0 / 3.11.0 to 5.3.0 in `RoslynMcp.Analyzers`; also fixes RS2007 (`AnalyzerReleases.Shipped.md` headers no longer carry the `-alpha` pre-release suffix, which 5.3.0 now rejects)
+- **`RoslynMcp.Analyzers` — CodeAnalysis packages pinned to 4.11.0 / 3.11.0** for VS 2022 host compatibility; analyzer DLLs must target a CodeAnalysis version ≤ the version shipped with the host IDE (VS 2022 = Roslyn 4.x); targeting 5.x causes silent load failure in VS 2022
+- **`AnalyzerReleases.Shipped.md`** — release headers no longer carry the `-alpha` pre-release suffix (e.g. `## Release 0.7.4` instead of `## Release 0.7.4-alpha`); pre-release labels in shipped release headers are invalid per analyzer release file conventions
 - **`Microsoft.Build.Locator`** — upgraded from 1.7.8 to 1.11.2; added explicit `Microsoft.Build.Framework` reference with `ExcludeAssets="runtime" PrivateAssets="all"` to satisfy the new MSBL001 diagnostic
 - **`Microsoft.Build.Framework`** — pinned to 18.4.0 (was implicit 17.11.48 via transitive reference); build-time only — MSBuild itself is still discovered at runtime via `Build.Locator`
 
