@@ -62,46 +62,68 @@ Use this checklist when preparing a new release of RoslynMcp.
 
 **Two-tag convention:**
 - `vX.Y.Z-alpha` — version marker tag; created early for milestone tracking; may move as commits land
-- `rX.Y.Z-alpha` — release tag; created **only at the very last moment**, immediately before `gh release create`; immutable once GitHub release is attached
+- `rX.Y.Z-alpha` — release tag; created **only at the very last moment**, immediately before `gh release create`; immutable once GitHub release is **published** (draft releases are still mutable — see §4)
 
-> **Why two tags?** GitHub makes a tag immutable the moment it is attached to a release. The `v` tag is for development reference; the `r` tag is the one that gets locked.
+> **Why two tags?** GitHub makes a tag immutable the moment it is attached to a *published* release. The `v` tag is for development reference; the `r` tag is the one that gets locked. A *draft* release does not lock the tag, so always create drafts first (§4).
+>
+> **Tag name blacklisting:** Once a tag name has been used by *any* release (even a deleted one), GitHub permanently blacklists it — it cannot be recreated. If you must re-release, use a new tag name (e.g., `rX.Y.Z.1-alpha`).
 
 - [ ] Confirm HEAD is the final commit before tagging
 
 ```bash
 git tag -a rX.Y.Z-alpha -m "Release vX.Y.Z-alpha"
 git push && git push origin rX.Y.Z-alpha
-# then immediately proceed to Create GitHub Release — no commits in between
+# then immediately proceed to Create GitHub Release (as draft) — no commits in between
 ```
 
 ### 3. Build Release Artifacts
 
-> **Important:** Do NOT use `--self-contained`. Roslyn resolves external assemblies from the SDK installation at runtime; self-contained binaries break this.
+> **Important:** Do NOT use `--self-contained` for the MCP server. Roslyn resolves external assemblies from the SDK installation at runtime; self-contained binaries break this. The log viewer has no such constraint but framework-dependent is fine since users already have .NET installed.
 
-```bash
-# Build framework-dependent for both targets
+```powershell
+# MCP server — framework-dependent for both targets
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0  -o ./publish/net8.0
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 
-# Verify zip contents BEFORE creating the release — check for unexpected executables
+# Log viewer — framework-dependent, net10.0 only (no Roslyn deps, ASP.NET Core web app)
+dotnet publish src/RoslynMcp.LogViewer/RoslynMcp.LogViewer.csproj -c Release -f net10.0 -o ./publish/logviewer
+
+# Verify MCP server zip contents BEFORE creating the release — check for unexpected executables
 # RoslynMcpA.exe is the analyzer host binary and must NOT be included
 Get-ChildItem ./publish/net8.0/*.exe, ./publish/net10.0/*.exe | Select-Object Name
 # Expected: only RoslynMcp.exe. If RoslynMcpA.exe appears, exclude it explicitly.
 
-# Zip each target (excluding analyzer host binary)
+# Zip MCP server targets (excluding analyzer host binary)
 $exc = @("RoslynMcpA.exe")
-Compress-Archive -Path (Get-ChildItem ./publish/net8.0 | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
+Compress-Archive -Path (Get-ChildItem ./publish/net8.0  | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
 Compress-Archive -Path (Get-ChildItem ./publish/net10.0 | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip
+
+# Zip log viewer
+Compress-Archive -Path ./publish/logviewer/* -DestinationPath ./artifacts/RoslynMcp-LogViewer-vX.Y.Z-alpha-net10.0.zip
 ```
 
 ### 4. Create GitHub Release
-- [ ] Go to https://github.com/MadQ/RoslynMcp/releases/new
-- [ ] Select tag `rX.Y.Z-alpha` (the `r` release tag, not the `v` version tag)
-- [ ] Title: `RoslynMcp vX.Y.Z-alpha`
-- [ ] Description: Copy relevant section from CHANGELOG.md
-- [ ] Attach both zip artifacts (`net8.0` and `net10.0`)
-- [ ] Mark as pre-release if alpha/beta
-- [ ] Publish release
+
+> **Always create as a draft first.** Draft releases are fully mutable — you can upload, remove, or replace assets freely, and the tag is not locked until you publish. Only publish when everything is verified.
+
+```powershell
+# Step 1: create as DRAFT — tag is not locked yet
+gh release create rX.Y.Z-alpha --draft --prerelease `
+  --title "RoslynMcp vX.Y.Z-alpha" `
+  --notes-file "$env:TEMP\release-notes.md" `
+  ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip `
+  ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip `
+  ./artifacts/RoslynMcp-LogViewer-vX.Y.Z-alpha-net10.0.zip
+
+# Step 2: verify assets on the release page, test the zips
+
+# Step 3: publish when satisfied — tag becomes immutable after this
+gh release edit rX.Y.Z-alpha --draft=false
+```
+
+- [ ] Create draft release with all 3 zip artifacts
+- [ ] Verify zip contents and release page look correct
+- [ ] Publish (un-draft)
 
 ### 5. Publish to NuGet (Future)
 ```bash
