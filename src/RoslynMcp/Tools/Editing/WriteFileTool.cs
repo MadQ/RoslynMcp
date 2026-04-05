@@ -115,10 +115,20 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
 		
+		// Verify the rename produced a non-empty file — filesystem/AV interference can silently empty it.
+		if(writeBytes.Length > 4 && new FileInfo(fullPath).Length <= 4)
+			return scope.Error(new ErrorResult(
+				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
+				(backupToken is not null
+					? $"Ask the user if they want to restore the previous version using roslyn_local_history (action: 'apply', backupToken: '{backupToken}'). " +
+					  "If that also fails, ask the user whether to restore from git instead (git checkout -- <file-path>)."
+					: "No backup was taken (new file). Ask the user whether to restore from git (git checkout -- <file-path>).")
+			));
+
 		// Invalidate Roslyn workspace so subsequent tools see the new source.
 		workspace.InvalidateFile(projectPath, fullPath);
-		
-		return scope.Outcome($"{lineCount} line(s) written", new WriteFileResult(
+
+		return scope.Outcome($"{lineCount} line(s) written",new WriteFileResult(
 			Written:     true,
 			FilePath:    filePath,
 			LineCount:   lineCount,

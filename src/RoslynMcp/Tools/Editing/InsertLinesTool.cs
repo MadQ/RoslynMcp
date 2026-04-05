@@ -106,7 +106,14 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 		}
-		
+
+		if(resultLines.Count > 0 && new FileInfo(fullPath).Length <= 4)
+			return scope.Error(new ErrorResult(
+				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
+				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
+			));
+
 		workspace.InvalidateFile(projectPath, fullPath);
 		
 		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines));

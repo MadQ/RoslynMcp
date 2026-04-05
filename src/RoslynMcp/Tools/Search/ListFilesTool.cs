@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.Extensions.FileSystemGlobbing;
 using ModelContextProtocol.Server;
 
@@ -10,6 +10,13 @@ internal sealed class ListFilesTool : RoslynMcpTool
 	public ListFilesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
 	[McpServerTool(Name = "roslyn_list_files", ReadOnly = true, Title = "List Files", OpenWorld = false, Idempotent = true)]
+	[Description(
+		"Fast file pattern matching using glob patterns. Find files by name patterns. " +
+		"Use instead of glob, Get-ChildItem, dir, or file find commands — searches all workspace files without requiring a terminal. " +
+		"Supports standard glob wildcards: * (any chars within a segment), ** (any chars across segments), ? (single char), {a,b} (either). Default: '**/*'. " +
+		"Returns matching paths relative to the project root, with paging. " +
+		"For searching file content (lines matching a pattern), use roslyn_search_files instead. " +
+		"For filename/path matching with no content search, this is the right tool.")]
 	public object ListFiles(
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Glob pattern (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). Default: '**/*'.")] string? pattern = null,

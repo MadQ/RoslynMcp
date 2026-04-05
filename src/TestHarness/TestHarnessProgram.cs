@@ -376,6 +376,30 @@ tests.Add(await RunTestAsync(
 	new { symbolName = "WorkspaceManager", projectPath = targetPath },
 	data => data?["file"]?.GetValue<string>().Contains("WorkspaceManager.cs") == true));
 
+Console.WriteLine("\nCall Graph Tools (2 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+	"roslyn_find_callers: find callers of GetCompilation",
+	"roslyn_find_callers",
+	new { symbolName = "GetCompilation", containingType = "WorkspaceManager", projectPath = targetPath },
+	data => data?["total_callers"]?.GetValue<int>() > 0
+	     && data?["callers"]?.AsArray().Count > 0
+	     && data?["callers"]?[0]?["caller"] is not null
+	     && data?["callers"]?[0]?["file"] is not null
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_get_call_graph: outgoing calls from GetCompilation",
+	"roslyn_get_call_graph",
+	new { symbolName = "GetCompilation", containingType = "WorkspaceManager", projectPath = targetPath },
+	data => data?["method"]?.GetValue<string>().Contains("GetCompilation") == true
+	     && data?["total_calls"]?.GetValue<int>() > 0
+	     && data?["calls"]?.AsArray().Count > 0
+	     && data?["calls"]?[0]?["callee"] is not null
+));
+
+
 Console.WriteLine("\nCode Generation Tools (1 test)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
 
@@ -525,6 +549,14 @@ tests.Add(await RunTestAsync(
 
 Console.WriteLine("\nFile Editing Tools (10 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+// NOTE: The empty-file-after-write detection added to all four editing tools
+// (roslyn_write_file, roslyn_replace_in_file, roslyn_replace_in_code, roslyn_insert_lines)
+// cannot be exercised from here. The condition it guards against — the OS or antivirus
+// silently truncating a file after an apparently successful write — requires environmental
+// interference that cannot be provoked via the MCP API. The guard condition itself
+// (writeBytes.Length > 4 && new FileInfo(fullPath).Length <= 4) is covered implicitly:
+// every successful write test below confirms the check does not false-positive on real files.
 
 // Create temp files for editing tool tests
 var tempTextFile = Path.Combine(targetPath, ".test_replace_temp.cs");
