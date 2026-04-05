@@ -112,7 +112,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		try {
 			Directory.CreateDirectory(dir);
 			await File.WriteAllBytesAsync(tmpFile, writeBytes);
-			WriteWithRetry(() => File.Move(tmpFile, fullPath, overwrite: true));
+			WriteWithRetry(() => File.Move(tmpFile, fullPath, overwrite: true), log: logger, filePath: fullPath);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			TryDeleteTemp(tmpFile);

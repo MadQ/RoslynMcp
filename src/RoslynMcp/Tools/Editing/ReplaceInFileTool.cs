@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 
@@ -94,7 +94,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
 		try {
-			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newContent));
+			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newContent), log: logger, filePath: fullPath);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
