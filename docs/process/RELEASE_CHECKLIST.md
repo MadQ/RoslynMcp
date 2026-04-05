@@ -83,9 +83,15 @@ git push && git push origin rX.Y.Z-alpha
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0  -o ./publish/net8.0
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 
-# Zip each target
-Compress-Archive -Path ./publish/net8.0/*  -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
-Compress-Archive -Path ./publish/net10.0/* -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip
+# Verify zip contents BEFORE creating the release — check for unexpected executables
+# RoslynMcpA.exe is the analyzer host binary and must NOT be included
+Get-ChildItem ./publish/net8.0/*.exe, ./publish/net10.0/*.exe | Select-Object Name
+# Expected: only RoslynMcp.exe. If RoslynMcpA.exe appears, exclude it explicitly.
+
+# Zip each target (excluding analyzer host binary)
+$exc = @("RoslynMcpA.exe")
+Compress-Archive -Path (Get-ChildItem ./publish/net8.0 | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
+Compress-Archive -Path (Get-ChildItem ./publish/net10.0 | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip
 ```
 
 ### 4. Create GitHub Release
