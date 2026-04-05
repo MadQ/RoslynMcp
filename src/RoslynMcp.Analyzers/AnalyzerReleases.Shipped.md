@@ -8,9 +8,9 @@ RMCP006 | RoslynMcp.Tools | Warning | scope.Outcome/Failed first argument contai
 
 ### Changed Rules
 
-Rule ID | Category | Severity | Notes
---------|----------|----------|-------
-RMCP005 | RoslynMcp.Tools | Error | Previously Warning; BeginTool name mismatch is factually incorrect, not cosmetic
+Rule ID | New Category | New Severity | Old Category | Old Severity | Notes
+--------|--------------|--------------|--------------|--------------|-------
+RMCP005 | RoslynMcp.Tools | Error | RoslynMcp.Tools | Warning | BeginTool name mismatch is factually incorrect, not cosmetic
 
 ## Release 0.3.0
 
