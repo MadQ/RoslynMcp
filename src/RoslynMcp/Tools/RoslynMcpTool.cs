@@ -549,42 +549,74 @@ internal abstract partial class RoslynMcpTool
 	// Retries transient file-lock IOExceptions with exponential backoff.
 	// Three attempts: immediate, ~50ms, ~150ms cumulative — absorbs parallel write contention windows.
 	// The final attempt is unguarded so the IOException propagates to the caller's catch block.
-	protected static async Task WriteWithRetryAsync(Func<Task> writeAction, int maxAttempts = 3)
+	protected static async Task WriteWithRetryAsync(Func<Task> writeAction, int maxAttempts = 3, FileLogger? log = null, string? filePath = null)
 	{
-		var delay = 50;
-		
+		var delay        = 50;
+		var retries      = 0;
+		var totalBackoff = 0;
+		var fileName     = filePath is null ? null : Path.GetFileName(filePath);
+
 		for(var attempt = 0; attempt < maxAttempts - 1; attempt++) {
-			
+
 			try {
 				await writeAction();
+
+				if(retries > 0)
+					log?.LogInfo("write_retry", $"recovered after {retries} retry total_backoff_ms={totalBackoff}" + (fileName is null ? "" : $" file=\"{fileName}\""));
+
 				return;
 			}
-			catch(IOException) {
+			catch(IOException ex) {
+				log?.LogInfo("write_retry", $"attempt={attempt + 1} delay_ms={delay} hint=\"{ex.Message}\"" + (fileName is null ? "" : $" file=\"{fileName}\""));
+				retries++;
+				totalBackoff += delay;
 				await Task.Delay(delay);
 				delay *= 2;
 			}
 		}
-		
-		await writeAction();
+
+		try {
+			await writeAction();
+		}
+		catch(IOException) {
+			log?.LogError("write_retry", $"exhausted {retries + 1} attempts" + (fileName is null ? "" : $" file=\"{fileName}\""));
+			throw;
+		}
 	}
 	
-	protected static void WriteWithRetry(Action writeAction, int maxAttempts = 3)
+	protected static void WriteWithRetry(Action writeAction, int maxAttempts = 3, FileLogger? log = null, string? filePath = null)
 	{
-		var delay = 50;
-		
+		var delay        = 50;
+		var retries      = 0;
+		var totalBackoff = 0;
+		var fileName     = filePath is null ? null : Path.GetFileName(filePath);
+
 		for(var attempt = 0; attempt < maxAttempts - 1; attempt++) {
-			
+
 			try {
 				writeAction();
+
+				if(retries > 0)
+					log?.LogInfo("write_retry", $"recovered after {retries} retry total_backoff_ms={totalBackoff}" + (fileName is null ? "" : $" file=\"{fileName}\""));
+
 				return;
 			}
-			catch(IOException) {
+			catch(IOException ex) {
+				log?.LogInfo("write_retry", $"attempt={attempt + 1} delay_ms={delay} hint=\"{ex.Message}\"" + (fileName is null ? "" : $" file=\"{fileName}\""));
+				retries++;
+				totalBackoff += delay;
 				Thread.Sleep(delay);
 				delay *= 2;
 			}
 		}
-		
-		writeAction();
+
+		try {
+			writeAction();
+		}
+		catch(IOException) {
+			log?.LogError("write_retry", $"exhausted {retries + 1} attempts" + (fileName is null ? "" : $" file=\"{fileName}\""));
+			throw;
+		}
 	}
 	
 	/// <summary>
