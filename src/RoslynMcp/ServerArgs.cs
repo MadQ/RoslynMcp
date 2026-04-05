@@ -1,4 +1,4 @@
-namespace RoslynMcp;
+﻿namespace RoslynMcp;
 
 /// <summary>
 ///     Process-global startup configuration parsed once from CLI args and environment variables.
@@ -89,16 +89,18 @@ internal sealed class ServerArgs
         string? msBuildFlag   = null;
         var     preload       = new List<string>();
 
-        for(var i = 0; i < args.Length; i++) {
+		var length = args.Length;
+		
+		for(var i = 0; i < length; i++) {
 
             var arg = args[i];
 
             if(!arg.StartsWith('-'))
                 continue;
 
-            var value = i + 1 < args.Length && !args[i + 1].StartsWith('-')
+            var value = i + 1 < length && !args[i + 1].StartsWith('-')
                 ? args[++i]
-                : (string?)null;
+                : (string?) null;
 
             switch(arg.ToLowerInvariant()) {
 

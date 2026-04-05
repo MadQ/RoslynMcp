@@ -9,8 +9,10 @@ static class FileEncoding
 	// already present; absent or unrecognised BOM → UTF-8 without BOM.
 	internal static Encoding Detect(ReadOnlySpan<byte> header)
 	{
+		// UTF-8 BOM detected — strip it on rewrite. Visual Studio writes UTF-8 BOM by default;
+		// we don't want to propagate it on every edit.
 		if(header.Length >= 3 && header[0] == 0xEF && header[1] == 0xBB && header[2] == 0xBF)
-			return new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+			return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
 		if(header.Length >= 2 && header[0] == 0xFF && header[1] == 0xFE)
 			return Encoding.Unicode; // UTF-16 LE

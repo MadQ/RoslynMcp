@@ -101,7 +101,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
 		try {
-			WriteWithRetry(() => File.WriteAllLines(fullPath, resultLines), log: logger, filePath: fullPath);
+			WriteWithRetry(() => File.WriteAllLines(fullPath, resultLines, new System.Text.UTF8Encoding(false)), log: logger, filePath: fullPath);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
