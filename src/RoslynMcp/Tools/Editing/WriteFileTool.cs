@@ -63,23 +63,18 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		
 		var isNewFile = !File.Exists(fullPath);
 		
-		// Detect encoding and line ending style from existing file.
-		Encoding targetEncoding;
-		string   normalizedContent;
+		// Detect line ending style from existing file; always write UTF-8 without BOM.
+		var targetEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+		string normalizedContent;
 		
 		if(!isNewFile) {
-			var existingBytes    = await ReadBytesAsync(fullPath);
-			targetEncoding       = FileEncoding.Detect(existingBytes);
-			var existingContent  = targetEncoding.GetString(existingBytes);
+			var existingContent  = await File.ReadAllTextAsync(fullPath);
 			var hasCrlf          = existingContent.Contains("\r\n");
 			
 			normalizedContent = NormalizeContentLineEndings(content, hasCrlf);
 		}
 		
 		else {
-			// New file: UTF-8 without BOM — the universal modern default.
-			targetEncoding    = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)
-			;
 			normalizedContent = NormalizeContentLineEndings(content, hasCrlf: true); // CRLF for new files on Windows
 		}
 		
@@ -97,7 +92,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		
 		// Compute the exact bytes that will land on disk so we can pass them to BackupStore.
 		// This lets Save() do correct dedup (skip if identical) and store PostWriteHash upfront.
-		byte[] writeBytes = [..targetEncoding.GetPreamble(), ..targetEncoding.GetBytes(normalizedContent)];
+		byte[] writeBytes = targetEncoding.GetBytes(normalizedContent);
 		
 		// Take backup before writing (existing files only).
 		string? backupToken = null;
@@ -130,18 +125,6 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			Created:     isNewFile,
 			BackupToken: backupToken
 		));
-	}
-	
-	// ── Helpers ────────────────────────────────────────────────────────────
-	
-	static async Task<byte[]> ReadBytesAsync(string path)
-	{
-		try {
-			return await File.ReadAllBytesAsync(path);
-		}
-		catch {
-			return [];
-		}
 	}
 	
 	static string NormalizeContentLineEndings(string content, bool hasCrlf)
