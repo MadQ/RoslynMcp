@@ -59,31 +59,41 @@ Use this checklist when preparing a new release of RoslynMcp.
 - [ ] Commit version bump: `git commit -m "chore: bump version to v0.X.Y-alpha"`
 
 ### 2. Tag Release
-- [ ] Confirm HEAD is the version-bump commit before tagging
+
+**Two-tag convention:**
+- `vX.Y.Z-alpha` — version marker tag; created early for milestone tracking; may move as commits land
+- `rX.Y.Z-alpha` — release tag; created **only at the very last moment**, immediately before `gh release create`; immutable once GitHub release is attached
+
+> **Why two tags?** GitHub makes a tag immutable the moment it is attached to a release. The `v` tag is for development reference; the `r` tag is the one that gets locked.
+
+- [ ] Confirm HEAD is the final commit before tagging
 
 ```bash
-git tag -a v0.X.Y-alpha -m "Release v0.X.Y-alpha"
-git push origin v0.X.Y-alpha
+git tag -a rX.Y.Z-alpha -m "Release vX.Y.Z-alpha"
+git push && git push origin rX.Y.Z-alpha
+# then immediately proceed to Create GitHub Release — no commits in between
 ```
 
 ### 3. Build Release Artifacts
+
+> **Important:** Do NOT use `--self-contained`. Roslyn resolves external assemblies from the SDK installation at runtime; self-contained binaries break this.
+
 ```bash
-# Build for all targets
-dotnet build src/RoslynMcp/RoslynMcp.csproj -c Release
+# Build framework-dependent for both targets
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0  -o ./publish/net8.0
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 
-# Create NuGet package (if publishing)
-dotnet pack src/RoslynMcp/RoslynMcp.csproj -c Release -o artifacts/
-
-# Verify package contents
-dotnet nuget verify artifacts/RoslynMcp.0.X.Y.nupkg
+# Zip each target
+Compress-Archive -Path ./publish/net8.0/*  -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
+Compress-Archive -Path ./publish/net10.0/* -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip
 ```
 
 ### 4. Create GitHub Release
 - [ ] Go to https://github.com/MadQ/RoslynMcp/releases/new
-- [ ] Select tag `v0.X.Y`
-- [ ] Title: `RoslynMcp v0.X.Y`
+- [ ] Select tag `rX.Y.Z-alpha` (the `r` release tag, not the `v` version tag)
+- [ ] Title: `RoslynMcp vX.Y.Z-alpha`
 - [ ] Description: Copy relevant section from CHANGELOG.md
-- [ ] Attach artifacts (if applicable)
+- [ ] Attach both zip artifacts (`net8.0` and `net10.0`)
 - [ ] Mark as pre-release if alpha/beta
 - [ ] Publish release
 
