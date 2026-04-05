@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Call graph tools** — two new analysis tools for navigating the call graph in both directions: `roslyn_find_callers` returns all methods that call a named symbol (with `isDirect` filter for direct vs. interface/delegate dispatch); `roslyn_get_call_graph` returns all methods directly invoked within a method body by walking the Roslyn IOperation tree (closes #32)
 - **Write-retry telemetry** — `WriteWithRetryAsync` and `WriteWithRetry` now emit structured `INFO` log entries when file-lock retries occur: one entry per caught `IOException` (attempt number, delay applied, hint message, file name) and a recovery entry when a non-final attempt succeeds; if all retries are exhausted, an `ERROR` entry is logged before re-throwing (closes #136)
 
 ---

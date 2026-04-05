@@ -72,6 +72,41 @@ internal sealed record FindOverridesResult(
 	[property: JsonPropertyName("_caution")]       string?  Caution      = null
 );
 
+internal sealed record CallerEntry(
+	[property: JsonPropertyName("caller")] string Caller,
+	[property: JsonPropertyName("file")]   string File,
+	[property: JsonPropertyName("line")]   int    Line
+);
+
+internal sealed record FindCallersResult(
+	[property: JsonPropertyName("symbol_searched")] string        SymbolSearched,
+	[property: JsonPropertyName("total_callers")]   int           TotalCallers,
+	[property: JsonPropertyName("skip")]            int           Skip,
+	[property: JsonPropertyName("take")]            int           Take,
+	[property: JsonPropertyName("callers")]         CallerEntry[] Callers,
+	[property: JsonPropertyName("page_token")]      string        PageToken,
+	[property: JsonPropertyName("has_more")]        bool          HasMore,
+	[property: JsonPropertyName("_caution")]        string?       Caution
+);
+
+internal sealed record CallSiteEntry(
+	[property: JsonPropertyName("callee")] string Callee,
+	[property: JsonPropertyName("file")]   string File,
+	[property: JsonPropertyName("line")]   int    Line
+);
+
+internal sealed record GetCallGraphResult(
+	[property: JsonPropertyName("method")]      string          Method,
+	[property: JsonPropertyName("total_calls")] int             TotalCalls,
+	[property: JsonPropertyName("skip")]        int             Skip,
+	[property: JsonPropertyName("take")]        int             Take,
+	[property: JsonPropertyName("calls")]       CallSiteEntry[] Calls,
+	[property: JsonPropertyName("page_token")]  string          PageToken,
+	[property: JsonPropertyName("has_more")]    bool            HasMore,
+	[property: JsonPropertyName("_caution")]    string?         Caution
+);
+
+
 internal sealed record ListTypesResult(
 	[property: JsonPropertyName("total_types")] int      TotalTypes,
 	[property: JsonPropertyName("skip")]        int      Skip,
