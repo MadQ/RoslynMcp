@@ -1,21 +1,21 @@
 ﻿# Auto detect text files and perform LF normalization
 * text=auto
 
-# C# files — explicit CRLF (Windows-native repo)
-*.cs text eol=crlf diff=csharp
+# C# files
+*.cs text diff=csharp
 
 # Project files
-*.csproj text eol=crlf diff=xml
-*.slnx text eol=crlf diff=xml
-*.sln text eol=crlf diff=xml
-*.props text eol=crlf diff=xml
-*.targets text eol=crlf diff=xml
+*.csproj text diff=xml
+*.slnx text diff=xml
+*.sln text diff=xml
+*.props text diff=xml
+*.targets text diff=xml
 
 # Markdown
-*.md text eol=crlf diff=markdown
+*.md text diff=markdown
 
 # JSON
-*.json text eol=crlf
+*.json text
 
 # Scripts
 *.sh text eol=lf
