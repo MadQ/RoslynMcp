@@ -53,6 +53,20 @@ By contributing, you're helping AI agents work better with C# code. That's worth
 - Git
 - Your preferred code editor (Visual Studio, VS Code, Rider, etc.)
 
+### Dev Environment Setup
+
+After cloning, run this one-liner to activate the pre-commit hook that strips UTF-8 BOMs from staged `.cs` files:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+**Why?** VS 17.14+ re-adds BOMs to `.cs` files via the Roslyn language service on background reload. The hook detects and strips them automatically on each commit, keeping the repository BOM-free.
+
+The `.githooks/pre-commit` script is committed to the repo — `core.hooksPath` tells git to use it instead of `.git/hooks/`.
+
+---
+
 ### Building
 
 ```bash
