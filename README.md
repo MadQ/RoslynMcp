@@ -25,7 +25,13 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 ## Quick Start
 
-**1. Clone and build** (requires .NET 8 or 10 SDK):
+**1. Get RoslynMcp**
+
+**Option A — Download and extract** (simplest, no SDK required):
+
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0` if you prefer). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+
+**Option B — Clone and build** (requires .NET 8 or 10 SDK):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
@@ -33,20 +39,41 @@ cd RoslynMcp
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
+The executable will be at `./publish/net10.0/RoslynMcp.exe`.
+
 **2. Add to your MCP client config.**
 
-For Claude Code, create `.mcp.json` in your project root:
+**Claude Code** — create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "/absolute/path/to/RoslynMcp.exe"
+    }
+  }
+}
+```
+
+> Global alternative: add the same `"mcpServers"` block to `~/.claude.json` (`%USERPROFILE%\.claude.json` on Windows).
+
+**GitHub Copilot (VS Code / CLI / Visual Studio)** — create `.mcp.json` in your project root:
 
 ```json
 {
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp.exe"
     }
   }
 }
 ```
+
+> Global alternative: add the same `"servers"` block to `~/.copilot/mcp-config.json` (`%USERPROFILE%\.copilot\mcp-config.json` on Windows).
+
+See [INSTALLATION.md](INSTALLATION.md) for Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
 
 **3. Start using it.** Every tool accepts a `projectPath` parameter pointing at your `.csproj`, `.sln`, or project directory. Your agent handles this automatically.
 
@@ -59,8 +86,6 @@ For Claude Code, create `.mcp.json` in your project root:
 > [!IMPORTANT]
 > **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
 > Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
-
-See [INSTALLATION.md](INSTALLATION.md) for setup guides for GitHub Copilot, Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
 
 ---
 

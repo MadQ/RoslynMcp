@@ -9,9 +9,9 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 > **⚠️ Not all configurations have been verified in production.**  
 > GitHub Copilot and Claude Desktop are tested and confirmed working. Other clients follow documented MCP patterns but may require adjustments. Contributions and corrections welcome!
 
-> **Configuration reference:** See [README.md](README.md) for detailed examples and troubleshooting.
+> **Also see:** [README.md](README.md) for the tool catalog, agent instructions, and architecture details.
 
-> All 33 tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
+> All `roslyn_*` tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
 
 > **Quick start:** Most clients use one of two patterns:
 > - **Workspace config**: `.mcp.json` or similar file in your project root
@@ -21,7 +21,13 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 ## Installation
 
-### Step 1: Build RoslynMcp
+### Step 1: Get RoslynMcp
+
+**Option A — Download and extract** (simplest, no SDK required):
+
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0`). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+
+**Option B — Clone and build** (requires .NET 8, 10, or 11 SDK):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
@@ -53,7 +59,7 @@ dotnet tool install --global RoslynMcp
 
 ---
 
-## GitHub Copilot (Visual Studio / VS Code)
+## GitHub Copilot (Visual Studio / VS Code / CLI)
 
 Add to `.mcp.json` at your workspace root:
 
@@ -72,7 +78,35 @@ Add to `.mcp.json` at your workspace root:
 - Use absolute path to `RoslynMcp.exe`
 - Do NOT pass project paths as `args` — the agent must specify `projectPath` parameter in each tool invocation
 
+**Global config alternative:** Add the same `"servers"` block to `~/.copilot/mcp-config.json` (`%USERPROFILE%\.copilot\mcp-config.json` on Windows) to make the server available across all projects.
+
 **Restart:** Reload window or restart GitHub Copilot extension after editing `.mcp.json`.
+
+---
+
+## Claude Code
+
+**Project config** — create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "/absolute/path/to/RoslynMcp.exe"
+    }
+  }
+}
+```
+
+**Global config** — add the same block to `~/.claude.json` (`%USERPROFILE%\.claude.json` on Windows) to make the server available across all projects. Note: do **not** put MCP config in `~/.claude/settings.json` — it is silently ignored there.
+
+**Notes:**
+- Use absolute path to `RoslynMcp.exe`
+- Do NOT pass project paths as `args` — the agent must specify `projectPath` parameter in each tool invocation
+- Project config (`.mcp.json`) takes precedence over global (`~/.claude.json`)
+
+**Restart:** Restart the Claude Code session after editing either config file.
 
 ---
 
@@ -219,8 +253,7 @@ Add to `.continue/config.json` in your project root:
         "name": "roslyn",
         "transport": {
           "type": "stdio",
-          "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-          "args": ["${workspaceFolder}"]
+          "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
         }
       }
     ]
@@ -228,9 +261,9 @@ Add to `.continue/config.json` in your project root:
 }
 ```
 
-**Path notes:**
-- Continue supports `${workspaceFolder}` variable
-- Use absolute path to the published `RoslynMcp.exe` executable
+**Notes:**
+- Use absolute path to `RoslynMcp.exe`
+- Do NOT pass project paths as `args` — the agent must specify `projectPath` in each tool invocation
 
 **Restart:** Reload window or restart Continue extension.
 
@@ -247,12 +280,15 @@ Add to `.vscode/mcp.json` in your project root:
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-      "args": ["${workspaceFolder}"]
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
 ```
+
+**Notes:**
+- Use absolute path to `RoslynMcp.exe`
+- Do NOT pass project paths as `args` — the agent must specify `projectPath` in each tool invocation
 
 **Restart:** Reload VS Code window.
 
@@ -267,8 +303,7 @@ Add to `~/.config/zed/settings.json`:
   "context_servers": {
     "roslyn": {
       "settings": {
-        "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
-        "args": ["/absolute/path/to/your/project/src"]
+        "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
       }
     }
   }
@@ -276,8 +311,8 @@ Add to `~/.config/zed/settings.json`:
 ```
 
 **Path notes:**
-- Zed uses absolute paths (no variable expansion)
-- Use absolute path to the published `RoslynMcp.exe` executable
+- Use absolute path to `RoslynMcp.exe`
+- Do NOT pass project paths as `args` — the agent must specify `projectPath` in each tool invocation
 - Config file location:
   - **macOS/Linux**: `~/.config/zed/settings.json`
   - **Windows**: `%APPDATA%\Zed\settings.json`
@@ -291,60 +326,85 @@ Add to `~/.config/zed/settings.json`:
 Run RoslynMcp directly from the command line:
 
 ```bash
-/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe path/to/your/src
+# Minimal — no preloading
+/path/to/RoslynMcp.exe
+
+# Preload a workspace for faster first tool call
+/path/to/RoslynMcp.exe /path/to/your/project
+
+# Force a specific workspace mode
+/path/to/RoslynMcp.exe --workspace adhoc /path/to/your/project
 ```
 
-This starts the MCP server on stdio — useful for testing or custom integrations.
+This starts the MCP server on stdio — useful for testing or custom integrations. See [CLI flags](#cli-flags) for all options.
 
 ---
 
 ## Troubleshooting
 
-### "Command not found: dotnet"
+See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensive solutions.
 
-**Cause:** .NET SDK not installed or not on PATH.
+### Server fails to start
 
-**Fix:** Install .NET SDK from [dotnet.microsoft.com/download](https://dotnet.microsoft.com/download) and ensure it's on your PATH.
+**Error:** `Could not execute because the specified command or file was not found.`
 
-### "MSBuild not found"
+**Fix:** Verify `command` in your config points to the published `RoslynMcp.exe`. Use an absolute path. Ensure you've built or extracted the release first.
 
-**Cause:** MSBuildWorkspace mode requires MSBuild on PATH.
+### MSBuild not found
 
-**Fix:**
-- Install Visual Studio (includes MSBuild)
-- Or install .NET SDK (includes MSBuild)
-- Or set `MSBUILD_EXE_PATH` environment variable
+**Cause:** MSBuildWorkspace requires MSBuild on PATH.
 
-RoslynMcp automatically falls back to AdhocWorkspace (source-only mode) if MSBuild isn't available.
+**Fix:** Install .NET SDK or Visual Studio — both include MSBuild. Or set `MSBUILD_EXE_PATH`. RoslynMcp automatically falls back to AdhocWorkspace (source-only) if MSBuild isn't available.
 
-### "Could not find project file"
+### No type resolution (AdhocWorkspace fallback)
 
-**Cause:** Path to `RoslynMcp.csproj` is incorrect.
+**Symptom:** NuGet types (`List<T>`, `HttpClient`) not resolved.
 
-**Fix:** Use absolute paths in global configs, verify relative paths from workspace root in workspace configs.
+**Cause:** No `.csproj` in the target directory.
 
-### MCP server not appearing in client
+**Fix:** Ensure `projectPath` points to a directory containing a `.csproj`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md).
 
-**Cause:** Configuration file not in the correct location or invalid JSON.
+### MCP client doesn't see tools
 
-**Fix:**
-- Verify config file path matches client documentation above
-- Validate JSON syntax (no trailing commas, proper quotes)
-- Restart client application completely (not just reload window)
+**Checklist:**
+1. Server process started (check client logs)
+2. MCP session initialized — `tools/list` returns the full `roslyn_*` tool set
+3. Config file is valid JSON and in the correct location for your client
+4. Client restarted completely after editing config (not just "reload window" in some clients)
 
 ### Changes not detected
 
-**Cause:** File watcher disabled or not monitoring the correct directory.
-
-**Fix:** RoslynMcp auto-detects file changes. If diagnostics aren't updating, verify the last argument points to your source directory.
+**Fix:** RoslynMcp auto-detects file changes via `FileSystemWatcher`. If diagnostics aren't updating, verify `projectPath` points to your source directory.
 
 ---
 
 ## Advanced Configuration
 
+### CLI flags
+
+```bash
+RoslynMcp.exe [path...] [--workspace sdk|vs|adhoc|auto]
+```
+
+| Argument | Description |
+|----------|-------------|
+| `path...` | One or more paths to preload on startup (optional). Useful for reducing first-call latency. Each tool call still requires a `projectPath` parameter regardless. |
+| `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROSLYNMCP_WORKSPACE` | `auto` | Same as `--workspace` flag — `sdk`, `vs`, `adhoc`, or `auto` |
+| `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` | Log file path. Set to empty string to disable logging. |
+| `ROSLYNMCP_BACKUP_PATH` | `%LOCALAPPDATA%\RoslynMcp\backups` | Backup store root for `roslyn_write_file` / `roslyn_local_history`. Set to empty to disable backups. |
+| `ROSLYNMCP_MAX_CACHED_WORKSPACES` | `5` | LRU workspace cache size. Increase for large multi-project workflows. |
+| `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Force a specific MSBuild installation path. |
+| `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
+
 ### Multi-project workspaces
 
-All 33 tools require a `projectPath` parameter, enabling multi-project workflows without restarting the server.
+All `roslyn_*` tools require a `projectPath` parameter, enabling multi-project workflows without restarting the server.
 
 RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point the command-line argument at the solution directory or primary project directory for pre-loading.
 
@@ -367,39 +427,10 @@ For large codebases (>100K LOC), consider:
 
 ## Next Steps
 
-- Try the [tools reference](README.md#tool-catalog) to see what RoslynMcp can do
-- Read [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for MSBuildWorkspace vs AdhocWorkspace details
-- Check [Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md) for common issues
-- Review [refactoring tools](README.md#refactoring) for rename previewing and applying
-
----
-
-## Quick Troubleshooting Reference
-
-**See [Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md) for comprehensive solutions to common issues.**
-
-**Quick fixes:**
-
-### Server fails to start
-
-**Error:** `Could not execute because the specified command or file was not found.`
-
-**Solution:** Verify the `command` path points to the published `RoslynMcp.exe` executable. Use absolute paths in configuration files.
-
-### No type resolution (AdhocWorkspace fallback)
-
-**Symptom:** NuGet types (`List<T>`, `HttpClient`) not resolved.
-
-**Cause:** No `.csproj` file in target directory.
-
-**Solution:** Ensure RoslynMcp is pointed at a directory containing a `.csproj` file for full MSBuildWorkspace support. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md).
-
-### MCP client doesn't see tools
-
-**Checklist:**
-1. Server process started successfully (check client logs)
-2. ✅ MCP session initialized (`tools/list` should return 33 tools, or 35 in Debug builds)
-3. Target directory is correct (check server stderr for `Target: ...`)
+- **Tell your agent to use RoslynMcp** — agents default to file reads and grep. Add a few lines to your `CLAUDE.md`, `AGENTS.md`, or `.github/copilot-instructions.md`. See [Agent Instructions](README.md#agent-instructions) in README.md for ready-to-paste snippets, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for the full version.
+- Try the [tool catalog](README.md#tool-catalog) to see what RoslynMcp can do
+- Read the [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for MSBuildWorkspace vs AdhocWorkspace details
+- Review the [refactoring tools](README.md#refactoring) for semantic rename and signature change
 
 ---
 
