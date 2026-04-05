@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -77,7 +77,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		else {
 			try {
 				using var stream = File.OpenRead(fullPath);
-				sourceText = SourceText.From(stream, Encoding.UTF8);
+				sourceText = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));

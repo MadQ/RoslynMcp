@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -242,7 +242,7 @@ internal sealed partial class WorkspaceManager
 					try {
 						
 						using var stream = File.OpenRead(fullPath);
-						var newText = SourceText.From(stream, Encoding.UTF8);
+						var newText = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 						var newSolution = workspace.CurrentSolution;
 						
 						foreach(var id in docIds)
@@ -490,7 +490,7 @@ internal sealed partial class WorkspaceManager
 			
 			using var stream = File.OpenRead(path);
 			
-			var text = SourceText.From(stream, Encoding.UTF8);
+			var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 			var name = Path.GetRelativePath(rootPath, path);
 			
 			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
@@ -646,7 +646,7 @@ internal sealed partial class WorkspaceManager
 					}
 					
 					using var stream = File.OpenRead(path);
-			var text = SourceText.From(stream, Encoding.UTF8);
+			var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 					
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);

@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using System.Text;
 
 namespace RoslynMcp;
@@ -43,7 +43,8 @@ internal static class SolutionDiff
 	/// </summary>
 	public static async Task ApplyToDiskAsync(Solution oldSolution, Solution newSolution)
 	{
-		foreach(var projectChange in newSolution.GetChanges(oldSolution).GetProjectChanges())
+		foreach(var projectChange in newSolution.GetChanges(oldSolution).GetProjectChanges()) {
+			
 			foreach(var docId in projectChange.GetChangedDocuments()) {
 				
 				var newDoc = newSolution.GetDocument(docId)!;
@@ -54,15 +55,17 @@ internal static class SolutionDiff
 				var sourceText = await newDoc.GetTextAsync();
 				
 				try {
-					var encoding = sourceText.Encoding ?? Encoding.UTF8;
-					
-					await File.WriteAllTextAsync(newDoc.FilePath, sourceText.ToString(), encoding);
+					// SourceText.Encoding is unreliable — StreamReader.CurrentEncoding returns a
+					// BOM-emitting instance regardless of whether the file had a BOM. RM's policy
+					// is always UTF-8 without BOM, so we never use sourceText.Encoding here.
+					await File.WriteAllTextAsync(newDoc.FilePath, sourceText.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					throw new InvalidOperationException($"Failed to write '{newDoc.FilePath}': {ex.Message}", ex);
 				}
 			}
 	}
+}
 	
 	// ── Minimal line-level unified diff ──────────────────────────────────────
 	

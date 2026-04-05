@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RMCP009** — new Error diagnostic: `string projectPath` parameter must use `[Description(ProjectPathDescription)]` specifically, not an inline string; inline strings drift across tools
 - **`ToolDescriptionAnalyzer`** — new analyzer class enforcing RMCP007, RMCP008, and RMCP009; no fixer (descriptions require human judgment)
 
+### Fixed
+- **BOM written by rename/signature-change tools** — `SolutionDiff.ApplyToDiskAsync` was using `sourceText.Encoding ?? Encoding.UTF8` to write changed files; `Encoding.UTF8` is `new UTF8Encoding(true)` (BOM-emitting), so renames and signature changes always wrote a UTF-8 BOM. Fixed to use `new UTF8Encoding(false)` directly — RM's policy is always UTF-8 without BOM. Root cause: `StreamReader.CurrentEncoding` always returns a BOM-emitting instance in .NET's `detectEncodingFromByteOrderMarks` mode regardless of file content, so `sourceText.Encoding` was never reliable for this purpose.
+- **`SourceText.From` encoding** — `WorkspaceManager.Instance.cs` and `ReplaceInCodeTool.cs` were passing `Encoding.UTF8` (BOM-emitting) to `SourceText.From(stream, encoding)`, causing Roslyn's in-memory documents to record a BOM-emitting encoding. Changed to `new UTF8Encoding(false)` to align with RM's BOM-free policy.
+
 ### Improved
 - **`roslyn_list_files`** — added missing `[Description]` attribute; was the only tool without one, making it effectively invisible to agent tool-selection (closes #99)
 - **`roslyn_search_files`** — first sentence now leads with "Fast and precise code search — use instead of grep, Select-String, or findstr" for stronger agent steering (closes #99)
