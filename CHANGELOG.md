@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **RMCP003 code fix** — `InsertBeginToolAsync` now detects the end-of-line style from the method body's opening brace and applies it as trailing trivia on the inserted `using var scope = BeginTool(...);` statement; previously the next statement ran on the same line immediately after the semicolon
+
 ### Changed
 - **`Microsoft.CodeAnalysis.CSharp` / `CSharp.Workspaces` / `Analyzers`** — upgraded from 4.11.0 / 4.11.0 / 3.11.0 to 5.3.0 in `RoslynMcp.Analyzers`; also fixes RS2007 (`AnalyzerReleases.Shipped.md` headers no longer carry the `-alpha` pre-release suffix, which 5.3.0 now rejects)
 - **`Microsoft.Build.Locator`** — upgraded from 1.7.8 to 1.11.2; added explicit `Microsoft.Build.Framework` reference with `ExcludeAssets="runtime" PrivateAssets="all"` to satisfy the new MSBL001 diagnostic
