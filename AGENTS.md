@@ -613,7 +613,13 @@ I trust you and I have git.
 
 **Shorthand:** `c/p` = commit and push now.
 
-**Branch naming:** `feature/<short-description>` for multi-file or non-trivial changes.
+**Branch naming:** `feat/issue-NNN-short-description` for issue work; `fix/`, `chore/`, `docs/` prefixes for other change types.
+
+**Branch for issue work:** Before starting any GitHub issue, always create a feature branch off `dev`:
+```powershell
+git checkout dev && git checkout -b feat/issue-NNN-short-description
+```
+Never commit implementation work directly to `dev`. Merge back with `git merge --no-ff feat/...` to preserve branch history.
 
 ### GitHub Issues — Body Formatting
 

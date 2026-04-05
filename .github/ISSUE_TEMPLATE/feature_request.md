@@ -6,6 +6,8 @@ labels: enhancement
 assignees: ''
 ---
 
+> **Before starting work on this issue:** `git checkout dev && git checkout -b feat/issue-NNN-short-title`
+
 ## Feature Description
 
 A clear and concise description of the feature you'd like to see.

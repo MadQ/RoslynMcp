@@ -6,6 +6,8 @@ labels: bug
 assignees: ''
 ---
 
+> **Before starting work on this issue:** `git checkout dev && git checkout -b feat/issue-NNN-short-title`
+
 ## Description
 
 A clear and concise description of the bug.
