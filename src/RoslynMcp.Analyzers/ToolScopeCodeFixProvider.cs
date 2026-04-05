@@ -107,8 +107,20 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			)
 			;
 
+		// Detect the end-of-line style from the opening brace so the inserted statement
+		// is followed by a proper line terminator and the next statement stays on its own line.
+		var eolToken = body.OpenBraceToken.TrailingTrivia
+			.FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia))
+			;
+
+		var eol = eolToken != default
+			? SyntaxFactory.TriviaList(eolToken)
+			: SyntaxFactory.TriviaList(SyntaxFactory.ElasticEndOfLine("\r\n"))
+			;
+
 		var statement = SyntaxFactory.ParseStatement($"using var scope = BeginTool(\"{toolName}\");")
 			.WithLeadingTrivia(indent)
+			.WithTrailingTrivia(eol)
 			;
 
 		var newBody = body.WithStatements(body.Statements.Insert(0, statement));
