@@ -123,7 +123,7 @@ Publish a Release build and configure your MCP client to use it:
 
 **PRs that add `.editorconfig` files will not be approved.** These create the same conflicts with the project's intentional style choices.
 
-**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes both error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal) and warning-severity rules (RMCP005: `BeginTool` name mismatch). New analyzer contributions follow the same pattern.
+**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal, RMCP005: `BeginTool` name mismatch) and warning-severity rules (RMCP006: `TODO` placeholder in `scope.Outcome`/`scope.Failed` detail strings). New analyzer contributions follow the same pattern.
 
 ---
 

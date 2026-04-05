@@ -27,6 +27,9 @@ built-in tools only if a roslyn tool fails.
   signatures). Use INSTEAD OF reading a file to understand its layout.
 - `roslyn_get_line_count` — Get line counts for one or more files. Use INSTEAD
   OF Read + counting lines.
+- `roslyn_get_trivia` (**EXPERIMENTAL**) — Inspect whitespace, blank lines,
+  comment placement, and indentation trivia in a C# file. Use when you need to
+  understand the formatting context at a specific location before inserting code.
 
 ### Discovering Code
 

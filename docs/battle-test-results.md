@@ -93,7 +93,7 @@ The built-in tools runs consistently produced more detailed, contextualized answ
 After reading a file once, the built-in tools agent could answer follow-up questions about that file for free (already in context). The roslyn tools agent made fresh tool calls for each question. This advantage fades on cross-project work.
 
 ### 4. The ToString() bug discovery
-The built-in tools agent found a more impactful bug (ToString() dropping stack traces) because it read the full 180-line file and noticed the override while scanning for constructors. The roslyn tools agent found a different bug (null-deref in constructor) by tracing the call chain precisely — but didn't see ToString() because `get_member_body` only returned what was asked for.
+The built-in tools agent found a more impactful bug (ToString() dropping stack traces) because it read the full 180-line file and noticed the override while scanning for constructors. The roslyn tools agent found a different bug (null-deref in constructor) by tracing the call chain precisely — but didn't see ToString() because `roslyn_get_member_body` only returned what was asked for.
 
 ---
 

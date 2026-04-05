@@ -1,4 +1,4 @@
-﻿# Installation Guide
+# Installation Guide
 
 # RoslynMcp Installation Guide
 
@@ -374,7 +374,7 @@ For large codebases (>100K LOC), consider:
 
 ---
 
-## Troubleshooting
+## Quick Troubleshooting Reference
 
 **See [Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md) for comprehensive solutions to common issues.**
 

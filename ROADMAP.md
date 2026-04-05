@@ -8,7 +8,7 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ## Shipped Releases
 
-All milestones through v0.7.3 are complete; additional work has shipped in dev post-0.7.3. Highlights per release:
+All milestones through v0.7.4 are complete. Highlights per release:
 
 | Release | Key additions |
 |---------|---------------|

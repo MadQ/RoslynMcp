@@ -24,9 +24,9 @@ Shipped `ToolScopeAnalyzer` — a new Roslyn analyzer (`RoslynMcp.Analyzers`) wi
 
 Three new analyzer diagnostics in `RoslynMcp.Analyzers`:
 
-- **RMCP003** — Tool method must call `BeginTool()`/`BeginToolAsync()` (enforces scope entry)
-- **RMCP004** — `BeginTool` result must be awaited (prevents silent fire-and-forget on async paths)
-- **RMCP005** — Tool result must be returned through the `ToolScope` (prevents bypassing structured response flow)
+- **RMCP003** — First statement must be `using var scope = BeginTool("name", ...)` (enforces scope entry)
+- **RMCP004** — Every value-bearing return must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
+- **RMCP005** — The name arg to `BeginTool` must match `[McpServerTool(Name = "...")]`
 
 All violations in the main project resolved; every tool file updated to comply. `AnalyzerReleases.Shipped.md` updated with Release 0.3.0.
 
@@ -48,9 +48,9 @@ All violations in the main project resolved; every tool file updated to comply. 
 
 | # | Milestone | Title |
 |---|-----------|-------|
-| #130 | v0.9.0 | Refactor: move `TryServeCachedPage` from `RoslynMcpTool` to `ToolScope` |
-| #129 | v0.9.0 | Fix: retry with exponential backoff on file write contention |
-| #128 | v0.9.0 | Feat: code fixers for RMCP003/RMCP004/RMCP005 |
+| #130 | ~~v0.9.0~~ | Refactor: move `TryServeCachedPage` from `RoslynMcpTool` to `ToolScope` — **✅ shipped** |
+| #129 | ~~v0.9.0~~ | Fix: retry with exponential backoff on file write contention — **✅ shipped** |
+| #128 | ~~v0.9.0~~ | Feat: code fixers for RMCP003/RMCP004/RMCP005 — **✅ shipped** (RMCP006 fixer also added) |
 | #118 | v0.9.0 | Feat: LogViewer — NDJSON log viewer with syntax highlighting |
 | #117 | v0.8.0 | Feat: expose version/MSBuild properties in `roslyn_get_project_info` |
 | #114 | v0.8.0 | Improve: tighten `IsUnderRoot` diagnostic filter |
@@ -75,9 +75,9 @@ All violations in the main project resolved; every tool file updated to comply. 
 5. **#99** — Agent tool selection (documentation/hooks work)
 
 ### v0.9.0 (style-aware editing milestone)
-1. **#128** — Code fixers for RMCP003/004/005 (natural follow-on from this session)
-2. **#130** — Move `TryServeCachedPage` into `ToolScope`
-3. **#129** — File write retry with exponential backoff
+1. ~~**#128** — Code fixers for RMCP003/004/005 (natural follow-on from this session)~~ **✅ shipped** (RMCP006 fixer also added)
+2. ~~**#130** — Move `TryServeCachedPage` into `ToolScope`~~ **✅ shipped**
+3. ~~**#129** — File write retry with exponential backoff~~ **✅ shipped**
 4. **#35** / **#34** — `preserveStyle` flag and `roslyn_get_style_profile`
 
 ## Context for Resuming

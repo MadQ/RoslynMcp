@@ -80,7 +80,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-33 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
+33 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 

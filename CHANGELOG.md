@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.7.3-alpha]— 2026-04-04
+## [0.7.3-alpha] — 2026-04-04
 
 ### Added
 - **`RoslynMcp.Analyzers` — ToolScopeAnalyzer (RMCP003/RMCP004/RMCP005)** — three analyzer rules that enforce the `BeginTool`/`ToolScope` pattern on all `[McpServerTool]` methods (#127)
@@ -387,7 +387,11 @@ Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) 
 
 ---
 
-[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.7.0-alpha...HEAD
+[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/r0.7.4.1-alpha...HEAD
+[0.7.4-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/r0.7.4.1-alpha
+[0.7.3-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.7.2-alpha...v0.7.3-alpha
+[0.7.2-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.7.1-alpha...v0.7.2-alpha
+[0.7.1-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.7.0-alpha...v0.7.1-alpha
 [0.7.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.6.0-alpha...v0.7.0-alpha
 [0.6.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.5.0-alpha...v0.6.0-alpha
 [0.5.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.4.0-alpha...v0.5.0-alpha

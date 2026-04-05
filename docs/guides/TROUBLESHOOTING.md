@@ -1,4 +1,4 @@
-﻿# Troubleshooting Guide
+# Troubleshooting Guide
 
 Common issues and solutions when setting up and using RoslynMcp.
 
@@ -356,7 +356,7 @@ If none of the above solutions work:
 
 1. **Check logs:**
    - Default location: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` (Windows) or `~/.local/share/RoslynMcp/logs/roslynmcp.log` (macOS/Linux)
-   - Look for `[ERROR]` or `[FATAL]` entries
+   - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/ERROR/INFO)
 
 2. **Enable detailed logging:**
    - Set `ROSLYNMCP_LOG_PATH` environment variable to a custom path

@@ -1,4 +1,4 @@
-﻿# AGENTS.md — RoslynMcp 🏴‍☠️
+# AGENTS.md — RoslynMcp 🏴‍☠️
 
 > We push boundaries, ship bleeding-edge C#, and we're having a blast doing it.
 > No hand-wringing. No unnecessary abstraction. Just clean, fast, pirate-grade code.
@@ -104,8 +104,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
 | `PaginationCache` | Generic TTL-based token cache for paginated tool results; shared across all tools via DI |
 | `SymbolFormatter` | Static helpers to format Roslyn `ISymbol` instances into human-readable signatures (method, property, field, event, type) |
-| `SymbolVisitors` | Roslyn symbol tree visitors (`SimpleNameFinder`, `AllSymbolsFinder`, `AnySymbolFinder`) used by reference and rename tools |
-| `Exceptions` | Project-specific exception types for workspace path resolution (`ProjectNotFoundException`, `MultipleProjectsFoundException`, `InvalidProjectPathException`, `AmbiguousFileException`) |
+| `SymbolVisitors.cs` | Roslyn symbol tree visitors (`SimpleNameFinder`, `AllSymbolsFinder`, `AnySymbolFinder`) used by reference and rename tools |
+| `Exceptions.cs` | Project-specific exception types for workspace path resolution (`ProjectNotFoundException`, `MultipleProjectsFoundException`, `InvalidProjectPathException`, `AmbiguousFileException`) |
 
 **Data flow:** stdio MCP request → tool → `RoslynMcpTool.TryGetCompilation(projectPath, ...)` → `WorkspaceResolver.GetCompilation()` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
