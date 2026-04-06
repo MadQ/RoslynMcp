@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
@@ -34,7 +34,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		"MSBuild target errors, SDK version issues, and source generator problems. " +
 		"Does not modify source files. " +
 		"For quick C# error checks during editing, use roslyn_get_diagnostics instead. " +
-		"Requires a .csproj to be present.")]
+		"Requires a .csproj to be present. " +
+		"When succeeded is false but errors is empty, check the error_details field — it contains the raw build " +
+		"output tail (last 30 lines) and explains the failure (e.g. locked output file, linker error, restore failure). " +
+		"Do NOT run dotnet build in a terminal to investigate — error_details already has the output you need.")]
 	public async Task<object> BuildProject(
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
