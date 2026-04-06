@@ -80,7 +80,7 @@
 Create `AGENTS.md` at the repository root covering:
 - Project layout (solution structure, where each concern lives)
 - The canonical `projectPath` value for working on RoslynMcp itself (`src/RoslynMcp/RoslynMcp.csproj`)
-- How to run the test harness (`dotnet run --project TestHarness/TestHarness.csproj`)
+- How to run the test harness (`dotnet run --project src/TestHarness/TestHarness.csproj`)
 - Tool-choice guidance specific to this codebase (prefer `roslyn_*` tools, use `roslyn_replace_in_code` for `.cs` edits)
 - Notes on multi-targeting and workspace behavior when using RoslynMcp on itself
 - Known gotchas (list_types needs namespaceFilter, find_references is more reliable with containingType)

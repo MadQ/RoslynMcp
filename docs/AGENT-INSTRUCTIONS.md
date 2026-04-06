@@ -48,6 +48,13 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_find_references` — Find all references to a symbol across the entire
   solution. Use INSTEAD OF Grep for symbol usage search -- it understands
   overloads, namespaces, and cross-project references.
+- `roslyn_find_callers` — Find all methods that call a named symbol. The inverse
+  of `roslyn_find_references`. Semantically impossible with text search alone.
+  Filter by `isDirect` to exclude interface dispatch or delegate calls.
+- `roslyn_get_call_graph` — Find all methods invoked within a named method body.
+  Answers "what does this method depend on?" by walking the Roslyn IOperation
+  tree — finds actual invocations, not text patterns. Pair with
+  `roslyn_find_callers` to trace the full call chain in both directions.
 - `roslyn_find_implementations` — Find implementations of an interface or
   overrides of a virtual/abstract method. Grep cannot do this.
 - `roslyn_get_symbol_definition` — Jump to a symbol's declaration. Returns file,
@@ -130,6 +137,7 @@ are more accurate than grep/Read/Edit.
 - Structure: `roslyn_get_file_outline` > reading the whole file
 - Search: `roslyn_search_files` / `roslyn_semantic_search` > Grep
 - References: `roslyn_find_references` > Grep (semantic, cross-project)
+- Callers: `roslyn_find_callers` (who calls X?) + `roslyn_get_call_graph` (what does X call?)
 - Types: `roslyn_get_type_members` / `roslyn_get_type_hierarchy` > reading files
 - Editing: `roslyn_replace_in_code` (C#) / `roslyn_replace_in_file` (any) > Edit
 - Insert: `roslyn_insert_lines` (by line or anchor) > Edit with context patterns

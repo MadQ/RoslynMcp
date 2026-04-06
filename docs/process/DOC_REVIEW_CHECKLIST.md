@@ -75,7 +75,7 @@ rg "RoslynMcp/RoslynMcp\.csproj" --type md --glob "!HANDOFF*.md"
 # 2. Check for dotnet run in MCP configs (should use published executable)
 rg "dotnet.*run.*--project.*\.mcp\.json" --type md -A 3 -B 3
 
-# 3. Verify tool count is consistent (should be 35 tools, 33 public + 2 debug-only)
+# 3. Verify tool count is consistent (should be 37 tools, 35 public + 2 debug-only)
 rg "23 tools|22 tools|21 tools" --type md
 
 # 4. Check for stale "deferred" or "planned" features that shipped

@@ -7,7 +7,7 @@ We tested RoslynMcp against three repos with the same prompts, with and without 
 **Test repos:**
 - [Spectre.Console](https://github.com/spectreconsole/spectre.console) (26 projects) — beautiful console UI library
 - [Orleans](https://github.com/dotnet/orleans) (63 projects) — distributed actor framework by Microsoft
-- [RoslynMcp](https://github.com/MadQ/RoslynMcp) itself (5 projects) — dogfooding
+- [RoslynMcp](https://github.com/MadQ/RoslynMcp) itself (4 projects) — dogfooding
 
 ---
 

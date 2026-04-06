@@ -1,10 +1,7 @@
 import { joinSession } from "@github/copilot-sdk/extension";
 
-// Trigger phrases that kick off a full doc↔code sweep.
-const TRIGGERS = [/\/doc-sweep\b/i, /\bdoc[\s\-–—]*sweep\b/i, /\bdoc[\s\-–—]*code[\s\-–—]*sync\b/i];
-
 const SWEEP_PROMPT = `
-You have been triggered to perform a full doc↔code sweep of the RoslynMcp repository.
+You have been asked to perform a full doc↔code sweep of the RoslynMcp repository.
 
 ## What this sweep is
 
@@ -162,22 +159,14 @@ Start now. Launch the subagent fleet.
 // Session wiring
 // ---------------------------------------------------------------------------
 
-// Sentinel injected into the sweep prompt so re-entrant hook calls can
-// detect that the sweep is already in progress and bail out immediately.
-const SENTINEL = '<!-- doc-sweep-active -->';
-
 const session = await joinSession({
-    hooks: {
-        onUserPromptSubmitted: async (input) => {
-            // Already running (sentinel present in conversation) — skip.
-            if(input.prompt.includes(SENTINEL))
-                return;
-
-            if(!TRIGGERS.some((re) => re.test(input.prompt)))
-                return;
-
-            session.send({ prompt: `${SENTINEL}\n${SWEEP_PROMPT}` });
+    commands: [
+        {
+            name: "doc-sweep",
+            description: "Run a full doc↔code accuracy sweep — reads every .md and .cs file, fixes drift in docs only.",
+            handler: async () => {
+                session.send({ prompt: SWEEP_PROMPT });
+            },
         },
-    },
-    tools: [],
+    ],
 });

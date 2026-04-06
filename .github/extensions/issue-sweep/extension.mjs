@@ -1,9 +1,7 @@
 import { joinSession } from "@github/copilot-sdk/extension";
 
-const TRIGGERS = [/\/issue-sweep\b/i, /\bissue[\s\-–—]*sweep\b/i];
-
 const ISSUE_SWEEP_PROMPT = `
-You have been triggered to perform an issues sweep of the RoslynMcp GitHub repository (MadQ/RoslynMcp).
+You have been asked to perform an issues sweep of the RoslynMcp GitHub repository (MadQ/RoslynMcp).
 
 ## What this sweep is
 
@@ -64,22 +62,18 @@ MANDATORY TOOL CONSTRAINTS — do NOT violate these:
 Start now with Step 1.
 `.trim();
 
-// Sentinel injected into the sweep prompt so re-entrant hook calls can
-// detect that the sweep is already in progress and bail out immediately.
-const SENTINEL = '<!-- issue-sweep-active -->';
+// ---------------------------------------------------------------------------
+// Session wiring
+// ---------------------------------------------------------------------------
 
 const session = await joinSession({
-    hooks: {
-        onUserPromptSubmitted: async (input) => {
-            // Already running (sentinel present in conversation) — skip.
-            if(input.prompt.includes(SENTINEL))
-                return;
-
-            if(!TRIGGERS.some((re) => re.test(input.prompt)))
-                return;
-
-            session.send({ prompt: `${SENTINEL}\n${ISSUE_SWEEP_PROMPT}` });
+    commands: [
+        {
+            name: "issue-sweep",
+            description: "Cross-reference every open GitHub issue against the current codebase — reports inaccuracies and waits for approval before editing.",
+            handler: async () => {
+                session.send({ prompt: ISSUE_SWEEP_PROMPT });
+            },
         },
-    },
-    tools: [],
+    ],
 });
