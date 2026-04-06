@@ -1,4 +1,4 @@
-﻿# Troubleshooting Guide
+# Troubleshooting Guide
 
 Common issues and solutions when setting up and using RoslynMcp.
 
@@ -104,13 +104,13 @@ Common issues and solutions when setting up and using RoslynMcp.
    - .NET SDK (includes MSBuild) — recommended
    - Visual Studio (includes MSBuild)
 
-2. **Or set environment variable:**
+2. **Or set environment variable** to point to your .NET SDK install location:
    ```bash
    # Windows
-   set MSBUILD_EXE_PATH=C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe
+   set DOTNET_ROOT=C:\Program Files\dotnet
 
    # macOS/Linux
-   export MSBUILD_EXE_PATH=/path/to/msbuild
+   export DOTNET_ROOT=/usr/local/share/dotnet
    ```
 
 3. **Fallback behavior:**
@@ -356,7 +356,7 @@ If none of the above solutions work:
 
 1. **Check logs:**
    - Default location: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` (Windows) or `~/.local/share/RoslynMcp/logs/roslynmcp.log` (macOS/Linux)
-   - Look for `[ERROR]` or `[FATAL]` entries
+   - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/ERROR/INFO)
 
 2. **Enable detailed logging:**
    - Set `ROSLYNMCP_LOG_PATH` environment variable to a custom path
@@ -378,4 +378,4 @@ If none of the above solutions work:
 
 ---
 
-**Last Updated:** 2026-03-28 (v0.7.0-alpha)
+**Last Updated:** 2026-03-28 (v0.7.4-alpha)

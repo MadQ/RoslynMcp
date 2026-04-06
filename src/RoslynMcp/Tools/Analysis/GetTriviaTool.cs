@@ -11,59 +11,62 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 {
     public GetTriviaTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 
-    [McpServerTool(Name = "roslyn_get_trivia", ReadOnly = true)]
+    [McpServerTool(Name = "roslyn_get_trivia", ReadOnly = true, Title = "Get Trivia", OpenWorld = false, Idempotent = true)]
     [Description(
-        "**EXPERIMENTAL:** Returns whitespace, comments, and formatting trivia from C# source files. " +
-        "Useful for understanding indentation context, blank lines, and comment placement. " +
-        "This tool may be removed or significantly changed in future releases. " +
-        "Supports whole-file analysis or filtering by line range, syntax kind, or trivia type. " +
-        "Use listSyntaxKinds=true or listTriviaKinds=true to discover available filter values.")]
+        "⚠️ EXPERIMENTAL — this tool may be removed or significantly changed in future releases without notice. " +
+        "Do not build workflows that depend on its output structure remaining stable. " +
+        "Use this when you need to inspect whitespace, blank lines, comment placement, or indentation trivia " +
+        "in a C# file — for example, to determine the indentation level at a specific line before inserting new code. " +
+        "For most code-understanding tasks, prefer roslyn_read_file (content) or roslyn_get_file_outline (structure). " +
+        "Start a session with listSyntaxKinds=true or listTriviaKinds=true to discover valid filter values before " +
+        "passing syntaxKind or triviaKind — unknown values return a helpful error with suggestions. " +
+        "Returns trivia entries grouped by syntax node, each with kind, span, truncated node text, and leading/trailing " +
+        "trivia arrays. Paged with default take=100, max take=500.")]
     public object GetTrivia(
         [Description(ProjectPathDescription)] string projectPath,
-        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'. Omit when using list parameters.")] string? filePath = null,
-        [Description("Optional: Starting line number (1-based) to scope analysis.")] int? startLine = null,
-        [Description("Optional: Ending line number (1-based) to scope analysis.")] int? endLine = null,
-        [Description("Optional: Filter by syntax node kind (e.g., 'IfStatement', 'MethodDeclaration', 'ForEachStatement'). Use listSyntaxKinds=true to see all options.")] string? syntaxKind = null,
-        [Description("Optional: Filter by trivia kind (e.g., 'WhitespaceTrivia', 'EndOfLineTrivia', 'SingleLineCommentTrivia', 'MultiLineCommentTrivia'). Use listTriviaKinds=true to see all options.")] string? triviaKind = null,
-        [Description("Include leading trivia (whitespace/comments before nodes). Default: true.")] bool includeLeading = true,
-        [Description("Include trailing trivia (whitespace/comments after nodes). Default: true.")] bool includeTrailing = true,
-        [Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
-        [Description("Maximum number of results to return. Default: 100, max: 500.")] int take = 100,
+        [Description("Relative file path, e.g. 'Core/WindowTracker.cs'. Required for trivia analysis; omit only when using listSyntaxKinds or listTriviaKinds.")] string? filePath = null,
+        [Description("Optional 1-based starting line to restrict analysis. Default: start of file.")] int? startLine = null,
+        [Description("Optional 1-based ending line to restrict analysis. Default: end of file.")] int? endLine = null,
+        [Description("Optional syntax node kind filter (e.g., 'IfStatement', 'MethodDeclaration'). Use listSyntaxKinds=true first to see all valid values.")] string? syntaxKind = null,
+        [Description("Optional trivia kind filter (e.g., 'WhitespaceTrivia', 'SingleLineCommentTrivia'). Use listTriviaKinds=true first to see all valid values.")] string? triviaKind = null,
+        [Description("Include leading trivia (whitespace/comments before each node). Default: true.")] bool includeLeading = true,
+        [Description("Include trailing trivia (whitespace/comments after each node). Default: true.")] bool includeTrailing = true,
+        [Description("Number of results to skip. Default: 0.")] int skip = 0,
+        [Description("Maximum results to return. Default: 100, max: 500.")] int take = 100,
         [Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null,
-        [Description("Set to true to list all available C# syntax kinds (IfStatement, ForEachStatement, etc.) instead of analyzing trivia.")] bool listSyntaxKinds = false,
-        [Description("Set to true to list all available trivia kinds (WhitespaceTrivia, EndOfLineTrivia, etc.) instead of analyzing trivia.")] bool listTriviaKinds = false)
+        [Description("Pass true to return all available C# syntax kind names instead of analyzing trivia. No filePath needed.")] bool listSyntaxKinds = false,
+        [Description("Pass true to return all available trivia kind names instead of analyzing trivia. No filePath needed.")] bool listTriviaKinds = false)
     {
         using var scope = BeginTool("roslyn_get_trivia", filePath);
 
-
         if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds: false, listTypeKinds: false, listSearchContexts: false, out var discovery))
-            return discovery;
+            return scope.Outcome("discovery", discovery);
 
-        var cachedPage = TryServeCachedPage<object>(scope, page_token, ref skip, ref take, 500);
-        if(cachedPage is not null)
-            return cachedPage;
+        if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 500, out var cached))
+            return scope.Outcome("cached page", cached);
 
         if(string.IsNullOrEmpty(filePath))
             return scope.Error(new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds"));
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
-            return error;
+            return scope.Error(error!);
 
         if(take <= 0 || take > 500)
             return scope.Error(new ErrorResult("take must be between 1 and 500"));
 
         var normalizedPath = NormalizePath(filePath);
-        var tree = compilation.SyntaxTrees.FirstOrDefault(t =>
+        var tree		   = compilation.SyntaxTrees.FirstOrDefault(t =>
             t.FilePath.EndsWith(normalizedPath, StringComparison.OrdinalIgnoreCase)
         );
 
         if(tree is null)
             return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
 
-        var root = tree.GetRoot();
+        var root	   = tree.GetRoot();
         var sourceText = tree.GetText();
 
         TextSpan span;
+		
         if(startLine.HasValue || endLine.HasValue) {
 
             var lineCount = sourceText.Lines.Count;
@@ -75,9 +78,8 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             span = TextSpan.FromBounds(start, end);
         }
-        else {
+        else
             span = root.FullSpan;
-        }
 
         // ToList() is intentional — nodesInSpan may be reassigned in-place below when filtering by syntaxKind.
         var nodesInSpan = root
@@ -103,7 +105,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         }
 
         var totalNodes = nodesInSpan.Count;
-        var results = new List<object>();
+        var results	   = new List<object>();
 
         foreach(var node in nodesInSpan) {
 
@@ -137,7 +139,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         object[] allResults = [.. results];
         var result = PaginateAndStore(allResults, ref skip, take);
 
-        return new GetTriviaResult(
+        return scope.Outcome("trivia", new GetTriviaResult(
             filePath,
             totalNodes,
             allResults.Length,
@@ -145,14 +147,15 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             result.Items,
             result.PageToken,
             result.HasMore
-        );
+        ));
     }
 
     private static object[] FilterTrivia(SyntaxTriviaList triviaList, string? kindFilter)
     {
         var filtered = kindFilter is not null
             ? triviaList.Where(t => t.Kind().ToString() == kindFilter)
-            : triviaList;
+            : triviaList
+		;
 
         return [..
             filtered.Select(t => new TriviaEntry(

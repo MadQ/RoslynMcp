@@ -31,7 +31,9 @@ Returns whitespace, comments, and formatting trivia from C# source files. Useful
   triviaKind?: string;      // Optional: Filter by trivia kind (e.g., 'WhitespaceTrivia')
   includeLeading?: boolean; // Include leading trivia (default: true)
   includeTrailing?: boolean;// Include trailing trivia (default: true)
+  skip?: number;            // Skip N results for pagination (default: 0)
   take?: number;            // Max results (default: 100, max: 500)
+  page_token?: string;      // Pagination token from a previous response
   listSyntaxKinds?: boolean;// List all available syntax kinds (educational)
   listTriviaKinds?: boolean;// List all available trivia kinds (educational)
 }
@@ -115,26 +117,28 @@ Returns:
 ```json
 {
   "file": "Core/WindowTracker.cs",
-  "totalNodes": 47,
-  "filteredNodes": 12,
+  "total_nodes": 47,
+  "filtered_nodes": 12,
+  "skip": 0,
+  "take": 100,
   "results": [
     {
-      "nodeKind": "IfStatement",
-      "nodeSpan": {
+      "node_kind": "IfStatement",
+      "node_span": {
         "start": 234,
         "end": 456,
-        "startLine": 12,
-        "endLine": 18
+        "start_line": 12,
+        "end_line": 18
       },
-      "nodeText": "if(windowKey is null)",
-      "leadingTrivia": [
+      "node_text": "if(windowKey is null)",
+      "leading_trivia": [
         {
           "kind": "WhitespaceTrivia",
           "text": "\t\t\t",
           "span": { "start": 231, "end": 234 }
         }
       ],
-      "trailingTrivia": [
+      "trailing_trivia": [
         {
           "kind": "WhitespaceTrivia",
           "text": " ",
@@ -142,7 +146,9 @@ Returns:
         }
       ]
     }
-  ]
+  ],
+  "page_token": "abc123",
+  "has_more": false
 }
 ```
 

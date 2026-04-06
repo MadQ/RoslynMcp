@@ -7,7 +7,7 @@ We tested RoslynMcp against three repos with the same prompts, with and without 
 **Test repos:**
 - [Spectre.Console](https://github.com/spectreconsole/spectre.console) (26 projects) — beautiful console UI library
 - [Orleans](https://github.com/dotnet/orleans) (63 projects) — distributed actor framework by Microsoft
-- [RoslynMcp](https://github.com/MadQ/RoslynMcp) itself (5 projects) — dogfooding
+- [RoslynMcp](https://github.com/MadQ/RoslynMcp) itself (4 projects) — dogfooding
 
 ---
 
@@ -79,6 +79,9 @@ Haiku + RoslynMcp = same correctness as Sonnet + RoslynMcp for semantic operatio
 ### 5. Zero strategy pivots
 Across the full Orleans workflow (13 prompts), the roslyn tools run had zero strategy pivots. Every approach was direct. The built-in tools run had to retry (MSBuild multi-project error) and sometimes abandoned approaches.
 
+### 6. Failed guesses are nearly free
+When an agent guesses at anchor text or pattern content and gets a "no match" error back (`roslyn_replace_in_file`, `roslyn_insert_lines`), the cost of that failure is almost nothing — a small error response, no file I/O, no compilation. The recovery path (one `roslyn_read_file` to verify exact content, then retry) costs a few hundred tokens. A non-RoslynMcp agent doing the same task would typically `cat` the whole file upfront anyway, paying that cost regardless of whether the match succeeded. Net result: even "guess wrong + read + retry" through RoslynMcp usually costs fewer tokens than the baseline of reading-first everywhere.
+
 ---
 
 ## Where Built-In Tools Won or Tied
@@ -89,11 +92,13 @@ Test 1 (find implementations of `IAnsiConsole`) — grep won because the interfa
 ### 2. Answer richness on exploration
 The built-in tools runs consistently produced more detailed, contextualized answers for exploration prompts. Reading full files gives the agent ambient context it can reference later. RoslynMcp's tools return precise but minimal data.
 
+This cuts both ways. More ambient context means more opportunities to notice unexpected things (see the ToString() finding below). It also means more opportunities to chase irrelevant code paths, include noise in the answer, or spend tokens on code the prompt never asked about. Whether that extra detail is signal or distraction depends on the task — and is hard to measure without prompts specifically designed to expose it. One to test next time: a prompt where the answer is clearly contained in one method, surrounded by a large file of plausible-but-irrelevant code. If the full-file agent produces a longer but less accurate answer, that's the distraction effect in action.
+
 ### 3. Cached context advantage
 After reading a file once, the built-in tools agent could answer follow-up questions about that file for free (already in context). The roslyn tools agent made fresh tool calls for each question. This advantage fades on cross-project work.
 
 ### 4. The ToString() bug discovery
-The built-in tools agent found a more impactful bug (ToString() dropping stack traces) because it read the full 180-line file and noticed the override while scanning for constructors. The roslyn tools agent found a different bug (null-deref in constructor) by tracing the call chain precisely — but didn't see ToString() because `get_member_body` only returned what was asked for.
+The built-in tools agent found a more impactful bug (ToString() dropping stack traces) because it read the full 180-line file and noticed the override while scanning for constructors. The roslyn tools agent found a different bug (null-deref in constructor) by tracing the call chain precisely — but didn't see ToString() because `roslyn_get_member_body` only returned what was asked for.
 
 ---
 
@@ -137,6 +142,7 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 6. **`roslyn_replace_body`** — replace method body only, keep signature intact
 7. **Diagnostics grouping** — `groupBy: "code"` for summarized error/warning view
 8. **Fix CRLF in multi-line patterns** — investigate MCP JSON string escaping
+9. **"Signal vs distraction" test prompt** — a prompt where the answer is clearly contained in one method, surrounded by a large file of plausible-but-irrelevant code. Hypothesis: full-file agents produce longer but less focused answers; roslyn tools agents answer precisely. Validates (or refutes) the ambient-context-as-distraction theory.
 
 ---
 
@@ -145,6 +151,8 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 **Strategy pivot** — when the agent abandons its current approach and tries something different. Examples: "wait, let me try a different file", "actually, let me search for that instead", "that didn't work, let me approach this differently." Each pivot wastes the tokens already spent on the abandoned approach. Fewer pivots = more efficient, more focused work.
 
 **Cold start** — the one-time cost of loading the Roslyn workspace on the first tool call. Subsequent calls reuse the cached workspace and are near-instant.
+
+**Failed-match recovery** — when an agent guesses at a pattern or anchor, gets a "no match" error, reads the file to verify the exact content, and retries. With RoslynMcp, the failure itself is near-free (a small error response, no I/O), and the recovery (`roslyn_read_file` + retry) is still cheaper than reading-first everywhere. The key insight: optimistic-guess-then-recover is a viable and efficient strategy with RoslynMcp — it isn't with `cat`/`grep` chains where every call reads the full file regardless.
 
 **Narrow focus vs greedy file reading** — a fundamental trade-off we observed. Roslyn tools return precisely what was asked for (a single method body, a list of references) — efficient but the agent only sees what it requests. Built-in tools read entire files — expensive but the agent gains ambient context that can surface unexpected findings. In our testing, roslyn tools produced faster, more focused answers with fewer wasted tokens. Built-in tools occasionally discovered issues the roslyn tools agent missed because it never looked at the surrounding code. Neither approach is universally better; the ideal is roslyn tools with optional "awareness hints" that flag related code worth investigating.
 

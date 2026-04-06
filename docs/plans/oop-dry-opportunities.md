@@ -7,7 +7,7 @@ Assessed at v0.7.0-alpha (post `FindSymbol`/`FormatSymbolName` extraction).
 
 ## Phase 1 — High Value, Low Risk
 
-### 1. Signature Formatting → `SymbolFormatter` utility
+### 1. `SymbolFormatter` utility — **Shipped**
 
 `FormatMethod()`, `FormatProperty()`, `FormatField()`, `FormatEvent()` are duplicated across 3 tools:
 - `FileOutlineTool.cs`

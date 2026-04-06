@@ -27,6 +27,9 @@ built-in tools only if a roslyn tool fails.
   signatures). Use INSTEAD OF reading a file to understand its layout.
 - `roslyn_get_line_count` — Get line counts for one or more files. Use INSTEAD
   OF Read + counting lines.
+- `roslyn_get_trivia` (**EXPERIMENTAL**) — Inspect whitespace, blank lines,
+  comment placement, and indentation trivia in a C# file. Use when you need to
+  understand the formatting context at a specific location before inserting code.
 
 ### Discovering Code
 
@@ -45,6 +48,13 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_find_references` — Find all references to a symbol across the entire
   solution. Use INSTEAD OF Grep for symbol usage search -- it understands
   overloads, namespaces, and cross-project references.
+- `roslyn_find_callers` — Find all methods that call a named symbol. The inverse
+  of `roslyn_find_references`. Semantically impossible with text search alone.
+  Filter by `isDirect` to exclude interface dispatch or delegate calls.
+- `roslyn_get_call_graph` — Find all methods invoked within a named method body.
+  Answers "what does this method depend on?" by walking the Roslyn IOperation
+  tree — finds actual invocations, not text patterns. Pair with
+  `roslyn_find_callers` to trace the full call chain in both directions.
 - `roslyn_find_implementations` — Find implementations of an interface or
   overrides of a virtual/abstract method. Grep cannot do this.
 - `roslyn_get_symbol_definition` — Jump to a symbol's declaration. Returns file,
@@ -76,6 +86,11 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_insert_lines` — Insert lines at a specific location (by line number
   or anchor pattern). Use when ADDING new lines rather than replacing existing
   content -- no need to construct surrounding-context patterns.
+- `roslyn_write_file` — Write or create files atomically with automatic
+  pre-write backup. Use for wholesale file rewrites or creating new files.
+  Returns a backup token usable with `roslyn_local_history` to undo.
+- `roslyn_local_history` — List, preview, and restore crash-safe file backup
+  snapshots created by `roslyn_write_file`. Use to undo destructive writes.
 
 ### Refactoring
 
@@ -122,9 +137,11 @@ are more accurate than grep/Read/Edit.
 - Structure: `roslyn_get_file_outline` > reading the whole file
 - Search: `roslyn_search_files` / `roslyn_semantic_search` > Grep
 - References: `roslyn_find_references` > Grep (semantic, cross-project)
+- Callers: `roslyn_find_callers` (who calls X?) + `roslyn_get_call_graph` (what does X call?)
 - Types: `roslyn_get_type_members` / `roslyn_get_type_hierarchy` > reading files
 - Editing: `roslyn_replace_in_code` (C#) / `roslyn_replace_in_file` (any) > Edit
 - Insert: `roslyn_insert_lines` (by line or anchor) > Edit with context patterns
+- Write/Undo: `roslyn_write_file` (create/rewrite) + `roslyn_local_history` (undo)
 - Rename: `roslyn_preview_rename` + `roslyn_apply_rename` > find-and-replace
 - Build: `roslyn_build_project` > NEVER `dotnet build` in terminal
 - Diagnostics: `roslyn_get_diagnostics` for fast error checks

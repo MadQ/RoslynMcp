@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace RoslynMcp.Tools.SignatureChange;
@@ -13,13 +13,13 @@ internal abstract class SignatureEditor
 {
 	/// <summary>Can this editor handle the given method symbol?</summary>
 	public abstract bool CanHandle(IMethodSymbol method);
-
+	
 	/// <summary>
 	///     Validates that the requested change is safe for this method kind.
 	///     Returns null if valid, or an error message if not.
 	/// </summary>
 	public abstract string? Validate(IMethodSymbol method, SignatureChangeRequest request);
-
+	
 	/// <summary>
 	///     Produces a new solution with the signature change applied.
 	///     Does not write to disk — the orchestrator handles that.
@@ -29,7 +29,8 @@ internal abstract class SignatureEditor
 		MethodDeclarationSyntax declaration,
 		SignatureChangeRequest request,
 		Solution solution,
-		Compilation compilation);
+		Compilation compilation,
+		CancellationToken cancellationToken);
 }
 
 /// <summary>

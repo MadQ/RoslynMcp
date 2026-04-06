@@ -1,49 +1,47 @@
+﻿using System.Text.Json;
+
 namespace RoslynMcp;
 
 /// <summary>
 ///     Lightweight file logger with rotation. All writes are thread-safe via a lock.
-///     Controlled by the <c>ROSLYNMCP_LOG_PATH</c> environment variable:
-///     - Not set → default path (%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log)
-///     - Set to empty string → logging disabled
-///     - Set to a path → logs to that file
+///     Outputs one <see cref="LogEntry"/> as NDJSON per line.
+///     Logging is configured via <see cref="ServerArgs.Current"/>:
+///     - <c>null</c> → default path (%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log)
+///     - empty string → logging disabled
+///     - path → logs to that file
 /// </summary>
 internal sealed class FileLogger : IDisposable
 {
-	//
-	// Could be using ILogger, but thus far I have not been able to like it one bit.
-	// Did we really need a whole new DSL just to log structured messages?
-	//
-	
-	const int    MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
-	const int    MaxRotatedFiles  = 3;
-	const string EnvVar           = "ROSLYNMCP_LOG_PATH";
-	
+	const int MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
+	const int MaxRotatedFiles  = 3;
+
+	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Log;
+
 	readonly string? logPath;
 	readonly object  writeLock = new();
-	readonly int     pid = Environment.ProcessId;
-	long             sessionTokens;
+	readonly int     pid       = Environment.ProcessId;
+
+	int  instanceCounter;
+	long sessionTokens;
 
 	public bool IsEnabled => logPath is not null;
-	
+
 	public FileLogger()
 	{
-		var envValue = Environment.GetEnvironmentVariable(EnvVar);
-		
+		var configured = ServerArgs.Current.LogPath;
+
 		// Explicitly set to empty → disabled.
-		if(envValue is not null && envValue.Length == 0) {
-			
+		if(configured is not null && configured.Length == 0) {
 			logPath = null;
-			
 			return;
 		}
-		
-		logPath = envValue is not null
-			? envValue
-			: Path.Combine(
+
+		logPath = configured
+			?? Path.Combine(
 				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
 				"RoslynMcp", "logs", "roslynmcp.log"
 			);
-		
+
 		try {
 			Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
 		}
@@ -55,61 +53,83 @@ internal sealed class FileLogger : IDisposable
 	
 	/// <summary>Logs server start with PID and working directory.</summary>
 	public void LogStart()
-		=> Write("START ", $"pid={Environment.ProcessId} cwd=\"{Environment.CurrentDirectory}\" log=\"{logPath}\"");
+		=> Write(new LogEntry {
+			Timestamp = Timestamp(),
+			Pid       = pid,
+			Level     = "START",
+			Message   = $"cwd=\"{Environment.CurrentDirectory}\" log=\"{logPath}\""
+		});
 	
 	/// <summary>Logs server stop.</summary>
 	public void LogStop()
-		=> Write("STOP  ", "Server stopping");
+		=> Write(new LogEntry {
+			Timestamp = Timestamp(),
+			Pid       = pid,
+			Level     = "STOP",
+			Message   = "Server stopping"
+		});
 	
 	/// <summary>Logs a tool invocation with outcome, elapsed time, and workspace mode indicator.</summary>
-	/// <param name="isMSBuild">True for MSBuildWorkspace (◆), false for AdhocWorkspace (◇), null when unknown.</param>
-	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0)
+	/// <param name="isMSBuild">True for MSBuildWorkspace, false for AdhocWorkspace.</param>
+	public void LogTool(string toolName, long elapsedMs, bool success, string? subject = null, string? detail = null, bool isMSBuild = true, string? cacheTag = null, int estimatedTokens = 0, string? responsePeek = null, string? args = null)
 	{
-		var outcome   = success ? "OK   " : "ERROR";
-		var ws        = isMSBuild ? "MSB" : "ADH";
+		var instance  = Interlocked.Increment(ref instanceCounter);
 		var shortName = toolName.StartsWith("roslyn_", StringComparison.Ordinal)
 			? toolName[7..]
 			: toolName
 		;
-		var cache = cacheTag switch { "HIT" => " [HIT]", "MISS" => " [MISS]", _ => "" };
-
+		
+		long tokens = 0;
+		
 		if(estimatedTokens > 0)
-			Interlocked.Add(ref sessionTokens, estimatedTokens);
-
-		var sb = new System.Text.StringBuilder();
-		sb.Append($"{ws} {outcome} {elapsedMs,5}ms {shortName,-25}");
-
-		if(subject is not null)
-			sb.Append($" {subject}");
-
-		if(detail is not null)
-			sb.Append($" — {detail}");
-
-		if(estimatedTokens > 0)
-			sb.Append($" ~{estimatedTokens}tok ({Interlocked.Read(ref sessionTokens)}tot)");
-
-		sb.Append(cache);
-
-		Write("TOOL  ", sb.ToString());
+			tokens = Interlocked.Add(ref sessionTokens, estimatedTokens);
+		
+		Write(new LogEntry {
+			Timestamp       = Timestamp(),
+			Pid             = pid,
+			Level           = "TOOL",
+			Instance        = instance,
+			WorkspaceMode   = isMSBuild ? "MSB" : "ADH",
+			ToolName        = shortName,
+			ElapsedMs       = elapsedMs,
+			Success         = success,
+			Subject         = subject,
+			Detail          = detail,
+			CacheTag        = cacheTag,
+			EstimatedTokens = estimatedTokens > 0 ? estimatedTokens : null,
+			SessionTokens   = estimatedTokens > 0 ? tokens : null,
+			ResponsePeek    = responsePeek,
+			// Args logged only on failure — avoids bloating successful call entries. // Meh! Do it anyway.
+			Args            = args
+		});
 	}
 	
 	/// <summary>Logs an error outside of a tool call (e.g. workspace load failure).</summary>
 	public void LogError(string context, string message)
-		=> Write("ERROR ", $"{context} — {message}");
+		=> Write(new LogEntry {
+			Timestamp = Timestamp(),
+			Pid       = pid,
+			Level     = "ERROR",
+			Message   = $"{context} — {message}"
+		});
 	
 	/// <summary>Logs informational diagnostic messages (verbose logging).</summary>
 	public void LogInfo(string context, string message)
-		=> Write("INFO  ", $"{context} — {message}");
+		=> Write(new LogEntry {
+			Timestamp = Timestamp(),
+			Pid       = pid,
+			Level     = "INFO",
+			Message   = $"{context} — {message}"
+		});
 	
-	void Write(string level, string message)
+	void Write(LogEntry entry)
 	{
 		if(logPath is null)
 			return;
 		
-		var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{pid}] [{level}] {message}{Environment.NewLine}";
+		var line = JsonSerializer.Serialize(entry, JsonOptions) + Environment.NewLine;
 		
-		lock(writeLock) {
-			
+		lock(writeLock)
 			try {
 				
 				RotateIfNeeded();
@@ -118,8 +138,9 @@ internal sealed class FileLogger : IDisposable
 			catch {
 				// Never crash the server over a logging failure.
 			}
-		}
 	}
+	
+	static string Timestamp() => DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ");
 	
 	void RotateIfNeeded()
 	{

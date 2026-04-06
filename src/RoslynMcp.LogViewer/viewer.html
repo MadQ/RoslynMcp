@@ -1,0 +1,1262 @@
+<!-- Developer tool — not a production web app. Accessibility (WCAG) not targeted unless requested. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RoslynMcp Logs</title>
+  <style>
+	*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+	/* ── Theme variables ── */
+	:root {
+	  --bg:           #1e1e1e;
+	  --bg-toolbar:   #2d2d2d;
+	  --bg-hover:     #333;
+	  --bg-input:     #3c3c3c;
+	  --bg-kbd:       #3c3c3c;
+	  --border:       #555;
+	  --text:         #d4d4d4;
+	  --text-dim:     rgb(55 52 32);
+	  --text-heading: #569cd6;
+	  --btn-bg:       #3c3c3c;
+	  --btn-hover:    #505050;
+	  --btn-active:   #264f78;
+	  --btn-active-border: #569cd6;
+	  --highlight:    #4a4a00;
+	  --error-border: #f44747;
+	  --lvl-start:    #569cd6;
+	  --lvl-stop:     #999;
+	  --lvl-tool:     #6a9955;
+	  --lvl-error:    #f44747;
+	  --ws-msb:       #6a9955;
+	  --ws-adh:       #ce9178;
+	  --tool-name:    #d4d4d4;
+	  --tool-ms:      #999;
+	  --tool-ok:      #6a9955;
+	  --tool-err:     #f44747;
+	  --tool-subj:    #9cdcfe;
+	  --tool-det:     #b0b0b0;
+	  --filter-all:   #d4d4d4;
+	  --filter-tool:  #6a9955;
+	  --filter-fail:  #ce9178;
+	  --filter-error: #f44747;
+	  --filter-start: #569cd6;
+	  --filter-stop:  #999;
+	  --legend-bg:    #252525;
+	  --legend-text:  #999;
+	  --status-live:  #6a9955;
+	  --status-err:   #f44747;
+	  --focus:        #569cd6;
+	  --j-key:        #9cdcfe;
+	  --j-str:        #ce9178;
+	  --j-num:        #b5cea8;
+	  --j-bool:       #569cd6;
+	  --j-null:       #888;
+	  --cs-kw:        #569cd6;
+	  --cs-str:       #ce9178;
+	  --cs-comment:   #6a9955;
+	  --cs-num:       #b5cea8;
+	  --rb0:          #ffd700;
+	  --rb1:          #da70d6;
+	  --rb2:          #4ec9b0;
+	}
+
+	[data-theme="light"] {
+	  --bg:           #ffffff;
+	  --bg-toolbar:   #f3f3f3;
+	  --bg-hover:     #e8e8e8;
+	  --bg-input:     #ffffff;
+	  --bg-kbd:       #e8e8e8;
+	  --border:       #d0d0d0;
+	  --text:         #1e1e1e;
+	  --text-dim:     #666;
+	  --text-heading: #0066b8;
+	  --btn-bg:       #e8e8e8;
+	  --btn-hover:    #d0d0d0;
+	  --btn-active:   #0066b8;
+	  --btn-active-border: #005a9e;
+	  --highlight:    #fff3b0;
+	  --error-border: #c00;
+	  --lvl-start:    #0066b8;
+	  --lvl-stop:     #666;
+	  --lvl-tool:     #008000;
+	  --lvl-error:    #c00;
+	  --ws-msb:       #008000;
+	  --ws-adh:       #b85c00;
+	  --tool-name:    #1e1e1e;
+	  --tool-ms:      #666;
+	  --tool-ok:      #008000;
+	  --tool-err:     #c00;
+	  --tool-subj:    #1e1e1e;
+	  --tool-det:     #666;
+	  --filter-all:   #1e1e1e;
+	  --filter-tool:  #008000;
+	  --filter-fail:  #b85c00;
+	  --filter-error: #c00;
+	  --filter-start: #0066b8;
+	  --filter-stop:  #666;
+	  --legend-bg:    #f0f0f0;
+	  --legend-text:  #666;
+	  --status-live:  #008000;
+	  --status-err:   #c00;
+	  --focus:        #0066b8;
+	  --j-key:        #0451a5;
+	  --j-str:        #a31515;
+	  --j-num:        #098658;
+	  --j-bool:       #0451a5;
+	  --j-null:       #767676;
+	  --cs-kw:        #0000ff;
+	  --cs-str:       #a31515;
+	  --cs-comment:   #008000;
+	  --cs-num:       #098658;
+	  --rb0:          #b8860b;
+	  --rb1:          #8b008b;
+	  --rb2:          #007878;
+	}
+
+	[data-theme="parchment"] {
+	  --bg:           rgb(214 211 171);
+	  --bg-toolbar:   rgb(196 193 150);
+	  --bg-hover:     rgb(200 197 156);
+	  --bg-input:     rgb(230 228 200);
+	  --bg-kbd:       rgb(230 228 200);
+	  --border:       rgb(160 155 110);
+	  --text:         rgb(30 25 10);
+	  --text-dim:     rgb(95 90 55);
+	  --text-heading: rgb(30 55 140);
+	  --btn-bg:       rgb(200 197 156);
+	  --btn-hover:    rgb(180 176 132);
+	  --btn-active:   rgb(50 70 150);
+	  --btn-active-border: rgb(30 55 140);
+	  --highlight:    rgb(255 255 180);
+	  --error-border: rgb(160 0 0);
+	  --lvl-start:    rgb(30 55 140);
+	  --lvl-stop:     rgb(95 90 55);
+	  --lvl-tool:     rgb(20 100 40);
+	  --lvl-error:    rgb(160 0 0);
+	  --ws-msb:       rgb(20 100 40);
+	  --ws-adh:       rgb(170 100 0);
+	  --tool-name:    rgb(30 25 10);
+	  --tool-ms:      rgb(95 90 55);
+	  --tool-ok:      rgb(20 100 40);
+	  --tool-err:     rgb(160 0 0);
+	  --tool-subj:    rgb(45 40 15);
+	  --tool-det:     rgb(100 95 60);
+	  --filter-all:   rgb(30 25 10);
+	  --filter-tool:  rgb(20 100 40);
+	  --filter-fail:  rgb(180 60 0);
+	  --filter-error: rgb(160 0 0);
+	  --filter-start: rgb(30 55 140);
+	  --filter-stop:  rgb(80 75 45);
+	  --legend-bg:    rgb(210 207 170);
+	  --legend-text:  rgb(60 55 30);
+	  --status-live:  rgb(20 100 40);
+	  --status-err:   rgb(160 0 0);
+	  --focus:        rgb(50 70 150);
+	  --j-key:        rgb(30 55 140);
+	  --j-str:        rgb(140 45 0);
+	  --j-num:        rgb(20 100 40);
+	  --j-bool:       rgb(100 0 120);
+	  --j-null:       rgb(95 90 55);
+	  --cs-kw:        rgb(30 55 140);
+	  --cs-str:       rgb(140 45 0);
+	  --cs-comment:   rgb(20 100 40);
+	  --cs-num:       rgb(130 80 0);
+	  --rb0:          rgb(160 110 0);
+	  --rb1:          rgb(120 0 120);
+	  --rb2:          rgb(0 120 110);
+	}
+
+	@media (prefers-color-scheme: light) {
+	  :root:not([data-theme]) {
+		--bg:           #ffffff;
+		--bg-toolbar:   #f3f3f3;
+		--bg-hover:     #e8e8e8;
+		--bg-input:     #ffffff;
+		--bg-kbd:       #e8e8e8;
+		--border:       #d0d0d0;
+		--text:         #1e1e1e;
+		--text-dim:     #666;
+		--text-heading: #0066b8;
+		--btn-bg:       #e8e8e8;
+		--btn-hover:    #d0d0d0;
+		--btn-active:   #0066b8;
+		--btn-active-border: #005a9e;
+		--highlight:    #fff3b0;
+		--error-border: #c00;
+		--lvl-start:    #0066b8;
+		--lvl-stop:     #666;
+		--lvl-tool:     #008000;
+		--lvl-error:    #c00;
+		--ws-msb:       #008000;
+		--ws-adh:       #b85c00;
+		--tool-name:    #1e1e1e;
+		--tool-ms:      #666;
+		--tool-ok:      #008000;
+		--tool-err:     #c00;
+		--tool-subj:    #1e1e1e;
+		--tool-det:     #666;
+		--filter-all:   #1e1e1e;
+		--filter-tool:  #008000;
+		--filter-fail:  #b85c00;
+		--filter-error: #c00;
+		--filter-start: #0066b8;
+		--filter-stop:  #666;
+		--legend-bg:    #f0f0f0;
+		--legend-text:  #666;
+		--status-live:  #008000;
+		--status-err:   #c00;
+		--focus:        #0066b8;
+	  --j-key:        #0451a5;
+	  --j-str:        #a31515;
+	  --j-num:        #098658;
+	  --j-bool:       #0451a5;
+	  --j-null:       #767676;
+	  --cs-kw:        #0000ff;
+	  --cs-str:       #a31515;
+	  --cs-comment:   #008000;
+	  --cs-num:       #098658;
+	  --rb0:          #b8860b;
+	  --rb1:          #8b008b;
+	  --rb2:          #007878;
+	  }
+	}
+
+	body {
+	  background: var(--bg);
+	  color: var(--text);
+	  font-family: monospace;
+	  font-size: 12pt;
+	  display: flex;
+	  flex-direction: column;
+	  height: 100vh;
+	  overflow: hidden;
+	}
+
+	/* ── Toolbar ── */
+	#toolbar {
+	  padding: 7px 12px;
+	  background: var(--bg-toolbar);
+	  border-bottom: 1px solid var(--border);
+	  display: flex;
+	  gap: 6px;
+	  align-items: center;
+	  flex-shrink: 0;
+	  flex-wrap: wrap;
+	}
+
+	#toolbar h1 { font-size: 13px; color: var(--text-heading); margin-right: 4px; letter-spacing: .02em; }
+
+	.btn {
+	  padding: 5px 13px;
+	  border: 1px solid var(--border);
+	  background: var(--btn-bg);
+	  color: var(--text);
+	  cursor: pointer;
+	  border-radius: 4px;
+	  font-size: 12px;
+	  font-family: inherit;
+	  transition: background .1s;
+	}
+	[data-filter] { min-width: 56px; text-align: center; }
+	.btn:hover  { background: var(--btn-hover); }
+	.btn.active { background: var(--btn-active); border-color: var(--btn-active-border); color: #fff; }
+
+	/* ── Parchment: Win95-inspired buttons ──────────────────────────────── */
+	[data-theme="parchment"] .btn {
+	  border-width: 1px;
+	  border-style: solid;
+	  border-radius: 1px;
+	  border-color:
+		rgb(255 255 255 / 62%) rgb(0 0 0 / 28%)
+		rgb(0 0 0 / 28%) rgb(255 255 255 / 62%);
+	  background: linear-gradient(180deg,
+		rgb(216 213 172) 0%,
+		rgb(202 199 156) 55%,
+		rgb(188 185 142) 100%
+	  );
+	  box-shadow:
+		inset  1px  1px 0 rgb(255 255 255 / 55%),
+		inset -1px -1px 0 rgb(0 0 0 / 20%),
+		0 1px 3px rgb(0 0 0 / 13%);
+	  text-shadow: 0 1px 0 rgb(255 255 255 / 48%);
+	  transition:
+		background .12s ease,
+		box-shadow .1s ease,
+		border-color .1s ease,
+		transform .07s ease,
+		text-shadow .1s ease;
+	}
+
+	[data-theme="parchment"] .btn:hover:not(.active):not(:active) {
+	  border-color:
+		rgb(255 255 255 / 72%) rgb(0 0 0 / 32%)
+		rgb(0 0 0 / 32%) rgb(255 255 255 / 72%);
+	  background: linear-gradient(180deg,
+		rgb(228 225 185) 0%,
+		rgb(213 210 167) 55%,
+		rgb(198 195 151) 100%
+	  );
+	  box-shadow:
+		inset  1px  1px 0 rgb(255 255 255 / 65%),
+		inset -1px -1px 0 rgb(0 0 0 / 17%),
+		0 2px 5px rgb(0 0 0 / 16%);
+	  text-shadow: 0 1px 0 rgb(255 255 255 / 56%);
+	}
+
+	[data-theme="parchment"] .btn:active:not(.active) {
+	  /* pressed: swap highlight/shadow directions + physical shift */
+	  border-color:
+		rgb(0 0 0 / 28%) rgb(255 255 255 / 62%)
+		rgb(255 255 255 / 62%) rgb(0 0 0 / 28%);
+	  background: linear-gradient(180deg,
+		rgb(185 182 140) 0%,
+		rgb(197 194 152) 55%,
+		rgb(208 205 162) 100%
+	  );
+	  box-shadow:
+		inset  1px  1px 0 rgb(0 0 0 / 18%),
+		inset -1px -1px 0 rgb(255 255 255 / 52%),
+		inset 0 2px 4px rgb(0 0 0 / 10%);
+	  text-shadow: none;
+	  transform: translate(1px, 1px);
+	}
+
+	/* active filter = permanently pressed; transparent edges work on blue too */
+	[data-theme="parchment"] .btn.active {
+	  border-color:
+		rgb(0 0 0 / 35%) rgb(255 255 255 / 30%)
+		rgb(255 255 255 / 30%) rgb(0 0 0 / 35%);
+	  background: linear-gradient(180deg,
+		rgb(38 55 135) 0%,
+		rgb(50 70 150) 55%,
+		rgb(62 82 165) 100%
+	  );
+	  box-shadow:
+		inset  1px  1px 0 rgb(0 0 0 / 25%),
+		inset -1px -1px 0 rgb(255 255 255 / 22%),
+		inset 0 2px 4px rgb(0 0 0 / 18%);
+	  color: #fff;
+	  text-shadow: 0 1px 1px rgb(0 0 0 / 45%);
+	  transform: translate(1px, 1px);
+	}
+
+	.filter-ALL   { color: var(--filter-all); }
+	.filter-TOOL  { color: var(--filter-tool); }
+	.filter-FAIL  { color: var(--filter-fail); }
+	.filter-ERROR { color: var(--filter-error); }
+	.filter-START { color: var(--filter-start); }
+	.filter-STOP  { color: var(--filter-stop); }
+
+	label.chk {
+	  display: flex;
+	  align-items: center;
+	  gap: 4px;
+	  cursor: pointer;
+	  font-size: 12px;
+	  user-select: none;
+	}
+
+	/* ── Parchment: Win95-style checkbox ────────────────────────────────── */
+	[data-theme="parchment"] .chk input[type="checkbox"] {
+	  /* suppress native chrome; the .chk-box span is the visual */
+	  appearance: none;
+	  position: absolute;
+	  opacity: 0;
+	  width: 0;
+	  height: 0;
+	}
+
+	[data-theme="parchment"] .chk-box {
+	  display: inline-flex;
+	  align-items: center;
+	  justify-content: center;
+	  width: 13px;
+	  height: 13px;
+	  flex-shrink: 0;
+	  border: 1px solid;
+	  /* sunken/inset: opposite of raised buttons */
+	  border-color: rgb(0 0 0 / 32%) rgb(255 255 255 / 58%) rgb(255 255 255 / 58%) rgb(0 0 0 / 32%);
+	  background: var(--bg-input);
+	  box-shadow:
+		inset  1px  1px 0 rgb(0 0 0 / 18%),
+		inset -1px -1px 0 rgb(255 255 255 / 45%);
+	  position: relative;
+	  cursor: pointer;
+	  transition: background .1s;
+	}
+
+	[data-theme="parchment"] .chk input:checked + .chk-box::before {
+	  content: '✔';
+	  font-size: 11px;
+	  line-height: 1;
+	  color: rgb(30 25 10);
+	  /* nudge for optical centering — checkmark glyphs are rarely truly centered */
+	  margin-top: -1px;
+	}
+
+	#sep, .sep-thin { width: 1px; height: 18px; background: var(--border); margin: 0 2px; }
+
+	#status { margin-left: auto; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+	#status.live { color: var(--status-live); }
+	#status.err  { color: var(--status-err); }
+
+	#themeSelect {
+	  padding: 4px 8px;
+	  border: 1px solid var(--border);
+	  background: var(--btn-bg);
+	  color: var(--text);
+	  border-radius: 4px;
+	  font-size: 12px;
+	  font-family: inherit;
+	  cursor: pointer;
+	}
+
+	[data-theme="parchment"] #themeSelect {
+	  border-width: 1px;
+	  border-style: solid;
+	  border-radius: 1px;
+	  border-color:
+		rgb(255 255 255 / 62%) rgb(0 0 0 / 28%)
+		rgb(0 0 0 / 28%) rgb(255 255 255 / 62%);
+	  background: linear-gradient(180deg,
+		rgb(216 213 172) 0%,
+		rgb(202 199 156) 55%,
+		rgb(188 185 142) 100%
+	  );
+	  box-shadow:
+		inset  1px  1px 0 rgb(255 255 255 / 55%),
+		inset -1px -1px 0 rgb(0 0 0 / 20%),
+		0 1px 3px rgb(0 0 0 / 13%);
+	}
+
+	[data-theme="parchment"] .entry-detail {
+	  margin-left: calc(8px + 1ch); /* center of col-expand: row-padding + half of 2ch */
+	  padding-left: 16px;
+	  border-left: 1px dotted rgb(0 0 0 / 28%);
+	}
+
+	/* Win95 [+]/[-] tree-node buttons for Parchment theme */
+	[data-theme="parchment"] .col-expand {
+	  color: transparent !important; /* hide ▶/▼; the box takes over even on selected rows */
+	  position: relative;
+	}
+	[data-theme="parchment"] .col-expand::before {
+	  content: '+';
+	  color: rgb(0 0 0 / 75%);
+	  position: absolute;
+	  top: 50%;
+	  left: 50%;
+	  transform: translate(-50%, -50%);
+	  width: 11px;
+	  height: 11px;
+	  display: flex;
+	  align-items: center;
+	  justify-content: center;
+	  line-height: 1;
+	  border: 1px solid rgb(0 0 0 / 50%);
+	  background: #ffffff;
+	  font-size: 10px;
+	  font-family: 'Courier New', monospace;
+	  font-weight: bold;
+	  box-shadow: 1px 1px 0 rgb(0 0 0 / 18%);
+	}
+	/* Switch to [-] when expanded */
+	[data-theme="parchment"] .entry-wrap:has(.entry-detail:not(.hidden)) .col-expand::before {
+	  content: '-';
+	}
+	[data-theme="parchment"] .col-expand:hover::before {
+	  background: #e8e8ff;
+	}
+
+	/* ── Log area ── */
+	#log { flex: 1; overflow-y: scroll; padding: 2px 0; }
+
+	#empty { padding: 16px 12px; color: var(--text-dim); font-style: italic; }
+
+	/* ── Entries ── */
+	.entry-wrap {
+	  border-bottom: 1px solid transparent;
+	}
+	.entry-wrap:hover .entry-row { background: var(--bg-hover); }
+	.entry-wrap.selected .entry-row { background: var(--btn-active); color: #fff; }
+	.entry-wrap.selected .entry-row * { color: #fff !important; }
+	.entry-wrap[data-level="ERROR"] { border-left: 2px solid var(--error-border); }
+
+	.entry-row {
+	  display: flex;
+	  align-items: baseline;
+	  gap: 8px;
+	  padding: 1px 8px;
+	  cursor: default;
+	}
+
+	.col-inst    { width: 4ch;  flex-shrink: 0; color: var(--text-dim); font-size: 11px; text-align: right; }
+	.col-time    { width: 12ch; flex-shrink: 0; color: var(--text-dim); }
+	.col-level   { width: 5ch;  flex-shrink: 0; font-weight: 600; }
+	.col-ws      { width: 3ch;  flex-shrink: 0; font-weight: 700; cursor: help; }
+	.col-tool    { width: 22ch; flex-shrink: 0; color: var(--tool-name); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	.col-status  { width: 3ch;  flex-shrink: 0; font-weight: 600; text-align: center; }
+	.col-elapsed { width: 8ch;  flex-shrink: 0; text-align: right; white-space: nowrap; color: var(--tool-ms); }
+	.col-subj    { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+	.col-expand  { width: 2ch;  flex-shrink: 0; cursor: pointer; color: var(--text-dim); user-select: none; text-align: center; font-size: 10px; }
+	.col-expand:hover { color: var(--text); }
+
+	.lvl-START { color: var(--lvl-start); }
+	.lvl-STOP  { color: var(--lvl-stop); }
+	.lvl-TOOL  { color: var(--lvl-tool); }
+	.lvl-ERROR { color: var(--lvl-error); }
+	.lvl-OTHER { color: var(--text-dim); }
+
+	.ws-msb  { color: var(--ws-msb); }
+	.ws-adh  { color: var(--ws-adh); }
+	.tool-ok   { color: var(--tool-ok); font-weight: 600; }
+	.tool-err  { color: var(--tool-err); font-weight: 600; }
+	.tool-ms   { color: var(--tool-ms); }
+	.tool-subj { color: var(--tool-subj); }
+	.tool-det  { color: var(--tool-det); font-style: italic; }
+
+	/* ── Expand detail panel ── */
+	.entry-detail {
+	  padding: 4px 8px 6px 20px;
+	  background: var(--bg-toolbar);
+	  border-top: 1px solid var(--border);
+	}
+	.entry-detail pre {
+	  font-family: inherit;
+	  font-size: 12px;
+	  color: var(--text-dim);
+	  white-space: pre-wrap;
+	  word-break: break-all;
+	  max-height: 300px;
+	  overflow-y: auto;
+	}
+	.detail-section-label {
+	  font-size: 10px;
+	  font-weight: 700;
+	  letter-spacing: 0.05em;
+	  color: var(--text-dim);
+	  text-transform: uppercase;
+	  margin: 6px 0 2px;
+	}
+	.detail-section-label:first-child { margin-top: 2px; }
+	.show-more { margin-top: 4px; font-size: 11px; padding: 2px 6px; }
+
+	/* ── JSON + C# syntax tokens ── */
+	.jk  { color: var(--j-key); }
+	.js  { color: var(--j-str); }
+	.jn  { color: var(--j-num); }
+	.jb  { color: var(--j-bool); font-weight: 600; }
+	.jz  { color: var(--j-null); }
+	.cs-kw      { color: var(--cs-kw); font-weight: 600; }
+	.cs-str     { color: var(--cs-str); }
+	.cs-comment { color: var(--cs-comment); font-style: italic; }
+	.cs-num     { color: var(--cs-num); }
+	.rb0 { color: var(--rb0); }
+	.rb1 { color: var(--rb1); }
+	.rb2 { color: var(--rb2); }
+
+	/* Embedded C# code block inside a JSON string value */
+	.json-code {
+	  display: block;
+	  margin: 2px 0 2px 12px;
+	  padding: 4px 8px;
+	  background: var(--bg);
+	  border-left: 2px solid var(--border);
+	  max-height: 200px;
+	  overflow-y: auto;
+	  tab-size: 4;
+	  white-space: pre;
+	  word-break: normal;
+	}
+
+	.hidden { display: none !important; }
+
+	/* ── Search bar ── */
+	#searchBar {
+	  padding: 5px 12px;
+	  background: var(--bg-toolbar);
+	  border-bottom: 1px solid var(--border);
+	  display: flex;
+	  gap: 8px;
+	  align-items: center;
+	  flex-shrink: 0;
+	}
+	#searchInput {
+	  flex: 1;
+	  padding: 3px 8px;
+	  border: 1px solid var(--border);
+	  border-radius: 4px;
+	  font-family: inherit;
+	  font-size: 12px;
+	  background: var(--bg-input);
+	  color: var(--text);
+	}
+	#searchInput:focus { outline: 2px solid var(--focus); }
+	#searchCount { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+	.entry-wrap.highlight .entry-row { background: var(--highlight) !important; }
+
+	/* ── Legend ── */
+	#legend {
+	  padding: 6px 12px;
+	  background: var(--legend-bg);
+	  border-bottom: 1px solid var(--border);
+	  font-size: 11px;
+	  color: var(--legend-text);
+	  flex-shrink: 0;
+	}
+
+	.legend-grid {
+	  display: flex;
+	  gap: 0;
+	  align-items: start;
+	}
+
+	.legend-group {
+	  display: grid;
+	  grid-template-columns: auto 1fr;
+	  column-gap: 6px;
+	  row-gap: 1px;
+	  align-items: baseline;
+	  padding: 0 12px;
+	}
+
+	.legend-group:first-child { padding-left: 0; }
+
+	.legend-sep {
+	  width: 1px;
+	  background: var(--border);
+	  align-self: stretch;
+	  margin: 1px 0;
+	  flex-shrink: 0;
+	}
+
+	/* each .li has two children that flow into the parent 2-col grid */
+	.legend-group .li { display: contents; }
+
+	.legend-group .lk {
+	  text-align: right;
+	  white-space: nowrap;
+	}
+	kbd {
+	  background: var(--bg-kbd);
+	  border: 1px solid var(--border);
+	  border-radius: 3px;
+	  padding: 1px 4px;
+	  font-family: inherit;
+	  font-size: 10px;
+	}
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+	<h1>RoslynMcp Logs</h1>
+	<button class="btn filter-ALL   active" data-filter="ALL"  >ALL</button>
+	<button class="btn filter-TOOL  "       data-filter="TOOL" >TOOL</button>
+	<button class="btn filter-FAIL  "       data-filter="FAIL" >FAIL</button>
+	<div class="sep-thin"></div>
+	<button class="btn filter-ERROR "       data-filter="ERROR">ERROR</button>
+	<button class="btn filter-START "       data-filter="START">START</button>
+	<button class="btn filter-STOP  "       data-filter="STOP" >STOP</button>
+	<div id="sep"></div>
+	<label class="chk"><input type="checkbox" id="autoScroll" checked><span class="chk-box"></span> Auto-scroll</label>
+	<button class="btn" id="clearBtn">Clear</button>
+	<button class="btn" id="shutdownBtn">Shutdown</button>
+	<button class="btn" id="helpBtn" title="Keyboard shortcuts">?</button>
+	<div class="sep-thin"></div>
+	<select id="themeSelect" title="Theme (T to cycle)"></select>
+	<span id="status">Connecting…</span>
+  </div>
+  <div id="legend" class="hidden">
+	<div class="legend-grid">
+	  <div class="legend-group">
+		<div class="li"><div class="lk"><kbd>1</kbd>–<kbd>6</kbd></div><div>Filters: ALL TOOL FAIL ERROR START STOP</div></div>
+		<div class="li"><div class="lk"><kbd>S</kbd></div><div>Auto-scroll</div></div>
+		<div class="li"><div class="lk"><kbd>T</kbd></div><div>Theme</div></div>
+		<div class="li"><div class="lk"><kbd>?</kbd></div><div>This legend</div></div>
+		<div class="li"><div class="lk"><kbd>Ctrl+F</kbd></div><div>Search</div></div>
+		<div class="li"><div class="lk"><kbd>Ctrl+L</kbd></div><div>Clear</div></div>
+		<div class="li"><div class="lk"><kbd>Ctrl+C</kbd></div><div>Copy entry</div></div>
+		<div class="li"><div class="lk"><kbd>Q</kbd></div><div>Shutdown</div></div>
+		<div class="li"><div class="lk"><kbd>Esc</kbd></div><div>Close / jump to end</div></div>
+	  </div>
+	  <div class="legend-sep"></div>
+	  <div class="legend-group">
+		<div class="li"><div class="lk"><kbd>↑</kbd> <kbd>↓</kbd></div><div>Navigate rows</div></div>
+		<div class="li"><div class="lk"><kbd>←</kbd></div><div>Collapse detail, or prev row</div></div>
+		<div class="li"><div class="lk"><kbd>→</kbd></div><div>Expand detail, or next row</div></div>
+		<div class="li"><div class="lk"><kbd>Enter</kbd> <kbd>Space</kbd></div><div>Toggle detail</div></div>
+		<div class="li"><div class="lk"><kbd>DblClick</kbd></div><div>Toggle detail</div></div>
+		<div class="li"><div class="lk"><kbd>+</kbd></div><div>Expand detail</div></div>
+		<div class="li"><div class="lk"><kbd>−</kbd></div><div>Collapse detail</div></div>
+	  </div>
+	</div>
+  </div>
+  <div id="searchBar" class="hidden">
+	<input type="text" id="searchInput" placeholder="Search logs… (Esc to close)">
+	<span id="searchCount"></span>
+  </div>
+  <div id="log"><div id="empty">Waiting for log entries…</div></div>
+
+  <script>
+	const logEl      = document.getElementById('log');
+	const statusEl   = document.getElementById('status');
+	const autoScroll = document.getElementById('autoScroll');
+	const emptyEl    = document.getElementById('empty');
+	
+	const pids		= new Map(); // pid → "#N" sequential label
+	
+	let   filter       = 'ALL';
+	let   count        = 0;
+	let   scrolledUp   = false;
+	let   hasSelection = false;
+
+	// ── Theme ────────────────────────────────────────────────────────────
+	const themeSelect = document.getElementById('themeSelect');
+	const themeIcons  = { dark: '\u{1F319}', light: '\u{2600}\u{FE0F}', parchment: '\u{1F4DC}', system: '\u{1F5A5}\u{FE0F}' };
+	const themes      = ['', 'dark', 'light', 'parchment'];
+	let   currentSetting = '';  // '' = system
+
+	function getSystemTheme() {
+	  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+	}
+
+	function getResolvedTheme(setting) {
+	  return setting || getSystemTheme();
+	}
+
+	function buildThemeOptions() {
+	  const sys = getSystemTheme();
+	  const sysLabel = `${themeIcons.system} System (${sys.charAt(0).toUpperCase() + sys.slice(1)})`;
+	  themeSelect.innerHTML = '';
+	  [
+		['', sysLabel],
+		['dark', `${themeIcons.dark} Dark`],
+		['light', `${themeIcons.light} Light`],
+		['parchment', `${themeIcons.parchment} Parchment`],
+	  ].forEach(([val, label]) => {
+		const opt = document.createElement('option');
+		opt.value = val;
+		opt.textContent = label;
+		themeSelect.appendChild(opt);
+	  });
+	  themeSelect.value = currentSetting;
+	}
+
+	function applyTheme(setting) {
+	  currentSetting = setting;
+	  const resolved = getResolvedTheme(setting);
+	  if(resolved)
+		document.documentElement.setAttribute('data-theme', resolved);
+	  else
+		document.documentElement.removeAttribute('data-theme');
+	  themeSelect.value = setting;
+	  try { localStorage.setItem('roslynmcp-theme', setting); } catch {}
+	}
+
+	function cycleTheme() {
+	  // Skip themes that would look identical to the current resolved appearance
+	  const currentResolved = getResolvedTheme(currentSetting);
+	  let idx = themes.indexOf(currentSetting);
+	  let next, nextResolved;
+	  do {
+		idx  = (idx + 1) % themes.length;
+		next = themes[idx];
+		nextResolved = getResolvedTheme(next);
+	  } while(nextResolved === currentResolved && next !== currentSetting);
+	  applyTheme(next);
+	}
+
+	themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
+
+	// Rebuild dropdown labels when system theme changes
+	window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+	  buildThemeOptions();
+	  if(currentSetting === '') applyTheme('');
+	});
+
+	// Restore saved theme
+	try {
+	  const saved = localStorage.getItem('roslynmcp-theme');
+	  if(saved !== null) currentSetting = saved;
+	} catch {}
+	buildThemeOptions();
+	applyTheme(currentSetting);
+
+	// ── Smart scroll tracking ─────────────────────────────────────────────
+	logEl.addEventListener('scroll', () => {
+	  scrolledUp = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight > 4;
+	}, { passive: true });
+
+	document.addEventListener('selectionchange', () => {
+	  hasSelection = (window.getSelection()?.toString().length ?? 0) > 0;
+	});
+
+	function shouldScroll() {
+	  return autoScroll.checked && !scrolledUp && !hasSelection;
+	}
+
+	// ── Filters ──────────────────────────────────────────────────────────
+	document.querySelectorAll('[data-filter]').forEach(btn => {
+	  btn.addEventListener('click', () => {
+		document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
+		btn.classList.add('active');
+		filter = btn.dataset.filter;
+		document.querySelectorAll('.entry-wrap').forEach(el => {
+		  if(filter === 'FAIL')
+			el.classList.toggle('hidden', el.dataset.fail !== 'true');
+		  else
+			el.classList.toggle('hidden', filter !== 'ALL' && el.dataset.level !== filter);
+		});
+	  });
+	});
+
+	// ── Shutdown ──────────────────────────────────────────────────────────
+	document.getElementById('shutdownBtn').addEventListener('click', () => {
+	  fetch('/shutdown', { method: 'POST' }).catch(() => {});
+	});
+
+	// ── Clear ─────────────────────────────────────────────────────────────
+	document.getElementById('clearBtn').addEventListener('click', () => {
+	  document.querySelectorAll('.entry-wrap').forEach(el => el.remove());
+	  emptyEl.style.display = '';
+	  count = 0;
+	  selectedWrap = null;
+	  updateStatus();
+	});
+
+	// ── Selection (for Ctrl+C copy) ───────────────────────────────────────
+	let selectedWrap = null;
+
+	function selectWrap(wrap) {
+	  selectedWrap?.classList.remove('selected');
+	  selectedWrap = wrap;
+	  wrap?.classList.add('selected');
+	}
+
+	// ── Detail expand/collapse helpers ────────────────────────────────────
+	function setDetail(wrap, open) {
+	  const detail = wrap?.querySelector('.entry-detail');
+	  const chev   = wrap?.querySelector('.col-expand');
+
+	  if(!detail) return;
+
+	  detail.classList.toggle('hidden', !open);
+	  if(chev) chev.textContent = open ? '▼' : '▶';
+	}
+
+	function isDetailOpen(wrap) {
+	  return wrap?.querySelector('.entry-detail')?.classList.contains('hidden') === false;
+	}
+
+	function toggleDetail(wrap) {
+	  if(wrap) setDetail(wrap, !isDetailOpen(wrap));
+	}
+
+	// ── Row navigation ────────────────────────────────────────────────────
+	function visibleWraps() {
+	  return [...logEl.querySelectorAll('.entry-wrap:not(.hidden)')];
+	}
+
+	function navigate(dir) {
+	  const wraps = visibleWraps();
+
+	  if(!wraps.length) return;
+
+	  if(!selectedWrap) {
+		const target = wraps[dir > 0 ? 0 : wraps.length - 1];
+		selectWrap(target);
+		target.scrollIntoView({ block: 'nearest' });
+		return;
+	  }
+
+	  const idx  = wraps.indexOf(selectedWrap);
+	  const next = wraps[idx + dir];
+
+	  if(next) {
+		selectWrap(next);
+		next.scrollIntoView({ block: 'nearest' });
+	  }
+	}
+
+	// ── Append entry ──────────────────────────────────────────────────────
+	function addEntry(e) {
+		
+		var uniquePidId = pids.getOrInsertComputed(e.pid, () => `#${pids.size + 1}`);
+		
+	  emptyEl.style.display = 'none';
+	  const level  = e.level || 'OTHER';
+	  const isFail = level === 'TOOL' && e.success === false;
+	  const wrap   = document.createElement('div');
+	  wrap.className     = 'entry-wrap';
+	  wrap.dataset.level = level;
+	  wrap.dataset.json  = JSON.stringify(e);
+	  if(isFail) wrap.dataset.fail = 'true';
+
+	  if(filter === 'FAIL' ? !isFail : (filter !== 'ALL' && level !== filter))
+		wrap.classList.add('hidden');
+
+	  // ── Summary row ──────────────────────────────────────────────────────
+	  const row = document.createElement('div');
+	  row.className = 'entry-row';
+	  row.addEventListener('click', () => selectWrap(wrap));
+
+	  // expand chevron — leftmost column so it reads like a tree view
+	  const chev = mk('span', 'col-expand', '▶');
+	  chev.title = 'Expand / collapse raw entry';
+	  row.appendChild(chev);
+
+	  // #instance
+	  const inst = mk('span', 'col-inst', uniquePidId);
+	  row.appendChild(inst);
+
+	  // time — local HH:mm:ss.fff
+	  const time = mk('span', 'col-time', e.timestamp ? fmtLocalTime(e.timestamp) : '');
+	  row.appendChild(time);
+
+	  // level
+	  const lvl = mk('span', `col-level lvl-${level}`, level);
+	  row.appendChild(lvl);
+
+	  // workspace mode
+	  const wsHints = { MSB: 'MSBuildWorkspace (.csproj)', ADH: 'AdhocWorkspace (no .csproj)' };
+	  const ws = mk('span', e.workspace_mode === 'MSB' ? 'col-ws ws-msb' : e.workspace_mode === 'ADH' ? 'col-ws ws-adh' : 'col-ws', e.workspace_mode || '');
+	  if(e.workspace_mode) ws.title = wsHints[e.workspace_mode] || '';
+	  row.appendChild(ws);
+
+	  // tool name
+	  row.appendChild(mk('span', 'col-tool', e.tool_name || ''));
+
+	  // status badge (OK/ERR) — separate column to avoid overlap with elapsed
+	  row.appendChild(mk('span', `col-status ${e.elapsed_ms != null ? (e.success ? 'tool-ok' : 'tool-err') : ''}`,
+		e.elapsed_ms != null ? (e.success ? 'OK' : 'ERR') : ''));
+
+	  // elapsed ms
+	  row.appendChild(mk('span', 'col-elapsed', e.elapsed_ms != null ? e.elapsed_ms + 'ms' : ''));
+
+	  // subject / message
+	  const subj = document.createElement('span');
+	  subj.className = 'col-subj';
+	  if(level === 'TOOL') {
+		if(e.subject) subj.appendChild(mk('span', 'tool-subj', e.subject));
+		if(e.detail)  subj.appendChild(mk('span', 'tool-det',  (e.subject ? ' — ' : '') + e.detail));
+	  } else {
+		subj.textContent = e.message || '';
+	  }
+	  row.appendChild(subj);
+
+	  wrap.appendChild(row);
+
+	  // ── Detail panel ────────────────────────────────────────────────────
+	  const detail = document.createElement('div');
+	  detail.className = 'entry-detail hidden';
+
+	  // Response peek section (TOOL entries only)
+	  if(e.response_peek) {
+		detail.appendChild(mk('div', 'detail-section-label', 'Response'));
+		const peekPre = document.createElement('pre');
+		peekPre.innerHTML = highlightJSON(e.response_peek);
+		detail.appendChild(peekPre);
+	  }
+
+	  // Raw log entry JSON
+	  detail.appendChild(mk('div', 'detail-section-label', 'Log entry'));
+	  const raw   = JSON.stringify(e, null, 2);
+	  const TRUNC = 800;
+	  const pre   = document.createElement('pre');
+	  pre.innerHTML = highlightJSON(raw.length <= TRUNC ? raw : raw.slice(0, TRUNC) + '\n…');
+	  detail.appendChild(pre);
+
+	  if(raw.length > TRUNC) {
+		const more = document.createElement('button');
+		more.className   = 'btn show-more';
+		more.textContent = 'Show full';
+		more.addEventListener('click', ev => { ev.stopPropagation(); pre.innerHTML = highlightJSON(raw); more.remove(); });
+		detail.appendChild(more);
+	  }
+
+	  chev.addEventListener('click', ev => { ev.stopPropagation(); toggleDetail(wrap); });
+	  row.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleDetail(wrap); window.getSelection()?.removeAllRanges(); });
+
+	  wrap.appendChild(detail);
+	  logEl.appendChild(wrap);
+
+	  count++;
+	  updateStatus();
+
+	  if(shouldScroll())
+		logEl.scrollTop = logEl.scrollHeight;
+	}
+
+	function mk(tag, cls, text) {
+	  const el = document.createElement(tag);
+	  el.className   = cls;
+	  el.textContent = text;
+	  return el;
+	}
+
+	function fmtLocalTime(isoStr) {
+	  const d = new Date(isoStr);
+	  const hh  = String(d.getHours()).padStart(2, '0');
+	  const mm  = String(d.getMinutes()).padStart(2, '0');
+	  const ss  = String(d.getSeconds()).padStart(2, '0');
+	  const ms  = String(d.getMilliseconds()).padStart(3, '0');
+	  return `${hh}:${mm}:${ss}.${ms}`;
+	}
+
+	// ── JSON + C# syntax highlighting ────────────────────────────────────────
+
+	function esc(s) {
+	  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	}
+
+	// Two-pass C# highlighter.
+	// Pass 1: tokenise strings and comments as atomic blobs (no coloring inside).
+	// Pass 2: colorBetween() handles keywords, numbers, and rainbow brackets in
+	//         the segments between those atomic tokens — on raw text before
+	//         HTML-escaping, so span tags can't interfere with regex matching.
+	function highlightCSharp(raw) {
+	  const ATOMIC  = /\/\/[^\n]*|@?"(?:\\[\s\S]|[^"\\])*"|'(?:\\.|[^'\\])'/g;
+	  const KW_BRAK = /[(){}\[\]]|\b\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?[fFdDmMlLuU]?\b|\b(abstract|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|get|goto|if|implicit|in|init|int|interface|internal|is|lock|long|namespace|new|not|nint|nuint|null|object|operator|out|override|params|partial|private|protected|public|readonly|record|ref|return|sbyte|sealed|set|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|value|var|virtual|void|volatile|where|while|with|yield)\b/g;
+
+	  let depth = 0;
+
+	  const colorBetween = chunk => {
+		let r = '', i = 0, m;
+		KW_BRAK.lastIndex = 0;
+
+		while((m = KW_BRAK.exec(chunk)) !== null) {
+		  r += esc(chunk.slice(i, m.index));
+
+		  const tok = m[0];
+		  if('([{'.includes(tok)) {
+			r += `<span class="rb${depth++ % 3}">${tok}</span>`;
+		  } else if(')]}'.includes(tok)) {
+			depth = Math.max(0, depth - 1);
+			r += `<span class="rb${depth % 3}">${tok}</span>`;
+		  } else if(m[1] !== undefined) {
+			r += `<span class="cs-kw">${esc(tok)}</span>`;
+		  } else {
+			r += `<span class="cs-num">${esc(tok)}</span>`;
+		  }
+
+		  i = KW_BRAK.lastIndex;
+		}
+
+		return r + esc(chunk.slice(i));
+	  };
+
+	  let out = '', last = 0, m;
+	  ATOMIC.lastIndex = 0;
+
+	  while((m = ATOMIC.exec(raw)) !== null) {
+		out += colorBetween(raw.slice(last, m.index));
+		out += m[0].startsWith('//')
+		  ? `<span class="cs-comment">${esc(m[0])}</span>`
+		  : `<span class="cs-str">${esc(m[0])}</span>`;
+		last = ATOMIC.lastIndex;
+	  }
+
+	  return out + colorBetween(raw.slice(last));
+	}
+
+	// Recursive JSON renderer with syntax coloring.
+	// Multi-line string values are rendered as C# code blocks via highlightCSharp().
+	function renderJSON(value, depth = 0) {
+	  if(value === null) return '<span class="jz">null</span>';
+	  const t = typeof value;
+	  if(t === 'boolean') return `<span class="jb">${value}</span>`;
+	  if(t === 'number')  return `<span class="jn">${value}</span>`;
+	  if(t === 'string') {
+		if(value.includes('\n'))
+		  return `<span class="js">"</span><pre class="json-code">${highlightCSharp(value)}</pre><span class="js">"</span>`;
+
+		return `<span class="js">"${esc(value)}"</span>`;
+	  }
+	  if(Array.isArray(value)) {
+		if(value.length === 0) return '[]';
+		const pad   = '  '.repeat(depth + 1);
+		const close = '  '.repeat(depth);
+		const items = value.map(v => `${pad}${renderJSON(v, depth + 1)}`).join(',\n');
+		return `[\n${items}\n${close}]`;
+	  }
+	  if(t === 'object') {
+		const keys = Object.keys(value);
+		if(keys.length === 0) return '{}';
+		const pad   = '  '.repeat(depth + 1);
+		const close = '  '.repeat(depth);
+		const items = keys
+		  .map(k => `${pad}<span class="jk">"${esc(k)}"</span>: ${renderJSON(value[k], depth + 1)}`)
+		  .join(',\n');
+		return `{\n${items}\n${close}}`;
+	  }
+	  return esc(String(value));
+	}
+
+	// Tries JSON.parse + full renderJSON. Falls back to regex coloring for
+	// truncated or otherwise-invalid JSON (e.g. peek ending mid-token).
+	function highlightJSON(jsonStr) {
+	  try {
+		return renderJSON(JSON.parse(jsonStr));
+	  } catch {
+		return esc(jsonStr)
+		  .replace(/"(?:\\.|[^"\\])*"(\s*:)?/g, (m, colon) =>
+			colon ? `<span class="jk">${m.slice(0, -colon.length)}</span>${colon}`
+			      : `<span class="js">${m}</span>`)
+		  .replace(/\b(true|false)\b/g, '<span class="jb">$1</span>')
+		  .replace(/\bnull\b/g,          '<span class="jz">null</span>')
+		  .replace(/\b\d+(?:\.\d*)?\b/g, '<span class="jn">$&</span>');
+	  }
+	}
+
+
+	function updateStatus() {
+	  const base = `${count} entr${count === 1 ? 'y' : 'ies'}`;
+	  statusEl.textContent = connected ? `${base} (live)` : base;
+	}
+
+	// ── SSE connection ────────────────────────────────────────────────────
+	let connected = false;
+
+	function connect() {
+	  const es = new EventSource('/logs/stream');
+
+	  es.onopen = () => {
+		connected = true;
+		statusEl.className = 'live';
+		updateStatus();
+	  };
+
+	  es.onmessage = e => {
+		try {
+		  const entry = JSON.parse(e.data);
+		  if(entry.level === 'INFO' && entry.message?.toLowerCase().includes('clear'))
+			document.getElementById('clearBtn').click();
+		  else
+			addEntry(entry);
+		}
+		catch { /* malformed entry — skip */ }
+	  };
+
+	  es.onerror = () => {
+		connected = false;
+		statusEl.className = 'err';
+		statusEl.textContent = 'Disconnected — reconnecting in 3s…';
+		es.close();
+		setTimeout(connect, 3000);
+	  };
+	}
+
+	// ── Help legend toggle ────────────────────────────────────────────
+	document.getElementById('helpBtn').addEventListener('click', () => {
+	  document.getElementById('legend').classList.toggle('hidden');
+	});
+
+	// ── Keyboard shortcuts ────────────────────────────────────────────
+	const searchBar   = document.getElementById('searchBar');
+	const searchInput = document.getElementById('searchInput');
+	const searchCount = document.getElementById('searchCount');
+	let   searching   = false;
+
+	function clearSearch() {
+	  searchInput.value = '';
+	  searchCount.textContent = '';
+	  document.querySelectorAll('.entry-wrap.highlight').forEach(el => el.classList.remove('highlight'));
+	  searchBar.classList.add('hidden');
+	  searching = false;
+	}
+
+	function doSearch() {
+	  const q = searchInput.value.toLowerCase().trim();
+	  document.querySelectorAll('.entry-wrap.highlight').forEach(el => el.classList.remove('highlight'));
+	  if(!q) { searchCount.textContent = ''; return; }
+	  let n = 0;
+	  document.querySelectorAll('.entry-wrap').forEach(el => {
+		if(el.textContent.toLowerCase().includes(q)) { el.classList.add('highlight'); n++; }
+	  });
+	  searchCount.textContent = `${n} match${n !== 1 ? 'es' : ''}`;
+	}
+
+	searchInput.addEventListener('input', doSearch);
+
+	function clickFilter(name) {
+	  const btn = document.querySelector(`[data-filter="${name}"]`);
+	  if(btn) btn.click();
+	}
+
+	document.addEventListener('keydown', e => {
+	  if(e.ctrlKey && e.key === 'l') {
+		e.preventDefault();
+		document.getElementById('clearBtn').click();
+		return;
+	  }
+
+	  if(e.ctrlKey && e.key === 'f') {
+		e.preventDefault();
+		searchBar.classList.remove('hidden');
+		searching = true;
+		searchInput.focus();
+		searchInput.select();
+		return;
+	  }
+
+	  if(e.ctrlKey && e.key === 'c') {
+		if(selectedWrap) {
+		  navigator.clipboard.writeText(selectedWrap.dataset.json || '').catch(() => {});
+		  return;
+		}
+	  }
+
+	  if(e.key === 'Escape') {
+		if(searching) { clearSearch(); return; }
+		const sel = window.getSelection();
+		if(sel && sel.toString().length > 0) { sel.removeAllRanges(); return; }
+		logEl.scrollTop = logEl.scrollHeight;
+		scrolledUp = false;
+		return;
+	  }
+
+	  if(!searching && !e.ctrlKey && !e.altKey && !e.metaKey) {
+		switch(e.key) {
+		  case '1': clickFilter('ALL');   break;
+		  case '2': clickFilter('TOOL');  break;
+		  case '3': clickFilter('FAIL');  break;
+		  case '4': clickFilter('ERROR'); break;
+		  case '5': clickFilter('START'); break;
+		  case '6': clickFilter('STOP');  break;
+		  case 's': autoScroll.checked = !autoScroll.checked; break;
+		  case 't': cycleTheme(); break;
+		  case 'q': document.getElementById('shutdownBtn').click(); break;
+		  case '?': document.getElementById('legend').classList.toggle('hidden'); break;
+		  case 'ArrowUp':
+			e.preventDefault(); navigate(-1); break;
+		  case 'ArrowDown':
+			e.preventDefault(); navigate(1);  break;
+		  case 'ArrowLeft':
+			e.preventDefault();
+			if(isDetailOpen(selectedWrap)) setDetail(selectedWrap, false);
+			else navigate(-1);
+			break;
+		  case 'ArrowRight':
+			e.preventDefault();
+			if(!isDetailOpen(selectedWrap)) setDetail(selectedWrap, true);
+			else navigate(1);
+			break;
+		  case 'Enter':
+		  case ' ':
+			if(selectedWrap) { e.preventDefault(); toggleDetail(selectedWrap); }
+			break;
+		  case '+':
+		  case '=': // unshifted + on most keyboards
+			setDetail(selectedWrap, true);  break;
+		  case '-':
+			setDetail(selectedWrap, false); break;
+		}
+	  }
+	});
+
+	connect();
+  </script>
+</body>
+</html>

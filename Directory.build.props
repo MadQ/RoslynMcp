@@ -1,7 +1,8 @@
-﻿<Project>
+<Project>
 	<PropertyGroup>
         
-        <VersionPrefix>0.7.1</VersionPrefix>
+        <VersionPrefix>0.7.6</VersionPrefix>
+        
         
         <VersionSuffix>alpha</VersionSuffix>
         

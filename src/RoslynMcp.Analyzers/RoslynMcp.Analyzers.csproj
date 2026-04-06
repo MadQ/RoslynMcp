@@ -9,7 +9,6 @@
     <IsRoslynComponent>true</IsRoslynComponent>
 
     <!-- Package metadata -->
-    <Version>0.2.0-alpha</Version>
     <Authors>Quinten Martens</Authors>
     <Description>Code analyzers for RoslynMcp style guidelines</Description>
     <PackageProjectUrl>https://github.com/MadQ/RoslynMcp</PackageProjectUrl>
@@ -20,6 +19,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!--
+      Pinned to 4.11.0 / 3.11.0 for VS 2022 host compatibility.
+      Roslyn analyzer DLLs must target a CodeAnalysis version that is less than or equal to the
+      version shipped with the host IDE. VS 2022 ships Roslyn 4.x; targeting 5.x causes the
+      analyzer to fail to load silently. The MCP server (RoslynMcp.csproj) uses 5.3.0 freely
+      because it is a standalone executable with no IDE host constraint.
+      Upgrade these when VS 2022 support is intentionally dropped.
+    -->
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.11.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0" PrivateAssets="all" />

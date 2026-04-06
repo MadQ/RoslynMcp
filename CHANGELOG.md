@@ -7,6 +7,182 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+---
+
+## [0.7.6-alpha] — 2026-04-06 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.7.6-alpha)
+
+### Added
+- **Call graph tools** — two new analysis tools for navigating the call graph in both directions: `roslyn_find_callers` returns all methods that call a named symbol (with `isDirect` filter for direct vs. interface/delegate dispatch); `roslyn_get_call_graph` returns all methods directly invoked within a method body by walking the Roslyn IOperation tree (closes #32)
+- **Write-retry telemetry** — `WriteWithRetryAsync` and `WriteWithRetry` now emit structured `INFO` log entries when file-lock retries occur: one entry per caught `IOException` (attempt number, delay applied, hint message, file name) and a recovery entry when a non-final attempt succeeds; if all retries are exhausted, an `ERROR` entry is logged before re-throwing (closes #136)
+- **RMCP007** — new Error diagnostic: every `[McpServerTool]` method must have a `[Description]` attribute; without it the tool is invisible to agent decision-making
+- **RMCP008** — new Error diagnostic: every parameter on a `[McpServerTool]` method must have a `[Description]` attribute; `CancellationToken` parameters are exempt (infrastructure, not surfaced in agent schema)
+- **RMCP009** — new Error diagnostic: `string projectPath` parameter must use `[Description(ProjectPathDescription)]` specifically, not an inline string; inline strings drift across tools
+- **`ToolDescriptionAnalyzer`** — new analyzer class enforcing RMCP007, RMCP008, and RMCP009; no fixer (descriptions require human judgment)
+
+### Fixed
+- **`roslyn_local_history` double-write on apply** — `HandleApply` previously called `backups.TryRestore` (which wrote the file inside the lock) and then `workspace.InvalidateFile` (which caused a second read + workspace update); the FSW handler could also fire a third reload. Refactored via new `BackupStore.TryCheck` (validates token + conflict check inside `syncRoot`, returns `CheckedRestore`) and `BackupStore.CompleteRestore` (removes meta + deletes .bak inside `syncRoot`); `HandleApply` now calls `TryCheck` → `workspace.WriteAndInvalidate` (FSW-suppressed write) → `CompleteRestore`, eliminating the double-write (closes #141)
+- **`roslyn_find_callers` returning duplicate results** — `AllSymbolsFinder` can return multiple matching symbols (e.g. interface + concrete implementation) for the same name when `containingType` is not specified; `FindCallersAsync` ran on each, producing duplicate `CallerEntry` records for the same call site. Fixed by deduplicating via `.DistinctBy(c => (c.Caller, c.File, c.Line))` before sorting (closes #143)
+- **`roslyn_build_project` reporting failure on successful builds** — `dotnet build` can exit with code 1 even when compilation succeeds; MSBuild analyzer diagnostics (MSBL*, NU*) set the exit code without emitting a parseable CS error line. Now checks whether the output contains "Build succeeded." as positive evidence; if no structured errors were found and that text is present, `succeeded` is set `true` regardless of exit code. The `error_details` fallback still fires for genuine failures (non-zero exit, no structured errors, and no "Build succeeded." text).
+- **RMCP003 code fix** — `InsertBeginToolAsync` now detects the end-of-line style from the method body's opening brace and applies it as trailing trivia on the inserted `using var scope = BeginTool(...);` statement; previously the next statement ran on the same line immediately after the semicolon
+- **BOM written by rename/signature-change tools** — `SolutionDiff.ApplyToDiskAsync` was using `sourceText.Encoding ?? Encoding.UTF8` to write changed files; `Encoding.UTF8` is `new UTF8Encoding(true)` (BOM-emitting), so renames and signature changes always wrote a UTF-8 BOM. Fixed to use `new UTF8Encoding(false)` directly — RM's policy is always UTF-8 without BOM. Root cause: `StreamReader.CurrentEncoding` always returns a BOM-emitting instance in .NET's `detectEncodingFromByteOrderMarks` mode regardless of file content, so `sourceText.Encoding` was never reliable for this purpose.
+- **`SourceText.From` encoding** — `WorkspaceManager.Instance.cs` and `ReplaceInCodeTool.cs` were passing `Encoding.UTF8` (BOM-emitting) to `SourceText.From(stream, encoding)`, causing Roslyn's in-memory documents to record a BOM-emitting encoding. Changed to `new UTF8Encoding(false)` to align with RM's BOM-free policy.
+
+### Improved
+- **`FileWriter` — centralised file write entry point** — new `internal static class FileWriter` with `WriteWithRetryAsync` and `WriteWithRetry` replaces the `protected static` methods on `RoslynMcpTool`; all file writes across the server now go through a single path that retries on `IOException`, logs each attempt and final failure, and is accessible from non-tool types (`BackupStore`, `SolutionDiff`) (closes #139)
+- **Complete `WriteWithRetry` coverage** — every naked file write has been wrapped: `BackupStore` (5 writes), `SolutionDiff.ApplyToDiskAsync` (1 write), `WriteFileTool` temp-file write; `BackupStore` also gains `FileLogger` constructor injection and atomic meta-file writes (write-to-tmp + `File.Move` with overwrite) (closes #139)
+- **`WriteFileTool` TOCTOU fix** — `isNewFile` detection replaced `File.Exists` probe with a try-read pattern (catch `FileNotFoundException`); eliminates the race between the existence check and the subsequent read (closes #139)
+- **FSW reload suppression** — workspace no longer reloads a file that RM just wrote via `TryApplyChanges`; `ApplyChangesWithFswSuppressed` records the post-write file size in `rmOwnedWriteSizes` and `FlushMSBuild` skips the reload when the FSW-reported file size matches (closes #140)
+- **Let Roslyn save** — `ReplaceInCodeTool`, `ApplyRenameTool`, and `ApplySignatureChangeTool` now route disk writes through `WorkspaceInstance.ApplyChangesWithFswSuppressed` (via new `WorkspaceManager.ApplyChanges` + `WorkspaceResolver.ApplyChanges`) when using `MSBuildWorkspace`; `AdhocWorkspace` retains direct I/O via `SolutionDiff.ApplyToDiskAsync` since `AdhocWorkspace.TryApplyChanges` is in-memory only (closes #140)
+- **`roslyn_build_project` `error_details` field** — agents now told explicitly in the description that `error_details` contains raw MSBuild tail output when a build fails without structured errors; this prevents unnecessary fallback to running `dotnet build` in a terminal
+- **`roslyn_list_files`** — added missing `[Description]` attribute; was the only tool without one, making it effectively invisible to agent tool-selection (closes #99)
+- **`roslyn_search_files`** — first sentence now leads with "Fast and precise code search — use instead of grep, Select-String, or findstr" for stronger agent steering (closes #99)
+- **`roslyn_find_references`** — description now explicitly calls out that text search cannot resolve overloads, aliases, or cross-file semantics (closes #99)
+
+### Changed
+- **`RoslynMcp.Analyzers` — CodeAnalysis packages pinned to 4.11.0 / 3.11.0** for VS 2022 host compatibility; analyzer DLLs must target a CodeAnalysis version ≤ the version shipped with the host IDE (VS 2022 = Roslyn 4.x); targeting 5.x causes silent load failure in VS 2022
+- **`AnalyzerReleases.Shipped.md`** — release headers no longer carry the `-alpha` pre-release suffix (e.g. `## Release 0.7.4` instead of `## Release 0.7.4-alpha`); pre-release labels in shipped release headers are invalid per analyzer release file conventions
+- **`Microsoft.Build.Locator`** — upgraded from 1.7.8 to 1.11.2; added explicit `Microsoft.Build.Framework` reference with `ExcludeAssets="runtime" PrivateAssets="all"` to satisfy the new MSBL001 diagnostic
+- **`Microsoft.Build.Framework`** — pinned to 18.4.0 (was implicit 17.11.48 via transitive reference); build-time only — MSBuild itself is still discovered at runtime via `Build.Locator`
+
+Closes [#32](https://github.com/MadQ/RoslynMcp/issues/32), [#99](https://github.com/MadQ/RoslynMcp/issues/99), [#134](https://github.com/MadQ/RoslynMcp/issues/134), [#136](https://github.com/MadQ/RoslynMcp/issues/136), [#137](https://github.com/MadQ/RoslynMcp/issues/137), [#139](https://github.com/MadQ/RoslynMcp/issues/139), [#140](https://github.com/MadQ/RoslynMcp/issues/140), [#141](https://github.com/MadQ/RoslynMcp/issues/141), [#143](https://github.com/MadQ/RoslynMcp/issues/143)
+
+---
+
+## [0.7.4-alpha] — 2026-04-05 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/r0.7.4.1-alpha)
+
+### Added
+- **`ToolScopeRefactoringProvider`** — new `CodeRefactoringProvider` (cursor-triggered, no diagnostic) offering quick conversions between `scope.Outcome`, `scope.Error`, `scope.Failed`, and `scope.Record`; all 6 terminal↔terminal pairs plus Record↔terminal; Record conversions include a warning in the action title since they drop or add the `return` keyword
+- **RMCP006** — new Warning diagnostic: first string argument to `scope.Outcome()` or `scope.Failed()` contains the placeholder text `"TODO"`; code fix replaces the placeholder with the tool name inferred from `[McpServerTool(Name)]` (e.g., `roslyn_info` → `"info"`)
+- **`ToolScopeHelpers`** — new internal static class shared by `ToolScopeAnalyzer`, `ToolScopeCodeFixProvider`, and `ToolScopeRefactoringProvider`; provides `HasMcpServerToolAttribute`, `GetMcpToolName`, and `InferDetailName`
+
+### Changed
+- **RMCP005** — upgraded from Warning to Error; a `BeginTool` name that mismatches `[McpServerTool(Name)]` makes log correlation impossible — it is factually incorrect, not cosmetic
+- **RMCP004 code fix** — `scope.Outcome` and `scope.Failed` fixes now infer the `detail`/`reason` label from `[McpServerTool(Name)]` (e.g., `roslyn_info` → `"info"`) instead of always using `"TODO: describe outcome"`; `scope.Failed` always uses `"failed"` as the reason; `scope.Error` is unchanged (no string arg)
+- **`ToolScopeAnalyzer` RMCP003** — expression-bodied `[McpServerTool]` methods now fail RMCP003 immediately rather than being skipped; the pattern is one class / one tool method and expression bodies cannot satisfy the `using var scope = BeginTool(...)` requirement
+- **`ModelContextProtocol`** — updated from 1.1.0 to 1.2.0; breaking changes (SSE disabled by default, `RequestContext` constructor obsoleted) are non-issues for this stdio server
+- **`Microsoft.Extensions.Hosting` / `Logging.Console`** — updated from `10.0.0-preview.3` to `10.0.5` (preview → stable)
+
+### Fixed
+- **RMCP004 code fix** — wrapping a `null` or `null!` return expression no longer produces uncompilable code (CS0411 type-inference failure on `scope.Failed<T>` / `scope.Outcome<T>` / `scope.Error<T>`); the fix now substitutes `new ErrorResult(<arg>)` where `<arg>` is the first `scope.Record(...)` string argument in the method, or `"TODO"` if none is found
+- **`ToolScopeRefactoringProvider`** — Record→terminal conversions ("Convert to return scope.Failed(...)") now also substitute `new ErrorResult(<Record arg>)` instead of the uncompilable `null!`
+- **`TryServeCachedPage`** — added `[NotNullWhen(true)]` to the `out` parameter; eliminates 10× CS8603 nullable-return warnings project-wide
+- **`roslyn_write_file`** — new `.cs` files no longer get a UTF-8 BOM; was incorrectly using `encoderShouldEmitUTF8Identifier: true` as a "VS default" for C# files
+- **`roslyn_replace_in_code`** — no longer uses the Roslyn workspace's cached `SourceText.Encoding` when writing; now peeks at the actual on-disk bytes to detect the BOM, preventing BOM-pollution when the workspace loaded a file before the encoding setting was corrected
+- **Log viewer** — instance column now shows a unique per-PID sequential label (`#1`, `#2`, …) instead of the global call counter, making multi-process log sessions easier to follow
+- **TestHarness** — 8 pre-existing test failures fixed; validators were using camelCase field names (`matchCount`, `changedLines`, `insertedAt`, `lineCount`) but tool responses use snake_case; now passes 41/41
+
+### Refactored
+- **`FileEncoding`** — new shared static helper (`FileEncoding.Detect(ReadOnlySpan<byte>)` + `FileEncoding.Peek(string)`) centralises BOM detection; replaces duplicated logic in `WriteFileTool` and `ReplaceInCodeTool`
+
+---
+
+## [0.7.3-alpha] — 2026-04-04
+
+### Added
+- **`RoslynMcp.Analyzers` — ToolScopeAnalyzer (RMCP003/RMCP004/RMCP005)** — three analyzer rules that enforce the `BeginTool`/`ToolScope` pattern on all `[McpServerTool]` methods (#127)
+  - **RMCP003** (Error): `[McpServerTool]` method must begin with `using var scope = BeginTool(...)`
+  - **RMCP004** (Error): all return paths in a `[McpServerTool]` method must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
+  - **RMCP005** (Warning): the `name` argument passed to `BeginTool` must match `[McpServerTool(Name = ...)]`
+- **`AnalyzerReleases.Shipped.md`** — Release 0.3.0 block added documenting RMCP003/RMCP004/RMCP005 (#127)
+- **`ToolScopeCodeFixProvider`** — IDE lightbulb code fixes for RMCP003/004/005 (#128)
+  - RMCP003: inserts `using var scope = BeginTool("toolName");` as the first statement; tool name read from `[McpServerTool(Name = "...")]`
+  - RMCP004: offers three alternatives — `scope.Outcome(...)`, `scope.Error(...)`, `scope.Failed(...)`; the wrong choice produces a compile-time generic constraint error, guiding the developer to the right one
+  - RMCP005: replaces the mismatched name literal with the value from `[McpServerTool(Name = "...")]`
+- **`roslyn_get_project_info`** — exposes MSBuild-derived project properties (#117)
+  - New fields: `version`, `root_namespace`, `target_frameworks`, `allow_unsafe_blocks`, `warnings_as_errors`
+  - Parsed from `.csproj` XML; `_caution` is populated whenever any MSBuild property is returned, noting that `Condition` attributes are not evaluated
+- **`roslyn_build_project`** — populates `error_details` with the last 30 lines of raw MSBuild output when the build fails with exit code ≠ 0 but zero C# diagnostics (#131)
+  - Prevents `succeeded: false` with empty `errors` from leaving agents without actionable context
+- **`BackupStore`** — now records `gitBranch` and `gitCommit` at snapshot time via `git rev-parse` (#122)
+- **`RoslynMcpJson`** — new static class with shared `JsonSerializerOptions` used by all serialization (#123)
+  - Custom `JavaScriptEncoder` using `TextEncoderSettings` — allows all Unicode through instead of escaping as `\uXXXX`; still escapes what is actually necessary
+  - Literal `\n` in JSON string values now preserved (not double-escaped)
+- **`ToolErrorResult`** — abstract base record in `ErrorResult.cs`; all structured error types now derive from it, replacing the `ExtractDetail` switch (#125)
+  - `PathErrorResult` and `UnexpectedErrorResult` in `ToolResults.cs` now inherit `: ToolErrorResult`, completing the structured error hierarchy
+  - `TryGetCompilation` and `TryGetProject` `out` parameters typed as `out ToolErrorResult?`, enabling callers to handle structured errors without casting
+
+### Changed
+- **`roslyn_local_history`** — `list` action now includes a `_caution` field when any backup was taken on a different branch than the current one (#122)
+- **`roslyn_local_history` and `roslyn_write_file`** — tool descriptions updated with branch-agnostic caution notes (#122)
+- **`ToolResults.cs`** — all ~51 result records converted to positional syntax with `[property: JsonPropertyName("snake_case")]` attributes; C# names normalized to PascalCase (#124)
+  - Snake_hybrid C# names (e.g. `Symbol_name`) → PascalCase (e.g. `SymbolName`)
+  - `_caution` → `Caution` in C# (JSON key `_caution` preserved via attribute)
+  - `MetadataSymbolResult.Message` → `Error`, JSON key `message` → `error`
+  - `SymbolDocumentationEmptyResult.Message` → `Error`, JSON key `message` → `error`
+- **`ToolScope.Error<T>()`** — gains `where T : ToolErrorResult` constraint; body simplified to `returnValue.Error` (#125)
+- **Operation-type results** — Build/Clean/Restore/ReplaceInFile/ReplaceInCode now use `scope.Failed(reason, result)` instead of `scope.Error(result)` (#125)
+- **`ExtractDetail<T>()` switch** — deleted entirely; replaced by `ToolErrorResult` abstract base record (#125)
+- **All tool files** — all RMCP003/004/005 violations resolved; every `[McpServerTool]` method now opens with `using var scope = BeginTool(...)` and all return paths go through `scope` (#127)
+- **`TryServeCachedPage<T>`** — moved from `RoslynMcpTool` to `ToolScope`; signature changed to `bool + out object?` (no longer calls `scope.Outcome` internally); callers receive the cached result directly and call `scope.Outcome` themselves (#130)
+
+### Fixed
+- **`BuildLiteralRegex` newline normalization** — CRLF-tolerance was a no-op: `Regex.Escape` converts literal `\n` to the two-char sequence `\n`, so the subsequent `.Replace("\n", ...)` searching for the actual newline char never matched; fix: `.Replace(@"\n", @"\r?\n")` (#126)
+- **`ToolErrorResult.Error`** — made non-nullable (`string?` → `string`); aligns with all derived types; dead `?? "error"` fallback removed from `ToolScope.Error<T>()` (#126)
+- **`IsUnderRoot` filter** — tightened to also check `LocationKind` and use path-separator-aware comparison, eliminating false positives for external files with overlapping path prefixes (#114)
+- **`roslyn_write_file`** — retries with exponential backoff (up to 3 attempts) on `IOException` due to file contention, preventing transient lock failures from surfacing as errors (#129)
+
+---
+
+## [0.7.2-alpha] — 2026-04-03
+
+### Added
+- **NDJSON log viewer** — `src/RoslynMcp.LogViewer/viewer.html`: self-contained browser-based log viewer (#118)
+  - Tree-view expand/collapse with chevron-left layout
+  - Win95-style `[+]`/`[-]` expand boxes (Parchment theme, pure CSS `:has()`)
+  - Parchment dotted tree lines aligned to box center; local time display
+  - Double-click clears accidental text selection; text remains normally selectable
+  - JSON syntax highlighting: recursive `renderJSON()` walker with colored keys/strings/numbers/booleans/null
+  - C# syntax highlighting: two-pass tokenizer (atomic strings/comments first, then keywords/numbers/brackets)
+  - Rainbow bracket coloring: `(`, `)`, `{`, `}`, `[`, `]` cycle 3 colors by nesting depth
+  - Embedded C# code blocks (multi-line string values) detected and rendered as `<pre>` blocks
+  - Graceful fallback for truncated/invalid JSON in `highlightJSON()`
+- **`response_peek` pipeline** — tool responses now captured and surfaced in the log viewer (#118)
+  - `LogEntry.ResponsePeek` property in shared NDJSON schema
+  - `FileLogger.LogTool` gains `responsePeek` parameter
+  - `RoslynMcpTool.SerializeResponse<T>` captures peek (600 char cap, truncated with `…`)
+  - `Outcome`/`Error`/`Failed` all pass peek through to the logger
+- **`roslyn_write_file`** — atomically write or create any file within the project root (#116)
+  - Atomic write via temp-file + `File.Move(overwrite: true)` — no partial writes
+  - Automatic pre-write backup; returns a `backupToken` usable with `roslyn_local_history` for undo
+  - BOM-preserving: sniffs existing encoding on overwrite; new `.cs` files default to UTF-8 BOM (VS default)
+  - `createNew: true` mode for file creation; path traversal guard via `TryResolveTargetPath`
+  - SDK-style projects: new `.cs` files in the project directory are auto-included (no `.csproj` edit needed)
+- **`roslyn_local_history`** — crash-safe token-based undo for file write operations (#116)
+  - `action: list` — list backup snapshots for a file (or all files)
+  - `action: preview` — inspect a backup by token; includes `conflictRisk` flag if file was modified since backup
+  - `action: apply` — restore a file from a backup token; invalidates workspace cache on success; returns conflict details if the current file diverges
+- **`BackupStore`** — crash-recoverable backup infrastructure (#116)
+  - Snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\{path-hash}/`; override with `ROSLYNMCP_BACKUP_PATH` env var
+  - Token format: `{8-char-path-hash}_{unix-ms}` — unique, multi-level, crash-recoverable without server state
+  - File hash in `meta.json` for dedup (skip backup if identical content), conflict detection, and integrity checks
+  - Retention: max 10 snapshots per file; oldest pruned automatically on write
+  - `TryResolveTargetPath` added to `RoslynMcpTool` base class: validates path stays under root without requiring file existence
+
+### Changed
+- **Tool metadata improvements — all 33 tools** (#112)
+  - Added `Title` (Title Case display names), `OpenWorld = false`, `Idempotent = true` (read-only tools), `Destructive = false` (additive/non-destructive tools) to all tool attributes
+  - Rewrote all `[Description]` strings with agent-centric framing: concise first sentence, key parameters, return shape, performance notes, caveats
+  - Correctness fixes: `ChangeSignatureTool` `ReadOnly = true`, `InsertLinesTool` `Destructive = false`, `BuildTool` remove incorrect `ReadOnly = true`, `ReplaceInFileTool` stale XML doc removed
+  - AGENTS.md: added missing `DebugAttachTool` entry, clarified `ChangeSignatureTool` as preview-only, added tool tips
+- **`roslyn_get_diagnostics` — structured response, pagination, shared types** (#111)
+  - **Breaking:** response is now a structured JSON object instead of a flat `string[]`
+  - Always-present `summary`, `errors`, `warnings`, `total`, `returned`, `has_more`, `page_token`, `items`
+  - `items` is a paginated array of `{ code, severity, file, line, column, message }` objects
+  - `take: 0` fast path — returns summary counts with empty `items`, no compilation overhead
+  - Stateless `page_token` (base64-encoded `{ skip, severity }`) — no server-side cache needed
+  - `severity` filter: `"errors"`, `"warnings"`, or `"all"` (default: errors + warnings)
+  - File paths now project-relative (consistent with `roslyn_build_project`)
+- **`roslyn_build_project`** — improved tool description; `Errors`/`Warnings` arrays now typed as `DiagnosticItem[]`
+- **`RoslynMcpTool` base class** — added `GetSeverityFilter` and `TryMakeRelative` as `protected static` helpers
+
+### Fixed
+- **External diagnostics noise** (#113) — `roslyn_get_diagnostics` and `roslyn_build_project` no longer surface diagnostics from files outside the project root (e.g. files open in VS from unrelated directories); `IsUnderRoot` helper added to `RoslynMcpTool` base class
+- **`SolutionDiff.BuildHunkList` infinite loop** (#115) — loop hung when new file is shorter than old; LCS-matched old lines with exhausted `ni` now correctly treated as deletions
+
+---
+
 ## [0.7.1-alpha] — 2026-03-31
 
 ### Added
@@ -38,7 +214,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **UTF-8 BOM stripped** from community standard files. (#76)
 
 ### Changed
-- **Result records** — ALL anonymous `new { }` types replaced with typed records across all 34 tools. `ErrorResult`, `ToolResults.cs` with 30+ record types. JSON field names preserved — no breaking change. (#74, #79, #81, #82)
+- **Result records** — ALL anonymous `new { }` types replaced with typed records across all 33 tools. `ErrorResult`, `ToolResults.cs` with 30+ record types. JSON field names preserved — no breaking change. (#74, #79, #81, #82)
 - **`Failed<T>` token estimation** — error paths now estimate tokens.
 - **SearchFiles/SemanticSearch** — switched from void `Outcome` to `Outcome<T>` for token estimation.
 - **README rewritten** — hero section, quick start, tool catalog, agent instructions, help wanted. (#74, #77, #78, #88)
@@ -250,7 +426,11 @@ Folds in previously unreleased v0.3.0-alpha work (multi-project infrastructure) 
 
 ---
 
-[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/v0.7.0-alpha...HEAD
+[Unreleased]: https://github.com/MadQ/RoslynMcp/compare/r0.7.4.1-alpha...HEAD
+[0.7.4-alpha]: https://github.com/MadQ/RoslynMcp/releases/tag/r0.7.4.1-alpha
+[0.7.3-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.7.2-alpha...v0.7.3-alpha
+[0.7.2-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.7.1-alpha...v0.7.2-alpha
+[0.7.1-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.7.0-alpha...v0.7.1-alpha
 [0.7.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.6.0-alpha...v0.7.0-alpha
 [0.6.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.5.0-alpha...v0.6.0-alpha
 [0.5.0-alpha]: https://github.com/MadQ/RoslynMcp/compare/v0.4.0-alpha...v0.5.0-alpha

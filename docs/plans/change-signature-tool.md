@@ -1,8 +1,7 @@
 ﻿# Change Signature Tool — Planning Doc
 
-**Status:** Planning (pre-v0.3.0)  
-**Target:** v0.4.0 or later  
-**Priority:** Medium (nice-to-have, not blocking)
+**Status:** Shipped as of v0.4.0 (`roslyn_change_signature` + `roslyn_apply_signature_change`)
+
 
 ---
 

@@ -1,4 +1,4 @@
-using System.Xml.Linq;
+﻿using System.Xml.Linq;
 using System.ComponentModel;
 using System.Xml;
 using Microsoft.CodeAnalysis;
@@ -11,21 +11,26 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 {
 	public GetSymbolDocumentationTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
-	[McpServerTool(Name = "roslyn_get_symbol_documentation", ReadOnly = true)]
+	[McpServerTool(Name = "roslyn_get_symbol_documentation", ReadOnly = true, Title = "Get Symbol Documentation", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns XML documentation comments for a symbol (type, method, property, field, event). " +
-		"Includes summary, parameter descriptions, return value description, and remarks. " +
-		"Use this to understand API contracts without reading source files.")]
+		"Returns parsed XML documentation for a symbol (type, method, property, field, event) as structured fields: " +
+		"summary, parameter descriptions, return value description, remarks, and example — not raw XML. " +
+		"Use this to understand a symbol's API contract (expected inputs, outputs, side effects) before " +
+		"using it, without reading its source code. " +
+		"For a brief summary only, use roslyn_get_symbol_definition; for full source code when docs are " +
+		"absent, use roslyn_get_member_body. " +
+		"Returns a structured empty result (not an error) when no XML doc comments are found for the symbol.")]
 	public object GetSymbolDocumentation(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Optional containing type to narrow the search, e.g. 'WorkspaceManager'.")] string? containingType = null)
+		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName);
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			return error;
 		
-		var symbol      = FindSymbol(compilation, symbolName, containingType);
+		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			return scope.Error(error!);
+		
+		var symbol = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
 			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
@@ -59,7 +64,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 	private static DocumentationComment ParseDocumentation(string xml)
 	{
 		try {
-		
+			
 			var doc = XDocument.Parse(xml);
 			var root = doc.Root;
 			
@@ -81,8 +86,9 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			return new DocumentationComment(summary, parameters, returns, remarks, example);
 		}
 		catch(XmlException) {
-		
+			
 			// Malformed XML documentation — return empty rather than failing the tool call.
+			
 			return new DocumentationComment();
 		}
 	}

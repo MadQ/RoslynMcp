@@ -53,6 +53,20 @@ By contributing, you're helping AI agents work better with C# code. That's worth
 - Git
 - Your preferred code editor (Visual Studio, VS Code, Rider, etc.)
 
+### Dev Environment Setup
+
+After cloning, run this one-liner to activate the pre-commit hook that strips UTF-8 BOMs from staged `.cs` files:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+**Why?** VS 17.14+ re-adds BOMs to `.cs` files via the Roslyn language service on background reload. The hook detects and strips them automatically on each commit, keeping the repository BOM-free.
+
+The `.githooks/pre-commit` script is committed to the repo — `core.hooksPath` tells git to use it instead of `.git/hooks/`.
+
+---
+
 ### Building
 
 ```bash
@@ -70,7 +84,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (41 tests covering all tools)
+# Run the comprehensive test suite (44 tests covering all tools)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
@@ -123,7 +137,7 @@ Publish a Release build and configure your MCP client to use it:
 
 **PRs that add `.editorconfig` files will not be approved.** These create the same conflicts with the project's intentional style choices.
 
-**Custom analyzers are acceptable** if they enforce narrow, high-value rules. Example: `RoslynMcp.Analyzers` suggests modern C# alternatives (all warnings, never errors).
+**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal, RMCP005: `BeginTool` name mismatch) and warning-severity rules (RMCP006: `TODO` placeholder in `scope.Outcome`/`scope.Failed` detail strings). New analyzer contributions follow the same pattern.
 
 ---
 
@@ -137,29 +151,35 @@ Publish a Release build and configure your MCP client to use it:
        public MyNewTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
            : base(workspace, logger, paginationCache) { }
 
-       [McpServerTool, Description("...")]
+       [McpServerTool(Name = "roslyn_my_tool", ReadOnly = true)]
+       [Description("...")]
        public object MyToolMethod(
            [Description("...")] string parameter,
-           [Description(ProjectPathDescription)] string? projectPath = null)
+           [Description(ProjectPathDescription)] string projectPath)
        {
-           if(!TryGetCompilation(projectPath, out var compilation, out var error))
-               return error;
+           using var scope = BeginTool("roslyn_my_tool", parameter);
+
+           if(!TryGetCompilation(projectPath, out var compilation, out ToolErrorResult? error))
+               return scope.Error(error!);
 
            // Use Roslyn APIs here
            // Typed result records are preferred over anonymous objects
-           return new { result = "..." };
+           return scope.Outcome("summary of result", new MyToolResult(...));
        }
    }
    ```
 
+   **Required scope rules (enforced by RMCP003/RMCP004 analyzer errors):**
+   - `using var scope = BeginTool(...)` must be the **first statement** — ensures every exit path logs timing
+   - Every return must flow through `scope.Error(error)`, `scope.Outcome(detail, value)`, or `scope.Failed(reason, value)` — bare `return` bypasses logging
+
 2. **No manual DI registration needed** — `WithToolsFromAssembly()` in `Program.cs` auto-discovers all `[McpServerToolType]` classes
 
-3. **Add tests** in `src/TestHarness/Program.cs`
+3. **Add tests** in `src/TestHarness/TestHarnessProgram.cs`
 
 4. **Update documentation**:
-   - README.md (tools table)
-   - AGENTS.md (architecture table)
-   - `.github/copilot-instructions.md` (architecture table)
+   - README.md (tool catalog table)
+   - AGENTS.md (architecture table and tool count)
 
 ---
 

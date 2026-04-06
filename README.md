@@ -2,13 +2,13 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4)](https://dotnet.microsoft.com/)
-[![MCP](https://img.shields.io/badge/MCP-1.1.0-blue)](https://modelcontextprotocol.io/)
+[![MCP](https://img.shields.io/badge/MCP-1.2.0-blue)](https://modelcontextprotocol.io/)
 [![Alpha](https://img.shields.io/badge/status-alpha-orange)]()
 
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 34 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 35 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -25,7 +25,13 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 ## Quick Start
 
-**1. Clone and build** (requires .NET 8 or 10 SDK):
+**1. Get RoslynMcp**
+
+**Option A — Download and extract** (simplest, no SDK required):
+
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0` if you prefer). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+
+**Option B — Clone and build** (requires .NET 8 or 10 SDK):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
@@ -33,36 +39,41 @@ cd RoslynMcp
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 ```
 
+The executable will be at `./publish/net10.0/RoslynMcp.exe`.
+
 **2. Add to your MCP client config.**
 
-For Claude Code, create `.mcp.json` in your project root:
+**Claude Code** — create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "roslyn": {
+      "type": "stdio",
+      "command": "/absolute/path/to/RoslynMcp.exe"
+    }
+  }
+}
+```
+
+> Global alternative: add the same `"mcpServers"` block to `~/.claude.json` (`%USERPROFILE%\.claude.json` on Windows).
+
+**GitHub Copilot (VS Code / CLI / Visual Studio)** — create `.mcp.json` in your project root:
 
 ```json
 {
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp.exe"
     }
   }
 }
 ```
 
-**For .NET Framework or large solutions**, add `--workspace adhoc` for faster startup:
+> Global alternative: add the same `"servers"` block to `~/.copilot/mcp-config.json` (`%USERPROFILE%\.copilot\mcp-config.json` on Windows).
 
-```json
-{
-  "servers": {
-    "roslyn": {
-      "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp.exe",
-      "args": ["--workspace", "adhoc"]
-    }
-  }
-}
-```
-
-Options: `auto` (default), `sdk`, `vs` (Visual Studio MSBuild for .NET Framework), `adhoc` (skip MSBuild, fastest startup). Also configurable via `ROSLYNMCP_WORKSPACE` env var.
+See [INSTALLATION.md](INSTALLATION.md) for Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
 
 **3. Start using it.** Every tool accepts a `projectPath` parameter pointing at your `.csproj`, `.sln`, or project directory. Your agent handles this automatically.
 
@@ -76,8 +87,6 @@ Options: `auto` (default), `sdk`, `vs` (Visual Studio MSBuild for .NET Framework
 > **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
 > Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
 
-See [INSTALLATION.md](INSTALLATION.md) for setup guides for GitHub Copilot, Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
-
 ---
 
 ## Why RoslynMcp?
@@ -90,13 +99,13 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 **Rename with confidence.** `roslyn_preview_rename` + `roslyn_apply_rename` performs semantic rename across your entire solution. It knows that `order.Status` and `IOrder.Status` are the same symbol. Grep doesn't.
 
-**Build without leaving the process.** `roslyn_build_project` checks Roslyn diagnostics first (~17ms). If there are errors, it returns them instantly without spawning MSBuild. Clean code triggers a real `dotnet build` for full validation.
+**Build without leaving the process.** `roslyn_build_project` checks Roslyn diagnostics first — fast, in-process, no MSBuild spawn. If there are errors, it returns them instantly. Clean code triggers a real `dotnet build` for full validation.
 
 ---
 
 ## Tool Catalog
 
-34 tools organized by what you need to do. All tools work in-process using Roslyn APIs unless noted.
+35 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -112,6 +121,8 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | Tool | What it does |
 |------|--------------|
 | `roslyn_find_references` | Every reference to a symbol across the solution |
+| `roslyn_find_callers` | All methods that call a named symbol (direct or via interface dispatch) |
+| `roslyn_get_call_graph` | All methods invoked within a method body (IOperation tree walk) |
 | `roslyn_find_implementations` | All types implementing an interface or overriding a member |
 | `roslyn_get_symbol_info` | What a name at a location actually resolves to |
 | `roslyn_get_symbol_definition` | Jump to where a symbol is declared |
@@ -140,6 +151,8 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | `roslyn_replace_in_code` | Semantic C# editing -- replaces syntax nodes, validates syntax |
 | `roslyn_replace_in_file` | Text-level find-and-replace with regex (any file type) |
 | `roslyn_insert_lines` | Insert lines at a position or anchor pattern |
+| `roslyn_write_file` | Atomically write or create a file; returns a backup token for undo |
+| `roslyn_local_history` | Browse, preview, and restore crash-safe file backups (list/preview/apply) |
 
 ### Refactoring
 
@@ -163,6 +176,16 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | Tool | What it does |
 |------|--------------|
 | `roslyn_info` | Server version, PID, uptime, MSBuild discovery, log markers |
+
+---
+
+## Log Viewer
+
+RoslynMcp writes structured NDJSON logs to `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`. `src/RoslynMcp.LogViewer/viewer.html` is a self-contained browser-based viewer for those logs — open it directly in any browser, point it at the log file, and watch tool calls stream in live.
+
+**Features:** expandable rows with response peek data, JSON and C# syntax highlighting (with rainbow bracket coloring), four themes (Dark, Light, Parchment, Auto), local time display, and a Win95-inspired tree-view UI in Parchment mode.
+
+Useful for understanding what your agent is actually doing, spotting slow tool calls, and debugging unexpected responses.
 
 ---
 
@@ -198,7 +221,7 @@ When working with C# code, prefer roslyn_* MCP tools:
 - `roslyn_search_files` / `roslyn_semantic_search` for code discovery
 - `roslyn_preview_rename` + `roslyn_apply_rename` for semantic renames
 - `roslyn_get_file_outline` for file structure (don't read the whole file)
-- `roslyn_get_diagnostics` with `severity: "errors"` for fast error checks
+- `roslyn_get_diagnostics` with `take: 0` for a fast error count check (no items), or `severity: "errors"` to page through individual errors
 ```
 
 For complete instructions covering every tool, see [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) — includes a full version, a compact version, and guidance for subagent delegation (subagents don't inherit your instructions).
@@ -223,7 +246,7 @@ See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for details.
 
 RoslynMcp works. We use it daily for C# development with AI agents. But it is alpha software and there are areas where outside perspectives would make a real difference.
 
-**First-call latency.** Loading an MSBuild workspace takes ~10 seconds on first tool call as the solution is parsed and compiled. Subsequent calls are fast (the workspace is cached and incrementally updated). Adding a new `.cs` file also triggers a full workspace reload (~8-10 seconds on next tool call) because Roslyn's `MSBuildWorkspace` doesn't support in-place document addition for SDK-style projects ([dotnet/roslyn#36781](https://github.com/dotnet/roslyn/issues/36781)). If you have ideas for improving cold-start or reload time -- lazy compilation, workspace preloading, partial loading strategies -- we would like to hear them.
+**First-call latency.** Loading an MSBuild workspace takes ~10 seconds on first tool call as the solution is parsed and compiled. Subsequent calls are fast (the workspace is cached and incrementally updated). Adding a new `.cs` file also triggers a full workspace reload (~8-10 seconds on next tool call) because Roslyn's `MSBuildWorkspace` doesn't support in-place document addition for SDK-style projects ([dotnet/roslyn#36781](https://github.com/dotnet/roslyn/issues/36781)). The cold start pays back quickly: once loaded, `roslyn_get_diagnostics` runs in-process in milliseconds — [18× faster than `dotnet build`](docs/battle-test-results.md) in our battle-testing. On very large solutions (Orleans with 235 compiled projects hit 7+ minutes), `--workspace adhoc` cuts cold start to ~22 seconds when full NuGet resolution isn't needed. If you have ideas for improving cold-start or reload time -- lazy compilation, workspace preloading, partial loading strategies -- we would like to hear them.
 
 **Platform testing.** RoslynMcp is developed and tested on Windows. It should work on Linux and macOS (Roslyn and MSBuild are cross-platform), but it has not been validated. If you run it on a non-Windows platform, your experience report is valuable whether it works perfectly or fails completely.
 
@@ -233,7 +256,7 @@ RoslynMcp works. We use it daily for C# development with AI agents. But it is al
 
 **Multi-agent resource usage.** Each subagent spawns its own MCP server process with its own Roslyn workspace (~100MB+ RAM, ~10s load time). Parallel subagents multiply this cost. We're designing a shared Workspace Service via named pipes — one workspace per solution, shared across all agents. See [#86](https://github.com/MadQ/RoslynMcp/issues/86) and the [design doc](docs/plans/multi-instance-architecture.md).
 
-**Benchmarks in progress.** We're actively benchmarking token usage and correctness across real-world repos — RoslynMcp vs built-in tools, across different model tiers. Results will be published before the first binary release.
+**Benchmarks in progress.** We're actively benchmarking token usage and correctness across real-world repos — RoslynMcp vs built-in tools, across different model tiers. See [initial battle-test results](docs/battle-test-results.md).
 
 If any of this sounds interesting, [open an issue](https://github.com/MadQ/RoslynMcp/issues) or submit a PR.
 

@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using System.Text;
 
 namespace RoslynMcp;
 
@@ -11,18 +12,18 @@ internal static class SolutionDiff
 	///     Returns a unified diff string comparing the changed documents between
 	///     <paramref name="before"/> and <paramref name="after"/>.
 	/// </summary>
-	public static async Task<string> BuildAsync(Solution before, Solution after)
+	public static async Task<string> BuildAsync(Solution before, Solution after, CancellationToken cancellationToken)
 	{
 		var sb = new System.Text.StringBuilder();
 		
-		foreach(var projectChange in after.GetChanges(before).GetProjectChanges()) {
+		foreach(var projectChange in after.GetChanges(before).GetProjectChanges())
 			foreach(var docId in projectChange.GetChangedDocuments()) {
-			
+				
 				var oldDoc = before.GetDocument(docId)!;
 				var newDoc = after.GetDocument(docId)!;
 				
-				var oldText = (await oldDoc.GetTextAsync()).ToString();
-				var newText = (await newDoc.GetTextAsync()).ToString();
+				var oldText = (await oldDoc.GetTextAsync(cancellationToken)).ToString();
+				var newText = (await newDoc.GetTextAsync(cancellationToken)).ToString();
 				
 				if(oldText == newText)
 					continue;
@@ -32,7 +33,6 @@ internal static class SolutionDiff
 				sb.AppendLine($"+++ {path}");
 				sb.Append(BuildHunks(oldText, newText));
 			}
-		}
 		
 		return sb.Length > 0 ? sb.ToString() : "(no changes)";
 	}
@@ -41,20 +41,24 @@ internal static class SolutionDiff
 	///     Writes all changed documents from <paramref name="newSolution"/> to disk.
 	///     Only files with a non-null <see cref="Document.FilePath"/> are written.
 	/// </summary>
-	public static async Task ApplyToDiskAsync(Solution oldSolution, Solution newSolution)
+	public static async Task ApplyToDiskAsync(Solution oldSolution, Solution newSolution, Func<string, string, Task> writeFile)
 	{
 		foreach(var projectChange in newSolution.GetChanges(oldSolution).GetProjectChanges()) {
-			foreach(var docId in projectChange.GetChangedDocuments()) {
 			
+			foreach(var docId in projectChange.GetChangedDocuments()) {
+				
 				var newDoc = newSolution.GetDocument(docId)!;
 				
 				if(newDoc.FilePath is null)
 					continue;
 				
-				var text = (await newDoc.GetTextAsync()).ToString();
-
+				var sourceText = await newDoc.GetTextAsync();
+				
 				try {
-					await File.WriteAllTextAsync(newDoc.FilePath, text);
+					// SourceText.Encoding is unreliable — StreamReader.CurrentEncoding returns a
+					// BOM-emitting instance regardless of whether the file had a BOM. RM's policy
+					// is always UTF-8 without BOM, so we never use sourceText.Encoding here.
+					await writeFile(newDoc.FilePath, sourceText.ToString());
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					throw new InvalidOperationException($"Failed to write '{newDoc.FilePath}': {ex.Message}", ex);
@@ -77,6 +81,7 @@ internal static class SolutionDiff
 		var hunks  = BuildHunkList(oldLines, newLines, lcs, context: 3);
 		
 		foreach(var hunk in hunks) {
+			
 			sb.AppendLine($"@@ -{hunk.OldStart + 1},{hunk.OldLines} +{hunk.NewStart + 1},{hunk.NewLines} @@");
 			
 			foreach(var line in hunk.Lines)
@@ -95,53 +100,53 @@ internal static class SolutionDiff
 	private static bool[] LongestCommonSubsequence(string[] oldLines, string[] newLines)
 	{
 		var inLcs = new bool[oldLines.Length];
-
+		
 		// Map each line to its positions in the old file.
 		var oldPositions = new Dictionary<string, List<int>>();
-
+		
 		for(var i = 0; i < oldLines.Length; i++) {
-
+			
 			if(!oldPositions.TryGetValue(oldLines[i], out var list))
 				oldPositions[oldLines[i]] = list = [];
-
+			
 			list.Add(i);
 		}
-
+		
 		// Walk the new file, greedily matching each line to the earliest
 		// unused position in the old file (preserving order).
 		var lastMatchedOld = -1;
-
+		
 		foreach(var line in newLines) {
-
+			
 			if(!oldPositions.TryGetValue(line, out var positions))
 				continue;
-
+			
 			// Binary search for first position > lastMatchedOld.
-			var lo = 0;
-			var hi = positions.Count - 1;
+			var lo	 = 0;
+			var hi	 = positions.Count - 1;
 			var best = -1;
-
+			
 			while(lo <= hi) {
-
+				
 				var mid = lo + (hi - lo) / 2;
-
+				
 				if(positions[mid] > lastMatchedOld) {
-
 					best = mid;
 					hi   = mid - 1;
 				}
 				else
 					lo = mid + 1;
 			}
-
+			
 			if(best < 0)
 				continue;
-
+			
 			var oldPos = positions[best];
+			
 			inLcs[oldPos]  = true;
 			lastMatchedOld = oldPos;
 		}
-
+		
 		return inLcs;
 	}
 	
@@ -154,9 +159,13 @@ internal static class SolutionDiff
 		var oi      = 0; // old index
 		var ni      = 0; // new index
 		var lcsIdx  = 0;
+		var oldLen  = oldLines.Length;
+		var newLen  = newLines.Length;
+		var lcsLen  = inLcs.Length;
 		
-		while(oi < oldLines.Length || ni < newLines.Length) {
-			if(lcsIdx < inLcs.Length && inLcs[lcsIdx] && oi < oldLines.Length && ni < newLines.Length && oldLines[oi] == newLines[ni]) {
+		while(oi < oldLen || ni < newLen) {
+			
+			if(lcsIdx < lcsLen && inLcs[lcsIdx] && oi < oldLen && ni < newLen && oldLines[oi] == newLines[ni]) {
 				oi++;
 				ni++;
 				lcsIdx++;
@@ -176,25 +185,26 @@ internal static class SolutionDiff
 			var hunkOi = oi;
 			var hunkNi = ni;
 			
-			while(oi < oldLines.Length || ni < newLines.Length) {
-				var atLcs = lcsIdx < inLcs.Length && inLcs[lcsIdx]
-					&& oi < oldLines.Length && ni < newLines.Length
+			while(oi < oldLen || ni < newLen) {
+				
+				var atLcs = lcsIdx < lcsLen && inLcs[lcsIdx]
+					&& oi < oldLen && ni < newLen
 					&& oldLines[oi] == newLines[ni];
 				
 				if(atLcs)
 					break;
 				
-				if(oi < oldLines.Length && (lcsIdx >= inLcs.Length || !inLcs[lcsIdx])) {
+				// If ni is exhausted, the LCS match can never be reached — treat as deletion.
+				if(oi < oldLen && (lcsIdx >= lcsLen || !inLcs[lcsIdx] || ni >= newLen)) {
 					lines.Add("-" + oldLines[oi++]);
 					lcsIdx++;
 				}
-				else if(ni < newLines.Length) {
+				else if(ni < newLen)
 					lines.Add("+" + newLines[ni++]);
-				}
 			}
 			
 			// Trailing context.
-			for(var c = 0; c < context && oi < oldLines.Length; c++, oi++, ni++, lcsIdx++)
+			for(var c = 0; c < context && oi < oldLen; c++, oi++, ni++, lcsIdx++)
 				lines.Add(" " + oldLines[oi]);
 			
 			hunks.Add(new Hunk(hunkOldStart, oi - hunkOldStart, hunkNewStart, ni - hunkNewStart, lines));

@@ -26,31 +26,26 @@ internal abstract partial class RoslynMcpTool
         discovery = null;
 
         if(listSyntaxKinds) {
-
             discovery = ListSyntaxKinds();
             return true;
         }
 
         if(listTriviaKinds) {
-
             discovery = ListTriviaKinds();
             return true;
         }
 
         if(listMemberKinds) {
-
             discovery = ListMemberKinds();
             return true;
         }
 
         if(listTypeKinds) {
-
             discovery = ListTypeKinds();
             return true;
         }
 
         if(listSearchContexts) {
-
             discovery = ListSearchContexts();
             return true;
         }
@@ -139,7 +134,6 @@ internal abstract partial class RoslynMcpTool
     protected static string[] GetCommonTriviaKinds()
     {
         return [
-
             "WhitespaceTrivia",
             "EndOfLineTrivia",
             "SingleLineCommentTrivia",

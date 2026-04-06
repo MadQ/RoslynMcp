@@ -11,11 +11,6 @@
     <LangVersion>preview</LangVersion>
 
     <!-- Package metadata -->
-    <!-->
-    <Version>0.2.1-alpha</Version>
-    <AssemblyVersion>0.2.1.0</AssemblyVersion>
-    <FileVersion>0.2.1.0</FileVersion>
-    -->
     <Authors>Quinten Martens</Authors>
     <Description>Model Context Protocol server exposing Roslyn-powered code intelligence tools to AI coding agents</Description>
     <PackageProjectUrl>https://github.com/MadQ/RoslynMcp</PackageProjectUrl>
@@ -75,13 +70,16 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol" Version="1.1.0" />
+    <PackageReference Include="ModelContextProtocol" Version="1.2.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Features" Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.3.0" />
-    <PackageReference Include="Microsoft.Build.Locator" Version="1.7.8" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0-preview.3.25171.5" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0-preview.3.25171.5" />
+    <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
+    <!-- Explicit reference required by MSBL001: Build.Locator 1.11.2 requires all transitive
+         Microsoft.Build.* packages to opt out of runtime assets to prevent assembly-load conflicts. -->
+    <PackageReference Include="Microsoft.Build.Framework" Version="18.4.0" ExcludeAssets="runtime" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.5" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.5" />
   </ItemGroup>
 
   <ItemGroup>

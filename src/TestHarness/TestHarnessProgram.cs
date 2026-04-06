@@ -26,21 +26,26 @@ Console.WriteLine($"Target:  {targetPath}");
 Console.WriteLine();
 
 // Build the server first — dotnet run's build output goes to stdout and breaks the MCP stdio protocol.
-Console.Write("Building server... ");
+Console.Write("Building server... ")
+;
 var buildProc = Process.Start(new ProcessStartInfo("dotnet") {
+	
 	Arguments       = $"build \"{serverProj}\" -f net10.0 --nologo -v q",
 	UseShellExecute = false,
 })!;
 buildProc.WaitForExit();
 
 if(buildProc.ExitCode != 0) {
+	
 	Console.Error.WriteLine($"Server build failed (exit code {buildProc.ExitCode}).");
+	
 	return 1;
 }
 
 Console.WriteLine("done.");
 
 var psi = new ProcessStartInfo("dotnet") {
+	
 	Arguments              = $"run --no-build --project \"{serverProj}\" -f net10.0",
 	RedirectStandardInput  = true,
 	RedirectStandardOutput = true,
@@ -51,6 +56,7 @@ var psi = new ProcessStartInfo("dotnet") {
 using var proc = Process.Start(psi)!;
 
 proc.ErrorDataReceived += (_, e) => {
+	
 	if(e.Data is not null)
 		Console.Error.WriteLine($"[stderr] {e.Data}");
 };
@@ -74,6 +80,7 @@ async Task<JsonNode?> ReceiveAsync(int timeoutMs = 60_000)
 	using var cts = new CancellationTokenSource(timeoutMs);
 	
 	try {
+		
 		var line = await reader.ReadLineAsync(cts.Token);
 		
 		return line is not null ? JsonNode.Parse(line) : null;
@@ -82,6 +89,7 @@ async Task<JsonNode?> ReceiveAsync(int timeoutMs = 60_000)
 		return null; // Timeout.
 	}
 	catch(Exception ex) {
+		
 		Console.Error.WriteLine($"[recv error] {ex.Message}");
 		
 		return null; // Pipe closed or other I/O error.
@@ -94,6 +102,7 @@ async Task<(bool pass, string message)> RunTestAsync(string testName, string too
 	var sw = Stopwatch.StartNew();
 	
 	await SendAsync(new {
+		
 		jsonrpc = "2.0",
 		id      = reqId++,
 		method  = "tools/call",
@@ -124,7 +133,7 @@ async Task<(bool pass, string message)> RunTestAsync(string testName, string too
 	JsonNode? data;
 	
 	if(expectJson) {
-	
+		
 		try {
 			data = JsonNode.Parse(content);
 		}
@@ -147,10 +156,12 @@ async Task<(bool pass, string message)> RunTestAsync(string testName, string too
 // ── MCP Session Initialization ──────────────────────────────────────────────
 
 await SendAsync(new {
+	
 	jsonrpc = "2.0",
 	id      = reqId++,
 	method  = "initialize",
 	@params = new {
+		
 		protocolVersion = "2024-11-05",
 		capabilities    = new { },
 		clientInfo      = new { name = "TestHarness", version = "1.0" }
@@ -160,8 +171,10 @@ await SendAsync(new {
 var initResponse = await ReceiveAsync();
 
 if(initResponse is null) {
+	
 	await Task.Delay(200); // Allow stderr to flush.
-	Console.Error.WriteLine("\n[FATAL] Server did not respond to initialize — check stderr above for crash details.");
+	Console.Error.WriteLine("\n[FATAL] Server did not respond to initialize — check stderr above for crash details.")
+	;
 	proc.Kill(entireProcessTree: true);
 	
 	return 1;
@@ -299,14 +312,15 @@ tests.Add(await RunTestAsync(
 {
 	Console.Write($"  {"roslyn_find_references: pagination token (page 1)",-50} ");
 	var sw1 = System.Diagnostics.Stopwatch.StartNew();
-
+	
 	await SendAsync(new {
+		
 		jsonrpc = "2.0",
 		id      = reqId++,
 		method  = "tools/call",
 		@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = targetPath, take = 2 } }
 	});
-
+	
 	var resp1 = await ReceiveAsync();
 	sw1.Stop();
 	var content1 = resp1?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
@@ -314,38 +328,43 @@ tests.Add(await RunTestAsync(
 	var token = page1?["page_token"]?.GetValue<string>();
 	var hasMore = page1?["has_more"]?.GetValue<bool>() == true;
 	var page1Refs = page1?["references"]?.AsArray();
-
+	
 	if(token is not null && hasMore && page1Refs?.Count == 2) {
+		
 		tests.Add((true, $"PASS  [{sw1.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"PASS  [{sw1.ElapsedMilliseconds}ms]");
 	}
 	else {
+		
 		tests.Add((false, $"FAIL  (no page_token or has_more) [{sw1.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"FAIL  (no page_token or has_more) [{sw1.ElapsedMilliseconds}ms]");
 	}
-
+	
 	Console.Write($"  {"roslyn_find_references: pagination token (page 2)",-50} ");
 	var sw2 = System.Diagnostics.Stopwatch.StartNew();
-
+	
 	await SendAsync(new {
+		
 		jsonrpc = "2.0",
 		id      = reqId++,
 		method  = "tools/call",
 		@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = targetPath, skip = 2, take = 2, page_token = token ?? "" } }
 	});
-
+	
 	var resp2 = await ReceiveAsync();
 	sw2.Stop();
 	var content2 = resp2?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
 	var page2 = content2 is not null ? System.Text.Json.Nodes.JsonNode.Parse(content2) : null;
 	var page2Items = page2?["items"]?.AsArray();
 	var page2Token = page2?["page_token"]?.GetValue<string>();
-
+	
 	if(page2Items?.Count > 0 && page2Token == token) {
+		
 		tests.Add((true, $"PASS  [{sw2.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"PASS  [{sw2.ElapsedMilliseconds}ms]");
 	}
 	else {
+		
 		tests.Add((false, $"FAIL  (page 2 missing items or wrong token) [{sw2.ElapsedMilliseconds}ms]"));
 		Console.WriteLine($"FAIL  (page 2 missing items or wrong token) [{sw2.ElapsedMilliseconds}ms]");
 	}
@@ -356,6 +375,30 @@ tests.Add(await RunTestAsync(
 	"roslyn_get_symbol_definition",
 	new { symbolName = "WorkspaceManager", projectPath = targetPath },
 	data => data?["file"]?.GetValue<string>().Contains("WorkspaceManager.cs") == true));
+
+Console.WriteLine("\nCall Graph Tools (2 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+tests.Add(await RunTestAsync(
+	"roslyn_find_callers: find callers of GetCompilation",
+	"roslyn_find_callers",
+	new { symbolName = "GetCompilation", containingType = "WorkspaceManager", projectPath = targetPath },
+	data => data?["total_callers"]?.GetValue<int>() > 0
+	     && data?["callers"]?.AsArray().Count > 0
+	     && data?["callers"]?[0]?["caller"] is not null
+	     && data?["callers"]?[0]?["file"] is not null
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_get_call_graph: outgoing calls from GetCompilation",
+	"roslyn_get_call_graph",
+	new { symbolName = "GetCompilation", containingType = "WorkspaceManager", projectPath = targetPath },
+	data => data?["method"]?.GetValue<string>().Contains("GetCompilation") == true
+	     && data?["total_calls"]?.GetValue<int>() > 0
+	     && data?["calls"]?.AsArray().Count > 0
+	     && data?["calls"]?[0]?["callee"] is not null
+));
+
 
 Console.WriteLine("\nCode Generation Tools (1 test)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
@@ -411,7 +454,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_get_diagnostics: check for compiler errors",
 	"roslyn_get_diagnostics",
 	new { projectPath = targetPath },
-	data => data?.AsArray() is not null
+	data => data?["errors"] is not null && data?["summary"] is not null
 ));
 
 tests.Add(await RunTestAsync(
@@ -428,7 +471,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_preview_rename: generate diff for renaming compilation",
 	"roslyn_preview_rename",
 	new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceInstance", projectPath = targetPath },
-	data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
+	data => data?["token"] is not null || data?["message"] is not null
 ));
 
 // ── change_signature tests ──────────────────────────────────────────────
@@ -438,6 +481,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: add parameter with default",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		addParameters  = "[{\"name\":\"toLower\",\"type\":\"bool\",\"defaultValue\":\"false\"}]",
@@ -454,6 +498,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject non-method symbol",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "WorkspaceManager",
 		addParameters  = "[{\"name\":\"x\",\"type\":\"int\"}]",
 		projectPath    = targetPath
@@ -466,6 +511,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject empty addParameters",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		projectPath    = targetPath
@@ -478,6 +524,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject invalid JSON",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		addParameters  = "not valid json",
@@ -491,6 +538,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_change_signature: reject duplicate parameter name",
 	"roslyn_change_signature",
 	new {
+		
 		methodName     = "NormalizePath",
 		containingType = "RoslynMcpTool",
 		addParameters  = "[{\"name\":\"filePath\",\"type\":\"string\"}]",
@@ -501,6 +549,14 @@ tests.Add(await RunTestAsync(
 
 Console.WriteLine("\nFile Editing Tools (10 tests)");
 Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+// NOTE: The empty-file-after-write detection added to all four editing tools
+// (roslyn_write_file, roslyn_replace_in_file, roslyn_replace_in_code, roslyn_insert_lines)
+// cannot be exercised from here. The condition it guards against — the OS or antivirus
+// silently truncating a file after an apparently successful write — requires environmental
+// interference that cannot be provoked via the MCP API. The guard condition itself
+// (writeBytes.Length > 4 && new FileInfo(fullPath).Length <= 4) is covered implicitly:
+// every successful write test below confirms the check does not false-positive on real files.
 
 // Create temp files for editing tool tests
 var tempTextFile = Path.Combine(targetPath, ".test_replace_temp.cs");
@@ -513,28 +569,28 @@ tests.Add(await RunTestAsync(
 	"roslyn_replace_in_file: dry run literal replacement",
 	"roslyn_replace_in_file",
 	new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = true, projectPath = targetPath },
-	data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false
+	data => data?["match_count"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_replace_in_file: apply literal replacement",
 	"roslyn_replace_in_file",
 	new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = false, projectPath = targetPath },
-	data => data?["matchCount"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true
+	data => data?["match_count"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_replace_in_file: regex replacement with capture groups",
 	"roslyn_replace_in_file",
 	new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = targetPath },
-	data => data?["matchCount"]?.GetValue<int>() == 1 && data?["changedLines"]?.AsArray()[0]?.GetValue<int>() == 2
+	data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_lines"]?.AsArray()[0]?.GetValue<int>() == 2
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_replace_in_code: dry run identifier replacement",
 	"roslyn_replace_in_code",
 	new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true, projectPath = targetPath },
-	data => data?["error"] is null && data?["changeCount"] is not null
+	data => data?["error"] is null && data?["change_count"] is not null
 ));
 
 tests.Add(await RunTestAsync(
@@ -554,28 +610,28 @@ tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: dry run insertAfter",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "inserted line", insertAfter = "line one", dryRun = true, projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == false && data?["insertedAt"]?.GetValue<int>() == 2 && data?["lineCount"]?.GetValue<int>() == 1
+	data => data?["applied"]?.GetValue<bool>() == false && data?["inserted_at"]?.GetValue<int>() == 2 && data?["line_count"]?.GetValue<int>() == 1
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: apply insertAfter",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "after one", insertAfter = "line one", projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 2
+	data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 2
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: apply insertBefore",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "before three", insertBefore = "line three", projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 4
+	data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 4
 ));
 
 tests.Add(await RunTestAsync(
 	"roslyn_insert_lines: apply atLine",
 	"roslyn_insert_lines",
 	new { filePath = ".test_insert_temp.txt", text = "at line 1", atLine = 1, projectPath = targetPath },
-	data => data?["applied"]?.GetValue<bool>() == true && data?["insertedAt"]?.GetValue<int>() == 1
+	data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 1
 ));
 
 tests.Add(await RunTestAsync(
@@ -590,6 +646,63 @@ try { File.Delete(tempInsertFile); } catch { }
 try { File.Delete(tempTextFile); } catch { }
 try { File.Delete(tempCodeFile); } catch { }
 try { File.Delete(Path.Combine(targetPath, ".test_code_debug.cs")); } catch { }
+
+// ── Local History Tests ──────────────────────────────────────────────────────
+
+Console.WriteLine("\nLocal History Tools (3 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+// Create a temp file with original content, then overwrite it to produce a backup token.
+var tempHistoryFile = ".test_local_history_temp.txt";
+var tempHistoryAbs  = Path.Combine(targetPath, tempHistoryFile);
+await File.WriteAllTextAsync(tempHistoryAbs, "// original content\n");
+
+// Write new content via the server — this triggers BackupStore.Save and returns backup_token.
+string? historyToken = null;
+{
+	await SendAsync(new {
+		jsonrpc = "2.0",
+		id      = reqId++,
+		method  = "tools/call",
+		@params = new {
+			name      = "roslyn_write_file",
+			arguments = new {
+				filePath    = tempHistoryFile,
+				projectPath = targetPath,
+				content     = "// modified content\n"
+			}
+		}
+	});
+
+	var resp    = await ReceiveAsync();
+	var content = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
+	var data    = content is not null ? JsonNode.Parse(content) : null;
+	historyToken = data?["backupToken"]?.GetValue<string>();
+}
+
+tests.Add(await RunTestAsync(
+	"roslyn_local_history: list backups for temp file",
+	"roslyn_local_history",
+	new { action = "list", filePath = tempHistoryFile, projectPath = targetPath },
+	data => data?["items"]?.AsArray().Count > 0
+	     && data?["count"]?.GetValue<int>() > 0
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_local_history: preview backup token",
+	"roslyn_local_history",
+	new { action = "preview", token = historyToken ?? "invalid", projectPath = targetPath },
+	data => data?["token"] is not null && data?["absolutePath"] is not null
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_local_history: apply restores original content",
+	"roslyn_local_history",
+	new { action = "apply", token = historyToken ?? "invalid", projectPath = targetPath },
+	data => data?["restored"]?.GetValue<bool>() == true && data?["absolutePath"] is not null
+));
+
+try { File.Delete(tempHistoryAbs); } catch { }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 
@@ -620,6 +733,6 @@ if(!proc.HasExited)
 	proc.Kill();
 
 return failed == 0 ? 0 : 1;
-
+	
 	}
 }

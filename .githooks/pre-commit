@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Strip UTF-8 BOM from staged .cs files before committing.
+#
+# Addresses a VS 17.14+ regression where the Roslyn language service re-adds
+# BOMs to files on background reload when it detects external file changes.
+#
+# Install (one-time per clone):
+#   git config core.hooksPath .githooks
+
+set -e
+
+files=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.cs$' || true)
+[ -z "$files" ] && exit 0
+
+stripped=()
+for file in $files; do
+    [ -f "$file" ] || continue
+
+    bom=$(head -c 3 "$file" | od -An -tx1 | tr -d ' \n')
+    if [ "$bom" = "efbbbf" ]; then
+        tail -c +4 "$file" > "${file}.bak" && mv "${file}.bak" "$file"
+        git add "$file"
+        stripped+=("$file")
+    fi
+done
+
+if [ "${#stripped[@]}" -gt 0 ]; then
+    echo "Stripped UTF-8 BOM from:"
+    printf '  %s\n' "${stripped[@]}"
+fi

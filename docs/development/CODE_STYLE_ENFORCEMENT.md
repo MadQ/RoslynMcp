@@ -146,7 +146,7 @@ Some editors can run scripts on save. Configure at your own discretion. The scri
 
 ## Style Guide Reference
 
-Complete style rules: **[AGENTS.md § Code Style](../AGENTS.md#code-style)**
+Complete style rules: **[AGENTS.md § Code Style](../../AGENTS.md#code-style)**
 
 ### Quick Reference: Quirky Rules
 
@@ -190,10 +190,10 @@ To add a new style check:
 
 ## Related
 
-- **[AGENTS.md § Code Style](../AGENTS.md#code-style)** — Complete style guide
-- **[scripts/Fix-BlankLineIndentation.ps1](../scripts/Fix-BlankLineIndentation.ps1)** — Legacy fixer (now part of Test-CodeStyle.ps1)
-- **[scripts/Convert-IndentationToTabs.ps1](../scripts/Convert-IndentationToTabs.ps1)** — Convert spaces to tabs
+- **[AGENTS.md § Code Style](../../AGENTS.md#code-style)** — Complete style guide
+- **[scripts/Fix-BlankLineIndentation.ps1](../../scripts/Fix-BlankLineIndentation.ps1)** — Legacy fixer (now part of Test-CodeStyle.ps1)
+- **[scripts/Convert-IndentationToTabs.ps1](../../scripts/Convert-IndentationToTabs.ps1)** — Convert spaces to tabs
 
 ---
 
-**Last Updated:** 2026-01-XX
+**Last Updated:** 2026-03-31

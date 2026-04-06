@@ -8,6 +8,8 @@
 *.csproj text diff=xml
 *.slnx text diff=xml
 *.sln text diff=xml
+*.props text diff=xml
+*.targets text diff=xml
 
 # Markdown
 *.md text diff=markdown

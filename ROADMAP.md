@@ -6,6 +6,24 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ---
 
+## Shipped Releases
+
+All milestones through v0.7.6 are complete. Highlights per release:
+
+| Release | Key additions |
+|---------|---------------|
+| v0.4.0 | Fixed 5 unregistered tools, pagination crash, GetRootPath, SolutionDiff `\r\n`, SemanticSearch duplicates |
+| v0.5.0 | Fixed wrong answers across analysis tools, TypeHierarchy for interfaces, rename workflow consistency, ReplaceInCode fallback, SemanticSearch correctness |
+| v0.6.0 | Fixed workspace infrastructure (LRU, lock, FSW loop), SolutionDiff O(n²) memory, GetTrivia bounds, DiagnosticsTool single-file scoping |
+| v0.7.0 | `roslyn_get_member_body`, hardened defaults for list_types and find_references, filtering parameters across tools, AGENTS.md update |
+| v0.7.1 | `roslyn_info`, `roslyn_insert_lines`, workspace mode CLI arg (`--workspace sdk\|vs\|adhoc\|auto`) |
+| v0.7.2 | `roslyn_write_file`, `roslyn_local_history`, `BackupStore` (crash-safe backup infrastructure), NDJSON log format with `response_peek` pipeline, structured `roslyn_get_diagnostics` response (#111), tool metadata improvements (#112) |
+| v0.7.3 | `BackupStore` gains git branch/commit metadata in snapshots (#122), `RoslynMcpJson` shared serializer options — no `\uXXXX` spam (#123), `ToolResults.cs` normalized to PascalCase C# + snake_case JSON (#124), `ToolErrorResult` abstract base record — replaces `ExtractDetail` switch; `PathErrorResult`/`UnexpectedErrorResult` inherit it (#125), `BuildLiteralRegex` CRLF fix (#126), `ToolScopeAnalyzer` RMCP003/004/005 + code fix provider (#127, #128), `roslyn_get_project_info` MSBuild-derived fields (#117), `roslyn_build_project` MSBuild tail on exit-code failures (#131), retry with exponential backoff on file write contention (#129), `TryServeCachedPage` moved to `ToolScope` (#130), `roslyn_get_diagnostics` success/locked-file fix (#114) |
+| v0.7.4 | `FileEncoding` shared BOM-detection helper; BOM fixes in `roslyn_write_file` and `roslyn_replace_in_code`; `ToolScopeAnalyzer` RMCP003 now fires on expression-bodied tool methods; `TryServeCachedPage` gains `[NotNullWhen(true)]`, eliminating 10× CS8603 warnings |
+| v0.7.6 | `roslyn_find_callers`, `roslyn_get_call_graph`; write-retry telemetry (#136); FSW reload suppression + let Roslyn save (#140); `roslyn_local_history` double-write fix (#141); `roslyn_find_callers` dedup fix (#143); `roslyn_build_project` false-failure fix; `FileWriter` centralised write entry point (#139); RMCP007/008/009 diagnostics; BOM fixes; tool description improvements (#99) |
+
+---
+
 ## Milestones
 
 ### v0.4.0-alpha — Fix Crashes and Invisible Tools
@@ -73,10 +91,11 @@ The highest-value new tool, hardened defaults for existing tools, and updated co
 
 Semantic analysis tools that justify RoslynMcp's existence beyond convenience.
 
-| # | Type | Title | Scope | Audit refs |
-|---|------|-------|-------|------------|
-| 18 | feature | Implement call graph tools | `roslyn_find_callers` and `roslyn_get_call_graph` — shared IOperation walking infrastructure | — |
-| 19 | feature | Implement `roslyn_find_unused` and supporting analysis tools | `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`, `roslyn_check_syntax` | — |
+| # | Type | Title | Scope | Refs |
+|---|------|-------|-------|------|
+| ~~18~~ | ~~feature~~ | ~~Implement call graph tools~~ | ~~Shipped in v0.7.6~~ | #32 |
+| 19 | feature | Implement `roslyn_find_unused` and supporting analysis tools | `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`, `roslyn_check_syntax` | #33 |
+| — | enhancement | Additional scope assigned to this milestone | See GitHub issue #99 | #99 |
 
 **Theme:** The "wow" release. Capabilities that text search fundamentally cannot provide.
 
@@ -88,8 +107,8 @@ Agents that use RoslynMcp don't just understand code — they respect the author
 
 | # | Type | Title | Scope | Audit refs |
 |---|------|-------|-------|------------|
-| 20 | feature | Implement `roslyn_get_style_profile` | StyleSampler helper; trivia-based style inference; returns named style properties | — |
-| 21 | feature | Add `preserveStyle` flag to `replace_in_code` | StyleNormalizer helper; contextual trivia normalization during targeted edits | — |
+| 20 | feature | Implement `roslyn_get_style_profile` | StyleSampler helper; trivia-based style inference; returns named style properties | #34 |
+| 21 | feature | Add `preserveStyle` flag to `replace_in_code` | StyleNormalizer helper; contextual trivia normalization during targeted edits | #35 |
 
 **Theme:** Respect. The author's column alignment, blank line patterns, and comment placement survive AI-assisted editing.
 
@@ -113,7 +132,7 @@ Whole-file style normalization — testable, inviting feedback, explicitly not b
 Everything from alpha and beta, battle-tested.
 
 **Entry criteria:**
-- All 23 issues closed
+- All planned v1.0.0 issues closed (original 23 audit items plus any subsequently added scope)
 - TestHarness passes on net8.0, net10.0, and net11.0
 - README updated with the full tool list and accurate descriptions
 - No open bugs marked as affecting correctness

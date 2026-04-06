@@ -27,7 +27,7 @@
 ## Testing
 
 <!-- Describe testing you've done -->
-- [ ] All existing tests pass (`dotnet run --project TestHarness/TestHarness.csproj`)
+- [ ] All existing tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj`)
 - [ ] Added new tests for this change
 - [ ] Tested manually with MCP client (describe setup)
 
