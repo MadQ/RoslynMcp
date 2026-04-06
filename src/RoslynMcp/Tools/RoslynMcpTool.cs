@@ -393,7 +393,7 @@ internal abstract partial class RoslynMcpTool
 					}
 				}
 			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) { }
 			
 			if(!ambiguous && suffixHit is not null)
 				return suffixHit;
