@@ -8,7 +8,7 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ## Shipped Releases
 
-All milestones through v0.7.6 are complete. Highlights per release:
+All milestones through v0.7.7 are complete. Highlights per release:
 
 | Release | Key additions |
 |---------|---------------|
@@ -21,6 +21,7 @@ All milestones through v0.7.6 are complete. Highlights per release:
 | v0.7.3 | `BackupStore` gains git branch/commit metadata in snapshots (#122), `RoslynMcpJson` shared serializer options — no `\uXXXX` spam (#123), `ToolResults.cs` normalized to PascalCase C# + snake_case JSON (#124), `ToolErrorResult` abstract base record — replaces `ExtractDetail` switch; `PathErrorResult`/`UnexpectedErrorResult` inherit it (#125), `BuildLiteralRegex` CRLF fix (#126), `ToolScopeAnalyzer` RMCP003/004/005 + code fix provider (#127, #128), `roslyn_get_project_info` MSBuild-derived fields (#117), `roslyn_build_project` MSBuild tail on exit-code failures (#131), retry with exponential backoff on file write contention (#129), `TryServeCachedPage` moved to `ToolScope` (#130), `roslyn_get_diagnostics` success/locked-file fix (#114) |
 | v0.7.4 | `FileEncoding` shared BOM-detection helper; BOM fixes in `roslyn_write_file` and `roslyn_replace_in_code`; `ToolScopeAnalyzer` RMCP003 now fires on expression-bodied tool methods; `TryServeCachedPage` gains `[NotNullWhen(true)]`, eliminating 10× CS8603 warnings |
 | v0.7.6 | `roslyn_find_callers`, `roslyn_get_call_graph`; write-retry telemetry (#136); FSW reload suppression + let Roslyn save (#140); `roslyn_local_history` double-write fix (#141); `roslyn_find_callers` dedup fix (#143); `roslyn_build_project` false-failure fix; `FileWriter` centralised write entry point (#139); RMCP007/008/009 diagnostics; BOM fixes; tool description improvements (#99) |
+| v0.7.7 | Correctness audit (#145): critical use-after-dispose on LRU eviction, workspace read-lock snapshots, ref-counted FSW suppression, path traversal guard, call graph captures constructors, line ending preservation, backup before editing tools, diagnostic dedup, AsyncLocal scope, backup token nonce |
 
 ---
 

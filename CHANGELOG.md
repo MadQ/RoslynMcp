@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.7-alpha] — 2026-04-06
+
+### Fixed
+- **Critical: use-after-dispose on LRU eviction** — `WorkspaceManager` now defers disposal of evicted `WorkspaceInstance`s with a 30-second grace period so concurrent callers that already hold a reference finish safely (#145 item 1, PR #146)
+- **`workspace` field read without lock** — `GetSolution`, `GetProject`, and `RebuildCompilation` now capture `workspace.CurrentSolution` under the read lock, preventing use-after-dispose when `ReloadIfNeeded` swaps the workspace on another thread (#145 item 2, PR #146)
+- **FSW suppression race** — `ApplyChangesWithFswSuppressed` now uses `Interlocked` ref-counted suppression instead of a bool toggle, so concurrent calls don't race on re-enabling `EnableRaisingEvents` (#145 item 3, PR #146)
+- **Path traversal on absolute paths** — `TryResolveTargetPath` absolute-path branch now has a separator guard preventing prefix collisions (e.g. root `D:\Foo` matching `D:\FooBar\secret.cs`) (#145 item 4, PR #147)
+- **`GetCallGraphTool` missing constructors** — now captures `IObjectCreationOperation` in addition to `IInvocationOperation`, matching the documented claim "Includes constructors" (#145 item 5, PR #148)
+- **`InsertLinesTool` silently converting line endings** — now detects the file's existing line-ending style (LF vs CRLF) and preserves it instead of forcing `Environment.NewLine` (#145 item 6, PR #149)
+- **`ResolveFilePath` ambiguity** — suffix match fallback now collects all candidates and returns null on ambiguity instead of silently returning the first filesystem hit (#145 item 7, PR #147)
+- **Backup token millisecond collision** — tokens now include a random 4-char nonce (`{hash}_{ms}_{nonce}`) to prevent collisions during pruning; `.bak` filenames updated accordingly; legacy tokens remain parseable (#145 item 9, PR #149)
+- **Diagnostic deduplication** — `DiagnosticsTool` deduplicates by `(code, file, line, column, message)` to prevent double-counted entries from multi-TFM workspaces (#145 item 13, PR #148)
+
+### Improved
+- **Backup before editing** — `ReplaceInCodeTool`, `ReplaceInFileTool`, and `InsertLinesTool` now call `BackupStore.Save` before destructive writes, making them recoverable via `roslyn_local_history` (#145 item 12, PR #149)
+- **`AsyncLocal` scope** — replaced `[ThreadStatic] activeScope` with `AsyncLocal<ToolScope>` so the scope flows correctly across `await` continuations (#145 item 11, PR #149)
+
+### Deprecated
+- **`BackupStore.TryRestore`** — marked `[Obsolete]`; bypasses `WorkspaceManager` and leaves workspace out of sync. Use the `TryCheck`/`WriteAndInvalidate`/`CompleteRestore` split instead (#145 item 8, PR #149)
+
+Closes [#145](https://github.com/MadQ/RoslynMcp/issues/145)
+
+---
+
 ## [0.7.6-alpha] — 2026-04-06 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.7.6-alpha)
 
 ### Added
