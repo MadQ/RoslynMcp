@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
 using System.Text;
+using System.Collections.Concurrent;
 
 namespace RoslynMcp;
 
@@ -50,6 +51,10 @@ internal sealed partial class WorkspaceManager
 		// can skip reloading files that are already up to date in the workspace.
 		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase);
 		private const    int                       MaxRmOwnedWriteSizes = 50;
+		// Per-file FSW suppression — ref-counted for concurrent-write safety.
+		// A path is added before each RM-owned write and decremented in the finally block.
+		// ScheduleDebounced skips events where the count is > 0.
+		private readonly ConcurrentDictionary<string, int> ignoredPaths = new(StringComparer.OrdinalIgnoreCase);
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
 		
@@ -246,13 +251,16 @@ internal sealed partial class WorkspaceManager
 					try {
 						
 						using var stream = File.OpenRead(fullPath);
-						var newText = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+						var newText = SourceText.From(stream, FileWriter.Utf8NoBom);
 						var newSolution = workspace.CurrentSolution;
 						
 						foreach(var id in docIds)
 							newSolution = newSolution.WithDocumentText(id, newText);
 						
-						ApplyChangesWithFswSuppressed(newSolution);
+						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
+					// flag for full reload so the next GetCompilation picks up the new content.
+					if(!ApplyChangesWithFswSuppressed(newSolution))
+						reloadNeeded = true;
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
 					{ }
@@ -496,7 +504,7 @@ internal sealed partial class WorkspaceManager
 			
 			using var stream = File.OpenRead(path);
 			
-			var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+			var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 			var name = Path.GetRelativePath(rootPath, path);
 			
 			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
@@ -536,7 +544,7 @@ internal sealed partial class WorkspaceManager
 		///     MSBuildWorkspace.TryApplyChanges writes text back to disk, which would
 		///     re-trigger the FSW. See issue #49.
 		/// </summary>
-		internal void ApplyChangesWithFswSuppressed(Solution newSolution)
+		internal bool ApplyChangesWithFswSuppressed(Solution newSolution)
 		{
 			// Collect changed document paths before TryApplyChanges overwrites them
 			// (MSBuild only — Adhoc.TryApplyChanges is in-memory only, no disk write).
@@ -559,16 +567,18 @@ internal sealed partial class WorkspaceManager
 			if(watcher is not null)
 				watcher.EnableRaisingEvents = false;
 			
+			bool applied;
+			
 			try {
-				workspace.TryApplyChanges(newSolution);
+				applied = workspace.TryApplyChanges(newSolution);
 			}
 			finally {
 				if(watcher is not null)
 					watcher.EnableRaisingEvents = true;
 			}
 			
-			// Record sizes after the write so FlushMSBuild can detect our own FSW events.
-			if(ownedPaths.Length > 0) {
+			// Record sizes only when TryApplyChanges succeeded and actually wrote files.
+			if(applied && ownedPaths.Length > 0) {
 				
 				lock(debounceLock) {
 					
@@ -592,8 +602,50 @@ internal sealed partial class WorkspaceManager
 			}
 			
 			InvalidateCompilation();
+			return applied;
 		}
 		
+		// For MSBuild-tracked .cs files: routes through TryApplyChanges as the single
+		// disk write (FSW-suppressed via ApplyChangesWithFswSuppressed). Returns false
+		// for Adhoc workspaces (TryApplyChanges is in-memory only) or for files not
+		// tracked by the workspace — callers fall back to WriteAndInvalidate.
+		internal bool TryApplyTextChange(string fullPath, SourceText text)
+		{
+			if(!isMSBuild)
+				return false;
+			
+			var docIds = workspace.CurrentSolution.GetDocumentIdsWithFilePath(fullPath);
+			
+			if(docIds.Length == 0)
+				return false;
+			
+			var newSolution = workspace.CurrentSolution;
+			
+			foreach(var id in docIds)
+				newSolution = newSolution.WithDocumentText(id, text);
+			
+			return ApplyChangesWithFswSuppressed(newSolution);
+		}
+		
+		// For untracked and Adhoc .cs files: suppresses the per-file FSW event during
+		// the write, then calls InvalidateFile to sync in-memory workspace state.
+		// No double write — Adhoc.InvalidateFile calls AddOrUpdateDocument (in-memory
+		// only); MSBuild-untracked InvalidateFile sets reloadNeeded (no TryApplyChanges).
+		internal async Task WriteAndInvalidate(string fullPath, Func<Task> write)
+		{
+			ignoredPaths.AddOrUpdate(fullPath, 1, (_, count) => count + 1);
+			
+			try {
+				await write();
+			}
+			finally {
+				ignoredPaths.AddOrUpdate(fullPath, 0, (_, count) => count - 1);
+			}
+			
+			InvalidateFile(fullPath);
+		}
+		
+
 		void StartWatcher()
 		{
 			watcher = new FileSystemWatcher(rootPath, "*.cs")
@@ -616,6 +668,11 @@ internal sealed partial class WorkspaceManager
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)
 		{
+			// Skip FSW events for paths RM is currently writing — prevents spurious workspace
+			// reloads from our own writes. Ref-counted for safety; normal usage is single-threaded.
+			if(!deleted && ignoredPaths.TryGetValue(fullPath, out var count) && count > 0)
+				return;
+			
 			lock(debounceLock) {
 				
 				if(deleted)
@@ -713,7 +770,7 @@ internal sealed partial class WorkspaceManager
 					}
 					
 					using var stream = File.OpenRead(path);
-					var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 					
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);

@@ -77,7 +77,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		else {
 			try {
 				using var stream = File.OpenRead(fullPath);
-				sourceText = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+				sourceText = SourceText.From(stream, FileWriter.Utf8NoBom);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
@@ -155,9 +155,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			}
 			else {
 				
+				var deletedText = deletedRoot.ToFullString();
+				
 				try {
-					var deletedText = deletedRoot.ToFullString();
-					await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, deletedText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)), log: logger, filePath: fullPath);
+					await workspace.WriteAndInvalidate(projectPath, fullPath,
+						() => FileWriter.WriteAllTextAsync(fullPath, deletedText));
 					
 					if(deletedText.Length > 4 && new FileInfo(fullPath).Length <= 4)
 						return scope.Error(new ErrorResult(
@@ -169,8 +171,6 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 				}
-				
-				workspace.InvalidateFile(projectPath, fullPath);
 			}
 			
 			return scope.Outcome($"deleted {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));
@@ -253,9 +253,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		}
 		else {
 			
+			var newText = newRoot.ToFullString();
+			
 			try {
-				var newText = newRoot.ToFullString();
-				await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newText, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)));
+				await workspace.WriteAndInvalidate(projectPath, fullPath,
+					() => FileWriter.WriteAllTextAsync(fullPath, newText));
 				
 				if(newText.Length > 4 && new FileInfo(fullPath).Length <= 4)
 					return scope.Error(new ErrorResult(
@@ -267,8 +269,6 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 			}
-			
-			workspace.InvalidateFile(projectPath, fullPath);
 		}
 		
 		return scope.Outcome($"replaced {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));

@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+using Microsoft.CodeAnalysis.Text;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using ModelContextProtocol.Server;
 
@@ -93,22 +94,36 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
-		try {
-			await WriteWithRetryAsync(() => File.WriteAllTextAsync(fullPath, newContent), log: logger, filePath: fullPath);
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+		// For .cs files: single write via workspace API (MSBuild-tracked goes through
+		// TryApplyChanges; untracked/Adhoc goes through FileWriter with FSW suppressed).
+		// For all other types: direct FileWriter write, then InvalidateFile.
+		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
 			
-			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			try {
+				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(newContent, FileWriter.Utf8NoBom));
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			}
 		}
-
+		else {
+			
+			try {
+				await FileWriter.WriteAllTextAsync(fullPath, newContent);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			}
+			
+			workspace.InvalidateFile(projectPath, fullPath);
+		}
+		
 		if(newContent.Length > 4 && new FileInfo(fullPath).Length <= 4)
 			return scope.Error(new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
 				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
 				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
 			));
-
-		workspace.InvalidateFile(projectPath, fullPath);
 		
 		return scope.Outcome($"{matches.Count} replacement(s)", new ReplaceInFileResult(true, matches.Count, changedLines));
 	}

@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynMcp;
 
@@ -224,6 +225,49 @@ internal sealed partial class WorkspaceManager : IDisposable
 				directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution);
 		}
 	}
+
+	public bool TryApplyTextChange(string resolvedProjectPath, string fullPath, SourceText text)
+	{
+		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var entry))
+				
+				return entry.Instance.TryApplyTextChange(fullPath, text);
+			
+			if(cache.TryGetValue(normalizedPath, out var directEntry))
+				return directEntry.Instance.TryApplyTextChange(fullPath, text);
+		}
+		
+		return false;
+	}
+	
+	public async Task WriteAndInvalidate(string resolvedProjectPath, string fullPath, Func<Task> write)
+	{
+		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
+		WorkspaceInstance? instance = null;
+		
+		// Grab the instance reference under the lock but await the write outside it.
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var entry))
+				
+				instance = entry.Instance;
+			
+			else if(cache.TryGetValue(normalizedPath, out var directEntry))
+				instance = directEntry.Instance;
+		}
+		
+		if(instance is not null)
+			await instance.WriteAndInvalidate(fullPath, write);
+		else
+			// No cached workspace — write directly; FSW suppression not needed.
+			await write();
+	}
+	
 
 	public void Dispose()
 	{

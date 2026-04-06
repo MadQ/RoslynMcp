@@ -41,7 +41,7 @@ internal static class SolutionDiff
 	///     Writes all changed documents from <paramref name="newSolution"/> to disk.
 	///     Only files with a non-null <see cref="Document.FilePath"/> are written.
 	/// </summary>
-	public static async Task ApplyToDiskAsync(Solution oldSolution, Solution newSolution)
+	public static async Task ApplyToDiskAsync(Solution oldSolution, Solution newSolution, Func<string, string, Task> writeFile)
 	{
 		foreach(var projectChange in newSolution.GetChanges(oldSolution).GetProjectChanges()) {
 			
@@ -58,14 +58,14 @@ internal static class SolutionDiff
 					// SourceText.Encoding is unreliable — StreamReader.CurrentEncoding returns a
 					// BOM-emitting instance regardless of whether the file had a BOM. RM's policy
 					// is always UTF-8 without BOM, so we never use sourceText.Encoding here.
-					await File.WriteAllTextAsync(newDoc.FilePath, sourceText.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+					await writeFile(newDoc.FilePath, sourceText.ToString());
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					throw new InvalidOperationException($"Failed to write '{newDoc.FilePath}': {ex.Message}", ex);
 				}
 			}
+		}
 	}
-}
 	
 	// ── Minimal line-level unified diff ──────────────────────────────────────
 	

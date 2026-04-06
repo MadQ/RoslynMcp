@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynMcp;
 
@@ -120,5 +121,34 @@ internal sealed class WorkspaceResolver
 		
 		manager.InvalidateFile(resolved, fullPath);
 		paginationCache.InvalidateAll();
+	}
+	
+	/// <summary>
+	///     Writes a text change to a .cs file via the workspace-managed path.
+	///     For MSBuild-tracked files: single write via TryApplyChanges (FSW-suppressed).
+	///     For untracked/Adhoc: FileWriter write with per-file FSW suppression, then InvalidateFile.
+	/// </summary>
+	public async Task ApplyTextChange(string projectPath, string fullPath, SourceText text)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		if(!manager.TryApplyTextChange(resolved, fullPath, text))
+			await manager.WriteAndInvalidate(resolved, fullPath,
+				() => FileWriter.WriteAllTextAsync(fullPath, text.ToString()));
+		
+		paginationCache.InvalidateAll();
+	}
+	
+	/// <summary>
+	///     Writes to a file with per-file FSW suppression and syncs the workspace in-memory state.
+	///     Use for .cs files where callers manage the write (e.g. atomic tmp→rename).
+	/// </summary>
+	public Task WriteAndInvalidate(string projectPath, string fullPath, Func<Task> write)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		paginationCache.InvalidateAll();
+		
+		return manager.WriteAndInvalidate(resolved, fullPath, write);
 	}
 }

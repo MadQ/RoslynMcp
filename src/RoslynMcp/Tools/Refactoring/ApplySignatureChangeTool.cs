@@ -47,7 +47,9 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		if(!workspace.IsAdhoc(projectPath))
 			workspace.ApplyChanges(projectPath, operation.NewSolution);
 		else
-			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution);
+			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
+			(path, content) => workspace.WriteAndInvalidate(projectPath, path,
+				() => FileWriter.WriteAllTextAsync(path, content)));
 		
 		var filesChanged = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()
