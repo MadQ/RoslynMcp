@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using ModelContextProtocol.Server;
 using RoslynMcp.Tools;
 
@@ -30,7 +30,7 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		"Backups are branch-agnostic: a backup taken on one branch can be restored on any branch. " +
 		"The list response includes a caution field when any backup was taken on a different branch than the current one — verify your branch before applying."
 	)]
-	public object LocalHistory(
+	public async Task<object> LocalHistory(
 		[Description("Action to perform: \"list\" (enumerate backups), \"preview\" (conflict check), or \"apply\" (restore from backup).")]
 		string  action,
 		[Description(ProjectPathDescription)]
@@ -44,15 +44,17 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action);
-		
-		object result = action.ToLowerInvariant() switch {
-			
-			"list"    => HandleList(projectPath, token, filePath),
-			"preview" => HandlePreview(token),
+
+		Task<object> task = action.ToLowerInvariant() switch {
+
+			"list"    => Task.FromResult<object>(HandleList(projectPath, token, filePath)),
+			"preview" => Task.FromResult<object>(HandlePreview(token)),
 			"apply"   => HandleApply(projectPath, token, force),
-			_         => new ErrorResult($"Unknown action '{action}'. Valid values: list, preview, apply.")
+			_         => Task.FromResult<object>(new ErrorResult($"Unknown action '{action}'. Valid values: list, preview, apply."))
 		};
-		
+
+		object result = await task;
+
 		return result is ToolErrorResult err
 			? scope.Error(err)
 			: scope.Outcome(action, result);
@@ -122,37 +124,42 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		);
 	}
 	
-	object HandleApply(string projectPath, string? token, bool force)
+	async Task<object> HandleApply(string projectPath, string? token, bool force)
 	{
 		if(token is null)
 			return new ErrorResult("token is required for action: apply.");
-		
-		var result = backups.TryRestore(token, force);
-		
-		if(result.Restored) {
-			workspace.InvalidateFile(projectPath, result.AbsolutePath!);
-			
-			return new LocalHistoryApplyResult(
-				Restored:     true,
-				AbsolutePath: result.AbsolutePath!,
-				Message:      $"Restored '{result.AbsolutePath}' from backup."
-			)
-			;
+
+		var (failure, checkedRestore) = backups.TryCheck(token, force);
+
+		if(failure is not null) {
+
+			if(failure.IsConflict)
+				return new LocalHistoryConflictResult(
+					Conflict:     true,
+					AbsolutePath: failure.AbsolutePath!,
+					Message:      "File was modified after backup was taken. Pass force: true to overwrite, or use preview to inspect.",
+					CurrentHash:  failure.CurrentHash,
+					BackupHash:   failure.BackupHash
+				);
+
+			return new ErrorResult(failure.ErrorMessage ?? "Restore failed.");
 		}
-		
-		if(result.IsConflict)
-			return new LocalHistoryConflictResult(
-				Conflict:     true,
-				AbsolutePath: result.AbsolutePath!,
-				Message:      "File was modified after backup was taken. Pass force: true to overwrite, or use preview to inspect.",
-				CurrentHash:  result.CurrentHash,
-				BackupHash:   result.BackupHash
-			);
-		
-		if(result.IsDisabled)
-			return new ErrorResult(result.ErrorMessage!);
-		
-		return new ErrorResult(result.ErrorMessage ?? "Restore failed.");
+
+		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath, () => {
+			var tmp = checkedRestore.AbsolutePath + ".rmcp.tmp";
+			FileWriter.WriteAllBytes(tmp, checkedRestore.Content);
+			FileWriter.Move(tmp, checkedRestore.AbsolutePath, overwrite: true);
+
+			return Task.CompletedTask;
+		});
+
+		backups.CompleteRestore(checkedRestore);
+
+		return new LocalHistoryApplyResult(
+			Restored:     true,
+			AbsolutePath: checkedRestore.AbsolutePath,
+			Message:      $"Restored '{checkedRestore.AbsolutePath}' from backup."
+		);
 	}
 }
 

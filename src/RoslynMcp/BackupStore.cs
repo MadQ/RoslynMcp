@@ -172,19 +172,18 @@ internal sealed class BackupStore
 		return results;
 	}
 
-	/// <summary>
-	///     Attempts to restore a file from the backup identified by <paramref name="token"/>.
-	///     Returns a <see cref="RestoreResult"/> describing success, conflict, or failure.
-	/// </summary>
-	public RestoreResult TryRestore(string token, bool force = false)
+	// Validates the token, runs the conflict check, and reads the .bak content —
+	// all inside the lock. Returns either a failure result or a CheckedRestore
+	// that the caller can pass to WriteAndInvalidate + CompleteRestore.
+	public (RestoreResult? Failure, CheckedRestore? Checked) TryCheck(string token, bool force = false)
 	{
 		if(backupRoot is null)
-			return RestoreResult.Disabled();
+			return (RestoreResult.Disabled(), null);
 
 		var parts = token.Split('_');
 
 		if(parts.Length != 2)
-			return RestoreResult.InvalidToken(token);
+			return (RestoreResult.InvalidToken(token), null);
 
 		var dir      = Path.Combine(backupRoot, parts[0]);
 		var metaFile = Path.Combine(dir, MetaFileName);
@@ -194,16 +193,15 @@ internal sealed class BackupStore
 			var entries = ReadAllMetaEntries(metaFile);
 
 			if(!entries.TryGetValue(token, out var meta))
-				return RestoreResult.NotFound(token);
+				return (RestoreResult.NotFound(token), null);
 
 			try {
 
-				// Find the .bak file — suffix match on the unix_ms portion.
 				var ms      = parts[1];
 				var bakFile = Directory.EnumerateFiles(dir, $"*_{ms}.bak").FirstOrDefault();
 
 				if(bakFile is null)
-					return RestoreResult.NotFound(token);
+					return (RestoreResult.NotFound(token), null);
 
 				// Conflict check: has the file changed since backup?
 				// Any I/O failure here means we cannot verify — proceed and let the write surface the real error.
@@ -213,35 +211,60 @@ internal sealed class BackupStore
 						var currentHash = ComputeContentHash(current);
 
 						if(currentHash != meta.PostWriteHash)
-
-							return RestoreResult.Conflict(meta.AbsolutePath, currentHash, meta.PostWriteHash);
+							return (RestoreResult.Conflict(meta.AbsolutePath, currentHash, meta.PostWriteHash), null);
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 
 				var content = File.ReadAllBytes(bakFile);
-				var dir2    = Path.GetDirectoryName(meta.AbsolutePath)!;
 
-				Directory.CreateDirectory(dir2);
-
-				var tmp = Path.Combine(dir2, $".roslynmcp_restore_{Guid.NewGuid():N}.tmp");
-
-				FileWriter.WriteAllBytes(tmp, content);
-				FileWriter.Move(tmp, meta.AbsolutePath, overwrite: true);
-
-				// Remove the consumed backup entry.
-				RemoveMetaEntry(metaFile, token);
-
-				try { File.Delete(bakFile); }
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
-					logger?.LogInfo("backup_delete", $"failed to delete backup file: {ex.Message}");
-				}
-
-				return RestoreResult.Success(meta.AbsolutePath);
+				return (null, new CheckedRestore(meta.AbsolutePath, content, bakFile, metaFile, token));
 			}
 			catch(Exception ex) {
-				return RestoreResult.Failed(ex.Message);
+				return (RestoreResult.Failed(ex.Message), null);
 			}
 		}
+	}
+
+	// Removes the consumed backup entry and deletes the .bak file.
+	// Call after a successful WriteAndInvalidate.
+	public void CompleteRestore(CheckedRestore checkedRestore)
+	{
+		lock(syncRoot) {
+
+			RemoveMetaEntry(checkedRestore.MetaFile, checkedRestore.Token);
+
+			try { File.Delete(checkedRestore.BakFile); }
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
+				logger?.LogInfo("backup_delete", $"failed to delete backup file: {ex.Message}");
+			}
+		}
+	}
+
+
+	/// <summary>
+	///     Attempts to restore a file from the backup identified by <paramref name="token"/>.
+	///     Returns a <see cref="RestoreResult"/> describing success, conflict, or failure.
+	/// </summary>
+	public RestoreResult TryRestore(string token, bool force = false)
+	{
+		var (failure, checkedRestore) = TryCheck(token, force);
+
+		if(failure is not null)
+			return failure;
+
+		var absPath = checkedRestore!.AbsolutePath;
+		var dir     = Path.GetDirectoryName(absPath)!;
+
+		Directory.CreateDirectory(dir);
+
+		var tmp = Path.Combine(dir, $".roslynmcp_restore_{Guid.NewGuid():N}.tmp");
+
+		FileWriter.WriteAllBytes(tmp, checkedRestore.Content);
+		FileWriter.Move(tmp, absPath, overwrite: true);
+
+		CompleteRestore(checkedRestore);
+
+		return RestoreResult.Success(absPath);
 	}
 
 
@@ -473,3 +496,14 @@ internal sealed class RestoreResult
 	public static RestoreResult Failed(string message)
 		=> new() { ErrorMessage = message };
 }
+
+// Pre-validated restore state produced by BackupStore.TryCheck.
+// Holds everything needed to execute the write and cleanup phases separately.
+internal sealed record CheckedRestore(
+	string AbsolutePath,
+	byte[] Content,
+	string BakFile,
+	string MetaFile,
+	string Token
+);
+
