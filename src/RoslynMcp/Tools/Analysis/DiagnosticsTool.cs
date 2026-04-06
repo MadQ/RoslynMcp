@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -65,8 +65,11 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 				.Where(d => IsUnderRoot(d, rootPath))
 			;
 		
+		// Deduplicate by identity tuple — multi-TFM workspaces can surface the same
+		// diagnostic from duplicate document entries across target frameworks.
 		var filtered = diagnostics
 			.Where(GetSeverityFilter(severity))
+			.DistinctBy(d => (d.Id, d.Location.SourceTree?.FilePath, d.Location.GetLineSpan().StartLinePosition.Line, d.Location.GetLineSpan().StartLinePosition.Character, d.GetMessage()))
 			.OrderByDescending(d => d.Severity)
 			.ThenBy(d => d.Location.SourceTree?.FilePath)
 			.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
