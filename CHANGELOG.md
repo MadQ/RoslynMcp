@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.7.6-alpha] — 2026-04-06
+## [0.7.6-alpha] — 2026-04-06 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.7.6-alpha)
 
 ### Added
 - **Call graph tools** — two new analysis tools for navigating the call graph in both directions: `roslyn_find_callers` returns all methods that call a named symbol (with `isDirect` filter for direct vs. interface/delegate dispatch); `roslyn_get_call_graph` returns all methods directly invoked within a method body by walking the Roslyn IOperation tree (closes #32)
