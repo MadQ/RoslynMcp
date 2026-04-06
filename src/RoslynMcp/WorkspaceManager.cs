@@ -38,6 +38,12 @@ internal sealed partial class WorkspaceManager : IDisposable
 	readonly int        maxCachedWorkspaces;
 	readonly FileLogger logger;
 	
+	// Deferred disposal: evicted instances are held here with a grace period so concurrent
+	// callers that already hold a reference can finish before the instance is disposed.
+	// Swept on each eviction and in Dispose(). See issue #145 item 1.
+	readonly List<(WorkspaceInstance Instance, DateTime EvictedAt)> retired = new();
+	const    int RetiredGraceSeconds = 30;
+	
 	
 	public WorkspaceManager(FileLogger logger)
 	{
@@ -140,7 +146,9 @@ internal sealed partial class WorkspaceManager : IDisposable
 				foreach(var k in staleKeys)
 					projectToCacheKey.Remove(k);
 				
-				lru.Value.Instance.Dispose();
+				// Defer disposal — concurrent callers may still hold a reference.
+				retired.Add((lru.Value.Instance, DateTime.UtcNow));
+				SweepRetired();
 			}
 			
 			cache[cacheKey] = new CacheEntry(cacheKey, instance, DateTime.UtcNow);
@@ -264,10 +272,31 @@ internal sealed partial class WorkspaceManager : IDisposable
 		if(instance is not null)
 			await instance.WriteAndInvalidate(fullPath, write);
 		else
-			// No cached workspace — write directly; FSW suppression not needed.
+			// No cached workspace — write directly. A concurrent thread could load the
+			// workspace between the null-check and the write, but the resulting FSW event
+			// is self-healing: the debounce timer re-reads the (correct) file from disk.
 			await write();
 	}
 	
+
+	// ── Retired instance management ──────────────────────────────────────
+	
+	/// <summary>
+	///     Disposes retired instances whose grace period has elapsed.
+	///     Must be called under <see cref="cacheLock"/>.
+	/// </summary>
+	void SweepRetired()
+	{
+		var cutoff = DateTime.UtcNow.AddSeconds(-RetiredGraceSeconds);
+		
+		for(var i = retired.Count - 1; i >= 0; i--) {
+			
+			if(retired[i].EvictedAt < cutoff) {
+				retired[i].Instance.Dispose();
+				retired.RemoveAt(i);
+			}
+		}
+	}
 
 	public void Dispose()
 	{
@@ -276,8 +305,12 @@ internal sealed partial class WorkspaceManager : IDisposable
 			foreach(var entry in cache.Values)
 				entry.Instance.Dispose();
 			
+			foreach(var (instance, _) in retired)
+				instance.Dispose();
+			
 			cache.Clear();
 			projectToCacheKey.Clear();
+			retired.Clear();
 		}
 	}
 

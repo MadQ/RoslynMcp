@@ -57,6 +57,10 @@ internal sealed partial class WorkspaceManager
 		private readonly ConcurrentDictionary<string, int> ignoredPaths = new(StringComparer.OrdinalIgnoreCase);
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
+		// Ref-counted FSW suppression — multiple concurrent ApplyChangesWithFswSuppressed
+		// calls each increment on entry and decrement on exit; EnableRaisingEvents is only
+		// restored when the last suppressor finishes (count returns to 0). See issue #145 item 3.
+		private          int              fswSuppressCount;
 		
 		// ── Factory methods ──────────────────────────────────────────────────
 		
@@ -154,7 +158,15 @@ internal sealed partial class WorkspaceManager
 		{
 			ReloadIfNeeded();
 			
-			return workspace.CurrentSolution;
+			// Snapshot under read lock — prevents use-after-dispose if ReloadIfNeeded
+			// swaps and disposes the old workspace on a concurrent thread.
+			@lock.EnterReadLock();
+			try {
+				return workspace.CurrentSolution;
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
 		}
 		
 		public Compilation GetCompilation(string? csprojPath = null)
@@ -181,8 +193,14 @@ internal sealed partial class WorkspaceManager
 			
 			var projectId = ResolveProjectId(csprojPath);
 			
-			return workspace.CurrentSolution.GetProject(projectId)
-				?? throw new InvalidOperationException($"Project '{projectId}' not found in current solution.");
+			@lock.EnterReadLock();
+			try {
+				return workspace.CurrentSolution.GetProject(projectId)
+					?? throw new InvalidOperationException($"Project '{projectId}' not found in current solution.");
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
 		}
 		
 		ProjectId ResolveProjectId(string? csprojPath)
@@ -564,8 +582,12 @@ internal sealed partial class WorkspaceManager
 				;
 			}
 			
-			if(watcher is not null)
+			// Ref-counted suppression: always disable before TryApplyChanges (idempotent),
+			// only re-enable when the last concurrent suppressor finishes.
+			if(watcher is not null) {
+				Interlocked.Increment(ref fswSuppressCount);
 				watcher.EnableRaisingEvents = false;
+			}
 			
 			bool applied;
 			
@@ -573,7 +595,7 @@ internal sealed partial class WorkspaceManager
 				applied = workspace.TryApplyChanges(newSolution);
 			}
 			finally {
-				if(watcher is not null)
+				if(watcher is not null && Interlocked.Decrement(ref fswSuppressCount) == 0)
 					watcher.EnableRaisingEvents = true;
 			}
 			
@@ -863,9 +885,21 @@ internal sealed partial class WorkspaceManager
 		
 		Compilation RebuildCompilation(ProjectId projectId)
 		{
-			// Compile outside any lock — GetCompilationAsync can take seconds and
-			// holding the write lock for the full duration blocks all concurrent readers.
-			var project = workspace.CurrentSolution.GetProject(projectId)!;
+			// Snapshot under read lock — prevents use-after-dispose if ReloadIfNeeded
+			// swaps the workspace concurrently. The Solution is immutable and remains
+			// valid after the lock is released; only the workspace.CurrentSolution read
+			// needs synchronization. GetCompilationAsync runs outside the lock since
+			// it can take seconds and would block all concurrent readers.
+			Solution solution;
+			@lock.EnterReadLock();
+			try {
+				solution = workspace.CurrentSolution;
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
+			
+			var project = solution.GetProject(projectId)!;
 			
 			var compilation = project.GetCompilationAsync().GetAwaiter().GetResult() ?? CSharpCompilation.Create("empty");
 			
