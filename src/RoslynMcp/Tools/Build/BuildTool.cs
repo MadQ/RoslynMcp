@@ -94,10 +94,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		catch(InvalidOperationException ex) {
 			
 			return scope.Failed(ex.Message, new BuildResult(
-				Succeeded:     false,
-				Errors:        (DiagnosticItem[]) [],
-				Warnings:      (DiagnosticItem[]) [],
-				Source:        "msbuild",
+				Succeeded:    false,
+				Errors:       (DiagnosticItem[]) [],
+				Warnings:     (DiagnosticItem[]) [],
+				Source:       "msbuild",
 				BuildSkipped: true,
 				SkipReason:   ex.Message,
 				DurationMs:   0,
@@ -107,14 +107,19 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
-		var succeeded   = exitCode == 0;
 		
 		DiagnosticItem[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
 		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
 		
-		// When the build fails but no structured diagnostics were extracted (e.g. a locked output
-		// file, linker failure, NuGet restore error without a CS code), surface the raw output tail
-		// so agents can understand why without running dotnet build directly.
+		// dotnet build sometimes exits with a non-zero code despite a clean compilation —
+		// MSBuild analyzer diagnostics (MSBL*, NU*) can set the exit code without emitting
+		// a parseable CS error line. Trust the output text over the exit code: if the output
+		// says "Build succeeded." and we found no structured errors, the build succeeded.
+		var buildSucceededText = output.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase);
+		var succeeded          = exitCode == 0 || (errors.Length == 0 && buildSucceededText);
+		
+		// When genuinely failed with no structured errors (locked file, linker, restore),
+		// surface the raw output tail so agents don't need to run dotnet build themselves.
 		var errorDetails = !succeeded && errors.Length == 0
 			? TailLines(output, 30)
 			: null
