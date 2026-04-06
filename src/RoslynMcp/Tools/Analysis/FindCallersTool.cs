@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using ModelContextProtocol.Server;
@@ -85,6 +85,7 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		}
 
 		var allResults = allCallers
+			.DistinctBy(c => (c.Caller, c.File, c.Line))
 			.OrderBy(c => c.File)
 			.ThenBy(c => c.Line)
 			.ToArray()
