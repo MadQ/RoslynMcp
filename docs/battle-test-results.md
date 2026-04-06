@@ -79,6 +79,9 @@ Haiku + RoslynMcp = same correctness as Sonnet + RoslynMcp for semantic operatio
 ### 5. Zero strategy pivots
 Across the full Orleans workflow (13 prompts), the roslyn tools run had zero strategy pivots. Every approach was direct. The built-in tools run had to retry (MSBuild multi-project error) and sometimes abandoned approaches.
 
+### 6. Failed guesses are nearly free
+When an agent guesses at anchor text or pattern content and gets a "no match" error back (`roslyn_replace_in_file`, `roslyn_insert_lines`), the cost of that failure is almost nothing — a small error response, no file I/O, no compilation. The recovery path (one `roslyn_read_file` to verify exact content, then retry) costs a few hundred tokens. A non-RoslynMcp agent doing the same task would typically `cat` the whole file upfront anyway, paying that cost regardless of whether the match succeeded. Net result: even "guess wrong + read + retry" through RoslynMcp usually costs fewer tokens than the baseline of reading-first everywhere.
+
 ---
 
 ## Where Built-In Tools Won or Tied
@@ -145,6 +148,8 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 **Strategy pivot** — when the agent abandons its current approach and tries something different. Examples: "wait, let me try a different file", "actually, let me search for that instead", "that didn't work, let me approach this differently." Each pivot wastes the tokens already spent on the abandoned approach. Fewer pivots = more efficient, more focused work.
 
 **Cold start** — the one-time cost of loading the Roslyn workspace on the first tool call. Subsequent calls reuse the cached workspace and are near-instant.
+
+**Failed-match recovery** — when an agent guesses at a pattern or anchor, gets a "no match" error, reads the file to verify the exact content, and retries. With RoslynMcp, the failure itself is near-free (a small error response, no I/O), and the recovery (`roslyn_read_file` + retry) is still cheaper than reading-first everywhere. The key insight: optimistic-guess-then-recover is a viable and efficient strategy with RoslynMcp — it isn't with `cat`/`grep` chains where every call reads the full file regardless.
 
 **Narrow focus vs greedy file reading** — a fundamental trade-off we observed. Roslyn tools return precisely what was asked for (a single method body, a list of references) — efficient but the agent only sees what it requests. Built-in tools read entire files — expensive but the agent gains ambient context that can surface unexpected findings. In our testing, roslyn tools produced faster, more focused answers with fewer wasted tokens. Built-in tools occasionally discovered issues the roslyn tools agent missed because it never looked at the surrounding code. Neither approach is universally better; the ideal is roslyn tools with optional "awareness hints" that flag related code worth investigating.
 
