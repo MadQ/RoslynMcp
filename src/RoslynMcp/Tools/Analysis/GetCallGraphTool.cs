@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Operations;
 using ModelContextProtocol.Server;
@@ -53,16 +53,24 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			if(operation is null)
 				continue;
 
-			foreach(var invocation in operation.DescendantsAndSelf().OfType<IInvocationOperation>()) {
+			foreach(var descendant in operation.DescendantsAndSelf()) {
 
-				var loc  = invocation.Syntax.GetLocation();
+				ISymbol? callee = descendant switch {
+					IInvocationOperation inv       => inv.TargetMethod,
+					IObjectCreationOperation ctor  => ctor.Constructor,
+					_ => null
+				};
+				
+				if(callee is null) continue;
+
+				var loc  = descendant.Syntax.GetLocation();
 				var span = loc.GetLineSpan();
 				var file = span.Path is { Length: > 0 } p
 					? Path.GetRelativePath(rootPath, p)
 					: "?";
 
 				allCalls.Add(new CallSiteEntry(
-					Callee: FormatSymbolName(invocation.TargetMethod),
+					Callee: FormatSymbolName(callee),
 					File:   file,
 					Line:   span.StartLinePosition.Line + 1
 				));
