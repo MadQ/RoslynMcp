@@ -372,9 +372,9 @@ internal abstract partial class RoslynMcpTool
 			string? nameHit   = null;
 			var     ambiguous = false;
 			
-			try {
-				foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
-					
+			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
+				
+				try {
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
 						
 						if(suffixHit is not null) {
@@ -392,8 +392,10 @@ internal abstract partial class RoslynMcpTool
 							nameHit = candidate;
 					}
 				}
+				catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) {
+					// Skip this candidate and keep enumerating.
+				}
 			}
-			catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) { }
 			
 			if(!ambiguous && suffixHit is not null)
 				return suffixHit;
