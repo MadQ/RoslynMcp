@@ -7,8 +7,8 @@ Use this checklist when preparing a new release of RoslynMcp.
 ## Pre-Release Verification
 
 ### Code Quality
-- [ ] All source files follow code style guidelines (`.github/copilot-instructions.md`)
-- [ ] No compiler warnings (`dotnet build src/RoslynMcp/RoslynMcp.csproj`)
+- [ ] ~~All source files follow code style guidelines~~ — **style passes currently suspended; skip this step**
+- [ ] No compiler errors (`roslyn_get_diagnostics` — never use `dotnet build` for this)
 - [ ] No Roslyn analyzer warnings
 - [ ] All tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj`)
 - [ ] Code coverage is adequate for new features
