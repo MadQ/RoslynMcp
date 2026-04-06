@@ -1,4 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
@@ -62,6 +62,9 @@ builder.Services
 var host = builder.Build();
 
 var logger      = host.Services.GetRequiredService<FileLogger>();
+
+FileWriter.Initialize(logger);
+
 var lifetime    = host.Services.GetRequiredService<IHostApplicationLifetime>();
 
 lifetime.ApplicationStarted.Register(() => {

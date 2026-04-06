@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
 using System.Text;
+using System.Collections.Concurrent;
 
 namespace RoslynMcp;
 
@@ -46,6 +47,14 @@ internal sealed partial class WorkspaceManager
 #endif
 		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
 		private readonly HashSet<string>  pendingDeletes = new(StringComparer.OrdinalIgnoreCase);
+		// Tracks file sizes written by RM's own TryApplyChanges calls so FlushMSBuild
+		// can skip reloading files that are already up to date in the workspace.
+		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase);
+		private const    int                       MaxRmOwnedWriteSizes = 50;
+		// Per-file FSW suppression — ref-counted for concurrent-write safety.
+		// A path is added before each RM-owned write and decremented in the finally block.
+		// ScheduleDebounced skips events where the count is > 0.
+		private readonly ConcurrentDictionary<string, int> ignoredPaths = new(StringComparer.OrdinalIgnoreCase);
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
 		
@@ -242,13 +251,16 @@ internal sealed partial class WorkspaceManager
 					try {
 						
 						using var stream = File.OpenRead(fullPath);
-						var newText = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+						var newText = SourceText.From(stream, FileWriter.Utf8NoBom);
 						var newSolution = workspace.CurrentSolution;
 						
 						foreach(var id in docIds)
 							newSolution = newSolution.WithDocumentText(id, newText);
 						
-						ApplyChangesWithFswSuppressed(newSolution);
+						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
+					// flag for full reload so the next GetCompilation picks up the new content.
+					if(!ApplyChangesWithFswSuppressed(newSolution))
+						reloadNeeded = true;
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
 					{ }
@@ -271,8 +283,10 @@ internal sealed partial class WorkspaceManager
 		{
 			watcher?.Dispose();
 			
-			lock(debounceLock)
+			lock(debounceLock) {
 				debounceTimer?.Dispose();
+				rmOwnedWriteSizes.Clear();
+			}
 			
 			@lock.Dispose();
 			workspace.Dispose();
@@ -490,7 +504,7 @@ internal sealed partial class WorkspaceManager
 			
 			using var stream = File.OpenRead(path);
 			
-			var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+			var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 			var name = Path.GetRelativePath(rootPath, path);
 			
 			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
@@ -530,22 +544,108 @@ internal sealed partial class WorkspaceManager
 		///     MSBuildWorkspace.TryApplyChanges writes text back to disk, which would
 		///     re-trigger the FSW. See issue #49.
 		/// </summary>
-		void ApplyChangesWithFswSuppressed(Solution newSolution)
+		internal bool ApplyChangesWithFswSuppressed(Solution newSolution)
 		{
+			// Collect changed document paths before TryApplyChanges overwrites them
+			// (MSBuild only — Adhoc.TryApplyChanges is in-memory only, no disk write).
+			// We record expected post-write sizes so FlushMSBuild can skip reloading
+			// files that are already up to date from our own writes.
+			string[] ownedPaths = [];
+			
+			if(isMSBuild) {
+				
+				ownedPaths = newSolution.GetChanges(workspace.CurrentSolution)
+					.GetProjectChanges()
+					.SelectMany(p => p.GetChangedDocuments())
+					.Select(id => newSolution.GetDocument(id)?.FilePath)
+					.Where(p => p is not null)
+					.Cast<string>()
+					.ToArray()
+				;
+			}
+			
 			if(watcher is not null)
 				watcher.EnableRaisingEvents = false;
 			
+			bool applied;
+			
 			try {
-				workspace.TryApplyChanges(newSolution);
+				applied = workspace.TryApplyChanges(newSolution);
 			}
 			finally {
 				if(watcher is not null)
 					watcher.EnableRaisingEvents = true;
 			}
 			
+			// Record sizes only when TryApplyChanges succeeded and actually wrote files.
+			if(applied && ownedPaths.Length > 0) {
+				
+				lock(debounceLock) {
+					
+					// Safety cap — clear rather than evict individual entries to keep it simple.
+					// These entries are short-lived (consumed by the next FSW flush), so this
+					// branch is only reached if FSW events are being lost or unusually delayed.
+					if(rmOwnedWriteSizes.Count + ownedPaths.Length > MaxRmOwnedWriteSizes)
+						rmOwnedWriteSizes.Clear();
+					
+					foreach(var path in ownedPaths) {
+						
+						try {
+							rmOwnedWriteSizes[path] = new FileInfo(path).Length;
+						}
+						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+							// File gone or locked — skip recording; FlushMSBuild will reload normally.
+							_ = ex;
+						}
+					}
+				}
+			}
+			
 			InvalidateCompilation();
+			return applied;
 		}
 		
+		// For MSBuild-tracked .cs files: routes through TryApplyChanges as the single
+		// disk write (FSW-suppressed via ApplyChangesWithFswSuppressed). Returns false
+		// for Adhoc workspaces (TryApplyChanges is in-memory only) or for files not
+		// tracked by the workspace — callers fall back to WriteAndInvalidate.
+		internal bool TryApplyTextChange(string fullPath, SourceText text)
+		{
+			if(!isMSBuild)
+				return false;
+			
+			var docIds = workspace.CurrentSolution.GetDocumentIdsWithFilePath(fullPath);
+			
+			if(docIds.Length == 0)
+				return false;
+			
+			var newSolution = workspace.CurrentSolution;
+			
+			foreach(var id in docIds)
+				newSolution = newSolution.WithDocumentText(id, text);
+			
+			return ApplyChangesWithFswSuppressed(newSolution);
+		}
+		
+		// For untracked and Adhoc .cs files: suppresses the per-file FSW event during
+		// the write, then calls InvalidateFile to sync in-memory workspace state.
+		// No double write — Adhoc.InvalidateFile calls AddOrUpdateDocument (in-memory
+		// only); MSBuild-untracked InvalidateFile sets reloadNeeded (no TryApplyChanges).
+		internal async Task WriteAndInvalidate(string fullPath, Func<Task> write)
+		{
+			ignoredPaths.AddOrUpdate(fullPath, 1, (_, count) => count + 1);
+			
+			try {
+				await write();
+			}
+			finally {
+				ignoredPaths.AddOrUpdate(fullPath, 0, (_, count) => count - 1);
+			}
+			
+			InvalidateFile(fullPath);
+		}
+		
+
 		void StartWatcher()
 		{
 			watcher = new FileSystemWatcher(rootPath, "*.cs")
@@ -568,6 +668,11 @@ internal sealed partial class WorkspaceManager
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)
 		{
+			// Skip FSW events for paths RM is currently writing — prevents spurious workspace
+			// reloads from our own writes. Ref-counted for safety; normal usage is single-threaded.
+			if(!deleted && ignoredPaths.TryGetValue(fullPath, out var count) && count > 0)
+				return;
+			
 			lock(debounceLock) {
 				
 				if(deleted)
@@ -632,6 +737,25 @@ internal sealed partial class WorkspaceManager
 			
 			foreach(var path in changed) {
 				
+				// Skip reload if this is a write RM made itself — workspace is already up to date
+				// from the TryApplyChanges call that triggered the FSW event.
+				lock(debounceLock) {
+					
+					if(rmOwnedWriteSizes.TryGetValue(path, out var expected)) {
+						
+						rmOwnedWriteSizes.Remove(path);
+						
+						try {
+							if(new FileInfo(path).Length == expected)
+								continue;
+						}
+						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+							// Can't read size — fall through to normal reload.
+							_ = ex;
+						}
+					}
+				}
+				
 				try {
 					
 					var docIds = newSolution.GetDocumentIdsWithFilePath(path);
@@ -646,7 +770,7 @@ internal sealed partial class WorkspaceManager
 					}
 					
 					using var stream = File.OpenRead(path);
-			var text = SourceText.From(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 					
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);

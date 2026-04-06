@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+using Microsoft.CodeAnalysis.Text;
+using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -20,7 +21,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		"For replacing existing C# syntax nodes, prefer roslyn_replace_in_code; " +
 		"for text-level find/replace in any file type, use roslyn_replace_in_file."
 	)]
-	public object InsertLines(
+	public async Task<object> InsertLines(
 		[Description("Relative path to the file from the workspace root.")                                                ] string  filePath,
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("The text to insert. May contain newlines for multi-line insertion.")                                 ] string  text,
@@ -100,21 +101,38 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
 				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
-		try {
-			WriteWithRetry(() => File.WriteAllLines(fullPath, resultLines, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false)), log: logger, filePath: fullPath);
+		// For .cs files: single write via workspace API with FSW suppression.
+		// For all other types: direct FileWriter write, then InvalidateFile.
+		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
+			
+			// WriteAllLines uses Environment.NewLine + trailing newline; match that here.
+			var resultText = string.Join(Environment.NewLine, resultLines) + Environment.NewLine;
+			
+			try {
+				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			}
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+		else {
+			
+			try {
+				FileWriter.WriteAllLines(fullPath, resultLines);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
+				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+			}
+			
+			workspace.InvalidateFile(projectPath, fullPath);
 		}
-
+		
 		if(resultLines.Count > 0 && new FileInfo(fullPath).Length <= 4)
 			return scope.Error(new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
 				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
 				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
 			));
-
-		workspace.InvalidateFile(projectPath, fullPath);
 		
 		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines));
 	}

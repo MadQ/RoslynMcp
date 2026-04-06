@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text;
 using ModelContextProtocol.Server;
 using RoslynMcp.Tools;
@@ -61,22 +61,22 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			fullPath = existing;
 		}
 		
-		var isNewFile = !File.Exists(fullPath);
+		// Attempt to read the existing file to detect line-ending style.
+		// Catching FileNotFoundException is more correct than File.Exists — avoids the
+		// TOCTOU race and correctly treats access-denied as an error rather than "new file".
+		string? existingContent = null;
+		
+		try {
+			existingContent = await File.ReadAllTextAsync(fullPath);
+		}
+		catch(FileNotFoundException) { }
+		
+		var isNewFile = existingContent is null;
 		
 		// Detect line ending style from existing file; always write UTF-8 without BOM.
-		var targetEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-		string normalizedContent;
-		
-		if(!isNewFile) {
-			var existingContent  = await File.ReadAllTextAsync(fullPath);
-			var hasCrlf          = existingContent.Contains("\r\n");
-			
-			normalizedContent = NormalizeContentLineEndings(content, hasCrlf);
-		}
-		
-		else {
-			normalizedContent = NormalizeContentLineEndings(content, hasCrlf: true); // CRLF for new files on Windows
-		}
+		var targetEncoding = FileWriter.Utf8NoBom;
+		var hasCrlf        = existingContent?.Contains("\r\n") ?? true; // CRLF default for new files on Windows
+		var normalizedContent = NormalizeContentLineEndings(content, hasCrlf);
 		
 		var lineCount = CountLines(normalizedContent);
 		
@@ -106,8 +106,21 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		
 		try {
 			Directory.CreateDirectory(dir);
-			await File.WriteAllBytesAsync(tmpFile, writeBytes);
-			WriteWithRetry(() => File.Move(tmpFile, fullPath, overwrite: true), log: logger, filePath: fullPath);
+			
+			// For .cs files: FSW suppression ensures the rename event is ignored, and
+			// InvalidateFile is called by WriteAndInvalidate to sync workspace state.
+			// For all other types: direct atomic write, then InvalidateFile.
+			if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
+				await workspace.WriteAndInvalidate(projectPath, fullPath, async () => {
+					await FileWriter.WriteAllBytesAsync(tmpFile, writeBytes);
+					FileWriter.Move(tmpFile, fullPath, overwrite: true);
+				});
+			}
+			else {
+				await FileWriter.WriteAllBytesAsync(tmpFile, writeBytes);
+				FileWriter.Move(tmpFile, fullPath, overwrite: true);
+				workspace.InvalidateFile(projectPath, fullPath);
+			}
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			TryDeleteTemp(tmpFile);
@@ -124,9 +137,6 @@ internal sealed class WriteFileTool : RoslynMcpTool
 					  "If that also fails, ask the user whether to restore from git instead (git checkout -- <file-path>)."
 					: "No backup was taken (new file). Ask the user whether to restore from git (git checkout -- <file-path>).")
 			));
-
-		// Invalidate Roslyn workspace so subsequent tools see the new source.
-		workspace.InvalidateFile(projectPath, fullPath);
 
 		return scope.Outcome($"{lineCount} line(s) written",new WriteFileResult(
 			Written:     true,
@@ -166,10 +176,9 @@ internal sealed class WriteFileTool : RoslynMcpTool
 	static void TryDeleteTemp(string tmpFile)
 	{
 		try {
-			if(File.Exists(tmpFile))
-				File.Delete(tmpFile);
+			File.Delete(tmpFile);
 		}
-		catch { }
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
 	}
 }
 
