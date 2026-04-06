@@ -16,7 +16,9 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ReplaceInCodeTool : RoslynMcpTool
 {
-	public ReplaceInCodeTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
+	readonly BackupStore backups;
+	
+	public ReplaceInCodeTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache, BackupStore backups) : base(workspace, logger, paginationCache) { this.backups = backups; }
 	
 	[McpServerTool(Name = "roslyn_replace_in_code", Destructive = true, Title = "Replace In Code", OpenWorld = false)]
 		[Description(
@@ -144,6 +146,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				));
 			}
 			
+			backups.Save(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(deletedRoot.ToFullString()));
+			
 			// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 			// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
 			// for untracked files (e.g. AdhocWorkspace or files outside the project).
@@ -241,6 +245,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
 				changedNodeInfo
 			));
+		
+		backups.Save(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(newRoot.ToFullString()));
 		
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O

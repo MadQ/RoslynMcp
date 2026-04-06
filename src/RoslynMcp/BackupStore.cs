@@ -89,7 +89,10 @@ internal sealed class BackupStore
 		var pathHash = ComputePathHash(absolutePath);
 		var dir      = Path.Combine(backupRoot, pathHash);
 		var unixMs   = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		var token    = $"{pathHash}_{unixMs}";
+		// Append a short random suffix to guarantee uniqueness even when two backups
+		// of the same file land within the same millisecond (Windows timer resolution ~15ms).
+		var nonce    = Guid.NewGuid().ToString("N")[..4];
+		var token    = $"{pathHash}_{unixMs}_{nonce}";
 
 		// Read git context outside the lock — avoids holding it during file I/O.
 		var (gitBranch, gitCommit) = ReadGitContext(absolutePath);
@@ -99,7 +102,7 @@ internal sealed class BackupStore
 
 				Directory.CreateDirectory(dir);
 
-				var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}.bak");
+				var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.bak");
 				var metaFile = Path.Combine(dir, MetaFileName);
 
 				FileWriter.WriteAllBytes(bakFile, current);
@@ -182,7 +185,8 @@ internal sealed class BackupStore
 
 		var parts = token.Split('_');
 
-		if(parts.Length != 2)
+		// Token format: {pathHash}_{unixMs} (legacy) or {pathHash}_{unixMs}_{nonce}.
+		if(parts.Length < 2)
 			return (RestoreResult.InvalidToken(token), null);
 
 		var dir      = Path.Combine(backupRoot, parts[0]);
@@ -197,8 +201,9 @@ internal sealed class BackupStore
 
 			try {
 
-				var ms      = parts[1];
-				var bakFile = Directory.EnumerateFiles(dir, $"*_{ms}.bak").FirstOrDefault();
+				// Extract the suffix after the path hash (covers both legacy "ms" and new "ms_nonce" formats).
+				var suffix  = token[(parts[0].Length + 1)..];
+				var bakFile = Directory.EnumerateFiles(dir, $"*_{suffix}.bak").FirstOrDefault();
 
 				if(bakFile is null)
 					return (RestoreResult.NotFound(token), null);
@@ -245,6 +250,11 @@ internal sealed class BackupStore
 	///     Attempts to restore a file from the backup identified by <paramref name="token"/>.
 	///     Returns a <see cref="RestoreResult"/> describing success, conflict, or failure.
 	/// </summary>
+	/// <remarks>
+	///     Bypasses WorkspaceManager — the workspace will be out of sync until FSW fires.
+	///     Prefer the TryCheck / WriteAndInvalidate / CompleteRestore split used by LocalHistoryTool.
+	/// </remarks>
+	[Obsolete("Use TryCheck + WriteAndInvalidate + CompleteRestore instead — this method bypasses WorkspaceManager.")]
 	public RestoreResult TryRestore(string token, bool force = false)
 	{
 		var (failure, checkedRestore) = TryCheck(token, force);
@@ -427,9 +437,10 @@ internal sealed class BackupStore
 			ordered.RemoveAt(0);
 			entries.Remove(oldToken);
 
-			// Delete matching .bak file.
-			var ms      = oldToken.Split('_').LastOrDefault() ?? "";
-			var bakFile = Directory.EnumerateFiles(dir, $"{fileName}_{ms}.bak").FirstOrDefault();
+			// Delete matching .bak file — extract suffix after path hash.
+			var hashEnd = oldToken.IndexOf('_');
+			var suffix  = hashEnd >= 0 ? oldToken[(hashEnd + 1)..] : oldToken;
+			var bakFile = Directory.EnumerateFiles(dir, $"{fileName}_{suffix}.bak").FirstOrDefault();
 
 			if(bakFile is not null)
 				File.Delete(bakFile);
@@ -491,7 +502,7 @@ internal sealed class RestoreResult
 		=> new() { ErrorMessage = $"No backup found for token '{token}'." };
 
 	public static RestoreResult InvalidToken(string token)
-		=> new() { ErrorMessage = $"Invalid token format: '{token}'. Expected {{path-hash}}_{{unix-ms}}." };
+		=> new() { ErrorMessage = $"Invalid token format: '{token}'. Expected {{path-hash}}_{{unix-ms}}_{{nonce}}." };
 
 	public static RestoreResult Failed(string message)
 		=> new() { ErrorMessage = message };

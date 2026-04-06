@@ -7,8 +7,10 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class InsertLinesTool : RoslynMcpTool
 {
-	public InsertLinesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
-		: base(workspace, logger, paginationCache) { }
+	readonly BackupStore backups;
+	
+	public InsertLinesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache, BackupStore backups)
+		: base(workspace, logger, paginationCache) { this.backups = backups; }
 	
 	[McpServerTool(Name = "roslyn_insert_lines", Destructive = false, Title = "Insert Lines", OpenWorld = false)]
 		[Description(
@@ -50,14 +52,24 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		if(specCount > 1)
 			return scope.Failed("multiple locations", new ErrorResult("Specify only one of: atLine, insertAfter, or insertBefore."));
 		
+		string   rawContent;
 		string[] lines;
 		
 		try {
-			lines = File.ReadAllLines(fullPath);
+			rawContent = File.ReadAllText(fullPath);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
 		}
+		
+		// Detect existing line-ending style before splitting strips them.
+		var eol = rawContent.Contains("\r\n") ? "\r\n" : "\n";
+		lines   = rawContent.Split(["\r\n", "\n"], StringSplitOptions.None);
+		
+		// Split produces a trailing empty element when the file ends with a newline — trim it
+		// so the insertion index math stays consistent with File.ReadAllLines behavior.
+		if(lines.Length > 0 && lines[^1].Length == 0)
+			lines = lines[..^1];
 		
 		// Resolve insertion index (0-based, insert BEFORE this index).
 		int insertIndex;
@@ -103,12 +115,14 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
 				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
+		backups.Save(fullPath, projectPath, "roslyn_insert_lines", FileWriter.Utf8NoBom.GetBytes(string.Join(eol, resultLines) + eol));
+		
 		// For .cs files: single write via workspace API with FSW suppression.
 		// For all other types: direct FileWriter write, then InvalidateFile.
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
 			
-			// WriteAllLines uses Environment.NewLine + trailing newline; match that here.
-			var resultText = string.Join(Environment.NewLine, resultLines) + Environment.NewLine;
+			// Preserve the file's original line-ending style.
+			var resultText = string.Join(eol, resultLines) + eol;
 			
 			try {
 				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
@@ -120,7 +134,9 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		else {
 			
 			try {
-				FileWriter.WriteAllLines(fullPath, resultLines);
+				// Preserve original line-ending style instead of using Environment.NewLine.
+				var resultText = string.Join(eol, resultLines) + eol;
+				FileWriter.WriteAllText(fullPath, resultText);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
 				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
