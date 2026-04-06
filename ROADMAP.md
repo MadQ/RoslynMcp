@@ -8,7 +8,7 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ## Shipped Releases
 
-All milestones through v0.7.5 are complete. Highlights per release:
+All milestones through v0.7.6 are complete. Highlights per release:
 
 | Release | Key additions |
 |---------|---------------|
@@ -93,7 +93,7 @@ Semantic analysis tools that justify RoslynMcp's existence beyond convenience.
 
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
-| 18 | feature | Implement call graph tools | `roslyn_find_callers` and `roslyn_get_call_graph` — shared IOperation walking infrastructure | #32 |
+| ~~18~~ | ~~feature~~ | ~~Implement call graph tools~~ | ~~Shipped in v0.7.6~~ | #32 |
 | 19 | feature | Implement `roslyn_find_unused` and supporting analysis tools | `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`, `roslyn_check_syntax` | #33 |
 | — | enhancement | Additional scope assigned to this milestone | See GitHub issue #99 | #99 |
 
