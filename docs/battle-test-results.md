@@ -92,6 +92,8 @@ Test 1 (find implementations of `IAnsiConsole`) — grep won because the interfa
 ### 2. Answer richness on exploration
 The built-in tools runs consistently produced more detailed, contextualized answers for exploration prompts. Reading full files gives the agent ambient context it can reference later. RoslynMcp's tools return precise but minimal data.
 
+This cuts both ways. More ambient context means more opportunities to notice unexpected things (see the ToString() finding below). It also means more opportunities to chase irrelevant code paths, include noise in the answer, or spend tokens on code the prompt never asked about. Whether that extra detail is signal or distraction depends on the task — and is hard to measure without prompts specifically designed to expose it. One to test next time: a prompt where the answer is clearly contained in one method, surrounded by a large file of plausible-but-irrelevant code. If the full-file agent produces a longer but less accurate answer, that's the distraction effect in action.
+
 ### 3. Cached context advantage
 After reading a file once, the built-in tools agent could answer follow-up questions about that file for free (already in context). The roslyn tools agent made fresh tool calls for each question. This advantage fades on cross-project work.
 
@@ -140,6 +142,7 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 6. **`roslyn_replace_body`** — replace method body only, keep signature intact
 7. **Diagnostics grouping** — `groupBy: "code"` for summarized error/warning view
 8. **Fix CRLF in multi-line patterns** — investigate MCP JSON string escaping
+9. **"Signal vs distraction" test prompt** — a prompt where the answer is clearly contained in one method, surrounded by a large file of plausible-but-irrelevant code. Hypothesis: full-file agents produce longer but less focused answers; roslyn tools agents answer precisely. Validates (or refutes) the ambient-context-as-distraction theory.
 
 ---
 
