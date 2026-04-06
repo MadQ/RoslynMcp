@@ -18,6 +18,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		"Supports literal string patterns (default) or regular expressions when useRegex=true; " +
 		"regex replacements support $1/$2 backreferences. Replaces ALL occurrences of the pattern in the file. " +
 		"Returns the number of replacements made and the 1-based line numbers that were changed. " +
+		"Literal patterns are matched case-sensitively and whitespace-exactly — verify the exact text with " +
+		"roslyn_read_file or roslyn_search_files before attempting a replacement if unsure of the content. " +
 		"Line endings in the replacement text are normalized to match the file's existing style by default (normalizeLineEndings=true). " +
 		"Supports dryRun=true to preview what would change without writing."
 	)]

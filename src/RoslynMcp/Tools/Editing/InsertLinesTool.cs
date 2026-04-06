@@ -16,7 +16,9 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		"Specify the insertion point by 1-based line number (atLine), by a literal anchor pattern to insert after " +
 		"(insertAfter), or by a literal anchor pattern to insert before (insertBefore) — exactly one specifier is required. " +
 		"Lines are inserted exactly as provided; indentation is the caller's responsibility. " +
-		"Anchor patterns use literal string matching against full line content and target the first match only. " +
+		"Anchor patterns use case-sensitive, whitespace-exact substring matching against line content — " +
+		"tabs and spaces are NOT interchangeable. If an anchor fails, use roslyn_read_file to verify the exact content " +
+		"(including indentation characters) before retrying. " +
 		"Supports dryRun=true to preview the insertion without writing. " +
 		"For replacing existing C# syntax nodes, prefer roslyn_replace_in_code; " +
 		"for text-level find/replace in any file type, use roslyn_replace_in_file."
