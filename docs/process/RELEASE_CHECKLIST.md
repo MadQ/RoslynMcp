@@ -60,19 +60,15 @@ Use this checklist when preparing a new release of RoslynMcp.
 
 ### 2. Tag Release
 
-**Two-tag convention:**
-- `vX.Y.Z-alpha` — version marker tag; created early for milestone tracking; may move as commits land
-- `rX.Y.Z-alpha` — release tag; created **only at the very last moment**, immediately before `gh release create`; immutable once GitHub release is **published** (draft releases are still mutable — see §4)
-
-> **Why two tags?** GitHub makes a tag immutable the moment it is attached to a *published* release. The `v` tag is for development reference; the `r` tag is the one that gets locked. A *draft* release does not lock the tag, so always create drafts first (§4).
+> **Always create the GitHub release as a draft first** — draft releases are fully mutable (assets, notes, tag all editable). Only publish when everything is verified. Once published, the release is immutable.
 >
-> **Tag name blacklisting:** Once a tag name has been used by *any* release (even a deleted one), GitHub permanently blacklists it — it cannot be recreated. If you must re-release, use a new tag name (e.g., `rX.Y.Z.1-alpha`).
+> **Tag name blacklisting:** Once a tag name has been used by *any* published release (even a deleted one), GitHub permanently blacklists it — it cannot be recreated. If you must re-release, bump to the next version instead.
 
 - [ ] Confirm HEAD is the final commit before tagging
 
 ```bash
-git tag -a rX.Y.Z-alpha -m "Release vX.Y.Z-alpha"
-git push && git push origin rX.Y.Z-alpha
+git tag -a vX.Y.Z-alpha -m "Release vX.Y.Z-alpha"
+git push && git push origin vX.Y.Z-alpha
 # then immediately proceed to Create GitHub Release (as draft) — no commits in between
 ```
 
@@ -108,7 +104,7 @@ Compress-Archive -Path ./publish/logviewer/* -DestinationPath ./artifacts/Roslyn
 
 ```powershell
 # Step 1: create as DRAFT — tag is not locked yet
-gh release create rX.Y.Z-alpha --draft --prerelease `
+gh release create vX.Y.Z-alpha --draft --prerelease `
   --title "RoslynMcp vX.Y.Z-alpha" `
   --notes-file "$env:TEMP\release-notes.md" `
   ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip `
@@ -118,7 +114,7 @@ gh release create rX.Y.Z-alpha --draft --prerelease `
 # Step 2: verify assets on the release page, test the zips
 
 # Step 3: publish when satisfied — tag becomes immutable after this
-gh release edit rX.Y.Z-alpha --draft=false
+gh release edit vX.Y.Z-alpha --draft=false
 ```
 
 - [ ] Create draft release with all 3 zip artifacts

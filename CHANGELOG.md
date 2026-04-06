@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.7.5-alpha] — 2026-04-06
+## [0.7.6-alpha] — 2026-04-06
 
 ### Added
 - **Call graph tools** — two new analysis tools for navigating the call graph in both directions: `roslyn_find_callers` returns all methods that call a named symbol (with `isDirect` filter for direct vs. interface/delegate dispatch); `roslyn_get_call_graph` returns all methods directly invoked within a method body by walking the Roslyn IOperation tree (closes #32)
@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Microsoft.Build.Locator`** — upgraded from 1.7.8 to 1.11.2; added explicit `Microsoft.Build.Framework` reference with `ExcludeAssets="runtime" PrivateAssets="all"` to satisfy the new MSBL001 diagnostic
 - **`Microsoft.Build.Framework`** — pinned to 18.4.0 (was implicit 17.11.48 via transitive reference); build-time only — MSBuild itself is still discovered at runtime via `Build.Locator`
 
-Closes [#32](https://github.com/MadQ/RoslynMcp/issues/32), [#99](https://github.com/MadQ/RoslynMcp/issues/99), [#134](https://github.com/MadQ/RoslynMcp/issues/134), [#136](https://github.com/MadQ/RoslynMcp/issues/136), [#139](https://github.com/MadQ/RoslynMcp/issues/139), [#140](https://github.com/MadQ/RoslynMcp/issues/140), [#141](https://github.com/MadQ/RoslynMcp/issues/141), [#143](https://github.com/MadQ/RoslynMcp/issues/143)
+Closes [#32](https://github.com/MadQ/RoslynMcp/issues/32), [#99](https://github.com/MadQ/RoslynMcp/issues/99), [#134](https://github.com/MadQ/RoslynMcp/issues/134), [#136](https://github.com/MadQ/RoslynMcp/issues/136), [#137](https://github.com/MadQ/RoslynMcp/issues/137), [#139](https://github.com/MadQ/RoslynMcp/issues/139), [#140](https://github.com/MadQ/RoslynMcp/issues/140), [#141](https://github.com/MadQ/RoslynMcp/issues/141), [#143](https://github.com/MadQ/RoslynMcp/issues/143)
 
 ---
 
