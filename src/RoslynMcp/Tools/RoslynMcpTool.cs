@@ -363,14 +363,45 @@ internal abstract partial class RoslynMcpTool
 				return direct;
 			
 			// Fallback: suffix match — handles agents passing project-relative paths
-			// when rootPath is the solution directory.
-			var suffix = Path.DirectorySeparatorChar + normalized;
+			// when rootPath is the solution directory. Prefer strict suffix matches
+			// over bare filename matches, and return null on ambiguity rather than
+			// silently picking an arbitrary file.
+			var suffix        = Path.DirectorySeparatorChar + normalized;
+			var fileName      = Path.GetFileName(normalized);
+			string? suffixHit = null;
+			string? nameHit   = null;
+			var     ambiguous = false;
 			
-			foreach(var candidate in Directory.EnumerateFiles(rootPath, Path.GetFileName(normalized), SearchOption.AllDirectories)) {
+			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
 				
-				if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) || string.Equals(Path.GetFileName(candidate), Path.GetFileName(normalized), StringComparison.OrdinalIgnoreCase))
-					return candidate;
+				try {
+					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
+						
+						if(suffixHit is not null) {
+							ambiguous = true;
+							break;
+						}
+						
+						suffixHit = candidate;
+					}
+					else if(string.Equals(Path.GetFileName(candidate), fileName, StringComparison.OrdinalIgnoreCase)) {
+						
+						if(nameHit is not null)
+							nameHit = null; // >1 filename match → discard
+						else
+							nameHit = candidate;
+					}
+				}
+				catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) {
+					// Skip this candidate and keep enumerating.
+				}
 			}
+			
+			if(!ambiguous && suffixHit is not null)
+				return suffixHit;
+			
+			if(nameHit is not null)
+				return nameHit;
 		}
 		catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) { }
 		
@@ -394,8 +425,10 @@ internal abstract partial class RoslynMcpTool
 			
 			if(Path.IsPathRooted(filePath)) {
 				
-				// Absolute path — verify it stays under root.
-				if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase)) {
+				// Absolute path — verify it stays under root with separator guard
+				// to prevent prefix collisions (e.g. root "D:\Foo" matching "D:\FooBar\file.cs").
+				if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
+					(filePath.Length > rootPath.Length && filePath[rootPath.Length] is not '\\' and not '/')) {
 					
 					error = $"Path '{filePath}' is outside the project root.";
 					
