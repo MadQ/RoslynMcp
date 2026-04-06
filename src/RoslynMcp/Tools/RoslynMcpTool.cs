@@ -16,8 +16,9 @@ internal abstract partial class RoslynMcpTool
 	
 	// Tracks the in-flight scope so TryGetCompilation/TryGetProject can set workspace mode without
 	// requiring callers to thread the scope through as a parameter.
-	[ThreadStatic]
-	private static ToolScope? activeScope;
+	// AsyncLocal flows across await continuations, unlike [ThreadStatic] which is bound to a
+	// single thread and would be null if TryGetCompilation ran after an await on a different thread.
+	private static readonly AsyncLocal<ToolScope?> activeScope = new();
 	
 	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
 	{
@@ -34,8 +35,8 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected ToolScope BeginTool(string name, string? subject = null)
 	{
-		var scope  = new ToolScope(name, subject, logger, () => activeScope = null, paginationCache);
-		activeScope = scope;
+		var scope  = new ToolScope(name, subject, logger, () => activeScope.Value = null, paginationCache);
+		activeScope.Value = scope;
 		
 		return scope;
 	}
@@ -89,12 +90,12 @@ internal abstract partial class RoslynMcpTool
 			
 			compilation = workspace.GetCompilation(projectPath);
 			
-			activeScope?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
 			// Annotate when non-obvious resolution occurred.
 			var kind = workspace.GetResolutionKind(projectPath);
 			
-			activeScope?.Record(kind switch {
+			activeScope.Value?.Record(kind switch {
 				
 				ResolutionKind.Directory          => "dir→.csproj",
 				ResolutionKind.FileWalkUp         => "file→.csproj",
@@ -180,12 +181,12 @@ internal abstract partial class RoslynMcpTool
 			
 			project = workspace.GetProject(projectPath);
 			
-			activeScope?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
 			// Annotate when non-obvious resolution occurred.
 			var kind = workspace.GetResolutionKind(projectPath);
 			
-			activeScope?.Record(kind switch {
+			activeScope.Value?.Record(kind switch {
 				
 				ResolutionKind.Directory          => "dir→.csproj",
 				ResolutionKind.FileWalkUp         => "file→.csproj",
@@ -336,7 +337,7 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected PaginatedResult<T> PaginateAndStore<T>(T[] allResults, ref int skip, int take)
 	{
-		activeScope?.SetCacheTag(hit: false);
+		activeScope.Value?.SetCacheTag(hit: false);
 		
 		var token   = paginationCache.Store(allResults);
 		var page    = Paginate(allResults, ref skip, take);
