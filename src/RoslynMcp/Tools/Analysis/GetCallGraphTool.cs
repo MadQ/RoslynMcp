@@ -61,7 +61,8 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 					_ => null
 				};
 				
-				if(callee is null) continue;
+				if(callee is null)
+					continue;
 
 				var loc  = descendant.Syntax.GetLocation();
 				var span = loc.GetLineSpan();
