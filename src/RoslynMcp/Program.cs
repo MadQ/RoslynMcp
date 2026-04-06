@@ -49,8 +49,9 @@ builder.Services
 	.AddSingleton<FileLogger>()
 	.AddMcpServer()
 	.WithStdioServerTransport()
-	// UnsafeRelaxedJsonEscaping: emit printable ASCII as-is instead of \uXXXX sequences.
-	// Reduces response size significantly for symbol signatures and doc comments (issue #3).
+	// UnsafeRelaxedJsonEscaping: emit printable ASCII as-is instead of \uXXXX sequences —
+	// reduces response size significantly for symbol signatures and doc comments (issue #3).
+	// JsonSerializerDefaults.Web: camelCase property names on all tool responses.
 	.WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions(JsonSerializerDefaults.Web) {
 		
 		  Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping

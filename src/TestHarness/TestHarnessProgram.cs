@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -471,7 +471,7 @@ tests.Add(await RunTestAsync(
 	"roslyn_preview_rename: generate diff for renaming compilation",
 	"roslyn_preview_rename",
 	new { symbolName = "compilation", newName = "compilation2", containingType = "WorkspaceInstance", projectPath = targetPath },
-	data => (data?["Token"] ?? data?["token"]) is not null || (data?["Message"] ?? data?["message"]) is not null
+	data => data?["token"] is not null || data?["message"] is not null
 ));
 
 // ── change_signature tests ──────────────────────────────────────────────
@@ -646,6 +646,63 @@ try { File.Delete(tempInsertFile); } catch { }
 try { File.Delete(tempTextFile); } catch { }
 try { File.Delete(tempCodeFile); } catch { }
 try { File.Delete(Path.Combine(targetPath, ".test_code_debug.cs")); } catch { }
+
+// ── Local History Tests ──────────────────────────────────────────────────────
+
+Console.WriteLine("\nLocal History Tools (3 tests)");
+Console.WriteLine("─────────────────────────────────────────────────────────────");
+
+// Create a temp file with original content, then overwrite it to produce a backup token.
+var tempHistoryFile = ".test_local_history_temp.txt";
+var tempHistoryAbs  = Path.Combine(targetPath, tempHistoryFile);
+await File.WriteAllTextAsync(tempHistoryAbs, "// original content\n");
+
+// Write new content via the server — this triggers BackupStore.Save and returns backup_token.
+string? historyToken = null;
+{
+	await SendAsync(new {
+		jsonrpc = "2.0",
+		id      = reqId++,
+		method  = "tools/call",
+		@params = new {
+			name      = "roslyn_write_file",
+			arguments = new {
+				filePath    = tempHistoryFile,
+				projectPath = targetPath,
+				content     = "// modified content\n"
+			}
+		}
+	});
+
+	var resp    = await ReceiveAsync();
+	var content = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
+	var data    = content is not null ? JsonNode.Parse(content) : null;
+	historyToken = data?["backupToken"]?.GetValue<string>();
+}
+
+tests.Add(await RunTestAsync(
+	"roslyn_local_history: list backups for temp file",
+	"roslyn_local_history",
+	new { action = "list", filePath = tempHistoryFile, projectPath = targetPath },
+	data => data?["items"]?.AsArray().Count > 0
+	     && data?["count"]?.GetValue<int>() > 0
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_local_history: preview backup token",
+	"roslyn_local_history",
+	new { action = "preview", token = historyToken ?? "invalid", projectPath = targetPath },
+	data => data?["token"] is not null && data?["absolutePath"] is not null
+));
+
+tests.Add(await RunTestAsync(
+	"roslyn_local_history: apply restores original content",
+	"roslyn_local_history",
+	new { action = "apply", token = historyToken ?? "invalid", projectPath = targetPath },
+	data => data?["restored"]?.GetValue<bool>() == true && data?["absolutePath"] is not null
+));
+
+try { File.Delete(tempHistoryAbs); } catch { }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 
