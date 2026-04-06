@@ -372,20 +372,34 @@ internal abstract partial class RoslynMcpTool
 			string? nameHit   = null;
 			var     ambiguous = false;
 			
-			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
-				
-				if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
-					if(suffixHit is not null) { ambiguous = true; break; }
-					suffixHit = candidate;
-				}
-				else if(string.Equals(Path.GetFileName(candidate), fileName, StringComparison.OrdinalIgnoreCase)) {
-					if(nameHit is not null) nameHit = null; // >1 filename match → discard
-					else nameHit = candidate;
+			try {
+				foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
+					
+					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
+						
+						if(suffixHit is not null) {
+							ambiguous = true;
+							break;
+						}
+						
+						suffixHit = candidate;
+					}
+					else if(string.Equals(Path.GetFileName(candidate), fileName, StringComparison.OrdinalIgnoreCase)) {
+						
+						if(nameHit is not null)
+							nameHit = null; // >1 filename match → discard
+						else
+							nameHit = candidate;
+					}
 				}
 			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
-			if(!ambiguous && suffixHit is not null) return suffixHit;
-			if(nameHit is not null) return nameHit;
+			if(!ambiguous && suffixHit is not null)
+				return suffixHit;
+			
+			if(nameHit is not null)
+				return nameHit;
 		}
 		catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) { }
 		
