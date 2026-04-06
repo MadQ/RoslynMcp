@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace RoslynMcp.Tools.SignatureChange;
@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools.SignatureChange;
 ///     <see cref="SignatureEditor"/>, and delegates the transformation.
 ///     Decoupled from MCP protocol — the tool class handles tokens, diffs, and approval.
 /// </summary>
-internal sealed class SignatureChangeOrchestrator
+internal sealed class SignatureChangePlanner
 {
 	// Editors are tried in order — first one that CanHandle wins.
 	// Phase 2 adds RemoveParameterEditor, BreakingModeEditor, etc.

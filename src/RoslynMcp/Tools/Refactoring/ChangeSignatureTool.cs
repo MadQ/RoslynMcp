@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -8,7 +8,7 @@ namespace RoslynMcp.Tools;
 
 /// <summary>
 ///     Thin MCP entry point for signature changes. Validates input, delegates to
-///     <see cref="SignatureChangeOrchestrator"/>, and manages the preview/apply token workflow.
+///     <see cref="SignatureChangePlanner"/>, and manages the preview/apply token workflow.
 ///     See docs/plans/change-signature-tool.md for full design.
 /// </summary>
 [McpServerToolType]
@@ -65,11 +65,10 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			);
 		}
 		
-		// Delegate to orchestrator.
-		var orchestrator = new SignatureChangeOrchestrator();
-		var solution     = workspace.GetSolution(projectPath);
+		var planner  = new SignatureChangePlanner();
+		var solution = workspace.GetSolution(projectPath);
 		
-		var result = await orchestrator.PrepareAsync(method, new SignatureChangeRequest {
+		var result = await planner.PrepareAsync(method, new SignatureChangeRequest {
 			AddParameters = paramsToAdd
 		}, solution, compilation, cancellationToken);
 		
