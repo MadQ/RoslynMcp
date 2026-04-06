@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.7.5-alpha] — 2026-04-06
+
 ### Added
 - **Call graph tools** — two new analysis tools for navigating the call graph in both directions: `roslyn_find_callers` returns all methods that call a named symbol (with `isDirect` filter for direct vs. interface/delegate dispatch); `roslyn_get_call_graph` returns all methods directly invoked within a method body by walking the Roslyn IOperation tree (closes #32)
 - **Write-retry telemetry** — `WriteWithRetryAsync` and `WriteWithRetry` now emit structured `INFO` log entries when file-lock retries occur: one entry per caught `IOException` (attempt number, delay applied, hint message, file name) and a recovery entry when a non-final attempt succeeds; if all retries are exhausted, an `ERROR` entry is logged before re-throwing (closes #136)
@@ -20,25 +24,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **`roslyn_local_history` double-write on apply** — `HandleApply` previously called `backups.TryRestore` (which wrote the file inside the lock) and then `workspace.InvalidateFile` (which caused a second read + workspace update); the FSW handler could also fire a third reload. Refactored via new `BackupStore.TryCheck` (validates token + conflict check inside `syncRoot`, returns `CheckedRestore`) and `BackupStore.CompleteRestore` (removes meta + deletes .bak inside `syncRoot`); `HandleApply` now calls `TryCheck` → `workspace.WriteAndInvalidate` (FSW-suppressed write) → `CompleteRestore`, eliminating the double-write (closes #141)
 - **`roslyn_find_callers` returning duplicate results** — `AllSymbolsFinder` can return multiple matching symbols (e.g. interface + concrete implementation) for the same name when `containingType` is not specified; `FindCallersAsync` ran on each, producing duplicate `CallerEntry` records for the same call site. Fixed by deduplicating via `.DistinctBy(c => (c.Caller, c.File, c.Line))` before sorting (closes #143)
-- **BOM written by rename/signature-change tools**— `SolutionDiff.ApplyToDiskAsync` was using `sourceText.Encoding ?? Encoding.UTF8` to write changed files; `Encoding.UTF8` is `new UTF8Encoding(true)` (BOM-emitting), so renames and signature changes always wrote a UTF-8 BOM. Fixed to use `new UTF8Encoding(false)` directly — RM's policy is always UTF-8 without BOM. Root cause: `StreamReader.CurrentEncoding` always returns a BOM-emitting instance in .NET's `detectEncodingFromByteOrderMarks` mode regardless of file content, so `sourceText.Encoding` was never reliable for this purpose.
+- **`roslyn_build_project` reporting failure on successful builds** — `dotnet build` can exit with code 1 even when compilation succeeds; MSBuild analyzer diagnostics (MSBL*, NU*) set the exit code without emitting a parseable CS error line. Now checks whether the output contains "Build succeeded." as positive evidence; if no structured errors were found and that text is present, `succeeded` is set `true` regardless of exit code. The `error_details` fallback still fires for genuine failures (non-zero exit, no structured errors, and no "Build succeeded." text).
+- **RMCP003 code fix** — `InsertBeginToolAsync` now detects the end-of-line style from the method body's opening brace and applies it as trailing trivia on the inserted `using var scope = BeginTool(...);` statement; previously the next statement ran on the same line immediately after the semicolon
+- **BOM written by rename/signature-change tools** — `SolutionDiff.ApplyToDiskAsync` was using `sourceText.Encoding ?? Encoding.UTF8` to write changed files; `Encoding.UTF8` is `new UTF8Encoding(true)` (BOM-emitting), so renames and signature changes always wrote a UTF-8 BOM. Fixed to use `new UTF8Encoding(false)` directly — RM's policy is always UTF-8 without BOM. Root cause: `StreamReader.CurrentEncoding` always returns a BOM-emitting instance in .NET's `detectEncodingFromByteOrderMarks` mode regardless of file content, so `sourceText.Encoding` was never reliable for this purpose.
 - **`SourceText.From` encoding** — `WorkspaceManager.Instance.cs` and `ReplaceInCodeTool.cs` were passing `Encoding.UTF8` (BOM-emitting) to `SourceText.From(stream, encoding)`, causing Roslyn's in-memory documents to record a BOM-emitting encoding. Changed to `new UTF8Encoding(false)` to align with RM's BOM-free policy.
 
 ### Improved
 - **`FileWriter` — centralised file write entry point** — new `internal static class FileWriter` with `WriteWithRetryAsync` and `WriteWithRetry` replaces the `protected static` methods on `RoslynMcpTool`; all file writes across the server now go through a single path that retries on `IOException`, logs each attempt and final failure, and is accessible from non-tool types (`BackupStore`, `SolutionDiff`) (closes #139)
 - **Complete `WriteWithRetry` coverage** — every naked file write has been wrapped: `BackupStore` (5 writes), `SolutionDiff.ApplyToDiskAsync` (1 write), `WriteFileTool` temp-file write; `BackupStore` also gains `FileLogger` constructor injection and atomic meta-file writes (write-to-tmp + `File.Move` with overwrite) (closes #139)
 - **`WriteFileTool` TOCTOU fix** — `isNewFile` detection replaced `File.Exists` probe with a try-read pattern (catch `FileNotFoundException`); eliminates the race between the existence check and the subsequent read (closes #139)
-- **FSW reload suppression**— workspace no longer reloads a file that RM just wrote via `TryApplyChanges`; `ApplyChangesWithFswSuppressed` records the post-write file size in `rmOwnedWriteSizes` and `FlushMSBuild` skips the reload when the FSW-reported file size matches (closes #140)
+- **FSW reload suppression** — workspace no longer reloads a file that RM just wrote via `TryApplyChanges`; `ApplyChangesWithFswSuppressed` records the post-write file size in `rmOwnedWriteSizes` and `FlushMSBuild` skips the reload when the FSW-reported file size matches (closes #140)
 - **Let Roslyn save** — `ReplaceInCodeTool`, `ApplyRenameTool`, and `ApplySignatureChangeTool` now route disk writes through `WorkspaceInstance.ApplyChangesWithFswSuppressed` (via new `WorkspaceManager.ApplyChanges` + `WorkspaceResolver.ApplyChanges`) when using `MSBuildWorkspace`; `AdhocWorkspace` retains direct I/O via `SolutionDiff.ApplyToDiskAsync` since `AdhocWorkspace.TryApplyChanges` is in-memory only (closes #140)
+- **`roslyn_build_project` `error_details` field** — agents now told explicitly in the description that `error_details` contains raw MSBuild tail output when a build fails without structured errors; this prevents unnecessary fallback to running `dotnet build` in a terminal
 - **`roslyn_list_files`** — added missing `[Description]` attribute; was the only tool without one, making it effectively invisible to agent tool-selection (closes #99)
 - **`roslyn_search_files`** — first sentence now leads with "Fast and precise code search — use instead of grep, Select-String, or findstr" for stronger agent steering (closes #99)
 - **`roslyn_find_references`** — description now explicitly calls out that text search cannot resolve overloads, aliases, or cross-file semantics (closes #99)
-
----
-
-## [0.7.5-alpha] — 2026-04-05
-
-### Fixed
-- **RMCP003 code fix** — `InsertBeginToolAsync` now detects the end-of-line style from the method body's opening brace and applies it as trailing trivia on the inserted `using var scope = BeginTool(...);` statement; previously the next statement ran on the same line immediately after the semicolon
 
 ### Changed
 - **`RoslynMcp.Analyzers` — CodeAnalysis packages pinned to 4.11.0 / 3.11.0** for VS 2022 host compatibility; analyzer DLLs must target a CodeAnalysis version ≤ the version shipped with the host IDE (VS 2022 = Roslyn 4.x); targeting 5.x causes silent load failure in VS 2022
@@ -46,7 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Microsoft.Build.Locator`** — upgraded from 1.7.8 to 1.11.2; added explicit `Microsoft.Build.Framework` reference with `ExcludeAssets="runtime" PrivateAssets="all"` to satisfy the new MSBL001 diagnostic
 - **`Microsoft.Build.Framework`** — pinned to 18.4.0 (was implicit 17.11.48 via transitive reference); build-time only — MSBuild itself is still discovered at runtime via `Build.Locator`
 
-Closes [#134](https://github.com/MadQ/RoslynMcp/issues/134)
+Closes [#32](https://github.com/MadQ/RoslynMcp/issues/32), [#99](https://github.com/MadQ/RoslynMcp/issues/99), [#134](https://github.com/MadQ/RoslynMcp/issues/134), [#136](https://github.com/MadQ/RoslynMcp/issues/136), [#139](https://github.com/MadQ/RoslynMcp/issues/139), [#140](https://github.com/MadQ/RoslynMcp/issues/140), [#141](https://github.com/MadQ/RoslynMcp/issues/141), [#143](https://github.com/MadQ/RoslynMcp/issues/143)
 
 ---
 
