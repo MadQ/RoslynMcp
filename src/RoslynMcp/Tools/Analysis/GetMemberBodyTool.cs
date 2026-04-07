@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -22,7 +22,8 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 	public async Task<object> GetMemberBody(
 		[Description("The declared symbol name, e.g. 'GetCompilation', 'RootPath', 'WorkspaceManager'. Use the simple name, not a qualified path.")] string symbolName,
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
+		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null,
+		CancellationToken ct = default)
 	{
 		using var scope = BeginTool("roslyn_get_member_body", symbolName);
 		
@@ -51,9 +52,9 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		for(var i = 0; i < syntaxRefs.Length; i++) {
 			
 			var syntaxRef = syntaxRefs[i];
-			var node      = await syntaxRef.GetSyntaxAsync();
+			var node      = await syntaxRef.GetSyntaxAsync(ct);
 			var tree      = node.SyntaxTree;
-			var text      = await tree.GetTextAsync();
+			var text      = await tree.GetTextAsync(ct);
 			var span      = tree.GetLineSpan(node.Span);
 			var startLine = span.StartLinePosition.Line;
 			var endLine   = span.EndLinePosition.Line;
