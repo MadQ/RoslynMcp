@@ -348,7 +348,7 @@ tests.Add(await RunTestAsync(
 		jsonrpc = "2.0",
 		id      = reqId++,
 		method  = "tools/call",
-		@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = targetPath, skip = 2, take = 2, page_token = token ?? "" } }
+		@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = targetPath, skip = 2, take = 2, page_token = token } }
 	});
 	
 	var resp2 = await ReceiveAsync();

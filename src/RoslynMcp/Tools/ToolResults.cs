@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace RoslynMcp.Tools;
 
@@ -20,8 +20,8 @@ internal sealed record CachedPageResult<T>(
 	[property: JsonPropertyName("total")]      int    Total,
 	[property: JsonPropertyName("skip")]       int    Skip,
 	[property: JsonPropertyName("take")]       int    Take,
-	[property: JsonPropertyName("page_token")] string PageToken,
-	[property: JsonPropertyName("has_more")]   bool   HasMore
+	[property: JsonPropertyName("page_token")] string? PageToken,
+	[property: JsonPropertyName("has_more")]   bool    HasMore
 );
 
 // ── Analysis tools ──────────────────────────────────────────────────────────
@@ -32,7 +32,7 @@ internal sealed record FileOutlineResult(
 	[property: JsonPropertyName("skip")]        int      Skip,
 	[property: JsonPropertyName("take")]        int      Take,
 	[property: JsonPropertyName("types")]       object[] Types,
-	[property: JsonPropertyName("page_token")]  string   PageToken,
+	[property: JsonPropertyName("page_token")]  string?   PageToken,
 	[property: JsonPropertyName("has_more")]    bool     HasMore,
 	[property: JsonPropertyName("_caution")]    string?  Caution
 );
@@ -43,7 +43,7 @@ internal sealed record FindReferencesResult(
 	[property: JsonPropertyName("skip")]              int      Skip,
 	[property: JsonPropertyName("take")]              int      Take,
 	[property: JsonPropertyName("references")]        string[] References,
-	[property: JsonPropertyName("page_token")]        string   PageToken,
+	[property: JsonPropertyName("page_token")]        string?   PageToken,
 	[property: JsonPropertyName("has_more")]          bool     HasMore,
 	[property: JsonPropertyName("_caution")]          string?  Caution
 );
@@ -84,7 +84,7 @@ internal sealed record FindCallersResult(
 	[property: JsonPropertyName("skip")]            int           Skip,
 	[property: JsonPropertyName("take")]            int           Take,
 	[property: JsonPropertyName("callers")]         CallerEntry[] Callers,
-	[property: JsonPropertyName("page_token")]      string        PageToken,
+	[property: JsonPropertyName("page_token")]      string?        PageToken,
 	[property: JsonPropertyName("has_more")]        bool          HasMore,
 	[property: JsonPropertyName("_caution")]        string?       Caution
 );
@@ -101,7 +101,7 @@ internal sealed record GetCallGraphResult(
 	[property: JsonPropertyName("skip")]        int             Skip,
 	[property: JsonPropertyName("take")]        int             Take,
 	[property: JsonPropertyName("calls")]       CallSiteEntry[] Calls,
-	[property: JsonPropertyName("page_token")]  string          PageToken,
+	[property: JsonPropertyName("page_token")]  string?          PageToken,
 	[property: JsonPropertyName("has_more")]    bool            HasMore,
 	[property: JsonPropertyName("_caution")]    string?         Caution
 );
@@ -112,7 +112,7 @@ internal sealed record ListTypesResult(
 	[property: JsonPropertyName("skip")]        int      Skip,
 	[property: JsonPropertyName("take")]        int      Take,
 	[property: JsonPropertyName("types")]       string[] Types,
-	[property: JsonPropertyName("page_token")]  string   PageToken,
+	[property: JsonPropertyName("page_token")]  string?   PageToken,
 	[property: JsonPropertyName("has_more")]    bool     HasMore,
 	[property: JsonPropertyName("_caution")]    string?  Caution
 );
@@ -126,7 +126,7 @@ internal sealed record TypeHierarchyResult(
 	[property: JsonPropertyName("skip")]                   int      Skip,
 	[property: JsonPropertyName("take")]                   int      Take,
 	[property: JsonPropertyName("interfaces_and_derived")] string[] InterfacesAndDerived,
-	[property: JsonPropertyName("page_token")]             string   PageToken,
+	[property: JsonPropertyName("page_token")]             string?   PageToken,
 	[property: JsonPropertyName("has_more")]               bool     HasMore,
 	[property: JsonPropertyName("_caution")]               string?  Caution
 );
@@ -138,7 +138,7 @@ internal sealed record TypeMembersResult(
 	[property: JsonPropertyName("skip")]          int       Skip,
 	[property: JsonPropertyName("take")]          int       Take,
 	[property: JsonPropertyName("members")]       object?[] Members,
-	[property: JsonPropertyName("page_token")]    string    PageToken,
+	[property: JsonPropertyName("page_token")]    string?    PageToken,
 	[property: JsonPropertyName("has_more")]      bool      HasMore,
 	[property: JsonPropertyName("_caution")]      string?   Caution
 );
@@ -304,7 +304,7 @@ internal sealed record GetTriviaResult(
 	[property: JsonPropertyName("skip")]            int      Skip,
 	[property: JsonPropertyName("take")]            int      Take,
 	[property: JsonPropertyName("results")]         object[] Results,
-	[property: JsonPropertyName("page_token")]      string   PageToken,
+	[property: JsonPropertyName("page_token")]      string?   PageToken,
 	[property: JsonPropertyName("has_more")]        bool     HasMore
 );
 
@@ -324,7 +324,7 @@ internal sealed record ListFilesResult(
 	[property: JsonPropertyName("count")]      int      Count,
 	[property: JsonPropertyName("skip")]       int      Skip,
 	[property: JsonPropertyName("take")]       int      Take,
-	[property: JsonPropertyName("page_token")] string   PageToken,
+	[property: JsonPropertyName("page_token")] string?   PageToken,
 	[property: JsonPropertyName("has_more")]   bool     HasMore,
 	[property: JsonPropertyName("_caution")]   string?  Caution
 );
@@ -340,7 +340,7 @@ internal sealed record SearchFilesResult(
 	[property: JsonPropertyName("matches")]       object[] Matches,
 	[property: JsonPropertyName("total_matches")] int      TotalMatches,
 	[property: JsonPropertyName("returned")]      int      Returned,
-	[property: JsonPropertyName("page_token")]    string   PageToken,
+	[property: JsonPropertyName("page_token")]    string?   PageToken,
 	[property: JsonPropertyName("has_more")]      bool     HasMore,
 	[property: JsonPropertyName("_caution")]      string?  Caution
 );
@@ -349,7 +349,7 @@ internal sealed record SemanticSearchResult(
 	[property: JsonPropertyName("matches")]       object[] Matches,
 	[property: JsonPropertyName("total_matches")] int      TotalMatches,
 	[property: JsonPropertyName("returned")]      int      Returned,
-	[property: JsonPropertyName("page_token")]    string   PageToken,
+	[property: JsonPropertyName("page_token")]    string?   PageToken,
 	[property: JsonPropertyName("has_more")]      bool     HasMore,
 	[property: JsonPropertyName("context")]       string?  Context  = null,
 	[property: JsonPropertyName("_caution")]      string?  Caution  = null

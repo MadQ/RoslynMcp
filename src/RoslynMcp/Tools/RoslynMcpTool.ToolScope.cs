@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using RoslynMcp;
@@ -68,7 +68,7 @@ internal abstract partial class RoslynMcpTool
 				Total:     cached.Length,
 				Skip:      skip,
 				Take:      take,
-				PageToken: pageToken!,
+				PageToken: pageToken,
 				HasMore:   skip + page.Length < cached.Length
 			);
 			
