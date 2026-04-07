@@ -146,7 +146,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				));
 			}
 			
-			backups.Save(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(deletedRoot.ToFullString()));
+			await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(deletedRoot.ToFullString()));
 			
 			// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 			// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
@@ -246,7 +246,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				changedNodeInfo
 			));
 		
-		backups.Save(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(newRoot.ToFullString()));
+		await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(newRoot.ToFullString()));
 		
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O

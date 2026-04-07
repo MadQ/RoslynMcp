@@ -129,7 +129,7 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		if(token is null)
 			return new ErrorResult("token is required for action: apply.");
 
-		var (failure, checkedRestore) = backups.TryCheck(token, force);
+		var (failure, checkedRestore) = await backups.TryCheckAsync(token, force);
 
 		if(failure is not null) {
 
@@ -145,20 +145,33 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			return new ErrorResult(failure.ErrorMessage ?? "Restore failed.");
 		}
 
-		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath, () => {
-			var tmp = checkedRestore.AbsolutePath + ".rmcp.tmp";
-			FileWriter.WriteAllBytes(tmp, checkedRestore.Content);
-			FileWriter.Move(tmp, checkedRestore.AbsolutePath, overwrite: true);
+		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath, async () => {
+			// Use a Guid-based tmp name to avoid collisions; always clean up on failure.
+			var tmp = Path.Combine(
+				Path.GetDirectoryName(checkedRestore.AbsolutePath)!,
+				$".roslynmcp_restore_{Guid.NewGuid():N}.tmp"
+			);
 
-			return Task.CompletedTask;
+			try {
+				await FileWriter.WriteAllBytesAsync(tmp, checkedRestore.Content);
+				FileWriter.Move(tmp, checkedRestore.AbsolutePath, overwrite: true);
+			}
+			catch {
+				try { File.Delete(tmp); } catch { }
+				throw;
+			}
 		});
 
-		backups.CompleteRestore(checkedRestore);
+		await backups.CompleteRestoreAsync(checkedRestore);
+
+		var message = checkedRestore.Warning is null
+			? $"Restored '{checkedRestore.AbsolutePath}' from backup."
+			: $"Restored '{checkedRestore.AbsolutePath}' from backup. Warning: {checkedRestore.Warning}";
 
 		return new LocalHistoryApplyResult(
 			Restored:     true,
 			AbsolutePath: checkedRestore.AbsolutePath,
-			Message:      $"Restored '{checkedRestore.AbsolutePath}' from backup."
+			Message:      message
 		);
 	}
 }
