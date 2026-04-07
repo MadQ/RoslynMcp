@@ -224,13 +224,15 @@ internal sealed partial class WorkspaceManager : IDisposable
 			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry)) {
 				
-				entry.Instance.ApplyChangesWithFswSuppressed(newSolution);
+				if(!entry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+					entry.Instance.MarkReloadNeeded();
 				
 				return;
 			}
 			
-			if(cache.TryGetValue(normalizedPath, out var directEntry))
-				directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution);
+			if(cache.TryGetValue(normalizedPath, out var directEntry)
+				&& !directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+				directEntry.Instance.MarkReloadNeeded();
 		}
 	}
 
