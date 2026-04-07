@@ -97,7 +97,7 @@ internal sealed class FindCallersTool : RoslynMcpTool
 				TotalCallers:   0,
 				Skip: skip, Take: take,
 				Callers:   [],
-				PageToken: "",
+				PageToken: null,
 				HasMore:   false,
 				Caution:   AdhocCaution(projectPath)
 			));

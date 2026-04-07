@@ -90,7 +90,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		;
 		
 		if(allResults.Length == 0)
-			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], "", false, AdhocCaution(projectPath)));
+			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], null, false, AdhocCaution(projectPath)));
 		
 		string[] symbolsSearched = [.. symbols.Select(s => FormatSymbolName(s)).Distinct()];
 		

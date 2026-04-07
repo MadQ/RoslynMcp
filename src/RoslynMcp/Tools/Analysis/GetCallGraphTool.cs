@@ -90,7 +90,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 				TotalCalls: 0,
 				Skip: skip, Take: take,
 				Calls:     [],
-				PageToken: "",
+				PageToken: null,
 				HasMore:   false,
 				Caution:   AdhocCaution(projectPath)
 			));

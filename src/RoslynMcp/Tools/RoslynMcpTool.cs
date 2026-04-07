@@ -623,6 +623,6 @@ internal sealed record PaginatedResult<T>(
 	int    Total,
 	int    Skip,
 	int    Take,
-	string PageToken,
-	bool   HasMore
+	string? PageToken,
+	bool    HasMore
 );
