@@ -679,7 +679,20 @@ Never commit implementation work directly to `dev`. Merge back with `git merge -
 ```powershell
 Get-ChildItem src\RoslynMcp -Recurse -Filter *.cs | Where-Object { $_.Length -lt 50 } | Select-Object FullName, Length
 ```
-Any file under 50 bytes is suspicious. Restore from the last good commit (`git checkout <sha> -- path/to/file.cs`) before committing. See `docs/process/WORKING_TREE_ROLLBACK.md` for full recovery steps. Run the same check after merges — merges are a common trigger.
+Any file under 50 bytes is suspicious. Before reaching for git, check the RoslynMcp backup store — `roslyn_write_file` snapshots files before every write, and a recent backup may be faster to restore from. **Do not use `roslyn_*` tools for this; use PowerShell directly** (the Roslyn workspace is equally stale when a file is 0 bytes on disk):
+
+```powershell
+$f = "MyFile.cs"
+$dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
+$best = Get-ChildItem $dir -Recurse |
+    Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+# Preview: Get-Content $best.FullName
+# Restore: Copy-Item $best.FullName "path\to\MyFile.cs"
+```
+
+Backup naming: `{originalFileName}_{unixMs}.bak` — some backups may themselves be 0 bytes (taken after truncation); always filter `Length -gt 0` and sort descending. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. See `docs/process/WORKING_TREE_ROLLBACK.md` for full recovery steps. Run the same check after merges — merges are a common trigger.
 
 ### GitHub Issues — Body Formatting
 

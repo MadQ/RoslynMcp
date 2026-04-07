@@ -48,19 +48,64 @@ git show HEAD:src/RoslynMcp/Tools/Build/CleanSolutionTool.cs | Measure-Object -L
 
 ## Recovery
 
-1. Identify the last good commit (the one before the zeroing):
+### Option A — RoslynMcp backup store (try first; no git needed)
+
+`roslyn_write_file` takes a crash-safe backup before every write. Backups live under:
+
+```
+C:\Users\madq4\AppData\Local\RoslynMcp\backups\
+```
+
+Naming convention: `{originalFileName}_{unixMs}.bak`  
+Example: `RestorePackagesTool.cs_1775570742174.bak`
+
+**Do not use `roslyn_*` tools for this** — if the file is 0 bytes on disk the Roslyn
+workspace is equally stale. Use PowerShell directly.
+
+1. Find all non-empty backups for the zeroed file:
+   ```powershell
+   $f = "RestorePackagesTool.cs"
+   $dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
+   Get-ChildItem $dir -Recurse |
+       Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
+       Sort-Object LastWriteTime -Descending |
+       Select-Object Name, LastWriteTime, Length
+   ```
+   Some backups may themselves be 0 bytes — those were taken after the file was already
+   truncated. Sort descending and pick the most recent non-zero entry.
+
+2. Preview the best candidate:
+   ```powershell
+   $best = Get-ChildItem $dir -Recurse |
+       Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
+       Sort-Object LastWriteTime -Descending |
+       Select-Object -First 1
+   Get-Content $best.FullName
+   ```
+
+3. Restore it (overwrite the 0-byte file):
+   ```powershell
+   Copy-Item $best.FullName "src\RoslynMcp\Tools\Build\RestorePackagesTool.cs"
+   ```
+
+4. Verify, then commit the fix:
+   ```
+   fix: restore <file> zeroed by working-tree rollback (from RoslynMcp backup)
+   ```
+
+### Option B — git history (when no backup is useful)
+
+1. Identify the last good commit:
    ```powershell
    git log --oneline -- path/to/file.cs
    ```
 
-2. Restore file(s) from that commit:
+2. Restore from that commit:
    ```powershell
    git checkout <good-sha> -- path/to/file.cs
    ```
 
-3. Verify content is restored, run `roslyn_get_diagnostics`.
-
-4. Commit the fix with a note:
+3. Verify content is restored, then commit the fix:
    ```
    fix: restore <file> zeroed by working-tree rollback
    ```

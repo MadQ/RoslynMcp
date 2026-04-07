@@ -45,7 +45,17 @@ A known working-tree rollback issue silently empties `.cs` files on disk while t
 ```powershell
 Get-ChildItem src\RoslynMcp -Recurse -Filter *.cs | Where-Object { $_.Length -lt 50 } | Select-Object FullName, Length
 ```
-Any result is a red flag. Restore from the last good commit before proceeding. Also run after merges. See `docs/process/WORKING_TREE_ROLLBACK.md`.
+Any result is a red flag. Before reaching for git, check the RoslynMcp backup store — `roslyn_write_file` snapshots files before every write. **Use PowerShell directly, not `roslyn_*` tools** (the workspace is equally stale when a file is 0 bytes on disk):
+```powershell
+$f = "MyFile.cs"
+$dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
+$best = Get-ChildItem $dir -Recurse |
+    Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+# Preview: Get-Content $best.FullName
+# Restore: Copy-Item $best.FullName "path\to\MyFile.cs"
+```
+Backup naming: `{originalFileName}_{unixMs}.bak`. Filter `Length -gt 0` and sort descending — some backups may themselves be 0 bytes. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. Also run the size check after merges. See `docs/process/WORKING_TREE_ROLLBACK.md`.
 
 ### Quick Reference
 
