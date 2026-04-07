@@ -62,7 +62,7 @@ Example: `RestorePackagesTool.cs_1775570742174.bak`
 **Do not use `roslyn_*` tools for this** — if the file is 0 bytes on disk the Roslyn
 workspace is equally stale. Use PowerShell directly.
 
-1. Find all non-empty backups for the zeroed file:
+1. List all candidates — non-empty backups for the zeroed file, newest first:
    ```powershell
    $f = "RestorePackagesTool.cs"
    $dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
@@ -72,9 +72,17 @@ workspace is equally stale. Use PowerShell directly.
        Select-Object Name, LastWriteTime, Length
    ```
    Some backups may themselves be 0 bytes — those were taken after the file was already
-   truncated. Sort descending and pick the most recent non-zero entry.
+   truncated. Filter `Length -gt 0` to skip them.
 
-2. Preview the best candidate:
+2. Cross-reference with git to anchor the truncation time:
+   ```powershell
+   git log --oneline --format="%h %ai %s" -- src/RoslynMcp/Tools/Build/RestorePackagesTool.cs
+   ```
+   Find the last commit where the file had correct content. The right backup will have a
+   `LastWriteTime` that falls **between** that commit and when the truncation was detected.
+   The most recent non-empty backup is a good starting point, but verify the timestamp.
+
+3. **Read and validate the backup content before copying anything:**
    ```powershell
    $best = Get-ChildItem $dir -Recurse |
        Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
@@ -82,13 +90,25 @@ workspace is equally stale. Use PowerShell directly.
        Select-Object -First 1
    Get-Content $best.FullName
    ```
+   Confirm it:
+   - Contains the expected class/type names and namespace
+   - Reflects the correct version of the file (not an older draft missing recent work)
+   - Is syntactically plausible C# (has `using`, `namespace` or `class` declarations)
 
-3. Restore it (overwrite the 0-byte file):
+   **Do not proceed to the next step until the content is verified to be correct.**
+
+4. Only after validation — restore the file:
    ```powershell
    Copy-Item $best.FullName "src\RoslynMcp\Tools\Build\RestorePackagesTool.cs"
    ```
 
-4. Verify, then commit the fix:
+5. Confirm the file is non-empty and run diagnostics:
+   ```powershell
+   (Get-Item "src\RoslynMcp\Tools\Build\RestorePackagesTool.cs").Length
+   ```
+   Then use `roslyn_get_diagnostics` (errors only) to confirm no compile errors were introduced.
+
+6. Commit the fix:
    ```
    fix: restore <file> zeroed by working-tree rollback (from RoslynMcp backup)
    ```

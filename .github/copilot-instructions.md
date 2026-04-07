@@ -49,13 +49,12 @@ Any result is a red flag. Before reaching for git, check the RoslynMcp backup st
 ```powershell
 $f = "MyFile.cs"
 $dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
-$best = Get-ChildItem $dir -Recurse |
+Get-ChildItem $dir -Recurse |
     Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-# Preview: Get-Content $best.FullName
-# Restore: Copy-Item $best.FullName "path\to\MyFile.cs"
+    Sort-Object LastWriteTime -Descending |
+    Select-Object Name, LastWriteTime, Length
 ```
-Backup naming: `{originalFileName}_{unixMs}.bak`. Filter `Length -gt 0` and sort descending — some backups may themselves be 0 bytes. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. Also run the size check after merges. See `docs/process/WORKING_TREE_ROLLBACK.md`.
+Backup naming: `{originalFileName}_{unixMs}.bak`. Filter `Length -gt 0` and sort descending — some backups may themselves be 0 bytes. **Read and validate the content before copying** — confirm it contains the expected class/type names and is the correct version, not a stale draft. Cross-reference `LastWriteTime` against `git log` to pick the right snapshot. Only after validation: `Copy-Item $best.FullName "path\to\MyFile.cs"`. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. Also run the size check after merges. See `docs/process/WORKING_TREE_ROLLBACK.md` for the full procedure.
 
 ### Quick Reference
 

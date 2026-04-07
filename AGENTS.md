@@ -684,15 +684,13 @@ Any file under 50 bytes is suspicious. Before reaching for git, check the Roslyn
 ```powershell
 $f = "MyFile.cs"
 $dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
-$best = Get-ChildItem $dir -Recurse |
+Get-ChildItem $dir -Recurse |
     Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
     Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
-# Preview: Get-Content $best.FullName
-# Restore: Copy-Item $best.FullName "path\to\MyFile.cs"
+    Select-Object Name, LastWriteTime, Length
 ```
 
-Backup naming: `{originalFileName}_{unixMs}.bak` — some backups may themselves be 0 bytes (taken after truncation); always filter `Length -gt 0` and sort descending. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. See `docs/process/WORKING_TREE_ROLLBACK.md` for full recovery steps. Run the same check after merges — merges are a common trigger.
+Backup naming: `{originalFileName}_{unixMs}.bak` — some backups may themselves be 0 bytes (taken after truncation); always filter `Length -gt 0` and sort descending. **Read and validate the backup content before copying** — confirm it contains the expected class/type names and reflects the correct version (not a stale draft). Cross-reference `LastWriteTime` against `git log` to pick the right snapshot. Only after validation: `Copy-Item $best.FullName "path\to\MyFile.cs"`. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. See `docs/process/WORKING_TREE_ROLLBACK.md` for the full step-by-step procedure. Run the same check after merges — merges are a common trigger.
 
 ### GitHub Issues — Body Formatting
 
