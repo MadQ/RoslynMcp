@@ -126,7 +126,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		};
 		
 		var docXml = member.GetDocumentationCommentXml();
-		var docSummary = ExtractDocSummary(docXml);
+		var docSummary = SymbolFormatter.ExtractDocSummary(docXml);
 		
 		return new MemberInfo(
 			Kind: kind,
@@ -134,30 +134,6 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 			Signature: signature,
 			DocSummary: docSummary
 		);
-	}
-	
-	
-	
-	
-	
-	
-	private static string? ExtractDocSummary(string? xml)
-	{
-		if(string.IsNullOrWhiteSpace(xml))
-			return null;
-		
-		try {
-			var doc = System.Xml.Linq.XDocument.Parse(xml);
-			var summary = doc.Root?.Element("summary")?.Value.Trim();
-			
-			return string.IsNullOrWhiteSpace(summary) ? null : summary;
-		}
-		catch(System.Xml.XmlException) {
-			
-			// Malformed XML documentation — return null rather than failing the whole tool call.
-			
-			return null;
-		}
 	}
 	
 	private sealed record MemberInfo(string Kind, string Name, string Signature, string? DocSummary);

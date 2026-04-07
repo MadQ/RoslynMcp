@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -77,16 +77,5 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 			},
 			AdhocCaution(projectPath)
 		));
-	}
-	
-	private static int GetPosition(SourceText text, int line, int column)
-	{
-		if(line < 1 || line > text.Lines.Count)
-			
-			return -1;
-		
-		var lineSpan = text.Lines[line - 1];
-		
-		return lineSpan.Start + Math.Min(column - 1, lineSpan.Span.Length);
 	}
 }

@@ -1,8 +1,5 @@
 using System.ComponentModel;
 using ModelContextProtocol.Server;
-using RoslynMcp.Tools;
-
-
 namespace RoslynMcp.Tools;
 
 [McpServerToolType]

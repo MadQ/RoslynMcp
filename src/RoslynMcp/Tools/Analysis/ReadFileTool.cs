@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -60,9 +60,10 @@ internal sealed class ReadFileTool : RoslynMcpTool
             if(fullPath is null)
                 return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 
-            sourceText    = SourceText.From(await File.ReadAllTextAsync(fullPath));
-            canonicalPath = fullPath
-;
+            // Stream directly - avoids the ReadAllTextAsync string SourceText double-buffer.
+            using var stream = File.OpenRead(fullPath);
+            sourceText    = SourceText.From(stream);
+            canonicalPath = fullPath;
         }
 
         var lines      = sourceText.Lines;

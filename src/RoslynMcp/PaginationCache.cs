@@ -1,4 +1,4 @@
-﻿namespace RoslynMcp;
+namespace RoslynMcp;
 
 /// <summary>
 ///     Caches paginated query results keyed by token. Agents pass the token back
@@ -25,6 +25,7 @@ internal sealed class PaginationCache
 			EvictExpired();
 			
 			while(cache.Count >= MaxEntries) {
+				// O(n) scan is fine — MaxEntries is 50, so this is at most 50 comparisons.
 				var oldest = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
 				
 				cache.Remove(oldest.Key);

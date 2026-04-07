@@ -24,6 +24,7 @@ internal static class FileWriter
     /// <summary>UTF-8 encoding without BOM — RM's standard file encoding.</summary>
     internal static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
+    // null! is safe — Initialize() is always called at startup before any writes are attempted.
     static FileLogger _logger = null!;
 
     /// <summary>Wires the singleton logger. Must be called once at startup before any writes.</summary>

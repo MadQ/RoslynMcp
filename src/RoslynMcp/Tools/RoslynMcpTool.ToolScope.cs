@@ -86,6 +86,8 @@ internal abstract partial class RoslynMcpTool
 				args = JsonSerializer.Serialize(argsObj, RoslynMcpJson.Compact);
 			}
 			catch {
+				// Swallowed intentionally — args is diagnostic only. Non-serializable types
+				// (anonymous objects with cyclic refs, proxies, etc.) must not crash tool calls.
 				args = null;
 			}
 		}
