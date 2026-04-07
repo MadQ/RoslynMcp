@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -52,10 +52,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		]
 		;
 		
-		// Extract global usings from compilation options.
-		var globalUsings = compilation.Options.SyntaxTreeOptionsProvider is { } provider
-			? ExtractGlobalUsings(compilation)
-			: [];
+		var globalUsings = await ExtractGlobalUsings(compilation);
 		
 		return scope.Outcome(filePath, new GetUsingsResult(
 			Path.GetRelativePath(rootPath, tree.FilePath),
@@ -65,7 +62,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		));
 	}
 	
-	private static string[] ExtractGlobalUsings(Compilation compilation)
+	private static async Task<string[]> ExtractGlobalUsings(Compilation compilation)
 	{
 		// Global usings come from <Using> items in the project or ImplicitUsings.
 		// They're baked into the compilation as invisible using directives.
@@ -75,7 +72,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		
 		foreach(var tree in compilation.SyntaxTrees) {
 			
-			var root = tree.GetRoot();
+			var root = await tree.GetRootAsync();
 			
 			foreach(var u in root.DescendantNodes().OfType<UsingDirectiveSyntax>()) {
 				

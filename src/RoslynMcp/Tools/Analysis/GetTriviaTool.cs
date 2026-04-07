@@ -22,7 +22,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         "passing syntaxKind or triviaKind — unknown values return a helpful error with suggestions. " +
         "Returns trivia entries grouped by syntax node, each with kind, span, truncated node text, and leading/trailing " +
         "trivia arrays. Paged with default take=100, max take=500.")]
-    public object GetTrivia(
+    public async Task<object> GetTrivia(
         [Description(ProjectPathDescription)] string projectPath,
         [Description("Relative file path, e.g. 'Core/WindowTracker.cs'. Required for trivia analysis; omit only when using listSyntaxKinds or listTriviaKinds.")] string? filePath = null,
         [Description("Optional 1-based starting line to restrict analysis. Default: start of file.")] int? startLine = null,
@@ -62,8 +62,8 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         if(tree is null)
             return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
 
-        var root	   = tree.GetRoot();
-        var sourceText = tree.GetText();
+        var root	   = await tree.GetRootAsync();
+        var sourceText = await tree.GetTextAsync();
 
         TextSpan span;
 		
