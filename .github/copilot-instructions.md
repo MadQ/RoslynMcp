@@ -54,7 +54,7 @@ Get-ChildItem $dir -Recurse |
     Sort-Object LastWriteTime -Descending |
     Select-Object Name, LastWriteTime, Length
 ```
-Backup naming: `{originalFileName}_{unixMs}.bak`. Filter `Length -gt 0` and sort descending — some backups may themselves be 0 bytes. **Read and validate the content before copying** — confirm it contains the expected class/type names and is the correct version, not a stale draft. Cross-reference `LastWriteTime` against `git log` to pick the right snapshot. Only after validation: `Copy-Item $best.FullName "path\to\MyFile.cs"`. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. Also run the size check after merges. See `docs/process/WORKING_TREE_ROLLBACK.md` for the full procedure.
+Backup naming: `{originalFileName}_{unixMs}.bak`. Filter `Length -gt 0` and sort descending — some backups may themselves be 0 bytes. **Read and validate the content before copying** — confirm it contains the expected class/type names and is the correct version, not a stale draft. Cross-reference `LastWriteTime` against `git log` to pick the right snapshot. Only after validation: `Copy-Item $best.FullName "path\to\MyFile.cs"`. **After copying, read the restored file with `roslyn_get_file_outline` or `roslyn_get_member_body` and reason explicitly about whether it reflects the correct state for the work in progress** — backups predate the write that caused the zeroing, so in-session edits may be missing and need to be re-applied. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. Also run the size check after merges. See `docs/process/WORKING_TREE_ROLLBACK.md` for the full procedure.
 
 ### Quick Reference
 

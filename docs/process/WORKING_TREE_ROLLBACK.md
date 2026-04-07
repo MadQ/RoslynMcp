@@ -102,13 +102,33 @@ workspace is equally stale. Use PowerShell directly.
    Copy-Item $best.FullName "src\RoslynMcp\Tools\Build\RestorePackagesTool.cs"
    ```
 
-5. Confirm the file is non-empty and run diagnostics:
+5. **Read the restored file and reason about correctness in context.**
+   Use `roslyn_get_file_outline` or `roslyn_get_member_body` to read the restored content
+   through the Roslyn workspace (it will reload from disk automatically):
+   ```
+   roslyn_get_file_outline(filePath: "src/RoslynMcp/Tools/Build/RestorePackagesTool.cs", ...)
+   ```
+   Then answer these questions explicitly before proceeding:
+   - Does the restored content match what was being worked on when the zeroing occurred?
+   - Are any changes from the current session missing (i.e., was the backup taken before
+     in-session edits were applied)?
+   - If changes are missing: which specific edits need to be re-applied, and are they still
+     recoverable from context (the session history, the triage doc, the issue description)?
+
+   The backup is taken *before* a `roslyn_write_file` call, so if the file was written with
+   new content and then zeroed externally, the backup may predate the session's edits. Do
+   not assume the restored file is complete — verify it.
+
+   **Only proceed to commit if the content is correct for the current stage of work.
+   If edits are missing, re-apply them before committing.**
+
+6. Confirm the file is non-empty and run diagnostics:
    ```powershell
    (Get-Item "src\RoslynMcp\Tools\Build\RestorePackagesTool.cs").Length
    ```
-   Then use `roslyn_get_diagnostics` (errors only) to confirm no compile errors were introduced.
+   Then use `roslyn_get_diagnostics` (errors only) to confirm no compile errors.
 
-6. Commit the fix:
+7. Commit the fix:
    ```
    fix: restore <file> zeroed by working-tree rollback (from RoslynMcp backup)
    ```
