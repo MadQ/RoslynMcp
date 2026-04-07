@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using Microsoft.Build.Locator;
@@ -15,14 +15,16 @@ namespace RoslynMcp;
 internal static class MSBuildBootstrap
 {
 	static readonly SemaphoreSlim gate = new(1, 1);
-	static bool    completed;
-	static string? failureReason;
-	static string discoveryMethod = "not attempted";
+	// volatile: the fast-path DCL check (if(completed) return failureReason) runs without the
+	// gate, so the JIT/CPU must not cache completed or reorder reads of the other fields past it.
+	static volatile bool    completed;
+	static volatile string? failureReason;
+	static volatile string  discoveryMethod = "not attempted";
 	
 	/// <summary>How MSBuild was discovered. Always non-null — describes the method or the failure.</summary>
 	public static string DiscoveryMethod => discoveryMethod;
 	
-	static WorkspaceMode resolvedMode;
+	static volatile WorkspaceMode resolvedMode;
 	
 	/// <summary>The workspace mode that was resolved and applied.</summary>
 	public static WorkspaceMode ResolvedMode => resolvedMode;
@@ -322,7 +324,8 @@ internal static class MSBuildBootstrap
 		
 		try {
 			var psi = new ProcessStartInfo(vsWherePath) {
-				Arguments              = "-latest -requires Microsoft.Component.MSBuild -find MSBuild\\**\\Bin\\MSBuild.exe",
+				// -products * is required to discover standalone Build Tools installs (not just IDE editions).
+				Arguments              = "-latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\\**\\Bin\\MSBuild.exe",
 				RedirectStandardOutput = true,
 				RedirectStandardError  = true,
 				UseShellExecute        = false,
@@ -334,11 +337,31 @@ internal static class MSBuildBootstrap
 			if(process is null)
 				return null;
 			
-			var output = process.StandardOutput.ReadToEnd().Trim();
+			// Read both streams concurrently on thread pool — sequential reads deadlock if either
+			// pipe buffer fills. Both tasks unblock when the process exits (pipes close).
+			var stdoutTask = Task.Run(() => { try { return process.StandardOutput.ReadToEnd(); } catch { return ""; } });
+			Task.Run(() => { try { process.StandardError.ReadToEnd(); } catch { } });
 			
-			process.WaitForExit(5_000);
+			// Enforce a hard timeout. WaitForExit(ms) returns false if the process hasn't exited,
+			// so ExitCode is only valid after a true return.
+			var exited = process.WaitForExit(5_000);
 			
-			if(process.ExitCode != 0 || string.IsNullOrEmpty(output))
+			if(!exited) {
+				
+				// Kill the child so it doesn't keep running after we return. Killing closes the
+				// pipes, which unblocks the stdoutTask thread pool task.
+				try { process.Kill(entireProcessTree: true); } catch { }
+				
+				return null;
+			}
+			
+			if(process.ExitCode != 0)
+				return null;
+			
+			// After a normal exit the pipes are closed; stdoutTask should drain near-instantly.
+			var output = stdoutTask.Wait(1_000) ? stdoutTask.Result.Trim() : "";
+			
+			if(string.IsNullOrEmpty(output))
 				return null;
 			
 			// vswhere returns the full path to MSBuild.exe — we need its directory.
