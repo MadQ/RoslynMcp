@@ -146,7 +146,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				));
 			}
 			
-			await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(deletedRoot.ToFullString()));
+			var deletedText  = deletedRoot.ToFullString();
+			var deletedBytes = FileWriter.Utf8NoBom.GetBytes(deletedText);
+			
+			await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", deletedBytes);
 			
 			// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 			// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
@@ -156,21 +159,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(deletedRoot);
 				var newSolution = newDoc.Project.Solution;
 				workspace.ApplyChanges(projectPath, newSolution);
+				
+				if(await TryRecoverTruncation(filePath, fullPath, projectPath, deletedBytes) is { } truncErr)
+					return scope.Error(truncErr);
 			}
 			else {
-				
-				var deletedText = deletedRoot.ToFullString();
 				
 				try {
 					await workspace.WriteAndInvalidate(projectPath, fullPath,
 						() => FileWriter.WriteAllTextAsync(fullPath, deletedText));
 					
-					if(deletedText.Length > 4 && new FileInfo(fullPath).Length <= 4)
-						return scope.Error(new ErrorResult(
-							$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
-							"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-							"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
-						));
+					if(CheckForTruncation(filePath, fullPath, deletedText.Length) is { } truncErr)
+						return scope.Error(truncErr);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
@@ -246,7 +246,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				changedNodeInfo
 			));
 		
-		await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", FileWriter.Utf8NoBom.GetBytes(newRoot.ToFullString()));
+		var newText  = newRoot.ToFullString();
+		var newBytes = FileWriter.Utf8NoBom.GetBytes(newText);
+		
+		await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", newBytes);
 		
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
@@ -256,21 +259,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(newRoot);
 			var newSolution = newDoc.Project.Solution;
 			workspace.ApplyChanges(projectPath, newSolution);
+			
+			if(await TryRecoverTruncation(filePath, fullPath, projectPath, newBytes) is { } truncErr)
+				return scope.Error(truncErr);
 		}
 		else {
-			
-			var newText = newRoot.ToFullString();
 			
 			try {
 				await workspace.WriteAndInvalidate(projectPath, fullPath,
 					() => FileWriter.WriteAllTextAsync(fullPath, newText));
 				
-				if(newText.Length > 4 && new FileInfo(fullPath).Length <= 4)
-					return scope.Error(new ErrorResult(
-						$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
-						"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-						"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
-					));
+				if(CheckForTruncation(filePath, fullPath, newText.Length) is { } truncErr)
+					return scope.Error(truncErr);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));

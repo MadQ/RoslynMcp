@@ -116,14 +116,16 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
 				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
-		await backups.SaveAsync(fullPath, projectPath, "roslyn_insert_lines", FileWriter.Utf8NoBom.GetBytes(string.Join(eol, resultLines) + eol));
+		// Preserve the file's original line-ending style — computed once, used for backup,
+		// write, and post-write verification.
+		var resultText  = string.Join(eol, resultLines) + eol;
+		var resultBytes = FileWriter.Utf8NoBom.GetBytes(resultText);
 		
-		// For .cs files: single write via workspace API with FSW suppression.
+		await backups.SaveAsync(fullPath, projectPath, "roslyn_insert_lines", resultBytes);
+		
+		// For .cs files: single write via workspace API with FSW suppression + self-healing recovery.
 		// For all other types: direct FileWriter write, then InvalidateFile.
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
-			
-			// Preserve the file's original line-ending style.
-			var resultText = string.Join(eol, resultLines) + eol;
 			
 			try {
 				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
@@ -131,12 +133,13 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
 			}
+			
+			if(await TryRecoverTruncation(filePath, fullPath, projectPath, resultBytes) is { } truncErr)
+				return scope.Error(truncErr);
 		}
 		else {
 			
 			try {
-				// Preserve original line-ending style instead of using Environment.NewLine.
-				var resultText = string.Join(eol, resultLines) + eol;
 				FileWriter.WriteAllText(fullPath, resultText);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
@@ -144,14 +147,10 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			}
 			
 			workspace.InvalidateFile(projectPath, fullPath);
+			
+			if(CheckForTruncation(filePath, fullPath, resultText.Length) is { } truncErr)
+				return scope.Error(truncErr);
 		}
-		
-		if(resultLines.Count > 0 && new FileInfo(fullPath).Length <= 4)
-			return scope.Error(new ErrorResult(
-				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
-				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>)."
-			));
 		
 		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines));
 	}
