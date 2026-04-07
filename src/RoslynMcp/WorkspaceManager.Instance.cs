@@ -310,13 +310,15 @@ internal sealed partial class WorkspaceManager
 		public void InvalidateFile(string fullPath)
 		{
 			Workspace ws;
+			Solution  currentSolution;
 			ProjectId adhocProjectId;
 			
 			@lock.EnterReadLock();
 			
 			try {
-				ws            = workspace;
-				adhocProjectId = defaultProjectId;
+				ws              = workspace;
+				currentSolution = workspace.CurrentSolution;
+				adhocProjectId  = defaultProjectId;
 			}
 			finally {
 				@lock.ExitReadLock();
@@ -324,7 +326,7 @@ internal sealed partial class WorkspaceManager
 			
 			if(isMSBuild) {
 				
-				var docIds = ws.CurrentSolution.GetDocumentIdsWithFilePath(fullPath);
+				var docIds = currentSolution.GetDocumentIdsWithFilePath(fullPath);
 				
 				if(docIds.Length > 0) {
 					
@@ -332,14 +334,14 @@ internal sealed partial class WorkspaceManager
 						
 						using var stream = File.OpenRead(fullPath);
 						var newText = SourceText.From(stream, FileWriter.Utf8NoBom);
-						var newSolution = ws.CurrentSolution;
+						var newSolution = currentSolution;
 						
 						foreach(var id in docIds)
 							newSolution = newSolution.WithDocumentText(id, newText);
 						
 						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
 						// flag for full reload so the next GetCompilation picks up the new content.
-						if(!ApplyChangesWithFswSuppressed(newSolution))
+						if(!ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
 							Interlocked.Increment(ref reloadVersion);
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
@@ -641,11 +643,43 @@ internal sealed partial class WorkspaceManager
 		internal bool ApplyChangesWithFswSuppressed(Solution newSolution)
 		{
 			Workspace ws;
+			Solution  baseSolution;
 			
 			@lock.EnterReadLock();
 			
 			try {
+				ws           = workspace;
+				baseSolution = workspace.CurrentSolution;
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
+			
+			return ApplyChangesWithFswSuppressed(newSolution, baseSolution, ws);
+		}
+		
+		// Triggers a full workspace reload on the next GetCompilation call. Used by
+		// callers (WorkspaceManager.ApplyChanges) that cannot retry the apply themselves.
+		internal void MarkReloadNeeded() => Interlocked.Increment(ref reloadVersion);
+		
+
+		
+		// Carries the caller's immutable Solution snapshot for diff computation and the expected
+		// Workspace reference for a best-effort staleness check before TryApplyChanges.
+		// A very narrow race between the staleness check and TryApplyChanges still exists, but
+		// TryApplyChanges returns false gracefully on a disposed workspace — so this is safe.
+		internal bool ApplyChangesWithFswSuppressed(Solution newSolution, Solution baseSolution, Workspace expectedWs)
+		{
+			// Best-effort staleness guard: if another thread completed a reload and replaced
+			// the workspace since the caller snapshotted it, discard rather than apply stale edits.
+			@lock.EnterReadLock();
+			Workspace ws;
+			
+			try {
 				ws = workspace;
+				
+				if(!ReferenceEquals(ws, expectedWs))
+					return false;
 			}
 			finally {
 				@lock.ExitReadLock();
@@ -653,13 +687,13 @@ internal sealed partial class WorkspaceManager
 			
 			// Collect changed document paths before TryApplyChanges overwrites them
 			// (MSBuild only — Adhoc.TryApplyChanges is in-memory only, no disk write).
-			// We record expected post-write sizes so FlushMSBuild can skip reloading
-			// files that are already up to date from our own writes.
+			// Use caller's baseSolution snapshot — not ws.CurrentSolution post-unlock —
+			// so the diff reflects exactly what changed relative to the caller's view.
 			string[] ownedPaths = [];
 			
 			if(isMSBuild) {
 				
-				ownedPaths = newSolution.GetChanges(ws.CurrentSolution)
+				ownedPaths = newSolution.GetChanges(baseSolution)
 					.GetProjectChanges()
 					.SelectMany(p => p.GetChangedDocuments())
 					.Select(id => newSolution.GetDocument(id)?.FilePath)
@@ -680,6 +714,12 @@ internal sealed partial class WorkspaceManager
 			
 			try {
 				applied = ws.TryApplyChanges(newSolution);
+			}
+			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
+				// Workspace was disposed by a concurrent ReloadIfNeeded between the staleness
+				// check and TryApplyChanges — treat the same as a false return.
+				_ = ex;
+				applied = false;
 			}
 			finally {
 				if(watcher is not null && Interlocked.Decrement(ref fswSuppressCount) == 0)
@@ -713,38 +753,43 @@ internal sealed partial class WorkspaceManager
 			InvalidateCompilation();
 			return applied;
 		}
+
 		
 		// For MSBuild-tracked .cs files: routes through TryApplyChanges as the single
 		// disk write (FSW-suppressed via ApplyChangesWithFswSuppressed). Returns false
 		// for Adhoc workspaces (TryApplyChanges is in-memory only) or for files not
 		// tracked by the workspace — callers fall back to WriteAndInvalidate.
-		internal bool TryApplyTextChange(string fullPath, SourceText text)
+		internal bool TryApplyTextChange(string filePath, SourceText newText)
 		{
+			// Adhoc workspace TryApplyChanges is in-memory only — no disk write.
+			// Return false so the caller's WriteAndInvalidate path handles disk persistence.
 			if(!isMSBuild)
 				return false;
 			
 			Workspace ws;
+			Solution  currentSolution;
 			
 			@lock.EnterReadLock();
 			
 			try {
-				ws = workspace;
+				ws              = workspace;
+				currentSolution = workspace.CurrentSolution;
 			}
 			finally {
 				@lock.ExitReadLock();
 			}
 			
-			var docIds = ws.CurrentSolution.GetDocumentIdsWithFilePath(fullPath);
+			var docIds = currentSolution.GetDocumentIdsWithFilePath(filePath);
 			
-			if(docIds.Length == 0)
+			if(docIds.IsEmpty)
 				return false;
 			
-			var newSolution = ws.CurrentSolution;
+			var newSolution = currentSolution;
 			
 			foreach(var id in docIds)
-				newSolution = newSolution.WithDocumentText(id, text);
+				newSolution = newSolution.WithDocumentText(id, newText);
 			
-			return ApplyChangesWithFswSuppressed(newSolution);
+			return ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws);
 		}
 		
 		// For untracked and Adhoc .cs files: suppresses the per-file FSW event during
@@ -862,11 +907,13 @@ internal sealed partial class WorkspaceManager
 		
 		void FlushMSBuild(string[] changed, string[] deleted)
 		{
-			Solution currentSolution;
+			Workspace ws;
+			Solution  currentSolution;
 			
 			@lock.EnterReadLock();
 			
 			try {
+				ws              = workspace;
 				currentSolution = workspace.CurrentSolution;
 			}
 			finally {
@@ -934,8 +981,8 @@ internal sealed partial class WorkspaceManager
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			}
 			
-			if(modified)
-				ApplyChangesWithFswSuppressed(newSolution);
+			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
+				Interlocked.Increment(ref reloadVersion);
 		}
 		
 		void FlushAdhoc(AdhocWorkspace adhoc, ProjectId projectId, string[] changed, string[] deleted)
