@@ -8,6 +8,8 @@ namespace RoslynMcp;
 /// </summary>
 internal static class SolutionDiff
 {
+	static readonly string[] LineSeparators = ["\r\n", "\n"];
+
 	/// <summary>
 	///     Returns a unified diff string comparing the changed documents between
 	///     <paramref name="before"/> and <paramref name="after"/>.
@@ -71,8 +73,8 @@ internal static class SolutionDiff
 	
 	private static string BuildHunks(string oldText, string newText)
 	{
-		var oldLines = oldText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
-		var newLines = newText.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+		var oldLines = oldText.Split(LineSeparators, StringSplitOptions.None);
+		var newLines = newText.Split(LineSeparators, StringSplitOptions.None);
 		var sb       = new System.Text.StringBuilder();
 		
 		// Simple greedy diff: find changed regions with 3-line context.

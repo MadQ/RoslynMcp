@@ -99,7 +99,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
                     $"No syntax nodes of kind '{syntaxKind}' found in the specified range.",
                     "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
                     syntaxKind,
-                    GetCommonSyntaxKinds()
+                    CommonSyntaxKinds
                 ));
             }
         }

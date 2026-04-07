@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
 namespace RoslynMcp.Tools;
 
@@ -43,6 +44,8 @@ internal abstract partial class RoslynMcpTool
 	
 	// Static cache for project path inference: maps relative/bare paths to resolved full paths.
 	// Enabled by default; disable via ROSLYNMCP_DISABLE_PATH_CACHE=true env var.
+	// Entries evicted above 500 to prevent unbounded growth in long-running server sessions.
+	const int PathCacheMaxSize = 500;
 	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
 	static readonly object pathCacheLock = new();
 
@@ -108,12 +111,17 @@ internal abstract partial class RoslynMcpTool
 				
 				var resolvedFull = workspace.GetWorkspaceInfo(projectPath).RootPath;
 				
-				lock(pathCacheLock)
-					if(!pathCache.ContainsKey(originalPath)) {
-						
-						pathCache[originalPath] = resolvedFull;
-						logger.LogInfo("TryGetCompilation", $"Cached path: '{originalPath}' → '{resolvedFull}'");
-					}
+                          lock(pathCacheLock) {
+                                  
+                                  if(pathCache.Count >= PathCacheMaxSize)
+                                      pathCache.Clear();
+                                  
+                                  if(!pathCache.ContainsKey(originalPath)) {
+                                      
+                                      pathCache[originalPath] = resolvedFull;
+                                      logger.LogInfo("TryGetCompilation", $"Cached path: '{originalPath}' → '{resolvedFull}'");
+                                  }
+                          }
 			}
 			
 			return true;
@@ -615,6 +623,16 @@ internal abstract partial class RoslynMcpTool
 		var ct = symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 		
 		return ct is not null ? $"{ct}.{symbol.Name}" : symbol.Name;
+	}
+
+	protected static int GetPosition(SourceText text, int line, int column)
+	{
+		if(line < 1 || line > text.Lines.Count || column < 1)
+			return -1;
+		
+		var lineSpan = text.Lines[line - 1];
+		
+		return lineSpan.Start + Math.Min(column - 1, lineSpan.Span.Length);
 	}
 }
 

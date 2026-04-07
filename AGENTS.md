@@ -70,7 +70,6 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `LocalHistoryTool` | `roslyn_local_history` — list, preview, and apply crash-safe file backup snapshots; token-based undo for write operations (actions: `list`, `preview`, `apply`) |
 | `RespawnTool` |`roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `FileWriter` | Centralised file write entry point; `WriteWithRetryAsync` and `WriteWithRetry` wrap all disk writes with exponential-backoff retry on `IOException`, structured `INFO`/`ERROR` log entries per attempt, and are accessible from non-tool types (`BackupStore`, `SolutionDiff`) |
-| `FileEncoding` | Static BOM-detection helper; `Detect(ReadOnlySpan<byte>)` identifies encoding from raw bytes; `Peek(string path)` peeks first 4 bytes from disk; used by `WriteFileTool` and `ReplaceInCodeTool` to preserve existing file encoding |
 | `TypeMembersTool` |`roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
 | `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path |
 | `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |

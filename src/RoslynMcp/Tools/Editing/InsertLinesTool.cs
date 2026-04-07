@@ -8,6 +8,7 @@ namespace RoslynMcp.Tools;
 internal sealed class InsertLinesTool : RoslynMcpTool
 {
 	readonly BackupStore backups;
+	static readonly string[] LineSeparators = ["\r\n", "\n"];
 	
 	public InsertLinesTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache, BackupStore backups)
 		: base(workspace, logger, paginationCache) { this.backups = backups; }
@@ -64,7 +65,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		
 		// Detect existing line-ending style before splitting strips them.
 		var eol = rawContent.Contains("\r\n") ? "\r\n" : "\n";
-		lines   = rawContent.Split(["\r\n", "\n"], StringSplitOptions.None);
+		lines   = rawContent.Split(LineSeparators, StringSplitOptions.None);
 		
 		// Split produces a trailing empty element when the file ends with a newline — trim it
 		// so the insertion index math stays consistent with File.ReadAllLines behavior.
@@ -100,7 +101,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		
 		// Split on both \r\n and \n to avoid trailing \r in lines.
 		// WriteAllLines uses Environment.NewLine on output, matching platform convention.
-		var newLines    = text.Split(["\r\n", "\n"], StringSplitOptions.None)
+		var newLines    = text.Split(LineSeparators, StringSplitOptions.None)
 		;
 		var resultLines = new List<string>(lines.Length + newLines.Length);
 		

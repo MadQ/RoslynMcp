@@ -143,6 +143,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		for(int i = 0; i < lines.Length; i++) {
 			
 			starts[i]  = current;
+			// +1 for the '\n' we split on. Files with bare '\r' line endings (rare, pre-Mac OS X)
+				// would be off by one per line; that platform is not a supported target.
 			current   += lines[i].Length + 1; // +1 for the '\n' we split on
 		}
 		

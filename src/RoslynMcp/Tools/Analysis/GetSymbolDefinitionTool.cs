@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -49,7 +49,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		var relative  = string.IsNullOrEmpty(filePath) ? "?" : Path.GetRelativePath(rootPath, filePath);
 		var signature = SymbolFormatter.FormatSignature(symbol);
 		var docXml    = symbol.GetDocumentationCommentXml();
-		var docSummary = ExtractDocSummary(docXml);
+		var docSummary = SymbolFormatter.ExtractDocSummary(docXml);
 		
 		return scope.Outcome(symbolName, new SymbolDefinitionResult(
 			FormatSymbolName(symbol),
@@ -61,34 +61,5 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			docSummary,
 			AdhocCaution(projectPath)
 		));
-	}
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	
-	private static string? ExtractDocSummary(string? xml)
-	{
-		if(string.IsNullOrWhiteSpace(xml))
-			return null;
-		
-		try {
-			
-			var doc = System.Xml.Linq.XDocument.Parse(xml);
-			var summary = doc.Root?.Element("summary")?.Value.Trim();
-			
-			return string.IsNullOrWhiteSpace(summary) ? null : summary;
-		}
-		catch(System.Xml.XmlException) {
-			
-			// Malformed XML documentation — return null rather than failing the whole tool call.
-			
-			return null;
-		}
 	}
 }
