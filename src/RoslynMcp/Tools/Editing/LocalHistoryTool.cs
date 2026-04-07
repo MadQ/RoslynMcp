@@ -45,7 +45,7 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		Task<object> task = action.ToLowerInvariant() switch {
 
 			"list"    => Task.FromResult<object>(HandleList(projectPath, token, filePath)),
-			"preview" => Task.FromResult<object>(HandlePreview(token)),
+			"preview" => HandlePreviewAsync(token),
 			"apply"   => HandleApply(projectPath, token, force),
 			_         => Task.FromResult<object>(new ErrorResult($"Unknown action '{action}'. Valid values: list, preview, apply."))
 		};
@@ -62,62 +62,80 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	object HandleList(string projectPath, string? token, string? filePath)
 	{
 		string? absolutePath = null;
-		
+
 		if(filePath is not null) {
 			var rootPath = workspace.GetRootPath(projectPath);
 			absolutePath = ResolveFilePath(filePath, rootPath);
 		}
-		
+
 		else if(token is not null) {
-			
+
 			// Token used as a file-scope filter: extract path from backup metadata.
 			var entries = backups.List();
 			absolutePath = entries.FirstOrDefault(e => e.Token == token)?.Meta.AbsolutePath;
 		}
-		
+
 		var all           = backups.List(absolutePath);
 		var rootDir       = workspace.GetRootPath(projectPath);
 		var currentBranch = backups.GetCurrentBranch(rootDir);
-		
+
 		var items = all.Select(e => new LocalHistoryEntry(
 			Token:           e.Token,
 			AbsolutePath:    e.Meta.AbsolutePath,
 			Operation:       e.Meta.Operation,
 			Timestamp:       e.Meta.Timestamp,
 			FileSizeBytes:   e.Meta.FileSizeBytes,
-			ConflictRisk:    e.ConflictRisk,
+			Phase:           e.Meta.Phase,
 			ChangedLineHint: e.Meta.ChangedLineHint,
 			GitBranch:       e.Meta.GitBranch
 		)).ToArray();
-		
+
 		string? caution = null;
-		
+
 		if(currentBranch is not null && all.Any(e => e.Meta.GitBranch is not null && e.Meta.GitBranch != currentBranch))
 			caution = "One or more backups were taken on a different branch. Verify branch context before restoring.";
-		
+
 		return new LocalHistoryListResult(items, items.Length, caution);
 	}
 	
-	object HandlePreview(string? token)
+	async Task<object> HandlePreviewAsync(string? token)
 	{
 		if(token is null)
 			return new ErrorResult("token is required for action: preview.");
-		
+
+		// Find the entry metadata (pure meta read — no disk I/O).
 		var entries = backups.List();
 		var entry   = entries.FirstOrDefault(e => e.Token == token);
-		
+
 		if(entry is null)
 			return new ErrorResult($"No backup found for token '{token}'.");
-		
+
+		// Run the conflict check on demand rather than eagerly at list time.
+		var (failure, checkedRestore) = await backups.TryCheckAsync(token, force: false);
+
+		if(failure is not null) {
+			if(failure.IsConflict)
+				return new LocalHistoryConflictResult(
+					Conflict:     true,
+					AbsolutePath: failure.AbsolutePath!,
+					Message:      "File has been modified since this backup was taken. Use force: true to overwrite, or resolve manually.",
+					CurrentHash:  failure.CurrentHash,
+					BackupHash:   failure.BackupHash
+				);
+
+			// Any other failure (not found, invalid token, read error) — surface it as an error.
+			return new ErrorResult(failure.ErrorMessage ?? "Preview failed.");
+		}
+
 		return new LocalHistoryPreviewResult(
-			Token:          entry.Token,
-			AbsolutePath:   entry.Meta.AbsolutePath,
-			Operation:      entry.Meta.Operation,
-			Timestamp:      entry.Meta.Timestamp,
-			ConflictRisk:   entry.ConflictRisk,
-			Message:        entry.ConflictRisk
-				? "File has been modified since this backup was taken. Use force: true to overwrite, or resolve manually."
-				: "No conflict detected — safe to apply."
+			Token:        token,
+			AbsolutePath: entry.Meta.AbsolutePath,
+			Operation:    entry.Meta.Operation,
+			Timestamp:    entry.Meta.Timestamp,
+			Phase:        entry.Meta.Phase,
+			Message:      checkedRestore?.Warning is null
+				? "No conflict detected — safe to apply."
+				: $"No conflict detected, but a warning was raised: {checkedRestore.Warning}"
 		);
 	}
 	
@@ -181,7 +199,7 @@ internal sealed record LocalHistoryEntry(
 	string  Operation,
 	string  Timestamp,
 	long    FileSizeBytes,
-	bool    ConflictRisk,
+	string? Phase,
 	int[]?  ChangedLineHint,
 	string? GitBranch
 );
@@ -189,12 +207,12 @@ internal sealed record LocalHistoryEntry(
 internal sealed record LocalHistoryListResult(LocalHistoryEntry[] Items, int Count, string? Caution);
 
 internal sealed record LocalHistoryPreviewResult(
-	string Token,
-	string AbsolutePath,
-	string Operation,
-	string Timestamp,
-	bool   ConflictRisk,
-	string Message
+	string  Token,
+	string  AbsolutePath,
+	string  Operation,
+	string  Timestamp,
+	string? Phase,
+	string  Message
 );
 
 internal sealed record LocalHistoryApplyResult(bool Restored, string AbsolutePath, string Message);

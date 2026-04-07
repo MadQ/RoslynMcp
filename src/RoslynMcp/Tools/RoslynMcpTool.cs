@@ -426,9 +426,8 @@ internal abstract partial class RoslynMcpTool
 	protected static ErrorResult? CheckForTruncation(string filePath, string fullPath, int expectedLength) =>
 		expectedLength > 0 && new FileInfo(fullPath).Length == 0
 			? new ErrorResult(
-				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
-				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>).")
+				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
+				Hint: BackupRecoveryHint(filePath))
 			: null;
 
 	/// <summary>
@@ -457,18 +456,23 @@ internal abstract partial class RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			return new ErrorResult(
-				$"Workspace write truncated '{filePath}' to 0 bytes and recovery also failed: {ex.Message} — " +
-				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>).");
+				$"Workspace write truncated '{filePath}' to 0 bytes and recovery also failed: {ex.Message}",
+				Hint: BackupRecoveryHint(filePath));
 		}
 
 		return new FileInfo(fullPath).Length == 0
 			? new ErrorResult(
-				$"Workspace write truncated '{filePath}' to 0 bytes; recovery also produced an empty file — filesystem or antivirus interference is suspected. " +
-				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
-				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>).")
+				$"Workspace write truncated '{filePath}' to 0 bytes; self-healing also produced an empty file — filesystem or antivirus interference is suspected.",
+				Hint: BackupRecoveryHint(filePath))
 			: null;
 	}
+
+	// Returns recovery guidance that agents can act on when a write produces bad results.
+	protected static string BackupRecoveryHint(string relPath) =>
+		$"Both pre- and post-write snapshots were saved before the write. " +
+		$"Use roslyn_local_history (action: \"list\", filePath: \"{relPath}\") to find tokens — " +
+		"apply the \"post\" snapshot to restore the intended content, or the \"pre\" snapshot to roll back. " +
+		$"As a last resort: git checkout -- {relPath}";
 
 
 		/// <summary>

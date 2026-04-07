@@ -55,10 +55,30 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		// Back up each changed file before writing — gives local-history a restore point.
-		foreach(var doc in changedDocs) {
-			var content = (await doc.GetTextAsync()).ToString();
-			await backups.SaveAsync(doc.FilePath!, projectPath, "roslyn_apply_rename", FileWriter.Utf8NoBom.GetBytes(content));
+		// Save pre- and post-change snapshots for each file before writing.
+		// SavePreAsync reads the current disk content (pre-rename); SavePostAsync saves the intended new content.
+		// Abort without touching any files if either snapshot fails.
+		bool preSaved = false;
+
+		try {
+
+			foreach(var doc in changedDocs) {
+				var bytes = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
+				preSaved = false;
+				await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_rename");
+				preSaved = true;
+				await backups.SavePostAsync(doc.FilePath!, projectPath, "roslyn_apply_rename", bytes);
+			}
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			var phaseWord = preSaved ? "post" : "pre";
+			var snapNote  = preSaved ? " Any pre-change snapshots already saved are not needed." : string.Empty;
+
+			// The approval token was already consumed — the agent must run roslyn_preview_rename again.
+			return scope.Failed("backup failed",
+				$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
+				$"No files were modified.{snapNote} " +
+				"The approval token has been consumed — run roslyn_preview_rename again to get a new token, then retry.");
 		}
 		
 		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.

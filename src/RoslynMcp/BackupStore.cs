@@ -13,7 +13,7 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class BackupStore
 {
-	const int    MaxPerFile   = 10;
+	const int    MaxPerFile   = 20;
 	const string MetaFileName = "meta.json";
 
 	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Backup;
@@ -52,17 +52,13 @@ internal sealed class BackupStore
 	}
 
 	/// <summary>
-	///     Creates a backup of <paramref name="absolutePath"/> before it is overwritten.
-	///     Returns a token of the form <c>{8-char-path-hash}_{unix-ms}</c> that can be
-	///     passed to <see cref="TryRestore"/> or <see cref="List"/>.
-	///     Returns null if backups are disabled or the file does not exist.
+	///     Saves the current on-disk content of <paramref name="absolutePath"/> as a pre-change snapshot.
+	///     Returns a token the caller can surface as <c>BackupToken</c> so agents can undo via <c>roslyn_local_history</c>.
+	///     Returns null if backups are disabled or the file does not exist (new-file case — nothing to save).
+	///     Throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> on I/O failure.
+	///     Callers must abort the write and surface the error when this throws.
 	/// </summary>
-	public async Task<string?> SaveAsync(
-		string   absolutePath,
-		string   projectPath,
-		string   operation,
-		byte[]   newContent,
-		int[]?   changedLineHint = null)
+	public async Task<string?> SavePreAsync(string absolutePath, string projectPath, string operation)
 	{
 		if(backupRoot is null)
 			return null;
@@ -72,29 +68,25 @@ internal sealed class BackupStore
 		try {
 			current = File.ReadAllBytes(absolutePath);
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-
-			logger.LogInfo("backup_save", $"could not read pre-write content for \"{Path.GetFileName(absolutePath)}\": {ex.GetType().Name}: {ex.Message}");
-
+		catch(FileNotFoundException) {
+			// File does not yet exist — this is a new-file creation, no pre-snapshot to save.
+			logger.LogInfo("backup_save_pre", $"skipping pre-snapshot for \"{Path.GetFileName(absolutePath)}\": file not found");
 			return null;
 		}
-
-		var preHash        = ComputeContentHash(current);
-		var newContentHash = ComputeContentHash(newContent);
-
-		// Skip backup when writing identical bytes — nothing to restore.
-		if(preHash == newContentHash)
+		catch(DirectoryNotFoundException) {
+			// Same rationale as FileNotFoundException.
+			logger.LogInfo("backup_save_pre", $"skipping pre-snapshot for \"{Path.GetFileName(absolutePath)}\": directory not found");
 			return null;
+		}
+		// Other IOException / UnauthorizedAccessException propagate — callers must abort on failure.
 
 		var pathHash = ComputePathHash(absolutePath);
 		var dir      = Path.Combine(backupRoot, pathHash);
 		var unixMs   = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-		// Append a short random suffix to guarantee uniqueness even when two backups
-		// of the same file land within the same millisecond (Windows timer resolution ~15ms).
+		// Short random suffix guarantees uniqueness within the same millisecond.
 		var nonce    = Guid.NewGuid().ToString("N")[..4];
-		var token    = $"{pathHash}_{unixMs}_{nonce}";
+		var token    = $"{pathHash}_{unixMs}_{nonce}_pre";
 
-		// Read git context outside the lock — avoids holding it during file I/O.
 		var (gitBranch, gitCommit) = ReadGitContext(absolutePath);
 
 		await asyncLock.WaitAsync();
@@ -103,22 +95,21 @@ internal sealed class BackupStore
 
 			Directory.CreateDirectory(dir);
 
-			var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.bak");
+			var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.pre.bak");
 			var metaFile = Path.Combine(dir, MetaFileName);
 
 			FileWriter.WriteAllBytes(bakFile, current);
 
 			var meta = new BackupMeta {
-				AbsolutePath    = absolutePath,
-				ProjectPath     = projectPath,
-				Operation       = operation,
-				Timestamp       = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-				FileSizeBytes   = current.Length,
-				PreWriteHash    = preHash,
-				PostWriteHash   = newContentHash,
-				ChangedLineHint = changedLineHint,
-				GitBranch       = gitBranch,
-				GitCommit       = gitCommit
+				AbsolutePath  = absolutePath,
+				ProjectPath   = projectPath,
+				Operation     = operation,
+				Timestamp     = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+				FileSizeBytes = current.Length,
+				ContentHash   = ComputeContentHash(current),
+				Phase         = "pre",
+				GitBranch     = gitBranch,
+				GitCommit     = gitCommit
 			};
 
 			WriteMetaEntry(metaFile, token, meta);
@@ -126,9 +117,69 @@ internal sealed class BackupStore
 
 			return token;
 		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			throw;
+		}
 		catch(Exception ex) {
-			logger.LogError("backup_save", $"failed to save backup for \"{Path.GetFileName(absolutePath)}\": {ex.Message}");
+			logger.LogError("backup_save_pre", $"unexpected error saving pre-snapshot for \"{Path.GetFileName(absolutePath)}\": {ex.Message}");
 			return null;
+		}
+		finally {
+			asyncLock.Release();
+		}
+	}
+
+	/// <summary>
+	///     Saves <paramref name="content"/> (the intended post-write bytes) as a post-change snapshot.
+	///     Call immediately after <see cref="SavePreAsync"/>, before the actual write.
+	///     Throws <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/> on I/O failure.
+	///     Callers must abort the write when this throws — the file has not been touched.
+	///     No-ops when backups are disabled.
+	/// </summary>
+	public async Task SavePostAsync(string absolutePath, string projectPath, string operation, byte[] content)
+	{
+		if(backupRoot is null)
+			return;
+
+		var pathHash = ComputePathHash(absolutePath);
+		var dir      = Path.Combine(backupRoot, pathHash);
+		var unixMs   = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+		var nonce    = Guid.NewGuid().ToString("N")[..4];
+		var token    = $"{pathHash}_{unixMs}_{nonce}_post";
+
+		var (gitBranch, gitCommit) = ReadGitContext(absolutePath);
+
+		await asyncLock.WaitAsync();
+
+		try {
+
+			Directory.CreateDirectory(dir);
+
+			var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.post.bak");
+			var metaFile = Path.Combine(dir, MetaFileName);
+
+			FileWriter.WriteAllBytes(bakFile, content);
+
+			var meta = new BackupMeta {
+				AbsolutePath  = absolutePath,
+				ProjectPath   = projectPath,
+				Operation     = operation,
+				Timestamp     = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+				FileSizeBytes = content.Length,
+				ContentHash   = ComputeContentHash(content),
+				Phase         = "post",
+				GitBranch     = gitBranch,
+				GitCommit     = gitCommit
+			};
+
+			WriteMetaEntry(metaFile, token, meta);
+			PruneOldBackups(dir, absolutePath);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			throw;
+		}
+		catch(Exception ex) {
+			logger.LogError("backup_save_post", $"unexpected error saving post-snapshot for \"{Path.GetFileName(absolutePath)}\": {ex.Message}");
 		}
 		finally {
 			asyncLock.Release();
@@ -157,19 +208,7 @@ internal sealed class BackupStore
 					!string.Equals(meta.AbsolutePath, absolutePath, StringComparison.OrdinalIgnoreCase))
 					continue;
 
-				var conflictRisk = false;
-
-				try {
-					if(meta.PostWriteHash is not null) {
-						var current = File.ReadAllBytes(meta.AbsolutePath);
-						conflictRisk = ComputeContentHash(current) != meta.PostWriteHash;
-					}
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					logger.LogInfo("backup_list", $"could not read current content to check conflict risk for \"{Path.GetFileName(meta.AbsolutePath)}\": {ex.Message}");
-				}
-
-				results.Add(new BackupEntry(token, meta, conflictRisk));
+				results.Add(new BackupEntry(token, meta, meta.Phase));
 			}
 		}
 
@@ -188,7 +227,8 @@ internal sealed class BackupStore
 
 		var parts = token.Split('_');
 
-		// Token format: {pathHash}_{unixMs} (legacy) or {pathHash}_{unixMs}_{nonce}.
+		// Token format: {pathHash}_{unixMs} (v0), {pathHash}_{unixMs}_{nonce} (v1),
+		//               {pathHash}_{unixMs}_{nonce}_pre or _post (v2).
 		if(parts.Length < 2)
 			return (RestoreResult.InvalidToken(token), null);
 
@@ -204,28 +244,45 @@ internal sealed class BackupStore
 			if(!entries.TryGetValue(token, out var meta))
 				return (RestoreResult.NotFound(token), null);
 
-			// Extract the suffix after the path hash (covers both legacy "ms" and new "ms_nonce" formats).
-			var suffix  = token[(parts[0].Length + 1)..];
-			var bakFile = Directory.EnumerateFiles(dir, $"*_{suffix}.bak").FirstOrDefault();
+			// Resolve the .bak file — handle v0/v1 (.bak) and v2 (.pre.bak / .post.bak).
+			var isV2    = parts.Length >= 4 && (parts[^1] == "pre" || parts[^1] == "post");
+			var phase   = isV2 ? parts[^1] : null;
+			string bakFile;
+
+			if(isV2) {
+				// Core = everything between pathHash and the phase suffix.
+				var core = token[(parts[0].Length + 1)..token.LastIndexOf('_')];
+				bakFile  = Directory.EnumerateFiles(dir, $"*_{core}.{phase}.bak").FirstOrDefault()!;
+			}
+			else {
+				var suffix = token[(parts[0].Length + 1)..];
+				bakFile    = Directory.EnumerateFiles(dir, $"*_{suffix}.bak").FirstOrDefault()!;
+			}
 
 			if(bakFile is null)
 				return (RestoreResult.NotFound(token), null);
 
-			// Conflict check: has the file changed since backup?
+			// Conflict check logic depends on phase:
+			// - null (legacy): compare current hash to PostWriteHash (written after the fact — file should still match)
+			// - "pre": no conflict check — the snapshot records what was there before; no "expected current" is known
+			// - "post": no conflict check — the snapshot records intended content; applying it is always valid
+			//           (the write may have failed and current = pre state, which is not a conflict)
 			string? warning = null;
 
-			if(!force && meta.PostWriteHash is not null)
-				try {
-					var current     = File.ReadAllBytes(meta.AbsolutePath);
-					var currentHash = ComputeContentHash(current);
+			if(!force && phase is null) {
+				if(meta.PostWriteHash is not null)
+					try {
+						var current     = File.ReadAllBytes(meta.AbsolutePath);
+						var currentHash = ComputeContentHash(current);
 
-					if(currentHash != meta.PostWriteHash)
-						return (RestoreResult.Conflict(meta.AbsolutePath, currentHash, meta.PostWriteHash), null);
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					// Cannot verify conflict — let the write proceed; the caller will surface any real error.
-					warning = $"Conflict check skipped: {ex.GetType().Name}: {ex.Message}";
-				}
+						if(currentHash != meta.PostWriteHash)
+							return (RestoreResult.Conflict(meta.AbsolutePath, currentHash, meta.PostWriteHash), null);
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						// Cannot verify conflict — let the write proceed; the caller will surface any real error.
+						warning = $"Conflict check skipped: {ex.GetType().Name}: {ex.Message}";
+					}
+			}
 
 			var content = File.ReadAllBytes(bakFile);
 
@@ -457,10 +514,20 @@ internal sealed class BackupStore
 			ordered.RemoveAt(0);
 			entries.Remove(oldToken);
 
-			// Delete matching .bak file — extract suffix after path hash.
-			var hashEnd = oldToken.IndexOf('_');
-			var suffix  = hashEnd >= 0 ? oldToken[(hashEnd + 1)..] : oldToken;
-			var bakFile = Directory.EnumerateFiles(dir, $"{fileName}_{suffix}.bak").FirstOrDefault();
+			// Delete matching .bak file — handle v0/v1 (.bak) and v2 (.pre.bak / .post.bak).
+			var tokenParts = oldToken.Split('_');
+			string bakFile;
+
+			if(tokenParts.Length >= 4 && (tokenParts[^1] == "pre" || tokenParts[^1] == "post")) {
+				var phase = tokenParts[^1];
+				var core  = oldToken[(tokenParts[0].Length + 1)..oldToken.LastIndexOf('_')];
+				bakFile   = Directory.EnumerateFiles(dir, $"{fileName}_{core}.{phase}.bak").FirstOrDefault()!;
+			}
+			else {
+				var hashEnd = oldToken.IndexOf('_');
+				var suffix  = hashEnd >= 0 ? oldToken[(hashEnd + 1)..] : oldToken;
+				bakFile     = Directory.EnumerateFiles(dir, $"{fileName}_{suffix}.bak").FirstOrDefault()!;
+			}
 
 			if(bakFile is not null)
 				try { File.Delete(bakFile); }
@@ -492,14 +559,18 @@ internal sealed record BackupMeta
 	public required string   Operation       { get; init; }
 	public required string   Timestamp       { get; init; }
 	public required long     FileSizeBytes   { get; init; }
-	public required string   PreWriteHash    { get; init; }
+	public required string   ContentHash     { get; init; }
+	// "pre" / "post" for v2 snapshots; null for legacy entries.
+	public          string?  Phase           { get; init; }
+	// Legacy fields — nullable for backward compat with old meta files.
+	public          string?  PreWriteHash    { get; init; }
 	public          string?  PostWriteHash   { get; init; }
 	public          int[]?   ChangedLineHint { get; init; }
 	public          string?  GitBranch       { get; init; }
 	public          string?  GitCommit       { get; init; }
 }
 
-internal sealed record BackupEntry(string Token, BackupMeta Meta, bool ConflictRisk);
+internal sealed record BackupEntry(string Token, BackupMeta Meta, string? Phase);
 
 internal sealed class RestoreResult
 {

@@ -149,9 +149,23 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			var deletedText  = deletedRoot.ToFullString();
 			var deletedBytes = FileWriter.Utf8NoBom.GetBytes(deletedText);
 			
-			await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", deletedBytes);
-			
-			// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
+			bool preSavedDelete = false;
+
+		try {
+			preSavedDelete = await backups.SavePreAsync(fullPath, projectPath, "roslyn_replace_in_code") is not null;
+			await backups.SavePostAsync(fullPath, projectPath, "roslyn_replace_in_code", deletedBytes);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			var hint = preSavedDelete
+				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
+				: "Resolve the issue (disk space or permissions) and retry.";
+
+			return scope.Error(new ErrorResult(
+				$"Write aborted — could not save {(preSavedDelete ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
+				Hint: hint));
+		}
+
+		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 			// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
 			// for untracked files (e.g. AdhocWorkspace or files outside the project).
 			if(docIds.Length > 0) {
@@ -173,10 +187,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 						return scope.Error(truncErr);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+					return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
 				}
 			}
-			
+
 			return scope.Outcome($"deleted {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));
 		}
 		
@@ -248,32 +262,46 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		var newText  = newRoot.ToFullString();
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newText);
-		
-		await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_code", newBytes);
-		
+
+		bool preSavedReplace = false;
+
+		try {
+			preSavedReplace = await backups.SavePreAsync(fullPath, projectPath, "roslyn_replace_in_code") is not null;
+			await backups.SavePostAsync(fullPath, projectPath, "roslyn_replace_in_code", newBytes);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			var hint = preSavedReplace
+				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
+				: "Resolve the issue (disk space or permissions) and retry.";
+
+			return scope.Error(new ErrorResult(
+				$"Write aborted — could not save {(preSavedReplace ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
+				Hint: hint));
+		}
+
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
 		// for untracked files (e.g. AdhocWorkspace or files outside the project).
 		if(docIds.Length > 0) {
-			
+
 			var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(newRoot);
 			var newSolution = newDoc.Project.Solution;
 			workspace.ApplyChanges(projectPath, newSolution);
-			
+
 			if(await TryRecoverTruncation(filePath, fullPath, projectPath, newBytes) is { } truncErr)
 				return scope.Error(truncErr);
 		}
 		else {
-			
+
 			try {
 				await workspace.WriteAndInvalidate(projectPath, fullPath,
 					() => FileWriter.WriteAllTextAsync(fullPath, newText));
-				
+
 				if(CheckForTruncation(filePath, fullPath, newText.Length) is { } truncErr)
 					return scope.Error(truncErr);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
 			}
 		}
 		
