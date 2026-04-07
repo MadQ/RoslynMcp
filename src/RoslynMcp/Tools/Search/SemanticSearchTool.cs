@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -110,7 +111,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				
 				var fileName = Path.GetFileName(document.FilePath);
 				
-				if(!MatchesGlob(fileName, filePattern))
+				if(!GlobMatcher.Matches(fileName, filePattern))
 					continue;
 				
 				if(!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
@@ -144,8 +145,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 					
 					matches = matches.Where(m => {
 						
-						var pos  = text.Lines[m.Line - 1].Start;
-						var node = root.FindToken(pos).Parent;
+						// Use the exact match position, not the line start — FindToken(lineStart)
+						// returns the indentation trivia token for indented code, causing the
+						// enclosing-kind walk to land on the wrong node.
+						var node = root.FindToken(m.Position).Parent;
 						
 						while(node is not null) {
 							
@@ -223,21 +226,22 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	IEnumerable<SemanticMatchResult> SearchInComments(SyntaxNode root, SourceText text, Regex regex)
 	{
 		foreach(var trivia in root.DescendantTrivia()) {
-			
+
 			if(!trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) &&
 			   !trivia.IsKind(SyntaxKind.MultiLineCommentTrivia))
 				continue;
-			
-			var span	 = trivia.Span;
-			var lineSpan = text.Lines.GetLinePositionSpan(span);
+
+			var span       = trivia.Span;
+			var lineSpan   = text.Lines.GetLinePositionSpan(span);
 			var triviaText = trivia.ToString();
-			
+
 			if(regex.IsMatch(triviaText)) {
 				yield return new SemanticMatchResult {
-					
-					Line	= lineSpan.Start.Line + 1,
-					Text	= triviaText.Trim(),
-					Context	= "comment"
+
+					Line     = lineSpan.Start.Line + 1,
+					Text     = triviaText.Trim(),
+					Context  = "comment",
+					Position = span.Start
 				};
 			}
 		}
@@ -246,20 +250,21 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	IEnumerable<SemanticMatchResult> SearchInStrings(SyntaxNode root, SourceText text, Regex regex)
 	{
 		foreach(var token in root.DescendantTokens()) {
-			
+
 			if(!token.IsKind(SyntaxKind.StringLiteralToken) && !token.IsKind(SyntaxKind.InterpolatedStringTextToken))
 				continue;
-			
-			var span	 = token.Span;
-			var lineSpan = text.Lines.GetLinePositionSpan(span);
+
+			var span      = token.Span;
+			var lineSpan  = text.Lines.GetLinePositionSpan(span);
 			var tokenText = token.ToString();
-			
+
 			if(regex.IsMatch(tokenText)) {
 				yield return new SemanticMatchResult {
-					
-					Line	= lineSpan.Start.Line + 1,
-					Text	= tokenText.Trim(),
-					Context	= "string"
+
+					Line     = lineSpan.Start.Line + 1,
+					Text     = tokenText.Trim(),
+					Context  = "string",
+					Position = span.Start
 				};
 			}
 		}
@@ -268,25 +273,26 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	IEnumerable<SemanticMatchResult> SearchInIdentifiers(SyntaxNode root, SourceText text, Regex regex)
 	{
 		foreach(var token in root.DescendantTokens()) {
-			
+
 			if(!token.IsKind(SyntaxKind.IdentifierToken))
 				continue;
-			
-			var span	 = token.Span;
-			var lineSpan = text.Lines.GetLinePositionSpan(span);
+
+			var span      = token.Span;
+			var lineSpan  = text.Lines.GetLinePositionSpan(span);
 			var tokenText = token.ToString();
-			
+
 			if(regex.IsMatch(tokenText)) {
-				
+
 				// Get the containing line for context
-				var line	 = text.Lines[lineSpan.Start.Line];
+				var line     = text.Lines[lineSpan.Start.Line];
 				var lineText = line.ToString().Trim();
-				
+
 				yield return new SemanticMatchResult {
-					
-					Line	= lineSpan.Start.Line + 1,
-					Text	= lineText,
-					Context	= "identifier"
+
+					Line     = lineSpan.Start.Line + 1,
+					Text     = lineText,
+					Context  = "identifier",
+					Position = span.Start
 				};
 			}
 		}
@@ -298,28 +304,29 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		// but skip lines whose primary content is a comment or string literal.
 		var lines       = text.Lines;
 		var reported    = new HashSet<int>();
-		
+
 		// Build a per-line context index once — avoids repeated DescendantTokens traversals
 		// for each matching line (was O(matching_lines x tokens_per_line)).
-		var lineContexts = BuildLineContextIndex(root, text)
-		;
-		
+		var lineContexts = BuildLineContextIndex(root, text);
+
 		for(int i = 0; i < lines.Count; i++) {
-			
+
 			var lineText = lines[i].ToString();
-			
-			if(!regex.IsMatch(lineText))
+			var m        = regex.Match(lineText);
+
+			if(!m.Success)
 				continue;
-			
+
 			if(lineContexts[i] is "comment" or "xmldoc" or "string")
 				continue;
-			
+
 			if(reported.Add(i))
 				yield return new SemanticMatchResult {
-					
-					Line    = i + 1,
-					Text    = lineText.Trim(),
-					Context = "code"
+
+					Line     = i + 1,
+					Text     = lineText.Trim(),
+					Context  = "code",
+					Position = lines[i].Start + m.Index
 				};
 		}
 	}
@@ -327,42 +334,45 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	IEnumerable<SemanticMatchResult> SearchInXmlDocs(SyntaxNode root, SourceText text, Regex regex)
 	{
 		foreach(var trivia in root.DescendantTrivia()) {
-			
+
 			if(!trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) && !trivia.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
 				continue;
-			
-			var span	   = trivia.Span;
+
+			var span       = trivia.Span;
 			var lineSpan   = text.Lines.GetLinePositionSpan(span);
 			var triviaText = trivia.ToString();
-			
+
 			if(regex.IsMatch(triviaText))
 				yield return new SemanticMatchResult {
-					Line	= lineSpan.Start.Line + 1,
-					Text	= triviaText.Trim(),
-					Context	= "xmldoc"
-			};
+					Line     = lineSpan.Start.Line + 1,
+					Text     = triviaText.Trim(),
+					Context  = "xmldoc",
+					Position = span.Start
+				};
 		}
 	}
 	
 	IEnumerable<SemanticMatchResult> SearchInAll(SyntaxNode root, SourceText text, Regex regex)
 	{
-		// Simple line-by-line search, similar to SearchFilesTool but with syntax awareness
+		// Simple line-by-line search, similar to SearchFilesTool but with syntax awareness.
 		var lines = text.Lines;
-		
+
 		for(int i = 0; i < lines.Count; i++) {
-			
+
 			var lineText = lines[i].ToString();
-			
-			if(regex.IsMatch(lineText)) {
-				
+			var m        = regex.Match(lineText);
+
+			if(m.Success) {
+
 				// Determine context by checking what's on this line
 				var lineSpan = lines[i].Span;
-				var context	 = DetermineContext(root, lineSpan);
-				
+				var context  = DetermineContext(root, lineSpan);
+
 				yield return new SemanticMatchResult {
-					Line	= i + 1,
-					Text	= lineText.Trim(),
-					Context	= context
+					Line     = i + 1,
+					Text     = lineText.Trim(),
+					Context  = context,
+					Position = lines[i].Start + m.Index
 				};
 			}
 		}
@@ -466,31 +476,15 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		return "code";
 	}
 	
-	static bool MatchesGlob(string fileName, string pattern)
-	{
-		if(pattern is "*" or "*.*")
-			return true;
-		
-		if(pattern.StartsWith("*.") && !pattern.AsSpan(2).Contains('*') && !pattern.AsSpan(2).Contains('?'))
-			return fileName.EndsWith(pattern.AsSpan(1), StringComparison.OrdinalIgnoreCase);
-		
-		// General glob: convert wildcards to regex and match.
-		var regexPat = "^" + string.Concat(pattern.Select(c => c switch {
-			
-			'*' => ".*",
-			'?' => ".",
-			'.' => "\\.",
-			_   => Regex.Escape(c.ToString())
-		})) + "$";
-		
-		return Regex.IsMatch(fileName, regexPat, RegexOptions.IgnoreCase);
-	}
-	
 	sealed record SemanticMatchResult
 	{
 		public string File    { get; init; } = "";
 		public int    Line    { get; init; }
 		public string Text    { get; init; } = "";
 		public string Context { get; init; } = "";
+
+		// Internal cursor for containingKind filtering — not exposed in the JSON response.
+		[JsonIgnore]
+		public int Position { get; init; }
 	}
 }

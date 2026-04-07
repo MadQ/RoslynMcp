@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -65,7 +65,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				
 				var fileName = Path.GetFileName(document.FilePath);
 				
-				if(!MatchesGlob(fileName, filePattern))
+				if(!GlobMatcher.Matches(fileName, filePattern))
 					continue;
 				
 				var text  = await document.GetTextAsync(cancellationToken);
@@ -98,36 +98,6 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			result.HasMore,
 			AdhocCaution(projectPath)
 		));
-	}
-	
-	// TODO: Future enhancement — add syntax-tree-based semantic filtering.
-	// Allow searching only within specific syntax contexts:
-	// - Comments only
-	// - String literals only
-	// - Identifiers only (class/method/variable names)
-	// - Exclude generated code
-	// This would use SyntaxTree.GetRoot() and filter by SyntaxKind before applying regex.
-	
-	private static bool MatchesGlob(string fileName, string pattern)
-	{
-		if(pattern is "*" or "*.*")
-			return true;
-		
-		// Fast-path for the common *.ext form.
-		if(pattern.StartsWith("*.") && !pattern.AsSpan(2).Contains('*') && !pattern.AsSpan(2).Contains('?'))
-			
-			return fileName.EndsWith(pattern.AsSpan(1), StringComparison.OrdinalIgnoreCase);
-		
-		// General glob: convert wildcards to regex and match.
-		var regexPat = "^" + string.Concat(pattern.Select(c => c switch {
-			
-			'*' => ".*",
-			'?' => ".",
-			'.' => "\\.",
-			_   => Regex.Escape(c.ToString())
-		})) + "$";
-		
-		return Regex.IsMatch(fileName, regexPat, RegexOptions.IgnoreCase);
 	}
 	
 	private sealed class MatchResult
