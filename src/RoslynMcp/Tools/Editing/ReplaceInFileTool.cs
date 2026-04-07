@@ -98,7 +98,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
-		backups.Save(fullPath, projectPath, "roslyn_replace_in_file", FileWriter.Utf8NoBom.GetBytes(newContent));
+		await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_file", FileWriter.Utf8NoBom.GetBytes(newContent));
 		
 		// For .cs files: single write via workspace API (MSBuild-tracked goes through
 		// TryApplyChanges; untracked/Adhoc goes through FileWriter with FSW suppressed).

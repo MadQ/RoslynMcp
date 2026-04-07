@@ -98,7 +98,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		string? backupToken = null;
 		
 		if(!isNewFile)
-			backupToken = backups.Save(fullPath, projectPath, "roslyn_write_file", writeBytes);
+			backupToken = await backups.SaveAsync(fullPath, projectPath, "roslyn_write_file", writeBytes);
 		
 		// Atomic write: temp file in the same directory → rename.
 		var dir     = Path.GetDirectoryName(fullPath)!;

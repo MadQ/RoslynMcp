@@ -115,7 +115,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
 				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
-		backups.Save(fullPath, projectPath, "roslyn_insert_lines", FileWriter.Utf8NoBom.GetBytes(string.Join(eol, resultLines) + eol));
+		await backups.SaveAsync(fullPath, projectPath, "roslyn_insert_lines", FileWriter.Utf8NoBom.GetBytes(string.Join(eol, resultLines) + eol));
 		
 		// For .cs files: single write via workspace API with FSW suppression.
 		// For all other types: direct FileWriter write, then InvalidateFile.

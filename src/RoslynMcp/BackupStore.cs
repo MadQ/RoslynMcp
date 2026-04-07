@@ -19,7 +19,7 @@ internal sealed class BackupStore
 	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Backup;
 
 	readonly string?     backupRoot;
-	readonly object      syncRoot = new();
+	readonly SemaphoreSlim asyncLock = new(1, 1);
 	readonly FileLogger  logger;
 
 	public bool IsEnabled => backupRoot is not null;
@@ -57,7 +57,7 @@ internal sealed class BackupStore
 	///     passed to <see cref="TryRestore"/> or <see cref="List"/>.
 	///     Returns null if backups are disabled or the file does not exist.
 	/// </summary>
-	public string? Save(
+	public async Task<string?> SaveAsync(
 		string   absolutePath,
 		string   projectPath,
 		string   operation,
@@ -97,39 +97,42 @@ internal sealed class BackupStore
 		// Read git context outside the lock — avoids holding it during file I/O.
 		var (gitBranch, gitCommit) = ReadGitContext(absolutePath);
 
-		lock(syncRoot)
-			try {
+		await asyncLock.WaitAsync();
 
-				Directory.CreateDirectory(dir);
+		try {
 
-				var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.bak");
-				var metaFile = Path.Combine(dir, MetaFileName);
+			Directory.CreateDirectory(dir);
 
-				FileWriter.WriteAllBytes(bakFile, current);
+			var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.bak");
+			var metaFile = Path.Combine(dir, MetaFileName);
 
-				var meta = new BackupMeta {
-					AbsolutePath    = absolutePath,
-					ProjectPath     = projectPath,
-					Operation       = operation,
-					Timestamp       = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-					FileSizeBytes   = current.Length,
-					PreWriteHash    = preHash,
-					PostWriteHash   = newContentHash,
-					ChangedLineHint = changedLineHint,
-					GitBranch       = gitBranch,
-					GitCommit       = gitCommit
-				};
+			FileWriter.WriteAllBytes(bakFile, current);
 
-				WriteMetaEntry(metaFile, token, meta);
-				PruneOldBackups(dir, absolutePath);
+			var meta = new BackupMeta {
+				AbsolutePath    = absolutePath,
+				ProjectPath     = projectPath,
+				Operation       = operation,
+				Timestamp       = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+				FileSizeBytes   = current.Length,
+				PreWriteHash    = preHash,
+				PostWriteHash   = newContentHash,
+				ChangedLineHint = changedLineHint,
+				GitBranch       = gitBranch,
+				GitCommit       = gitCommit
+			};
 
-				return token;
-			}
-			catch(Exception ex) {
-				logger.LogError("backup_save", $"failed to save backup for \"{Path.GetFileName(absolutePath)}\": {ex.Message}");
-				return null;
-			}
+			WriteMetaEntry(metaFile, token, meta);
+			PruneOldBackups(dir, absolutePath);
 
+			return token;
+		}
+		catch(Exception ex) {
+			logger.LogError("backup_save", $"failed to save backup for \"{Path.GetFileName(absolutePath)}\": {ex.Message}");
+			return null;
+		}
+		finally {
+			asyncLock.Release();
+		}
 	}
 
 
@@ -178,7 +181,7 @@ internal sealed class BackupStore
 	// Validates the token, runs the conflict check, and reads the .bak content —
 	// all inside the lock. Returns either a failure result or a CheckedRestore
 	// that the caller can pass to WriteAndInvalidate + CompleteRestore.
-	public (RestoreResult? Failure, CheckedRestore? Checked) TryCheck(string token, bool force = false)
+	public async Task<(RestoreResult? Failure, CheckedRestore? Checked)> TryCheckAsync(string token, bool force = false)
 	{
 		if(backupRoot is null)
 			return (RestoreResult.Disabled(), null);
@@ -192,49 +195,57 @@ internal sealed class BackupStore
 		var dir      = Path.Combine(backupRoot, parts[0]);
 		var metaFile = Path.Combine(dir, MetaFileName);
 
-		lock(syncRoot) {
+		await asyncLock.WaitAsync();
+
+		try {
 
 			var entries = ReadAllMetaEntries(metaFile);
 
 			if(!entries.TryGetValue(token, out var meta))
 				return (RestoreResult.NotFound(token), null);
 
-			try {
+			// Extract the suffix after the path hash (covers both legacy "ms" and new "ms_nonce" formats).
+			var suffix  = token[(parts[0].Length + 1)..];
+			var bakFile = Directory.EnumerateFiles(dir, $"*_{suffix}.bak").FirstOrDefault();
 
-				// Extract the suffix after the path hash (covers both legacy "ms" and new "ms_nonce" formats).
-				var suffix  = token[(parts[0].Length + 1)..];
-				var bakFile = Directory.EnumerateFiles(dir, $"*_{suffix}.bak").FirstOrDefault();
+			if(bakFile is null)
+				return (RestoreResult.NotFound(token), null);
 
-				if(bakFile is null)
-					return (RestoreResult.NotFound(token), null);
+			// Conflict check: has the file changed since backup?
+			string? warning = null;
 
-				// Conflict check: has the file changed since backup?
-				// Any I/O failure here means we cannot verify — proceed and let the write surface the real error.
-				if(!force && meta.PostWriteHash is not null)
-					try {
-						var current     = File.ReadAllBytes(meta.AbsolutePath);
-						var currentHash = ComputeContentHash(current);
+			if(!force && meta.PostWriteHash is not null)
+				try {
+					var current     = File.ReadAllBytes(meta.AbsolutePath);
+					var currentHash = ComputeContentHash(current);
 
-						if(currentHash != meta.PostWriteHash)
-							return (RestoreResult.Conflict(meta.AbsolutePath, currentHash, meta.PostWriteHash), null);
-					}
-					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+					if(currentHash != meta.PostWriteHash)
+						return (RestoreResult.Conflict(meta.AbsolutePath, currentHash, meta.PostWriteHash), null);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					// Cannot verify conflict — let the write proceed; the caller will surface any real error.
+					warning = $"Conflict check skipped: {ex.GetType().Name}: {ex.Message}";
+				}
 
-				var content = File.ReadAllBytes(bakFile);
+			var content = File.ReadAllBytes(bakFile);
 
-				return (null, new CheckedRestore(meta.AbsolutePath, content, bakFile, metaFile, token));
-			}
-			catch(Exception ex) {
-				return (RestoreResult.Failed(ex.Message), null);
-			}
+			return (null, new CheckedRestore(meta.AbsolutePath, content, bakFile, metaFile, token, warning));
+		}
+		catch(Exception ex) {
+			return (RestoreResult.Failed(ex.Message), null);
+		}
+		finally {
+			asyncLock.Release();
 		}
 	}
 
 	// Removes the consumed backup entry and deletes the .bak file.
 	// Call after a successful WriteAndInvalidate.
-	public void CompleteRestore(CheckedRestore checkedRestore)
+	public async Task CompleteRestoreAsync(CheckedRestore checkedRestore)
 	{
-		lock(syncRoot) {
+		await asyncLock.WaitAsync();
+
+		try {
 
 			RemoveMetaEntry(checkedRestore.MetaFile, checkedRestore.Token);
 
@@ -242,6 +253,9 @@ internal sealed class BackupStore
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
 				logger?.LogInfo("backup_delete", $"failed to delete backup file: {ex.Message}");
 			}
+		}
+		finally {
+			asyncLock.Release();
 		}
 	}
 
@@ -254,10 +268,10 @@ internal sealed class BackupStore
 	///     Bypasses WorkspaceManager — the workspace will be out of sync until FSW fires.
 	///     Prefer the TryCheck / WriteAndInvalidate / CompleteRestore split used by LocalHistoryTool.
 	/// </remarks>
-	[Obsolete("Use TryCheck + WriteAndInvalidate + CompleteRestore instead — this method bypasses WorkspaceManager.")]
+	[Obsolete("Use TryCheckAsync + WriteAndInvalidate + CompleteRestoreAsync instead — this method bypasses WorkspaceManager.")]
 	public RestoreResult TryRestore(string token, bool force = false)
 	{
-		var (failure, checkedRestore) = TryCheck(token, force);
+		var (failure, checkedRestore) = TryCheckAsync(token, force).GetAwaiter().GetResult();
 
 		if(failure is not null)
 			return failure;
@@ -272,7 +286,7 @@ internal sealed class BackupStore
 		FileWriter.WriteAllBytes(tmp, checkedRestore.Content);
 		FileWriter.Move(tmp, absPath, overwrite: true);
 
-		CompleteRestore(checkedRestore);
+		CompleteRestoreAsync(checkedRestore).GetAwaiter().GetResult();
 
 		return RestoreResult.Success(absPath);
 	}
@@ -375,9 +389,15 @@ internal sealed class BackupStore
 	// 8-char hex prefix of SHA256(normalized-lowercase-path).
 	static string ComputePathHash(string absolutePath)
 	{
-		var normalized = absolutePath.ToLowerInvariant().Replace('/', '\\');
-		var bytes      = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-
+		// Normalize to a canonical form. Only lowercase on Windows — Linux paths are
+		// case-sensitive, so lowercasing would map distinct paths to the same hash.
+		var normalized = Path.GetFullPath(absolutePath).Replace('/', Path.DirectorySeparatorChar);
+		
+		if(OperatingSystem.IsWindows())
+			normalized = normalized.ToLowerInvariant();
+		
+		var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+		
 		return Convert.ToHexString(bytes)[..8].ToLowerInvariant();
 	}
 
@@ -443,7 +463,9 @@ internal sealed class BackupStore
 			var bakFile = Directory.EnumerateFiles(dir, $"{fileName}_{suffix}.bak").FirstOrDefault();
 
 			if(bakFile is not null)
-				File.Delete(bakFile);
+				try { File.Delete(bakFile); }
+				catch(IOException ex)            { logger.LogInfo("Backup prune failed", ex.Message); }
+				catch(UnauthorizedAccessException ex) { logger.LogInfo("Backup prune failed", ex.Message); }
 		}
 
 		WriteMetaAtomic(metaFile, entries);
@@ -511,10 +533,11 @@ internal sealed class RestoreResult
 // Pre-validated restore state produced by BackupStore.TryCheck.
 // Holds everything needed to execute the write and cleanup phases separately.
 internal sealed record CheckedRestore(
-	string AbsolutePath,
-	byte[] Content,
-	string BakFile,
-	string MetaFile,
-	string Token
+	string  AbsolutePath,
+	byte[]  Content,
+	string  BakFile,
+	string  MetaFile,
+	string  Token,
+	string? Warning = null
 );
 
