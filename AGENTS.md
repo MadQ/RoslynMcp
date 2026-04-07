@@ -675,6 +675,12 @@ git checkout dev && git checkout -b feat/issue-NNN-short-description
 ```
 Never commit implementation work directly to `dev`. Merge back with `git merge --no-ff feat/...` to preserve branch history.
 
+**⚠️ Zero-byte check — required before every commit.** A known working-tree rollback issue can silently empty `.cs` files on disk while the Roslyn in-memory workspace still shows the correct content. Always run this before `git commit`:
+```powershell
+Get-ChildItem src\RoslynMcp -Recurse -Filter *.cs | Where-Object { $_.Length -lt 50 } | Select-Object FullName, Length
+```
+Any file under 50 bytes is suspicious. Restore from the last good commit (`git checkout <sha> -- path/to/file.cs`) before committing. See `docs/process/WORKING_TREE_ROLLBACK.md` for full recovery steps. Run the same check after merges — merges are a common trigger.
+
 ### GitHub Issues — Body Formatting
 
 **⚠️ Never use `gh issue create --body "..."` or `gh issue edit --body "..."` with inline text.**

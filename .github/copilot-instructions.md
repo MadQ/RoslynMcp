@@ -40,6 +40,13 @@ This file contains Copilot-specific overrides and notes only.
 - For C# edits, strongly prefer `replace_in_code` over text-based replacements
 - **Performance:** Default to modern zero-allocation patterns (`Span<T>`, `ReadOnlySpan<T>`, `stackalloc`) when equally readable — see AGENTS.md § Performance & Allocation
 
+### ⚠️ Zero-Byte File Check — Required Before Every Commit
+A known working-tree rollback issue silently empties `.cs` files on disk while the in-memory Roslyn workspace still shows the correct content. Always verify before committing:
+```powershell
+Get-ChildItem src\RoslynMcp -Recurse -Filter *.cs | Where-Object { $_.Length -lt 50 } | Select-Object FullName, Length
+```
+Any result is a red flag. Restore from the last good commit before proceeding. Also run after merges. See `docs/process/WORKING_TREE_ROLLBACK.md`.
+
 ### Quick Reference
 
 **All details in [`AGENTS.md`](../AGENTS.md):**
