@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -138,85 +137,21 @@ internal sealed class BuildTool : RoslynMcpTool
 		));
 	}
 	
-	private static string BuildArgs(string csprojPath, string? tfm)
+	static string[] BuildArgs(string csprojPath, string? tfm)
 	{
 		// --no-restore: restore is separate; /v:quiet: only errors/warnings + summary line.
-		var tfmArg = tfm is not null ? $" -f {tfm}" : "";
+		var args = new List<string> { "build", csprojPath, "--no-restore", "/nologo", "/v:quiet" };
 		
-		return $"build \"{csprojPath}\"{tfmArg} --no-restore /nologo /v:quiet";
+		if(tfm is not null) {
+			args.Add("-f");
+			args.Add(tfm);
+		}
+		
+		return [.. args];
 	}
 	
-	private async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string args, string workingDirectory, ToolScope scope)
-	{
-		var psi = new ProcessStartInfo("dotnet", args) {
-			
-			RedirectStandardOutput = true,
-			RedirectStandardError  = true,
-			UseShellExecute        = false,
-			CreateNoWindow         = true,
-			WorkingDirectory       = workingDirectory
-		};
-		
-		Process?	process	 = null;
-		int			exitCode = -1;
-		
-		try {
-			scope.Record($"dotnet {args}");
-			scope.Record($"cwd={workingDirectory}");
-			
-			process = new Process { StartInfo = psi };
-			
-			if(!process.Start())
-				throw new InvalidOperationException("Process.Start() returned false — process did not start.");
-			
-			scope.Record($"pid={process.Id}");
-		}
-		catch(Exception ex) when(ex is Win32Exception or InvalidOperationException) {
-			scope.Record($"start failed: {ex.GetType().Name}");
-			throw new InvalidOperationException("Failed to start dotnet process. Is dotnet installed and in PATH?", ex);
-		}
-		
-		var sw = Stopwatch.StartNew();
-		
-		try {
-			
-			// Read both streams concurrently to avoid deadlocks on large output.
-			var stdoutTask = process.StandardOutput.ReadToEndAsync();
-			var stderrTask = process.StandardError.ReadToEndAsync();
-			
-			await process.WaitForExitAsync();
-			
-			sw.Stop();
-			
-			// Capture exit code BEFORE disposing.
-			exitCode = process.ExitCode;
-			
-			scope.Record($"exit={exitCode} elapsed={sw.Elapsed.TotalSeconds:F1}s");
-			
-			string stdout, stderr;
-			
-			try {
-				stdout = await stdoutTask;
-				stderr = await stderrTask;
-				scope.Record($"stdout={stdout.Length} stderr={stderr.Length} chars");
-			}
-			catch(IOException ex) {
-				scope.Record($"read failed: {ex.Message}");
-				throw new InvalidOperationException("Failed to read build output.", ex);
-			}
-			
-			// MSBuild writes diagnostics to stdout; stderr is typically empty or SDK noise.
-			var combined = string.IsNullOrWhiteSpace(stderr)
-				? stdout
-				: stdout + stderr
-			;
-			
-			return (combined, sw.Elapsed, exitCode);
-		}
-		finally {
-			process?.Dispose();
-		}
-	}
+	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope)
+		=> await DotnetRunner.RunAsync(args, workingDirectory, scope.Record);
 	
 	private static DiagnosticItem[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
 	{
