@@ -610,14 +610,60 @@ I trust you and I have git.
 
 ---
 
+## Development Workflow
+
+### Per-Issue Loop
+
+For every GitHub issue, in order:
+
+1. `git checkout dev && git checkout -b feat/issue-NNN-short-description`
+2. Implement
+3. `roslyn_get_diagnostics(severity: "errors")` — must be zero before continuing
+4. **First critic pass** — apply "Right Code" filter (see below); fix real bugs inline, discard noise; re-check diagnostics if anything was changed
+5. **Second critic pass** — same filter; anything remaining goes to **todos** (not implemented inline), unless it's a real correctness bug — those always get fixed regardless of pass number
+6. Commit with descriptive message + `Co-authored-by` trailer
+7. `git checkout dev && git merge --no-ff feat/issue-NNN-...`
+8. `git push origin dev`
+9. `gh issue close NNN --comment "Fixed in <branch>, merged to dev (<sha>)."`
+10. Open follow-up issues for deferred todos; link them back to the original
+
+### Critic Integration
+
+- **Always exactly 2 critic passes per issue** — no more, no fewer. This is what prevents the fix → critic → fix → critic rabbit hole.
+- After pass 1: fix what's clearly worth it, discard style opinions and theoretical concerns.
+- After pass 2: new findings → todos → follow-up issues. Move on.
+- **Exception:** real correctness bugs (race conditions, use-after-dispose, data corruption, API misuse) are always fixed inline — regardless of which pass or how many passes have run.
+
+**"Right Code" filter (applied before every fix decision):**
+- Is this *actually broken*, or just *imperfect*? Imperfect → todo.
+- What's the real-world risk if left unfixed? Negligible risk → todo or discard.
+- Does fixing this meaningfully complicate the implementation? If yes, is the benefit proportionate?
+
+**Finding classification:**
+
+| Category | Action |
+|----------|--------|
+| Race conditions, use-after-dispose, null refs, wrong results, API contract violations | Fix inline always |
+| Design improvements, performance, low-risk edge cases | Todo + follow-up issue |
+| Style opinions, formatting, purely theoretical concerns | Discard |
+
+### Issue Scope Management
+
+- **Close the original issue when its defined scope is done** — not when everything is theoretically perfect.
+- **Open fresh follow-up issues** for deferred findings — do not reopen the original. Each follow-up gets its own label, milestone, and scope.
+- Rationale: clean history, accurate velocity, independent prioritization. "Done" means the stated problem is fixed, not that the universe is in order.
+
+---
+
 ## Git Rules
 
 | Operation | Rule |
 |-----------|------|
 | Create / switch branch | ✅ Free |
 | Stage files | ✅ Free |
-| Commit | ❌ Ask first |
-| Push | ❌ Ask first |
+| Commit | ✅ Free once user says "go for it" on an issue — no per-commit approval needed |
+| Push | ✅ Free as part of the per-issue loop close step |
+| Commit outside issue work | ❌ Ask first |
 
 **Shorthand:** `c/p` = commit and push now.
 
