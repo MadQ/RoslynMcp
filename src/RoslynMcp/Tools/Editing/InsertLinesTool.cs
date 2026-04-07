@@ -121,33 +121,47 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		var resultText  = string.Join(eol, resultLines) + eol;
 		var resultBytes = FileWriter.Utf8NoBom.GetBytes(resultText);
 		
-		await backups.SaveAsync(fullPath, projectPath, "roslyn_insert_lines", resultBytes);
-		
+		bool preSaved = false;
+
+		try {
+			preSaved = await backups.SavePreAsync(fullPath, projectPath, "roslyn_insert_lines") is not null;
+			await backups.SavePostAsync(fullPath, projectPath, "roslyn_insert_lines", resultBytes);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			var hint = preSaved
+				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
+				: "Resolve the issue (disk space or permissions) and retry.";
+
+			return scope.Error(new ErrorResult(
+				$"Write aborted — could not save {(preSaved ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
+				Hint: hint));
+		}
+
 		// For .cs files: single write via workspace API with FSW suppression + self-healing recovery.
 		// For all other types: direct FileWriter write, then InvalidateFile.
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
-			
+
 			try {
 				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
 			}
-			
+
 			if(await TryRecoverTruncation(filePath, fullPath, projectPath, resultBytes) is { } truncErr)
 				return scope.Error(truncErr);
 		}
 		else {
-			
+
 			try {
 				FileWriter.WriteAllText(fullPath, resultText);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
-				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
 			}
-			
+
 			workspace.InvalidateFile(projectPath, fullPath);
-			
+
 			if(CheckForTruncation(filePath, fullPath, resultText.Length) is { } truncErr)
 				return scope.Error(truncErr);
 		}

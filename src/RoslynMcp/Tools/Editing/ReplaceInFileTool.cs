@@ -98,29 +98,45 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
-		await backups.SaveAsync(fullPath, projectPath, "roslyn_replace_in_file", FileWriter.Utf8NoBom.GetBytes(newContent));
-		
+		var newBytes = FileWriter.Utf8NoBom.GetBytes(newContent);
+
+		bool preSaved = false;
+
+		try {
+			preSaved = await backups.SavePreAsync(fullPath, projectPath, "roslyn_replace_in_file") is not null;
+			await backups.SavePostAsync(fullPath, projectPath, "roslyn_replace_in_file", newBytes);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			var hint = preSaved
+				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
+				: "Resolve the issue (disk space or permissions) and retry.";
+
+			return scope.Error(new ErrorResult(
+				$"Write aborted — could not save {(preSaved ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
+				Hint: hint));
+		}
+
 		// For .cs files: single write via workspace API (MSBuild-tracked goes through
 		// TryApplyChanges; untracked/Adhoc goes through FileWriter with FSW suppressed).
 		// For all other types: direct FileWriter write, then InvalidateFile.
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
-			
+
 			try {
 				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(newContent, FileWriter.Utf8NoBom));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
 			}
 		}
 		else {
-			
+
 			try {
 				await FileWriter.WriteAllTextAsync(fullPath, newContent);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
 			}
-			
+
 			workspace.InvalidateFile(projectPath, fullPath);
 		}
 		

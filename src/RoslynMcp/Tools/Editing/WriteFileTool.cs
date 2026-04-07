@@ -91,12 +91,31 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		// This lets Save() do correct dedup (skip if identical) and store PostWriteHash upfront.
 		byte[] writeBytes = targetEncoding.GetBytes(normalizedContent);
 		
-		// Take backup before writing (existing files only).
-		string? backupToken = null;
-		
-		if(!isNewFile)
-			backupToken = await backups.SaveAsync(fullPath, projectPath, "roslyn_write_file", writeBytes);
-		
+		// Save pre-change snapshot (existing files only) and post-change snapshot (always).
+		// Abort without touching the file if either snapshot fails to save.
+		string? preToken  = null;
+		bool    preSaved  = false;
+
+		try {
+			if(!isNewFile) {
+				preToken = await backups.SavePreAsync(fullPath, projectPath, "roslyn_write_file");
+				preSaved = preToken is not null;
+			}
+
+			await backups.SavePostAsync(fullPath, projectPath, "roslyn_write_file", writeBytes);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			var phase    = preSaved ? "post" : "pre";
+			var fileNoun = isNewFile ? "created" : "modified";
+			var hint     = preSaved
+				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
+				: "Resolve the issue (disk space or permissions) and retry.";
+
+			return scope.Error(new ErrorResult(
+				$"Write aborted — could not save {phase}-change backup: {ex.Message}. The file was not {fileNoun}.",
+				Hint: hint));
+		}
+
 		// Atomic write: temp file in the same directory → rename.
 		var dir     = Path.GetDirectoryName(fullPath)!;
 		var tmpFile = Path.Combine(dir, $".roslynmcp_write_{Guid.NewGuid():N}.tmp");
@@ -121,26 +140,24 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			TryDeleteTemp(tmpFile);
-			
-			return scope.Error(new ErrorResult($"Failed to write file: {ex.Message}"));
+
+			return scope.Error(new ErrorResult(
+				$"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.",
+				Hint: BackupRecoveryHint(filePath)));
 		}
-		
+
 		// Verify the rename produced a non-empty file — filesystem/AV interference can silently empty it.
 		if(writeBytes.Length > 4 && new FileInfo(fullPath).Length <= 4)
 			return scope.Error(new ErrorResult(
-				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
-				(backupToken is not null
-					? $"Ask the user if they want to restore the previous version using roslyn_local_history (action: 'apply', backupToken: '{backupToken}'). " +
-					  "If that also fails, ask the user whether to restore from git instead (git checkout -- <file-path>)."
-					: "No backup was taken (new file). Ask the user whether to restore from git (git checkout -- <file-path>).")
-			));
+				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
+				Hint: BackupRecoveryHint(filePath)));
 
-		return scope.Outcome($"{lineCount} line(s) written",new WriteFileResult(
+		return scope.Outcome($"{lineCount} line(s) written", new WriteFileResult(
 			Written:     true,
 			FilePath:    filePath,
 			LineCount:   lineCount,
 			Created:     isNewFile,
-			BackupToken: backupToken
+			BackupToken: preToken
 		));
 	}
 	
