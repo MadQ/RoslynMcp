@@ -7,11 +7,13 @@ namespace RoslynMcp.Tools;
 internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 {
 	readonly ApprovalStore approvals;
+	readonly BackupStore    backups;
 	
-	public ApplySignatureChangeTool(WorkspaceResolver workspace, ApprovalStore approvals, FileLogger logger, PaginationCache paginationCache)
+	public ApplySignatureChangeTool(WorkspaceResolver workspace, ApprovalStore approvals, BackupStore backups, FileLogger logger, PaginationCache paginationCache)
 		: base(workspace, logger, paginationCache)
 	{
 		this.approvals = approvals;
+		this.backups   = backups;
 	}
 	
 	[McpServerTool(Name = "roslyn_apply_signature_change", Destructive = true, Title = "Apply Signature Change", OpenWorld = false)]
@@ -43,19 +45,51 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		if(operation is null)
 			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run change_signature again.");
 		
-		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
-		if(!workspace.IsAdhoc(projectPath))
-			workspace.ApplyChanges(projectPath, operation.NewSolution);
-		else
-			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
-			(path, content) => workspace.WriteAndInvalidate(projectPath, path,
-				() => FileWriter.WriteAllTextAsync(path, content)));
-		
-		var filesChanged = operation.NewSolution.GetChanges(operation.BaseSolution)
+		// Collect changed docs so we can back them up and verify each one after writing.
+		var rootPath    = workspace.GetRootPath(projectPath);
+		var changedDocs = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()
-			.SelectMany(p => p.GetChangedDocuments())
-			.Count()
+			.SelectMany(p => p.GetChangedDocuments()
+				.Select(id => operation.NewSolution.GetDocument(id)!))
+			.Where(d => d.FilePath is not null)
+			.ToArray()
 		;
+		
+		// Back up each changed file before writing — gives local-history a restore point.
+		foreach(var doc in changedDocs) {
+			var content = (await doc.GetTextAsync()).ToString();
+			await backups.SaveAsync(doc.FilePath!, projectPath, "roslyn_apply_signature_change", FileWriter.Utf8NoBom.GetBytes(content));
+		}
+		
+		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
+		if(!workspace.IsAdhoc(projectPath)) {
+			
+			workspace.ApplyChanges(projectPath, operation.NewSolution);
+			
+			// Self-healing recovery: if TryApplyChanges truncated a file, re-write from memory.
+			foreach(var doc in changedDocs) {
+				var path    = doc.FilePath!;
+				var relPath = TryMakeRelative(path, rootPath) ?? path;
+				var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
+				
+				if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
+					return scope.Failed("truncation detected", truncErr.Error);
+			}
+		}
+		else {
+			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
+			async (path, content) => {
+				await workspace.WriteAndInvalidate(projectPath, path,
+					() => FileWriter.WriteAllTextAsync(path, content));
+				
+				var relPath = TryMakeRelative(path, rootPath) ?? path;
+				
+				if(CheckForTruncation(relPath, path, content.Length) is { } truncErr)
+					throw new IOException(truncErr.Error);
+			});
+		}
+		
+		var filesChanged = changedDocs.Length;
 		
 		var sessionNote = forSession ? " Method approved for the remainder of this session." : string.Empty;
 		

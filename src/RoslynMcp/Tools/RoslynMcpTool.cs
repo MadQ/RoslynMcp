@@ -417,6 +417,60 @@ internal abstract partial class RoslynMcpTool
 		return null;
 	}
 		
+	/// <summary>
+	///     Returns a truncation <see cref="ErrorResult"/> if <paramref name="fullPath"/> is empty
+	///     on disk after a write that was expected to produce <paramref name="expectedLength"/> bytes.
+	///     Returns null if no truncation is detected or if <paramref name="expectedLength"/> is zero
+	///     (empty-to-empty writes are non-events).
+	/// </summary>
+	protected static ErrorResult? CheckForTruncation(string filePath, string fullPath, int expectedLength) =>
+		expectedLength > 0 && new FileInfo(fullPath).Length == 0
+			? new ErrorResult(
+				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected. " +
+				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>).")
+			: null;
+
+	/// <summary>
+	///     Checks whether a workspace-tracked write truncated <paramref name="fullPath"/> to 0 bytes
+	///     and, if so, attempts transparent self-healing recovery: flushes the stale workspace state
+	///     via <see cref="WorkspaceResolver.WriteAndInvalidate"/>, then atomically re-writes the
+	///     intended content via temp-file rename. Returns null if no truncation occurred or recovery
+	///     succeeded. Returns an <see cref="ErrorResult"/> only if the file is still empty after the
+	///     recovery attempt.
+	/// </summary>
+	protected async Task<ErrorResult?> TryRecoverTruncation(
+		string filePath, string fullPath, string projectPath, byte[] contentBytes)
+	{
+		if(contentBytes.Length == 0 || new FileInfo(fullPath).Length > 0)
+			return null;
+
+		var dir = Path.GetDirectoryName(fullPath)!;
+		var tmp = Path.Combine(dir, $".roslynmcp_recover_{Guid.NewGuid():N}.tmp");
+
+		try {
+			// WriteAndInvalidate handles FSW suppression and workspace resync atomically.
+			await workspace.WriteAndInvalidate(projectPath, fullPath, async () => {
+				await FileWriter.WriteAllBytesAsync(tmp, contentBytes);
+				FileWriter.Move(tmp, fullPath, overwrite: true);
+			});
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			return new ErrorResult(
+				$"Workspace write truncated '{filePath}' to 0 bytes and recovery also failed: {ex.Message} — " +
+				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>).");
+		}
+
+		return new FileInfo(fullPath).Length == 0
+			? new ErrorResult(
+				$"Workspace write truncated '{filePath}' to 0 bytes; recovery also produced an empty file — filesystem or antivirus interference is suspected. " +
+				"Ask the user if they want to restore a previous version: call roslyn_local_history with action: 'list' to check for any prior backup of this file. " +
+				"If no backup exists, ask the user whether to restore from git instead (git checkout -- <file-path>).")
+			: null;
+	}
+
+
 		/// <summary>
 	///     Resolves where a file <em>would</em> be created — does not require the file to exist.
 	///     Returns false with an error message if the path escapes the root or is otherwise invalid.
