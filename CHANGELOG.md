@@ -24,18 +24,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Backup token millisecond collision** — tokens now include a random 4-char nonce (`{hash}_{ms}_{nonce}`) to prevent collisions during pruning; `.bak` filenames updated accordingly; legacy tokens remain parseable (#145 item 9, PR #149)
 - **Diagnostic deduplication** — `DiagnosticsTool` deduplicates by `(code, file, line, column, message)` to prevent double-counted entries from multi-TFM workspaces (#145 item 13, PR #148)
 - **`roslyn_build_project` returning 0 diagnostics on multi-target projects** — `MSBuildLocator.RegisterDefaults()` injected `MSBUILD_EXE_PATH` into the host process; child `dotnet build` inherited it and failed pre-compilation, producing no diagnostics. `DotnetRunner` now strips `MSBUILD_EXE_PATH`, `MSBuildExtensionsPath`, `MSBuildSDKsPath`, and `MSBUILDUSESERVER=0` from the child process environment before launch (closes #165)
+- **`roslyn_apply_rename` stale file after type rename** — when a type rename moves the type to a differently-named file, the original file was left on disk alongside the new one; the old file is now deleted after the workspace applies the rename (closes #151)
+- **`WorkspaceManager` thread-safety** — generation counter prevents stale-cache reads under concurrent invalidation; all `projectMap` reads now acquire the read lock; workspace loaded outside the write lock to reduce contention; FSW callbacks quiesced during reload to prevent reentrant invalidation (closes #153)
+- **`DotnetRunner` deadlock + process leak** — stdout and stderr now drained concurrently via `Task.WhenAll`, eliminating the deadlock when either pipe buffer fills; `Process` wrapped in `using`; args passed via `ArgumentList` to prevent injection via untrusted path segments (closes #154)
+- **`MSBuildBootstrap` hardening** — `completed` flag marked `volatile` to prevent DCL tear; `vswhere` stderr drained concurrently to prevent deadlock; Build Tools install path added as fallback when VS instance list is empty; `EnsureReady` now catches unexpected exceptions before `completed` fires (closes #155)
+- **`BackupStore` async + deadlock prevention** — `lock` replaced with `SemaphoreSlim(1,1)` for async-safe mutual exclusion; `Save`/`TryCheck` promoted to async; `PruneOldBackups` wraps `File.Delete` in `try/catch` to tolerate concurrent deleters; `LocalHistoryTool.ApplyAsync` uses a guid-suffix temp file with `try/finally` cleanup on failure (closes #156)
+- **`SemanticSearchTool` `FindToken` position bug** — token lookup used the line-start position instead of the actual match span; fix stores `span.Start` at match time so `FindToken` is called with the precise character offset, eliminating misclassified matches (closes #157)
+- **`SemanticSearchTool` P1/P2 correctness** — identifier matches no longer fire inside string literals; comment matches bounded to the comment span; XML-doc matches scoped to the correct element (closes #157)
+- **`WorkspaceManager` write-path snapshot race** — workspace and solution captured atomically under lock in all write paths, preventing a concurrent reload from producing a torn snapshot where workspace and solution belong to different generations (closes #161)
+- **`MSBuildBootstrap` failure surface** — workspace-load failures now propagated to `WorkspaceInfo` instead of being silently swallowed; `DotnetRunner` concatenates stdout and stderr in a single ordered stream so the full output is visible in `error_details`
 
 ### Added
 - **`target_frameworks` field on diagnostic items** — `roslyn_build_project` now populates `target_frameworks: string[]` on each diagnostic when MSBuild emits TFM context in the bracket suffix (e.g. `net8.0`, `net10.0`). Items emitted for each target framework are aggregated into a single entry with a sorted `target_frameworks` array instead of duplicates. Field is omitted (`null`) on the Roslyn fast path and for project-level diagnostics (NU*/MSB*) where no TFM context is present (closes #166)
+- **Self-healing truncation recovery** — `WorkspaceManager` detects when a tracked file is truncated to zero bytes and automatically re-reads from disk; guards against the known working-tree-rollback issue where `.cs` files are silently zeroed (closes #162)
+- **Pre/post backup snapshots** — write operations now create a post-write snapshot in addition to the pre-write backup; `roslyn_local_history` can return both the "before" and "after" states of any write, enabling comparison and selective rollback (closes #163)
 
 ### Improved
 - **Backup before editing** — `ReplaceInCodeTool`, `ReplaceInFileTool`, and `InsertLinesTool` now call `BackupStore.Save` before destructive writes, making them recoverable via `roslyn_local_history` (#145 item 12, PR #149)
 - **`AsyncLocal` scope** — replaced `[ThreadStatic] activeScope` with `AsyncLocal<ToolScope>` so the scope flows correctly across `await` continuations (#145 item 11, PR #149)
+- **`CancellationToken` propagation** — `GetTriviaTool` is now fully async; `GetUsingsTool` awaits `GetRootAsync`; `GetMemberBodyTool` propagates `CancellationToken` through the body-lookup loop (closes #158)
+- **`PageToken` nullability** — all paginated result records now use `string? PageToken = null`; `null` means no more pages (replaces the empty-string convention), enabling a null-check idiom in consumers (closes #159)
 
 ### Deprecated
 - **`BackupStore.TryRestore`** — marked `[Obsolete]`; bypasses `WorkspaceManager` and leaves workspace out of sync. Use the `TryCheck`/`WriteAndInvalidate`/`CompleteRestore` split instead (#145 item 8, PR #149)
 
-Closes [#145](https://github.com/MadQ/RoslynMcp/issues/145)
+Closes [#145](https://github.com/MadQ/RoslynMcp/issues/145), [#151](https://github.com/MadQ/RoslynMcp/issues/151), [#153](https://github.com/MadQ/RoslynMcp/issues/153), [#154](https://github.com/MadQ/RoslynMcp/issues/154), [#155](https://github.com/MadQ/RoslynMcp/issues/155), [#156](https://github.com/MadQ/RoslynMcp/issues/156), [#157](https://github.com/MadQ/RoslynMcp/issues/157), [#158](https://github.com/MadQ/RoslynMcp/issues/158), [#159](https://github.com/MadQ/RoslynMcp/issues/159), [#161](https://github.com/MadQ/RoslynMcp/issues/161), [#162](https://github.com/MadQ/RoslynMcp/issues/162), [#163](https://github.com/MadQ/RoslynMcp/issues/163), [#165](https://github.com/MadQ/RoslynMcp/issues/165), [#166](https://github.com/MadQ/RoslynMcp/issues/166)
 
 ---
 
