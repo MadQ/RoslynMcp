@@ -51,10 +51,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		if(filePath is not null) {
 			
 			// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
-			var normalized = NormalizePath(filePath);
-			var tree = compilation.SyntaxTrees
-				.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
-			;
+			var tree = FindSyntaxTree(compilation, filePath);
 			
 			diagnostics = tree is not null
 				? compilation.GetSemanticModel(tree).GetDiagnostics()

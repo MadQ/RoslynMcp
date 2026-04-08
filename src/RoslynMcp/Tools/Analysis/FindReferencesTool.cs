@@ -46,22 +46,10 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		// When containingType is specified, search one symbol. Otherwise search ALL
 		// symbols matching the name — prevents silently incomplete results when
 		// multiple types have members with the same name.
-		ISymbol[] symbols
-		;
-		
-		if(containingType is not null) {
-			var symbol = FindSymbol(compilation, symbolName, containingType);
-			symbols = symbol is not null ? [symbol] : [];
-		}
-		
-		else {
-			var finder = new AllSymbolsFinder(symbolName);
-			finder.Visit(compilation.Assembly.GlobalNamespace);
-			symbols = [.. finder.Results];
-		}
+		var symbols = FindSymbols(compilation, symbolName, containingType);
 		
 		if(symbols.Length == 0)
-			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
 		var allLocations = new List<string>();
 		

@@ -93,28 +93,12 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		
 		// Save pre-change snapshot (existing files only) and post-change snapshot (always).
 		// Abort without touching the file if either snapshot fails to save.
-		string? preToken  = null;
-		bool    preSaved  = false;
-
-		try {
-			if(!isNewFile) {
-				preToken = await backups.SavePreAsync(fullPath, projectPath, "roslyn_write_file");
-				preSaved = preToken is not null;
-			}
-
-			await backups.SavePostAsync(fullPath, projectPath, "roslyn_write_file", writeBytes);
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			var phase    = preSaved ? "post" : "pre";
-			var fileNoun = isNewFile ? "created" : "modified";
-			var hint     = preSaved
-				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
-				: "Resolve the issue (disk space or permissions) and retry.";
-
-			return scope.Error(new ErrorResult(
-				$"Write aborted — could not save {phase}-change backup: {ex.Message}. The file was not {fileNoun}.",
-				Hint: hint));
-		}
+		var (preToken, backupErr) = await SaveBackupsAsync(
+			backups, fullPath, projectPath, "roslyn_write_file", writeBytes,
+			skipPre: isNewFile, fileState: isNewFile ? "created" : "modified");
+		
+		if(backupErr is not null)
+			return scope.Error(backupErr);
 
 		// Atomic write: temp file in the same directory → rename.
 		var dir     = Path.GetDirectoryName(fullPath)!;

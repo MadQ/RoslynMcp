@@ -100,21 +100,11 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newContent);
 
-		bool preSaved = false;
-
-		try {
-			preSaved = await backups.SavePreAsync(fullPath, projectPath, "roslyn_replace_in_file") is not null;
-			await backups.SavePostAsync(fullPath, projectPath, "roslyn_replace_in_file", newBytes);
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			var hint = preSaved
-				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
-				: "Resolve the issue (disk space or permissions) and retry.";
-
-			return scope.Error(new ErrorResult(
-				$"Write aborted — could not save {(preSaved ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
-				Hint: hint));
-		}
+		var (_, backupErr) = await SaveBackupsAsync(
+			backups, fullPath, projectPath, "roslyn_replace_in_file", newBytes);
+		
+		if(backupErr is not null)
+			return scope.Error(backupErr);
 
 		// For .cs files: single write via workspace API (MSBuild-tracked goes through
 		// TryApplyChanges; untracked/Adhoc goes through FileWriter with FSW suppressed).

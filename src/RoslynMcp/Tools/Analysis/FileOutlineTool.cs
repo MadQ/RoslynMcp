@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using ModelContextProtocol.Server;
@@ -35,12 +35,8 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);
 		
-		var rootPath   = workspace.GetRootPath(projectPath);
-		var normalized = NormalizePath(filePath);
-		
-		var tree = compilation.SyntaxTrees
-			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
-		;
+		var rootPath = workspace.GetRootPath(projectPath);
+		var tree     = FindSyntaxTree(compilation, filePath);
 		
 		if(tree is null)
 			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));

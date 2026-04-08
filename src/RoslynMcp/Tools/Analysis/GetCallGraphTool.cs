@@ -40,7 +40,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		var symbol   = FindSymbol(compilation, symbolName, containingType);
 
 		if(symbol is null)
-			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use roslyn_get_type_members or roslyn_find_references to verify the name."));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 
 		var allCalls = new List<CallSiteEntry>();
 
