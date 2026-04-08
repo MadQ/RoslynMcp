@@ -722,7 +722,36 @@ PowerShell session with known issues. Rules:
 
 ## Testing
 
-**Local testing:** use `src/TestHarness/TestHarness.csproj` — runs a single tool call and prints the JSON response.
+### TestHarness
+
+`src/TestHarness/TestHarness.csproj` is a comprehensive integration test suite. It dogfoods itself — starts the MCP server as a child process, fires real JSON-RPC calls, and verifies structured results against known expected values.
+
+**Run all tests:**
+```powershell
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
+```
+
+**Run a single section** (e.g., build-diagnostics tests only):
+```powershell
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --only-build-diag
+```
+
+The `--only-<section>` pattern uses a `goto` to jump directly to the labelled section and skip the summary at the end. More section switches will be added in issue #167 when TestHarness is split into per-file sections.
+
+**Scratch-file pattern:** Tests that require real compilable code with specific diagnostics create a temporary `.cs` file, call the tool, assert the results, then delete the file — always in a `try/finally` to guarantee cleanup even on assertion failure. Example:
+```csharp
+var scratchPath = Path.Combine(repoRoot, "src", "RoslynMcp", "_BuildDiagnosticsTest_.cs");
+try {
+    await File.WriteAllTextAsync(scratchPath, "class Broken { void M() { return 42; } }");
+    // ... call tool, assert results ...
+}
+finally {
+    if(File.Exists(scratchPath))
+        File.Delete(scratchPath);
+}
+```
+
+Scratch files are gitignored (see `.gitignore`) — `_Scratch_.cs` and `_BuildDiagnosticsTest_.cs` will never accidentally appear in commits. Roslyn's workspace may keep a 0-byte ghost of a deleted scratch file in memory; this is harmless since the files are gitignored.
 
 **Live testing:** configure in `.mcp.json` and test via GitHub Copilot or any MCP client.
 
