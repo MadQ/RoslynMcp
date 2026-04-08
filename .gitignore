@@ -397,6 +397,9 @@ FodyWeavers.xsd
 .idea/
 *.sln.iml
 
+# Deleted file that keeps reappearing as a 0-byte ghost from build tooling
+src/RoslynMcp/FileEncoding.cs
+
 # RoslynMcp — session artefacts and private scratchpad
 # These are local-only; each fork/workstation keeps its own copies.
 docs/sessions/
