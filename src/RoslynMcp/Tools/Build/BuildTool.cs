@@ -153,7 +153,9 @@ internal sealed class BuildTool : RoslynMcpTool
 	static string[] BuildArgs(string csprojPath, string? tfm)
 	{
 		// --no-restore: restore is separate; /v:quiet: only errors/warnings + summary line.
-		var args = new List<string> { "build", csprojPath, "--no-restore", "/nologo", "/v:quiet" };
+		// -tl:off: disable terminal logger — it activates even with redirected output in some
+		// SDK versions and produces an indented format that breaks the DiagnosticLine regex.
+		var args = new List<string> { "build", csprojPath, "--no-restore", "/nologo", "/v:quiet", "-tl:off" };
 		
 		if(tfm is not null) {
 			args.Add("-f");
