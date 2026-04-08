@@ -31,7 +31,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	// Whitespace around ':' (when present) avoids false matches on drive-letter colons in paths.
 	// Code must be letters + digits (e.g. NU1101, MSB3245, NETSDK1045) to avoid false positives.
 	private static readonly Regex ProjectLevelDiagnosticLine = new(
-		@"^(?:(?<file>.+?)\s+:\s+)?(?<severity>error|warning)\s+(?<code>[A-Za-z]+\d+):\s+(?<message>.+?)(?:\s+\[.+\])?$",
+		@"^(?:(?<file>.+?)\s+:\s+)?(?<severity>error|warning)\s+(?<code>[A-Za-z]+\d+):\s+(?<message>.+?)(?:\s+\[[^\]]+\])*$",
 		RegexOptions.Compiled | RegexOptions.IgnoreCase
 	);
 	

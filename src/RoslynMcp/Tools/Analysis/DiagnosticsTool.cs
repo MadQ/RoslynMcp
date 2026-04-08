@@ -72,6 +72,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 			.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
 			.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Character)
 			.ThenBy(d => d.Id)
+			.ThenBy(d => d.GetMessage())
 			.ToArray()
 		;
 		
