@@ -98,86 +98,97 @@ internal static class MSBuildBootstrap
 			
 			resolvedMode = mode;
 			
-			// Adhoc mode: skip MSBuild entirely.
-			if(mode == WorkspaceMode.Adhoc) {
-				discoveryMethod = "adhoc mode (MSBuild skipped)";
-				return null;
-			}
-			
-			// VS mode: skip SDK, go straight to vswhere.
-			if(mode == WorkspaceMode.Vs) {
+			try {
 				
-				if(!OperatingSystem.IsWindows()) {
-					failureReason = "VS workspace mode requires Windows (Visual Studio MSBuild).";
+				// Adhoc mode: skip MSBuild entirely.
+				if(mode == WorkspaceMode.Adhoc) {
+					discoveryMethod = "adhoc mode (MSBuild skipped)";
+					return null;
+				}
+				
+				// VS mode: skip SDK, go straight to vswhere.
+				if(mode == WorkspaceMode.Vs) {
+					
+					if(!OperatingSystem.IsWindows()) {
+						failureReason = "VS workspace mode requires Windows (Visual Studio MSBuild).";
+						discoveryMethod = "not found — " + failureReason;
+						return failureReason;
+					}
+					
+					var msbuildDir = TryVsWhere();
+					
+					if(msbuildDir is not null) {
+						PrependToPath(msbuildDir);
+						if(TryRegister()) {
+							discoveryMethod = $"resolved via vswhere — VS mode ({msbuildDir})";
+							return null;
+						}
+					}
+					
+					failureReason = "Visual Studio MSBuild not found. Install Visual Studio or Build Tools.";
 					discoveryMethod = "not found — " + failureReason;
+					
 					return failureReason;
 				}
 				
-				var msbuildDir = TryVsWhere();
+				// SDK mode (or Auto): standard discovery chain.
 				
-				if(msbuildDir is not null) {
-					PrependToPath(msbuildDir);
-					if(TryRegister()) {
-						discoveryMethod = $"resolved via vswhere — VS mode ({msbuildDir})";
-						return null;
-					}
-				}
-				
-				failureReason = "Visual Studio MSBuild not found. Install Visual Studio or Build Tools.";
-				discoveryMethod = "not found — " + failureReason;
-				
-				return failureReason;
-			}
-			
-			// SDK mode (or Auto): standard discovery chain.
-			
-			// 1. Try MSBuildLocator directly — works when .NET SDK is on PATH.
-			if(TryRegister()) {
-				
-				discoveryMethod = "resolved via PATH (.NET SDK found on PATH)";
-				
-				return null;
-			}
-			
-			// 2. dotnet not on PATH — discover via env vars, registry, well-known paths.
-			if(TryDiscoverDotnet(out var dotnetDir, out var source)) {
-				
-				PrependToPath(dotnetDir);
-				
+				// 1. Try MSBuildLocator directly — works when .NET SDK is on PATH.
 				if(TryRegister()) {
 					
-					discoveryMethod = source;
+					discoveryMethod = "resolved via PATH (.NET SDK found on PATH)";
 					
 					return null;
 				}
-			}
-			
-			// 3. Windows only: try vswhere.exe to find Visual Studio MSBuild.
-			if(OperatingSystem.IsWindows()) {
 				
-				var msbuildDir = TryVsWhere();
-				
-				if(msbuildDir is not null) {
+				// 2. dotnet not on PATH — discover via env vars, registry, well-known paths.
+				if(TryDiscoverDotnet(out var dotnetDir, out var source)) {
 					
-					PrependToPath(msbuildDir);
+					PrependToPath(dotnetDir);
 					
 					if(TryRegister()) {
 						
-						discoveryMethod = $"resolved via vswhere ({msbuildDir})";
+						discoveryMethod = source;
 						
 						return null;
 					}
 				}
+				
+				// 3. Windows only: try vswhere.exe to find Visual Studio MSBuild.
+				if(OperatingSystem.IsWindows()) {
+					
+					var msbuildDir = TryVsWhere();
+					
+					if(msbuildDir is not null) {
+						
+						PrependToPath(msbuildDir);
+						
+						if(TryRegister()) {
+							
+							discoveryMethod = $"resolved via vswhere ({msbuildDir})";
+							
+							return null;
+						}
+					}
+				}
+				
+				failureReason = OperatingSystem.IsWindows()
+					? "MSBuild not found. Install .NET SDK or Visual Studio Build Tools. "
+						+ "If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH."
+					: "MSBuild not found. Install the .NET SDK (https://dot.net). "
+						+ "If installed in a non-standard location, set DOTNET_ROOT."
+				;
+				
+				discoveryMethod = "not found — " + failureReason;
 			}
-			
-			failureReason = OperatingSystem.IsWindows()
-				? "MSBuild not found. Install .NET SDK or Visual Studio Build Tools. "
-					+ "If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH."
-				: "MSBuild not found. Install the .NET SDK (https://dot.net). "
-					+ "If installed in a non-standard location, set DOTNET_ROOT."
-			;
-			
-			discoveryMethod = "not found — " + failureReason;
+			catch(Exception ex) when (failureReason is null) {
+				
+				// Unexpected exception before any known failure was recorded. Without this catch,
+				// the finally block would set completed=true with failureReason=null, which callers
+				// interpret as successful initialization.
+				failureReason   = $"MSBuild initialization failed unexpectedly: {ex.GetType().Name}: {ex.Message}";
+				discoveryMethod = "not found — unexpected error";
+			}
 			
 			return failureReason;
 		}
