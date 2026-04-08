@@ -83,9 +83,11 @@ internal static class DotnetRunner
 			}
 			
 			// MSBuild writes diagnostics to stdout; stderr is typically empty or SDK noise.
+			// Ensure a line break between streams when both are non-empty — stdout may not
+			// end with a newline, which would merge the last stdout line with the first stderr line.
 			var combined = string.IsNullOrWhiteSpace(stderr)
 				? stdout
-				: stdout + stderr
+				: stdout + (stdout.EndsWith('\n') ? "" : Environment.NewLine) + stderr
 			;
 			
 			return (combined, sw.Elapsed, exitCode);
