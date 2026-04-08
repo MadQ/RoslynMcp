@@ -18,7 +18,9 @@ internal static class SolutionDiff
 	{
 		var sb = new System.Text.StringBuilder();
 		
-		foreach(var projectChange in after.GetChanges(before).GetProjectChanges())
+		foreach(var projectChange in after.GetChanges(before).GetProjectChanges()) {
+			
+			// Changed documents: both files exist, content differs.
 			foreach(var docId in projectChange.GetChangedDocuments()) {
 				
 				var oldDoc = before.GetDocument(docId)!;
@@ -35,6 +37,39 @@ internal static class SolutionDiff
 				sb.AppendLine($"+++ {path}");
 				sb.Append(BuildHunks(oldText, newText));
 			}
+			
+			// Added documents: new file, e.g., a type renamed to Bar.cs.
+			foreach(var docId in projectChange.GetAddedDocuments()) {
+				
+				var newDoc = after.GetDocument(docId)!;
+				
+				if(newDoc.FilePath is null)
+					continue;
+				
+				var newText = (await newDoc.GetTextAsync(cancellationToken)).ToString();
+				
+				sb.AppendLine($"--- /dev/null");
+				sb.AppendLine($"+++ {newDoc.FilePath}");
+				sb.Append(BuildAllAdded(newText));
+			}
+			
+			// Removed documents: deleted file, e.g., old Foo.cs after rename to Bar.cs.
+			// Skip paths still referenced in the new solution (linked/shared files can
+			// appear as removed in one project while still present in another).
+			foreach(var docId in projectChange.GetRemovedDocuments()) {
+				
+				var oldDoc = before.GetDocument(docId)!;
+				
+				if(oldDoc.FilePath is null || !after.GetDocumentIdsWithFilePath(oldDoc.FilePath).IsEmpty)
+					continue;
+				
+				var oldText = (await oldDoc.GetTextAsync(cancellationToken)).ToString();
+				
+				sb.AppendLine($"--- {oldDoc.FilePath}");
+				sb.AppendLine($"+++ /dev/null");
+				sb.Append(BuildAllRemoved(oldText));
+			}
+		}
 		
 		return sb.Length > 0 ? sb.ToString() : "(no changes)";
 	}
@@ -47,7 +82,9 @@ internal static class SolutionDiff
 	{
 		foreach(var projectChange in newSolution.GetChanges(oldSolution).GetProjectChanges()) {
 			
-			foreach(var docId in projectChange.GetChangedDocuments()) {
+			// Write changed and added documents. Added documents are new files (e.g., the
+			// renamed file at its new path); they need the same disk write as changed documents.
+			foreach(var docId in projectChange.GetChangedDocuments().Concat(projectChange.GetAddedDocuments())) {
 				
 				var newDoc = newSolution.GetDocument(docId)!;
 				
@@ -69,6 +106,38 @@ internal static class SolutionDiff
 		}
 	}
 	
+
+	// ── File-level add / remove diffs ────────────────────────────────────────
+	
+	// All lines shown as additions (for a newly created file).
+	private static string BuildAllAdded(string text)
+	{
+		var lines = text.Split(LineSeparators, StringSplitOptions.None);
+		var sb    = new StringBuilder();
+		
+		sb.AppendLine($"@@ -0,0 +1,{lines.Length} @@");
+		
+		foreach(var line in lines)
+			sb.AppendLine("+" + line);
+		
+		return sb.ToString();
+	}
+	
+	// All lines shown as removals (for a deleted file).
+	private static string BuildAllRemoved(string text)
+	{
+		var lines = text.Split(LineSeparators, StringSplitOptions.None);
+		var sb    = new StringBuilder();
+		
+		sb.AppendLine($"@@ -1,{lines.Length} +0,0 @@");
+		
+		foreach(var line in lines)
+			sb.AppendLine("-" + line);
+		
+		return sb.ToString();
+	}
+	
+
 	// ── Minimal line-level unified diff ──────────────────────────────────────
 	
 	private static string BuildHunks(string oldText, string newText)
