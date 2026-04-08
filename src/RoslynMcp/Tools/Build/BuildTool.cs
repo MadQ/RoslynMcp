@@ -174,6 +174,13 @@ internal sealed class BuildTool : RoslynMcpTool
 				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
 				.Where(d => !IgnoredDiagnostics.Contains(d.Id))
 				.Select(d => ConvertRoslynDiagnostic(d, rootPath))
+				.DistinctBy(d => (d.Severity, d.Code, d.File, d.Line, d.Column, d.Message))
+				.OrderByDescending(d => d.Severity == "error")
+				.ThenBy(d => d.File)
+				.ThenBy(d => d.Line)
+				.ThenBy(d => d.Column)
+				.ThenBy(d => d.Code)
+				.ThenBy(d => d.Message)
 		];
 	}
 	
