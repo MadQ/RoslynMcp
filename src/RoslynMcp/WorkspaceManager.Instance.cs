@@ -417,7 +417,12 @@ internal sealed partial class WorkspaceManager
 			}
 			
 			WarnIfLargeSolution(path, mode, logger);
-			MSBuildBootstrap.EnsureReady(mode);
+			
+			var bootstrapFailure = MSBuildBootstrap.EnsureReady(mode);
+			
+			if(bootstrapFailure is not null)
+				throw new InvalidOperationException($"MSBuild initialization failed: {bootstrapFailure}");
+			
 			logger.LogInfo("MSBuild", MSBuildBootstrap.DiscoveryMethod);
 		}
 		
