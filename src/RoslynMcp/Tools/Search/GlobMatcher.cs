@@ -3,9 +3,17 @@ using System.Text.RegularExpressions;
 
 namespace RoslynMcp.Tools;
 
-// Single * does not cross path-segment boundaries; ** does.
+// Filename-only glob matcher — callers pass Path.GetFileName(...), never a full path.
+// Supports * (any chars, no separator), ** (any chars, crosses segments), ? (single char).
+// Does NOT support {a,b} brace expansion.
 internal static class GlobMatcher
 {
+	/// <summary>
+	/// Returns true when <paramref name="fileName"/> matches <paramref name="pattern"/>.
+	/// Operates on filenames only — path separators in the input produce unspecified results.
+	/// Supports * (within a segment), ** (across segments), and ? (single char).
+	/// Does NOT support {a,b} brace expansion.
+	/// </summary>
 	public static bool Matches(string fileName, string pattern)
 	{
 		if(pattern is "*" or "*.*")

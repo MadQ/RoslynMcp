@@ -101,11 +101,14 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		var solution   = workspace.GetSolution(projectPath);
 		var rootPath   = workspace.GetRootPath(projectPath);
 		var allMatches = new List<SemanticMatchResult>();
+		// seenPaths prevents searching the same physical file twice in multi-targeted projects
+		// (e.g., net8.0 + net10.0 each have their own Document for the same .cs file).
+		// The first TFM's parse wins; #if NET10_0 blocks may be absent in the skipped parse.
 		var seenPaths  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		
+
 		foreach(var project in solution.Projects)
 			foreach(var document in project.Documents) {
-				
+
 				if(document.FilePath is null || !seenPaths.Add(document.FilePath))
 					continue;
 				
