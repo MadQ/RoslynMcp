@@ -28,6 +28,19 @@ internal static class DotnetRunner
 			WorkingDirectory       = workingDirectory
 		};
 		
+		// MSBuildLocator.RegisterDefaults() (called by MSBuildBootstrap) sets MSBUILD_EXE_PATH
+		// as a process-wide env var so Roslyn can load the right MSBuild assemblies. When a
+		// child `dotnet build` inherits it, the child skips its own SDK discovery and uses the
+		// parent's MSBuild DLL path — which causes a pre-compilation MSBuild failure with
+		// "Build FAILED. 0 Warning(s) 0 Error(s)". Unset it so the child does clean discovery.
+		psi.Environment.Remove("MSBUILD_EXE_PATH");
+		psi.Environment.Remove("MSBuildExtensionsPath");
+		psi.Environment.Remove("MSBuildSDKsPath");
+		
+		// Disable the MSBuild build server — when the server runs `dotnet build` as a child,
+		// a shared build server node may have stale state from the parent's dotnet run context.
+		psi.Environment["MSBUILDUSESERVER"] = "0";
+		
 		// ArgumentList avoids shell quoting/injection issues with paths containing spaces or
 		// special characters — do not use the Arguments string property instead.
 		foreach(var arg in args)
@@ -77,6 +90,11 @@ internal static class DotnetRunner
 				stdout = await stdoutTask;
 				stderr = await stderrTask;
 				record?.Invoke($"stdout={stdout.Length} stderr={stderr.Length} chars");
+				
+				// Preview first 300 chars so log entries reveal suppressed diagnostics.
+				var preview = (stdout + stderr).Replace('\r', ' ').Replace('\n', '↵');
+				if(preview.Length > 0)
+					record?.Invoke($"output_preview={preview[..Math.Min(300, preview.Length)]}");
 			}
 			catch(IOException ex) {
 				throw new InvalidOperationException("Failed to read process output.", ex);
