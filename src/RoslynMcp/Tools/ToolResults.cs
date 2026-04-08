@@ -402,8 +402,8 @@ internal sealed record BuildResult(
 	[property: JsonPropertyName("build_skipped")]  bool             BuildSkipped,
 	[property: JsonPropertyName("skip_reason")]    string?          SkipReason,
 	[property: JsonPropertyName("duration_ms")]    long             DurationMs,
-	[property: JsonPropertyName("exit_code")]      int?             ExitCode,
-	[property: JsonPropertyName("error_details")]  string?          ErrorDetails = null
+	[property: JsonPropertyName("exit_code")]      int?             ExitCode,      // null when build_skipped is true (no build ran)
+	[property: JsonPropertyName("error_details")]  string?          ErrorDetails = null // non-null when succeeded is false and errors[] is empty
 );
 
 internal sealed record ReplaceInCodeResult(
