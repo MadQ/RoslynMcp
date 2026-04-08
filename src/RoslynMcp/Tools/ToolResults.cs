@@ -5,13 +5,21 @@ namespace RoslynMcp.Tools;
 // ── Shared ──────────────────────────────────────────────────────────────────
 
 /// <summary>A single compiler diagnostic item returned by <c>roslyn_get_diagnostics</c> and <c>roslyn_build_project</c>.</summary>
+/// <remarks>
+/// <c>target_frameworks</c> is populated by <c>roslyn_build_project</c> when MSBuild emits TFM context
+/// in the bracket suffix (e.g. <c>[proj::TargetFramework=net10.0]</c>). Always <c>null</c> on the
+/// Roslyn fast path — Roslyn diagnostics carry no per-diagnostic TFM information.
+/// </remarks>
 internal sealed record DiagnosticItem(
-	[property: JsonPropertyName("code")]     string  Code,
-	[property: JsonPropertyName("severity")] string  Severity,
-	[property: JsonPropertyName("file")]     string? File,
-	[property: JsonPropertyName("line")]     int     Line,
-	[property: JsonPropertyName("column")]   int     Column,
-	[property: JsonPropertyName("message")]  string  Message
+	[property: JsonPropertyName("code")]              string   Code,
+	[property: JsonPropertyName("severity")]          string   Severity,
+	[property: JsonPropertyName("file")]              string?  File,
+	[property: JsonPropertyName("line")]              int      Line,
+	[property: JsonPropertyName("column")]            int      Column,
+	[property: JsonPropertyName("message")]           string   Message,
+	[property: JsonPropertyName("target_frameworks")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? TargetFrameworks = null
 );
 
 /// <summary>Cached page response from <see cref="RoslynMcpTool.ToolScope.TryServeCachedPage{T}"/>.</summary>

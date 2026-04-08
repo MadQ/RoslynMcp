@@ -18,8 +18,9 @@ internal sealed class BuildTool : RoslynMcpTool
 	// Matches MSBuild diagnostic lines with source location:
 	//   path(line,col): error CS0103: message [proj::TargetFramework=net10.0]
 	//   path(line,col): warning CS8600: message [proj]
+	// The optional <context> capture contains the bracket suffix content for TFM extraction.
 	private static readonly Regex DiagnosticLine = new(
-		@"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s+(?<severity>error|warning)\s+(?<code>\w+):\s+(?<message>.+?)(?:\s+\[.+\])?$",
+		@"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s+(?<severity>error|warning)\s+(?<code>\w+):\s+(?<message>.+?)(?:\s+\[(?<context>[^\]]+)\])?$",
 		RegexOptions.Compiled | RegexOptions.IgnoreCase
 	);
 	
@@ -203,7 +204,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	
 	private static DiagnosticItem[] ParseMSBuildDiagnostics(string output, string rootPath)
 	{
-		var results = new List<DiagnosticItem>();
+		var results = new List<(DiagnosticItem Item, string? Context)>();
 		
 		foreach(var raw in output.Split('\n')) {
 			
@@ -221,16 +222,16 @@ internal sealed class BuildTool : RoslynMcpTool
 				if(IgnoredDiagnostics.Contains(code))
 					continue;
 				
-				var filePath = m.Groups["file"].Value.Trim();
+				var context = m.Groups["context"].Success ? m.Groups["context"].Value : null;
 				
-				results.Add(new DiagnosticItem(
+				results.Add((new DiagnosticItem(
 					Code:     code,
 					Severity: m.Groups["severity"].Value.ToLowerInvariant(),
-					File:     TryMakeRelative(filePath, rootPath),
+					File:     TryMakeRelative(m.Groups["file"].Value.Trim(), rootPath),
 					Line:     int.Parse(m.Groups["line"].Value),
 					Column:   int.Parse(m.Groups["col"].Value),
 					Message:  m.Groups["message"].Value.Trim()
-				));
+				), context));
 				
 				continue;
 			}
@@ -248,21 +249,35 @@ internal sealed class BuildTool : RoslynMcpTool
 			if(IgnoredDiagnostics.Contains(projCode))
 				continue;
 			
-			results.Add(new DiagnosticItem(
+			// TFM extraction skipped for project-level diagnostics — the bracket suffix
+			// on NU*/MSB* lines carries project path identity, not TargetFramework context.
+			results.Add((new DiagnosticItem(
 				Code:     projCode,
 				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
 				File:     TryMakeRelative(m.Groups["file"].Value.Trim(), rootPath),
 				Line:     0,
 				Column:   0,
 				Message:  m.Groups["message"].Value.Trim()
-			));
+			), null));
 		}
 		
-		// Multi-target builds emit each diagnostic once per TF — deduplicate by identity,
-		// then sort stably so output is consistent regardless of MSBuild evaluation order.
+		// Multi-target builds emit each diagnostic once per TFM — group by identity and
+		// aggregate target framework names from the MSBuild bracket suffix. Sort TFMs for
+		// deterministic output across MSBuild evaluation orders.
 		return [..
 			results
-				.DistinctBy(d => (d.Severity, d.Code, d.File, d.Line, d.Column, d.Message))
+				.GroupBy(r => (r.Item.Severity, r.Item.Code, r.Item.File, r.Item.Line, r.Item.Column, r.Item.Message))
+				.Select(g => {
+					
+					var tfms = g
+						.Select(r => ExtractTargetFramework(r.Context))
+						.OfType<string>()
+						.Distinct(StringComparer.OrdinalIgnoreCase)
+						.Order(StringComparer.OrdinalIgnoreCase)
+						.ToArray();
+					
+					return g.First().Item with { TargetFrameworks = tfms.Length > 0 ? tfms : null };
+				})
 				.OrderByDescending(d => d.Severity == "error")
 				.ThenBy(d => d.File)
 				.ThenBy(d => d.Line)
@@ -271,6 +286,23 @@ internal sealed class BuildTool : RoslynMcpTool
 				.ThenBy(d => d.Message)
 		];
 	}
+	
+	// Extracts the TargetFramework value from an MSBuild bracket suffix context string.
+	// Context format: "path/to/proj.csproj::TargetFramework=net10.0"
+	// Returns null when the context is absent or carries no TargetFramework entry.
+	private static string? ExtractTargetFramework(string? context)
+	{
+		if(context is null)
+			return null;
+		
+		var idx = context.IndexOf("TargetFramework=", StringComparison.OrdinalIgnoreCase);
+		
+		if(idx < 0)
+			return null;
+		
+		return context[(idx + "TargetFramework=".Length)..].Trim();
+	}
+
 
 	private static string TailLines(string output, int count)
 	{
