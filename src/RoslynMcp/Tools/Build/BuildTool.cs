@@ -259,6 +259,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				.ThenBy(d => d.Line)
 				.ThenBy(d => d.Column)
 				.ThenBy(d => d.Code)
+				.ThenBy(d => d.Message)
 		];
 	}
 
