@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ResolveFilePath` ambiguity** — suffix match fallback now collects all candidates and returns null on ambiguity instead of silently returning the first filesystem hit (#145 item 7, PR #147)
 - **Backup token millisecond collision** — tokens now include a random 4-char nonce (`{hash}_{ms}_{nonce}`) to prevent collisions during pruning; `.bak` filenames updated accordingly; legacy tokens remain parseable (#145 item 9, PR #149)
 - **Diagnostic deduplication** — `DiagnosticsTool` deduplicates by `(code, file, line, column, message)` to prevent double-counted entries from multi-TFM workspaces (#145 item 13, PR #148)
+- **`roslyn_build_project` returning 0 diagnostics on multi-target projects** — `MSBuildLocator.RegisterDefaults()` injected `MSBUILD_EXE_PATH` into the host process; child `dotnet build` inherited it and failed pre-compilation, producing no diagnostics. `DotnetRunner` now strips `MSBUILD_EXE_PATH`, `MSBuildExtensionsPath`, `MSBuildSDKsPath`, and `MSBUILDUSESERVER=0` from the child process environment before launch (closes #165)
+
+### Added
+- **`target_frameworks` field on diagnostic items** — `roslyn_build_project` now populates `target_frameworks: string[]` on each diagnostic when MSBuild emits TFM context in the bracket suffix (e.g. `net8.0`, `net10.0`). Items emitted for each target framework are aggregated into a single entry with a sorted `target_frameworks` array instead of duplicates. Field is omitted (`null`) on the Roslyn fast path and for project-level diagnostics (NU*/MSB*) where no TFM context is present (closes #166)
 
 ### Improved
 - **Backup before editing** — `ReplaceInCodeTool`, `ReplaceInFileTool`, and `InsertLinesTool` now call `BackupStore.Save` before destructive writes, making them recoverable via `roslyn_local_history` (#145 item 12, PR #149)
