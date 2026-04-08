@@ -671,6 +671,68 @@ internal abstract partial class RoslynMcpTool
 	}
 	
 	/// <summary>
+	///     Finds all symbols with <paramref name="symbolName"/> in the compilation. When
+	///     <paramref name="containingType"/> is provided, returns the single matching member (or empty
+	///     if not found). Otherwise uses <see cref="AllSymbolsFinder"/> to collect every symbol that
+	///     matches — prevents silently incomplete results when multiple types share a member name.
+	/// </summary>
+	protected static ISymbol[] FindSymbols(Compilation compilation, string symbolName, string? containingType)
+	{
+		if(containingType is not null) {
+			var symbol = FindSymbol(compilation, symbolName, containingType);
+			return symbol is not null ? [symbol] : [];
+		}
+		
+		var finder = new AllSymbolsFinder(symbolName);
+		finder.Visit(compilation.Assembly.GlobalNamespace);
+		return [.. finder.Results];
+	}
+	
+	/// <summary>
+	///     Returns a canonical "symbol not found" <see cref="ErrorResult"/> with standardized hint text.
+	///     Callers must pass this to <c>scope.Failed("symbol not found", ...)</c> — the analyzer
+	///     requires the scope terminal to appear directly at the return site.
+	/// </summary>
+	protected static ErrorResult SymbolNotFoundError(string symbolName) =>
+		new(
+			$"Symbol '{symbolName}' not found.",
+			Hint: "Use roslyn_get_type_members or roslyn_find_references to verify the name.");
+	
+	/// <summary>
+	///     Saves pre- and post-change backup snapshots, returning the pre-change token on success
+	///     or a populated <see cref="ErrorResult"/> on failure. Pass <paramref name="skipPre"/>=true
+	///     for new files (no existing content to snapshot). Pass <paramref name="fileState"/> to
+	///     customize the "file was not {state}" phrase in the error message.
+	/// </summary>
+	protected static async Task<(string? PreToken, ErrorResult? Error)> SaveBackupsAsync(
+		BackupStore backups, string fullPath, string projectPath, string toolName,
+		byte[] postBytes, bool skipPre = false, string fileState = "modified")
+	{
+		string? preToken = null;
+		bool    preSaved = false;
+		
+		try {
+			if(!skipPre) {
+				preToken = await backups.SavePreAsync(fullPath, projectPath, toolName);
+				preSaved = preToken is not null;
+			}
+			
+			await backups.SavePostAsync(fullPath, projectPath, toolName, postBytes);
+			return (preToken, null);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			var phase = preSaved ? "post" : "pre";
+			var hint  = preSaved
+				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
+				: "Resolve the issue (disk space or permissions) and retry.";
+			
+			return (null, new ErrorResult(
+				$"Write aborted — could not save {phase}-change backup: {ex.Message}. The file was not {fileState}.",
+				Hint: hint));
+		}
+	}
+	
+	/// <summary>
 	///     Formats a symbol's display name: fully qualified for types, ContainingType.Name for members.
 	/// </summary>
 	protected static string FormatSymbolName(ISymbol symbol)

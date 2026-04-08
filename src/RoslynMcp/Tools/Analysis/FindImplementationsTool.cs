@@ -41,7 +41,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
 		var solution = workspace.GetSolution(projectPath);
 		

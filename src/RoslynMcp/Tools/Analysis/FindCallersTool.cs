@@ -41,23 +41,10 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		var solution = workspace.GetSolution(projectPath);
 		var rootPath = workspace.GetRootPath(projectPath);
 
-		ISymbol[] symbols;
-
-		if(containingType is not null) {
-
-			var symbol = FindSymbol(compilation, symbolName, containingType);
-			symbols = symbol is not null ? [symbol] : [];
-		}
-
-		else {
-
-			var finder = new AllSymbolsFinder(symbolName);
-			finder.Visit(compilation.Assembly.GlobalNamespace);
-			symbols = [.. finder.Results];
-		}
+		var symbols = FindSymbols(compilation, symbolName, containingType);
 
 		if(symbols.Length == 0)
-			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use roslyn_get_type_members or roslyn_find_references to verify the name."));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 
 		var allCallers = new List<CallerEntry>();
 

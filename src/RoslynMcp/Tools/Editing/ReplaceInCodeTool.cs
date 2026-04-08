@@ -149,21 +149,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			var deletedText  = deletedRoot.ToFullString();
 			var deletedBytes = FileWriter.Utf8NoBom.GetBytes(deletedText);
 			
-			bool preSavedDelete = false;
-
-		try {
-			preSavedDelete = await backups.SavePreAsync(fullPath, projectPath, "roslyn_replace_in_code") is not null;
-			await backups.SavePostAsync(fullPath, projectPath, "roslyn_replace_in_code", deletedBytes);
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			var hint = preSavedDelete
-				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
-				: "Resolve the issue (disk space or permissions) and retry.";
-
-			return scope.Error(new ErrorResult(
-				$"Write aborted — could not save {(preSavedDelete ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
-				Hint: hint));
-		}
+			var (_, deleteBackupErr) = await SaveBackupsAsync(
+			backups, fullPath, projectPath, "roslyn_replace_in_code", deletedBytes);
+		
+		if(deleteBackupErr is not null)
+			return scope.Error(deleteBackupErr);
 
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 			// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
@@ -263,21 +253,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		var newText  = newRoot.ToFullString();
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newText);
 
-		bool preSavedReplace = false;
-
-		try {
-			preSavedReplace = await backups.SavePreAsync(fullPath, projectPath, "roslyn_replace_in_code") is not null;
-			await backups.SavePostAsync(fullPath, projectPath, "roslyn_replace_in_code", newBytes);
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			var hint = preSavedReplace
-				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
-				: "Resolve the issue (disk space or permissions) and retry.";
-
-			return scope.Error(new ErrorResult(
-				$"Write aborted — could not save {(preSavedReplace ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
-				Hint: hint));
-		}
+		var (_, replaceBackupErr) = await SaveBackupsAsync(
+			backups, fullPath, projectPath, "roslyn_replace_in_code", newBytes);
+		
+		if(replaceBackupErr is not null)
+			return scope.Error(replaceBackupErr);
 
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
