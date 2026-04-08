@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [0.7.7-alpha] — 2026-04-06
+## [0.7.7-alpha] — 2026-04-08 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.7.7-alpha)
 
 ### Fixed
 - **Critical: use-after-dispose on LRU eviction** — `WorkspaceManager` now defers disposal of evicted `WorkspaceInstance`s with a 30-second grace period so concurrent callers that already hold a reference finish safely (#145 item 1, PR #146)
