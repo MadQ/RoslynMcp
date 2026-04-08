@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.Json;
 using RoslynMcp;
 using Microsoft.CodeAnalysis;
@@ -50,7 +50,10 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		
 		var solution    = workspace.GetSolution(projectPath);
 		var symbolKey   = SymbolKey(symbol);
-		var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions(), newName, cancellationToken);
+		
+		// RenameFile: when the renamed symbol is a type whose file matches the type name,
+		// Roslyn renames the file too — shown in the preview diff as add+remove.
+		var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions { RenameFile = true }, newName, cancellationToken);
 		var diff        = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
 		var token       = approvals.Register(solution, newSolution, diff, symbolKey);
 		var preConfirmed = approvals.IsSessionApproved(symbolKey);
