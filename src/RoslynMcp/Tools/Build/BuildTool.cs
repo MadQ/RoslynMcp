@@ -15,12 +15,23 @@ internal sealed class BuildTool : RoslynMcpTool
 		"NETSDK1209", // "The current Visual Studio version does not support targeting .NET X"
 	};
 	
-	// Matches MSBuild diagnostic lines:
+	// Matches MSBuild diagnostic lines with source location:
 	//   path(line,col): error CS0103: message [proj::TargetFramework=net10.0]
 	//   path(line,col): warning CS8600: message [proj]
-	// The path, location, and project suffix are all optional (some messages omit them).
 	private static readonly Regex DiagnosticLine = new(
 		@"^(?<file>.+?)\((?<line>\d+),(?<col>\d+)\):\s+(?<severity>error|warning)\s+(?<code>\w+):\s+(?<message>.+?)(?:\s+\[.+\])?$",
+		RegexOptions.Compiled | RegexOptions.IgnoreCase
+	);
+	
+	// Matches project-level diagnostics without source location, in two forms:
+	//   J:\...\proj.csproj : error NU1101: Unable to find package XYZ [TargetFramework=net10.0]
+	//   MSBUILD : warning MSB3245: Could not resolve assembly reference.
+	//   error NETSDK1045: The current .NET SDK does not support targeting .NET 10.
+	// The file prefix + separator are optional to catch bare SDK/engine errors (no source path).
+	// Whitespace around ':' (when present) avoids false matches on drive-letter colons in paths.
+	// Code must be letters + digits (e.g. NU1101, MSB3245, NETSDK1045) to avoid false positives.
+	private static readonly Regex ProjectLevelDiagnosticLine = new(
+		@"^(?:(?<file>.+?)\s+:\s+)?(?<severity>error|warning)\s+(?<code>[A-Za-z]+\d+):\s+(?<message>.+?)(?:\s+\[.+\])?$",
 		RegexOptions.Compiled | RegexOptions.IgnoreCase
 	);
 	
@@ -34,8 +45,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		"Does not modify source files. " +
 		"For quick C# error checks during editing, use roslyn_get_diagnostics instead. " +
 		"Requires a .csproj to be present. " +
+		"NuGet/MSBuild errors (NU*, MSB*) without a source location appear in errors[] with line: 0, column: 0. " +
+		"exit_code is null when build_skipped is true (no dotnet build ran). " +
 		"When succeeded is false but errors is empty, check the error_details field — it contains the raw build " +
-		"output tail (last 30 lines) and explains the failure (e.g. locked output file, linker error, restore failure). " +
+		"output tail (last 30 lines) and explains the failure (e.g. locked output file, linker error). " +
 		"Do NOT run dotnet build in a terminal to investigate — error_details already has the output you need.")]
 	public async Task<object> BuildProject(
 		[Description(ProjectPathDescription)] string projectPath,
@@ -192,28 +205,61 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			var m = DiagnosticLine.Match(line);
 			
+			if(m.Success) {
+				
+				var code = m.Groups["code"].Value;
+				
+				if(IgnoredDiagnostics.Contains(code))
+					continue;
+				
+				var filePath = m.Groups["file"].Value.Trim();
+				
+				results.Add(new DiagnosticItem(
+					Code:     code,
+					Severity: m.Groups["severity"].Value.ToLowerInvariant(),
+					File:     TryMakeRelative(filePath, rootPath),
+					Line:     int.Parse(m.Groups["line"].Value),
+					Column:   int.Parse(m.Groups["col"].Value),
+					Message:  m.Groups["message"].Value.Trim()
+				));
+				
+				continue;
+			}
+			
+			// Project-level diagnostics have no source location (NU*, MSB*, etc.).
+			// Try the looser pattern so these appear in structured errors[] rather than
+			// being buried in error_details.
+			m = ProjectLevelDiagnosticLine.Match(line);
+			
 			if(!m.Success)
 				continue;
 			
-			var code     = m.Groups["code"].Value;
-			var filePath = m.Groups["file"].Value.Trim();
-			var relative = TryMakeRelative(filePath, rootPath);
+			var projCode = m.Groups["code"].Value;
 			
-			// Skip non-actionable SDK/tooling diagnostics.
-			if(IgnoredDiagnostics.Contains(code))
+			if(IgnoredDiagnostics.Contains(projCode))
 				continue;
 			
 			results.Add(new DiagnosticItem(
-				Code:     code,
+				Code:     projCode,
 				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
-				File:     relative,
-				Line:     int.Parse(m.Groups["line"].Value),
-				Column:   int.Parse(m.Groups["col"].Value),
+				File:     TryMakeRelative(m.Groups["file"].Value.Trim(), rootPath),
+				Line:     0,
+				Column:   0,
 				Message:  m.Groups["message"].Value.Trim()
 			));
 		}
 		
-		return [.. results];
+		// Multi-target builds emit each diagnostic once per TF — deduplicate by identity,
+		// then sort stably so output is consistent regardless of MSBuild evaluation order.
+		return [..
+			results
+				.DistinctBy(d => (d.Severity, d.Code, d.File, d.Line, d.Column, d.Message))
+				.OrderByDescending(d => d.Severity == "error")
+				.ThenBy(d => d.File)
+				.ThenBy(d => d.Line)
+				.ThenBy(d => d.Column)
+				.ThenBy(d => d.Code)
+		];
 	}
 
 	private static string TailLines(string output, int count)

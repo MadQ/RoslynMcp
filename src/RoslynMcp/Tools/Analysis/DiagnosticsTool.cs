@@ -66,10 +66,12 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		// diagnostic from duplicate document entries across target frameworks.
 		var filtered = diagnostics
 			.Where(GetSeverityFilter(severity))
-			.DistinctBy(d => (d.Id, d.Location.SourceTree?.FilePath, d.Location.GetLineSpan().StartLinePosition.Line, d.Location.GetLineSpan().StartLinePosition.Character, d.GetMessage()))
+			.DistinctBy(d => (d.Severity, d.Id, d.Location.SourceTree?.FilePath, d.Location.GetLineSpan().StartLinePosition.Line, d.Location.GetLineSpan().StartLinePosition.Character, d.GetMessage()))
 			.OrderByDescending(d => d.Severity)
 			.ThenBy(d => d.Location.SourceTree?.FilePath)
 			.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
+			.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Character)
+			.ThenBy(d => d.Id)
 			.ToArray()
 		;
 		
@@ -88,13 +90,14 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		if(take == 0) {
 			return scope.Outcome(summary, new {
 				summary,
-				errors   = errorCount,
-				warnings = warningCount,
+				source    = "roslyn",
+				errors    = errorCount,
+				warnings  = warningCount,
 				total,
-				returned  = 0,
-				has_more  = false,
+				returned   = 0,
+				has_more   = false,
 				page_token = (string?) null,
-				items     = Array.Empty<object>()
+				items      = Array.Empty<object>()
 			});
 		}
 		
@@ -115,11 +118,12 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		
 		return scope.Outcome(summary, new {
 			summary,
-			errors   = errorCount,
-			warnings = warningCount,
+			source    = "roslyn",
+			errors    = errorCount,
+			warnings  = warningCount,
 			total,
-			returned  = items.Length,
-			has_more  = hasMore,
+			returned   = items.Length,
+			has_more   = hasMore,
 			page_token = nextToken,
 			items
 		});
