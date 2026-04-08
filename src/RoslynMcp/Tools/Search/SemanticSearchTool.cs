@@ -232,16 +232,21 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				continue;
 
 			var span       = trivia.Span;
-			var lineSpan   = text.Lines.GetLinePositionSpan(span);
 			var triviaText = trivia.ToString();
 
-			if(regex.IsMatch(triviaText)) {
+			foreach(Match m in regex.Matches(triviaText)) {
+
+				// absPos is the absolute source position of the match — not the block start —
+				// so multiline block comments report the correct line number per occurrence.
+				var absPos  = span.Start + m.Index;
+				var lineIdx = text.Lines.GetLinePosition(absPos).Line;
+
 				yield return new SemanticMatchResult {
 
-					Line     = lineSpan.Start.Line + 1,
-					Text     = triviaText.Trim(),
+					Line     = lineIdx + 1,
+					Text     = text.Lines[lineIdx].ToString().Trim(),
 					Context  = "comment",
-					Position = span.Start
+					Position = absPos
 				};
 			}
 		}
@@ -251,20 +256,32 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	{
 		foreach(var token in root.DescendantTokens()) {
 
-			if(!token.IsKind(SyntaxKind.StringLiteralToken) && !token.IsKind(SyntaxKind.InterpolatedStringTextToken))
+			var tk = token.Kind();
+
+			if(tk is not (SyntaxKind.StringLiteralToken or
+			              SyntaxKind.InterpolatedStringTextToken or
+			              SyntaxKind.SingleLineRawStringLiteralToken or
+			              SyntaxKind.MultiLineRawStringLiteralToken or
+			              SyntaxKind.Utf8StringLiteralToken or
+			              SyntaxKind.Utf8SingleLineRawStringLiteralToken or
+			              SyntaxKind.Utf8MultiLineRawStringLiteralToken))
 				continue;
 
 			var span      = token.Span;
-			var lineSpan  = text.Lines.GetLinePositionSpan(span);
 			var tokenText = token.ToString();
 
-			if(regex.IsMatch(tokenText)) {
+			foreach(Match m in regex.Matches(tokenText)) {
+
+				// absPos is the absolute match position — handles multiline verbatim/raw strings.
+				var absPos  = span.Start + m.Index;
+				var lineIdx = text.Lines.GetLinePosition(absPos).Line;
+
 				yield return new SemanticMatchResult {
 
-					Line     = lineSpan.Start.Line + 1,
-					Text     = tokenText.Trim(),
+					Line     = lineIdx + 1,
+					Text     = text.Lines[lineIdx].ToString().Trim(),
 					Context  = "string",
-					Position = span.Start
+					Position = absPos
 				};
 			}
 		}
@@ -301,33 +318,33 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	IEnumerable<SemanticMatchResult> SearchInCode(SyntaxNode root, SourceText text, Regex regex)
 	{
 		// Search line-by-line (supports multi-token patterns like "new List"),
-		// but skip lines whose primary content is a comment or string literal.
-		var lines       = text.Lines;
-		var reported    = new HashSet<int>();
-
-		// Build a per-line context index once — avoids repeated DescendantTokens traversals
-		// for each matching line (was O(matching_lines x tokens_per_line)).
-		var lineContexts = BuildLineContextIndex(root, text);
+		// skipping positions that fall within a comment, xmldoc, or string span.
+		// All per-line matches are checked so a comment-excluded first match does not
+		// hide a later code match on the same line (e.g., `/* Foo */ var Foo = 1;`).
+		var lines    = text.Lines;
+		var excluded = BuildExcludedSpans(root);
 
 		for(int i = 0; i < lines.Count; i++) {
 
 			var lineText = lines[i].ToString();
-			var m        = regex.Match(lineText);
 
-			if(!m.Success)
-				continue;
+			foreach(Match m in regex.Matches(lineText)) {
 
-			if(lineContexts[i] is "comment" or "xmldoc" or "string")
-				continue;
+				var matchPos = lines[i].Start + m.Index;
 
-			if(reported.Add(i))
+				if(IsInExcludedSpan(excluded, matchPos))
+					continue;
+
 				yield return new SemanticMatchResult {
 
 					Line     = i + 1,
 					Text     = lineText.Trim(),
 					Context  = "code",
-					Position = lines[i].Start + m.Index
+					Position = matchPos
 				};
+
+				break; // one result per line
+			}
 		}
 	}
 	
@@ -339,16 +356,21 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				continue;
 
 			var span       = trivia.Span;
-			var lineSpan   = text.Lines.GetLinePositionSpan(span);
 			var triviaText = trivia.ToString();
 
-			if(regex.IsMatch(triviaText))
+			foreach(Match m in regex.Matches(triviaText)) {
+
+				var absPos  = span.Start + m.Index;
+				var lineIdx = text.Lines.GetLinePosition(absPos).Line;
+
 				yield return new SemanticMatchResult {
-					Line     = lineSpan.Start.Line + 1,
-					Text     = triviaText.Trim(),
+
+					Line     = lineIdx + 1,
+					Text     = text.Lines[lineIdx].ToString().Trim(),
 					Context  = "xmldoc",
-					Position = span.Start
+					Position = absPos
 				};
+			}
 		}
 	}
 	
@@ -378,68 +400,59 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		}
 	}
 	
-	// Returns a per-line (0-based) context label for the entire file in a single pass.
-	// Each label is: "comment", "xmldoc", "string", "identifier", or "code".
-	// Priority order: comment > xmldoc > string > identifier > code.
-	static string[] BuildLineContextIndex(SyntaxNode root, SourceText text)
+	// Returns sorted (Start, End) pairs for all non-code spans (comments, xmldocs, string literals).
+	// Used by SearchInCode to check whether a match position falls in a non-code region,
+	// allowing lines like `Foo(); // note` to match when searching code patterns.
+	static (int Start, int End)[] BuildExcludedSpans(SyntaxNode root)
 	{
-		var count    = text.Lines.Count;
-		var contexts = new string[count];
-		
-		Array.Fill(contexts, "code");
-		
+		var spans = new List<(int Start, int End)>();
+
 		foreach(var token in root.DescendantTokens()) {
-			
+
 			foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia)) {
-				
+
 				var kind = trivia.Kind();
-				
-				if(kind is SyntaxKind.SingleLineCommentTrivia or SyntaxKind.MultiLineCommentTrivia) {
-					MarkLines(contexts, text, trivia.Span, "comment");
-					continue;
-				}
-				
-				if(kind is SyntaxKind.SingleLineDocumentationCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia)
-					MarkLines(contexts, text, trivia.Span, "xmldoc");
+
+				if(kind is SyntaxKind.SingleLineCommentTrivia or
+				           SyntaxKind.MultiLineCommentTrivia or
+				           SyntaxKind.SingleLineDocumentationCommentTrivia or
+				           SyntaxKind.MultiLineDocumentationCommentTrivia)
+					spans.Add((trivia.Span.Start, trivia.Span.End));
 			}
-			
+
 			var tk = token.Kind();
-			
-			if(tk is SyntaxKind.StringLiteralToken or SyntaxKind.InterpolatedStringTextToken) {
-				
-				var line = text.Lines.GetLinePosition(token.Span.Start).Line;
-				
-				if(contexts[line] is "code" or "identifier")
-					contexts[line] = "string";
-				
-				continue;
-			}
-			
-			if(tk == SyntaxKind.IdentifierToken) {
-				
-				var line = text.Lines.GetLinePosition(token.Span.Start).Line;
-				if(contexts[line] == "code")
-					contexts[line] = "identifier";
-			}
+
+			if(tk is SyntaxKind.StringLiteralToken or
+			         SyntaxKind.InterpolatedStringTextToken or
+			         SyntaxKind.SingleLineRawStringLiteralToken or
+			         SyntaxKind.MultiLineRawStringLiteralToken or
+			         SyntaxKind.Utf8StringLiteralToken or
+			         SyntaxKind.Utf8SingleLineRawStringLiteralToken or
+			         SyntaxKind.Utf8MultiLineRawStringLiteralToken)
+				spans.Add((token.Span.Start, token.Span.End));
 		}
-		
-		return contexts;
+
+		spans.Sort((a, b) => a.Start.CompareTo(b.Start));
+
+		return spans.ToArray();
 	}
 	
-	static void MarkLines(string[] contexts, SourceText text, TextSpan span, string context)
+	static bool IsInExcludedSpan((int Start, int End)[] excluded, int position)
 	{
-		var start = text.Lines.GetLinePosition(span.Start).Line;
-		var end   = text.Lines.GetLinePosition(Math.Max(span.Start, span.End - 1)).Line;
-		
-		for(var li = start; li <= end && li < contexts.Length; li++) {
-			
-			// Never overwrite a higher-priority context.
-			if(context == "comment")
-				contexts[li] = "comment";
-			
-			else if(context == "xmldoc" && contexts[li] != "comment")
-				contexts[li] = "xmldoc";
+		// Binary search for the last span starting at or before position.
+		int lo = 0, hi = excluded.Length - 1;
+
+		while(lo <= hi) {
+
+			int mid = (lo + hi) >>> 1;
+
+			if(excluded[mid].Start <= position)
+				lo = mid + 1;
+			else
+				hi = mid - 1;
 		}
+
+		return hi >= 0 && excluded[hi].End > position;
 	}
 	
 	
