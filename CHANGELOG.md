@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **TestHarness shutdown `TaskCanceledException`** — `WaitForExitAsync` now wrapped in `try/catch(OperationCanceledException)` so the harness exits cleanly when the server doesn't stop within the 5-second window; server process is still killed via the existing `proc.Kill()` fallback (closes #170)
+
+### Added
+- **TestHarness: `target_frameworks` coverage test** — new `roslyn_build_project: forceBuild populates target_frameworks on CS diagnostics` test verifies that multi-TFM projects populate `target_frameworks` on at least one diagnostic item in the build output
+
 ---
 
 ## [0.7.8-alpha] — 2026-04-09 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.7.8-alpha)

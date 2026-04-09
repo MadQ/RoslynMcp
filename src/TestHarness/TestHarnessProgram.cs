@@ -524,6 +524,30 @@ try {
 		new { projectPath = serverProj, forceBuild = true },
 		data => data?["succeeded"]?.GetValue<bool>() == false
 	));
+
+	// The server project is multi-targeted (net8.0 + net10.0), so dotnet build
+	// emits TFM-suffixed bracket contexts like [proj::TargetFramework=net10.0].
+	// This test verifies ParseMSBuildDiagnostics populates target_frameworks on
+	// at least one diagnostic item.
+	tests.Add(await RunTestAsync(
+		"roslyn_build_project: forceBuild populates target_frameworks on CS diagnostics",
+		"roslyn_build_project",
+		new { projectPath = serverProj, forceBuild = true },
+		data => {
+
+			var errors   = data?["errors"]?.AsArray();
+			var warnings = data?["warnings"]?.AsArray();
+
+			if(errors is null || warnings is null)
+				return false;
+
+			return errors.Concat(warnings).Any(d =>
+				d?["target_frameworks"]?.AsArray() is { } tfms
+				&& tfms.Count > 0
+				&& tfms.Any(t => t?.GetValue<string>()?.StartsWith("net") == true)
+			);
+		}
+	));
 }
 finally {
 
@@ -798,7 +822,12 @@ else
 	Console.WriteLine($"❌ {failed} test(s) failed.");
 
 writer.Close();
-await proc.WaitForExitAsync(new CancellationTokenSource(5_000).Token).ConfigureAwait(false);
+
+// Give the server up to 5 seconds to exit cleanly; kill it if it doesn't.
+try {
+	await proc.WaitForExitAsync(new CancellationTokenSource(5_000).Token);
+}
+catch(OperationCanceledException) { }
 
 if(!proc.HasExited)
 	proc.Kill();
