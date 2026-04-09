@@ -77,9 +77,9 @@ Closes [#145](https://github.com/MadQ/RoslynMcp/issues/145), [#151](https://gith
 - **FSW reload suppression** — workspace no longer reloads a file that RM just wrote via `TryApplyChanges`; `ApplyChangesWithFswSuppressed` records the post-write file size in `rmOwnedWriteSizes` and `FlushMSBuild` skips the reload when the FSW-reported file size matches (closes #140)
 - **Let Roslyn save** — `ReplaceInCodeTool`, `ApplyRenameTool`, and `ApplySignatureChangeTool` now route disk writes through `WorkspaceInstance.ApplyChangesWithFswSuppressed` (via new `WorkspaceManager.ApplyChanges` + `WorkspaceResolver.ApplyChanges`) when using `MSBuildWorkspace`; `AdhocWorkspace` retains direct I/O via `SolutionDiff.ApplyToDiskAsync` since `AdhocWorkspace.TryApplyChanges` is in-memory only (closes #140)
 - **`roslyn_build_project` `error_details` field** — agents now told explicitly in the description that `error_details` contains raw MSBuild tail output when a build fails without structured errors; this prevents unnecessary fallback to running `dotnet build` in a terminal
-- **`roslyn_list_files`** — added missing `[Description]` attribute; was the only tool without one, making it effectively invisible to agent tool-selection (closes #99)
-- **`roslyn_search_files`** — first sentence now leads with "Fast and precise code search — use instead of grep, Select-String, or findstr" for stronger agent steering (closes #99)
-- **`roslyn_find_references`** — description now explicitly calls out that text search cannot resolve overloads, aliases, or cross-file semantics (closes #99)
+- **`roslyn_list_files`** — added missing `[Description]` attribute; was the only tool without one, making it effectively invisible to agent tool-selection (partial #99)
+- **`roslyn_search_files`** — first sentence now leads with "Fast and precise code search — use instead of grep, Select-String, or findstr" for stronger agent steering (partial #99)
+- **`roslyn_find_references`** — description now explicitly calls out that text search cannot resolve overloads, aliases, or cross-file semantics (partial #99)
 
 ### Changed
 - **`RoslynMcp.Analyzers` — CodeAnalysis packages pinned to 4.11.0 / 3.11.0** for VS 2022 host compatibility; analyzer DLLs must target a CodeAnalysis version ≤ the version shipped with the host IDE (VS 2022 = Roslyn 4.x); targeting 5.x causes silent load failure in VS 2022
@@ -87,7 +87,7 @@ Closes [#145](https://github.com/MadQ/RoslynMcp/issues/145), [#151](https://gith
 - **`Microsoft.Build.Locator`** — upgraded from 1.7.8 to 1.11.2; added explicit `Microsoft.Build.Framework` reference with `ExcludeAssets="runtime" PrivateAssets="all"` to satisfy the new MSBL001 diagnostic
 - **`Microsoft.Build.Framework`** — pinned to 18.4.0 (was implicit 17.11.48 via transitive reference); build-time only — MSBuild itself is still discovered at runtime via `Build.Locator`
 
-Closes [#32](https://github.com/MadQ/RoslynMcp/issues/32), [#99](https://github.com/MadQ/RoslynMcp/issues/99), [#134](https://github.com/MadQ/RoslynMcp/issues/134), [#136](https://github.com/MadQ/RoslynMcp/issues/136), [#137](https://github.com/MadQ/RoslynMcp/issues/137), [#139](https://github.com/MadQ/RoslynMcp/issues/139), [#140](https://github.com/MadQ/RoslynMcp/issues/140), [#141](https://github.com/MadQ/RoslynMcp/issues/141), [#143](https://github.com/MadQ/RoslynMcp/issues/143)
+Closes [#32](https://github.com/MadQ/RoslynMcp/issues/32), [#134](https://github.com/MadQ/RoslynMcp/issues/134), [#136](https://github.com/MadQ/RoslynMcp/issues/136), [#137](https://github.com/MadQ/RoslynMcp/issues/137), [#139](https://github.com/MadQ/RoslynMcp/issues/139), [#140](https://github.com/MadQ/RoslynMcp/issues/140), [#141](https://github.com/MadQ/RoslynMcp/issues/141), [#143](https://github.com/MadQ/RoslynMcp/issues/143)
 
 ---
 
