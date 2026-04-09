@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`roslyn_build_project`: project-level diagnostics now populate `target_frameworks`** — `ProjectLevelDiagnosticLine` regex now captures the MSBuild bracket suffix so NU\*/MSB\* errors from multi-target builds correctly report which target frameworks they apply to (closes #169)
 - **TestHarness shutdown `TaskCanceledException`** — `WaitForExitAsync` now wrapped in `try/catch(OperationCanceledException)` so the harness exits cleanly when the server doesn't stop within the 5-second window; server process is still killed via the existing `proc.Kill()` fallback (closes #170)
 
 ### Added
