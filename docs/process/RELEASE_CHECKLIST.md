@@ -50,7 +50,7 @@ Use this checklist when preparing a new release of RoslynMcp.
 ## Release Process
 
 ### 1. Version Bump
-- [ ] Update version in `Directory.Build.props`
+- [ ] Update version in `Directory.build.props` (`<VersionPrefix>` and `<VersionSuffix>` tags)
 - [ ] Confirm the GitHub milestone `vX.Y.Z` exists (omit pre-release suffix — use `v0.7.4`, not `v0.7.4-alpha`)
 - [ ] Update CHANGELOG.md
   - [ ] Move `[Unreleased]` items to new version section
@@ -85,11 +85,11 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 dotnet publish src/RoslynMcp.LogViewer/RoslynMcp.LogViewer.csproj -c Release -f net10.0 -o ./publish/logviewer
 
 # Verify MCP server zip contents BEFORE creating the release — check for unexpected executables
-# RoslynMcpA.exe is the analyzer host binary and must NOT be included
+# RoslynMcpA.exe is a local dev copy created by pub.ps1 and must NOT be included in releases
 Get-ChildItem ./publish/net8.0/*.exe, ./publish/net10.0/*.exe | Select-Object Name
 # Expected: only RoslynMcp.exe. If RoslynMcpA.exe appears, exclude it explicitly.
 
-# Zip MCP server targets (excluding analyzer host binary)
+# Zip MCP server targets (excluding local dev copy)
 $exc = @("RoslynMcpA.exe")
 Compress-Archive -Path (Get-ChildItem ./publish/net8.0  | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
 Compress-Archive -Path (Get-ChildItem ./publish/net10.0 | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip
@@ -101,6 +101,8 @@ Compress-Archive -Path ./publish/logviewer/* -DestinationPath ./artifacts/Roslyn
 ### 4. Create GitHub Release
 
 > **Always create as a draft first.** Draft releases are fully mutable — you can upload, remove, or replace assets freely, and the tag is not locked until you publish. Only publish when everything is verified.
+>
+> ⚠️ **PUBLISH POLICY: NEVER publish a release without TWO explicit user confirmations.** Always create as `--draft`. Never run `gh release edit --draft=false` unilaterally — ask the user to confirm, wait for acknowledgement, then ask again. Only run the publish command after both confirmations.
 
 ```powershell
 # Step 1: create as DRAFT — tag is not locked yet
@@ -113,13 +115,14 @@ gh release create vX.Y.Z-alpha --draft --prerelease `
 
 # Step 2: verify assets on the release page, test the zips
 
-# Step 3: publish when satisfied — tag becomes immutable after this
-gh release edit vX.Y.Z-alpha --draft=false
+# Step 3: NEVER run this unilaterally — requires TWO explicit user confirmations.
+# Ask the user to confirm, wait for acknowledgement, then confirm again before running:
+# gh release edit vX.Y.Z-alpha --draft=false
 ```
 
 - [ ] Create draft release with all 3 zip artifacts
 - [ ] Verify zip contents and release page look correct
-- [ ] Publish (un-draft)
+- [ ] Publish (un-draft) — ⚠️ requires TWO explicit user confirmations; never publish unilaterally
 
 ### 5. Publish to NuGet (Future)
 ```bash

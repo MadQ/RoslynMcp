@@ -84,7 +84,7 @@ dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (44 tests covering all tools)
+# Run the comprehensive test suite (46 tests covering all tools)
 dotnet run --project src/TestHarness/TestHarness.csproj
 ```
 
@@ -137,7 +137,7 @@ Publish a Release build and configure your MCP client to use it:
 
 **PRs that add `.editorconfig` files will not be approved.** These create the same conflicts with the project's intentional style choices.
 
-**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal, RMCP005: `BeginTool` name mismatch) and warning-severity rules (RMCP006: `TODO` placeholder in `scope.Outcome`/`scope.Failed` detail strings). New analyzer contributions follow the same pattern.
+**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal, RMCP005: `BeginTool` name mismatch, RMCP007: missing `[Description]` on tool method, RMCP008: missing `[Description]` on tool parameter, RMCP009: `string projectPath` must use `[Description(ProjectPathDescription)]`) and warning-severity rules (RMCP001/RMCP002: prefer `nint`/`nuint` over `IntPtr`/`UIntPtr`, RMCP006: `TODO` placeholder in `scope.Outcome`/`scope.Failed` detail strings). New analyzer contributions follow the same pattern.
 
 ---
 
@@ -169,9 +169,11 @@ Publish a Release build and configure your MCP client to use it:
    }
    ```
 
-   **Required scope rules (enforced by RMCP003/RMCP004 analyzer errors):**
-   - `using var scope = BeginTool(...)` must be the **first statement** — ensures every exit path logs timing
-   - Every return must flow through `scope.Error(error)`, `scope.Outcome(detail, value)`, or `scope.Failed(reason, value)` — bare `return` bypasses logging
+   **Required rules (enforced by analyzer errors):**
+   - `using var scope = BeginTool(...)` must be the **first statement** — ensures every exit path logs timing (RMCP003)
+   - Every return must flow through `scope.Error(error)`, `scope.Outcome(detail, value)`, or `scope.Failed(reason, value)` — bare `return` bypasses logging (RMCP004)
+   - `[Description("...")]` is required on the tool method and every parameter (RMCP007/RMCP008)
+   - `string projectPath` must use `[Description(ProjectPathDescription)]`, not an inline string (RMCP009)
 
 2. **No manual DI registration needed** — `WithToolsFromAssembly()` in `Program.cs` auto-discovers all `[McpServerToolType]` classes
 

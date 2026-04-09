@@ -378,4 +378,4 @@ If none of the above solutions work:
 
 ---
 
-**Last Updated:** 2026-03-28 (v0.7.4-alpha)
+**Last Updated:** 2026-03-28 (v0.7.8-alpha)

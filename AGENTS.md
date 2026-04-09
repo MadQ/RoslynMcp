@@ -62,11 +62,12 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines `ProjectPathDescription` constant |
 | `SearchFilesTool` | `roslyn_search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
 | `SemanticSearchTool` | `roslyn_semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
+| `GlobMatcher` | Filename-only glob matching (`*`, `**`, `?`) extracted from `SemanticSearchTool`; shared by file-search tools; does not support `{a,b}` brace expansion |
 | `ListFilesTool` | `roslyn_list_files` — enumerate files matching glob pattern (fast file listing, no content) |
 | `ReplaceInFileTool` | `roslyn_replace_in_file` — text-level find/replace with regex support (any file type) |
 | `ReplaceInCodeTool` | `roslyn_replace_in_code` — semantic C# node replacement using Roslyn (validates syntax, preserves formatting) |
 | `InsertLinesTool` | `roslyn_insert_lines` — insert lines at a position or anchor pattern |
-| `WriteFileTool` | `roslyn_write_file` — write or create files atomically with automatic pre-write backup; returns a backup token usable with `roslyn_local_history` |
+| `WriteFileTool` | `roslyn_write_file` — write or create files atomically with automatic pre- and post-write backup snapshots; returns a backup token usable with `roslyn_local_history` |
 | `LocalHistoryTool` | `roslyn_local_history` — list, preview, and apply crash-safe file backup snapshots; token-based undo for write operations (actions: `list`, `preview`, `apply`) |
 | `RespawnTool` |`roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `FileWriter` | Centralised file write entry point; `WriteWithRetryAsync` and `WriteWithRetry` wrap all disk writes with exponential-backoff retry on `IOException`, structured `INFO`/`ERROR` log entries per attempt, and are accessible from non-tool types (`BackupStore`, `SolutionDiff`) |
@@ -81,9 +82,10 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `ChangeSignatureTool` | `roslyn_change_signature` — preview adding parameters with a non-breaking forwarding overload; returns unified diff + token (ReadOnly — never writes) |
 | `ApplySignatureChangeTool` | `roslyn_apply_signature_change` — apply or reject a previewed signature change |
 | `ProjectInfoTool` | `roslyn_get_project_info` — project metadata (TFM, language version, packages, etc.) |
-| `BuildTool` | `roslyn_build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true` |
+| `BuildTool` | `roslyn_build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true`; diagnostic items include optional `target_frameworks` when MSBuild emits TFM context |
 | `CleanSolutionTool` | `roslyn_clean_solution` — remove all build artifacts (bin/obj directories) |
 | `RestorePackagesTool` | `roslyn_restore_packages` — restore NuGet packages |
+| `DotnetRunner` | Shared helper for spawning `dotnet` CLI commands; strips MSBuild env vars (`MSBUILD_EXE_PATH` etc.) so child builds do clean SDK discovery; drains stdout+stderr concurrently to prevent pipe deadlock; used by `BuildTool`, `CleanSolutionTool`, `RestorePackagesTool` |
 | `FileOutlineTool` | `roslyn_get_file_outline` — type/member structure without bodies (token saver) |
 | `TypeHierarchyTool` | `roslyn_get_type_hierarchy` — base types, interfaces, derived types |
 | `FindImplementationsTool` | `roslyn_find_implementations` — concrete implementations of interfaces/abstract members |
@@ -99,7 +101,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `InfoTool` | `roslyn_info` — server version, PID, uptime, MSBuild discovery method, log markers |
 | `DebugAttachTool` | `roslyn_debug_attach` (DEBUG only) — launches the JIT debugger dialog so Visual Studio can attach; blocks the server until dismissed or attached |
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
-| `BackupStore` | Crash-safe backup store for file write operations; snapshots stored in `%LOCALAPPDATA%\RoslynMcp\backups\`; supports multi-level undo with token-based restore and conflict detection |
+| `BackupStore` | Crash-safe backup store for file write operations; stores pre- and post-write snapshots in `%LOCALAPPDATA%\RoslynMcp\backups\`; supports multi-level undo with token-based restore and conflict detection; async-safe via `SemaphoreSlim` |
 | `RoslynMcpJson` | Shared `JsonSerializerOptions` with a custom `JavaScriptEncoder` — passes through Unicode characters without `\uXXXX` escaping; used by all tools for consistent serialization |
 | `ToolErrorResult` | Abstract base record for all structured error responses; provides a non-nullable `Error` string property; enables the `where T : ToolErrorResult` generic constraint on `ToolScope.Error<T>()` |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
@@ -150,7 +152,7 @@ When editing C# code, **actively prefer `roslyn_replace_in_code`** over `roslyn_
 - `roslyn_replace_in_file` is for text/config files or when you need literal text replacement
 
 For writing full file content (new files or wholesale rewrites), use `roslyn_write_file`:
-- Takes a crash-safe backup automatically before writing; returns a token usable with `roslyn_local_history` to undo
+- Takes crash-safe pre- and post-write backup snapshots automatically; returns a token usable with `roslyn_local_history` to undo
 - Set `createNew: true` to create a new file or overwrite; default requires the file to already exist
 
 When discovering files/content:
@@ -689,7 +691,7 @@ Get-ChildItem $dir -Recurse |
     Select-Object Name, LastWriteTime, Length
 ```
 
-Backup naming: `{originalFileName}_{unixMs}.bak` — some backups may themselves be 0 bytes (taken after truncation); always filter `Length -gt 0` and sort descending. **Read and validate the backup content before copying** — confirm it contains the expected class/type names and reflects the correct version (not a stale draft). Cross-reference `LastWriteTime` against `git log` to pick the right snapshot. Only after validation: `Copy-Item $best.FullName "path\to\MyFile.cs"`. **After copying, read the restored file with `roslyn_get_file_outline` or `roslyn_get_member_body` and reason explicitly about whether it reflects the correct state for the work in progress** — the backup predates the write that caused the zeroing, so in-session edits may be missing and need to be re-applied before committing. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. See `docs/process/WORKING_TREE_ROLLBACK.md` for the full step-by-step procedure. Run the same check after merges — merges are a common trigger.
+Backup naming: `{originalFileName}_{unixMs}_{nonce}.pre.bak` (pre-write) or `{originalFileName}_{unixMs}_{nonce}.post.bak` (post-write) — some backups may themselves be 0 bytes (taken after truncation); always filter `Length -gt 0` and sort descending. **Read and validate the backup content before copying** — confirm it contains the expected class/type names and reflects the correct version (not a stale draft). Cross-reference `LastWriteTime` against `git log` to pick the right snapshot. Only after validation: `Copy-Item $best.FullName "path\to\MyFile.cs"`. **After copying, read the restored file with `roslyn_get_file_outline` or `roslyn_get_member_body` and reason explicitly about whether it reflects the correct state for the work in progress** — the backup predates the write that caused the zeroing, so in-session edits may be missing and need to be re-applied before committing. If no usable backup exists, fall back to `git checkout <sha> -- path/to/file.cs`. See `docs/process/WORKING_TREE_ROLLBACK.md` for the full step-by-step procedure. Run the same check after merges — merges are a common trigger.
 
 ### GitHub Issues — Body Formatting
 

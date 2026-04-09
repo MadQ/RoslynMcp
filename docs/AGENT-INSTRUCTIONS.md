@@ -89,7 +89,7 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_write_file` — Write or create files atomically with automatic
   pre-write backup. Use for wholesale file rewrites or creating new files.
   Returns a backup token usable with `roslyn_local_history` to undo.
-- `roslyn_local_history` — List, preview, and restore crash-safe file backup
+- `roslyn_local_history` — List, preview, and apply crash-safe file backup
   snapshots created by `roslyn_write_file`. Use to undo destructive writes.
 
 ### Refactoring

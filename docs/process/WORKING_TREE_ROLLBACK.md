@@ -56,8 +56,8 @@ git show HEAD:src/RoslynMcp/Tools/Build/CleanSolutionTool.cs | Measure-Object -L
 C:\Users\madq4\AppData\Local\RoslynMcp\backups\
 ```
 
-Naming convention: `{originalFileName}_{unixMs}.bak`  
-Example: `RestorePackagesTool.cs_1775570742174.bak`
+Naming convention: `{originalFileName}_{unixMs}_{nonce}.pre.bak` (pre-write snapshot; post-write copies use `.post.bak`)  
+Example: `RestorePackagesTool.cs_1775570742174_a3f9.pre.bak`
 
 **Do not use `roslyn_*` tools for this** — if the file is 0 bytes on disk the Roslyn
 workspace is equally stale. Use PowerShell directly.

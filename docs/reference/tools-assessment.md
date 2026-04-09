@@ -1,6 +1,6 @@
 # Roslyn MCP Tools: Honest Assessment
 
-> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.4-alpha.
+> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.8-alpha.
 
 ## Tools That Work Well
 
@@ -15,6 +15,10 @@
 **`roslyn_get_diagnostics`** — clean and fast. **v0.5.0: errors now sorted before warnings. v0.6.0: single-file queries use SemanticModel for better performance.**
 
 **`roslyn_read_file`** — reads from the in-memory workspace (post-edit, always current), supports line ranges. The `source: "roslyn"` annotation is a nice touch. Direct substitute for `Read` for `.cs` files.
+
+**`roslyn_get_line_count`** — returns line counts for one or more files without reading content. Useful for sizing a file before deciding whether to read it whole or use `roslyn_get_file_outline`.
+
+**`roslyn_get_trivia`** (**EXPERIMENTAL**) — extracts whitespace, comments, and formatting trivia from C# files. Supports filtering by syntax kind, trivia kind, or line range. The primary use case is understanding indentation context before inserting code so that `roslyn_insert_lines` can match the surrounding style.
 
 ---
 
@@ -50,7 +54,7 @@ Where normal tools win:
 
 ## Bottom Line
 
-The design philosophy is right — Roslyn semantics are genuinely better than text search for C# navigation. `get_type_members`, `get_symbol_definition`, `get_symbol_info`, and `get_type_hierarchy` are all things worth reaching for first. ~~Three issues that would reliably break an AI agent:~~ Status as of v0.7.4-alpha:
+The design philosophy is right — Roslyn semantics are genuinely better than text search for C# navigation. `get_type_members`, `get_symbol_definition`, `get_symbol_info`, and `get_type_hierarchy` are all things worth reaching for first. ~~Three issues that would reliably break an AI agent:~~ Status as of v0.7.8-alpha:
 
 1. ~~`list_types` needs a namespace filter~~ — **fixed v0.7.0 (#29)**
 2. ~~`semantic_search` duplication~~ — **fixed v0.4.0 (#18)**
