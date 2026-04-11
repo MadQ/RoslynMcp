@@ -22,6 +22,7 @@ All milestones through v0.7.8 are complete. Highlights per release:
 | v0.7.4 | `FileEncoding` shared BOM-detection helper; BOM fixes in `roslyn_write_file` and `roslyn_replace_in_code`; `ToolScopeAnalyzer` RMCP003 now fires on expression-bodied tool methods; `TryServeCachedPage` gains `[NotNullWhen(true)]`, eliminating 10× CS8603 warnings |
 | v0.7.6 | `roslyn_find_callers`, `roslyn_get_call_graph`; write-retry telemetry (#136); FSW reload suppression + let Roslyn save (#140); `roslyn_local_history` double-write fix (#141); `roslyn_find_callers` dedup fix (#143); `roslyn_build_project` false-failure fix; `FileWriter` centralised write entry point (#139); RMCP007/008/009 diagnostics; BOM fixes; tool description improvements (#99) |
 | v0.7.8 | Thread-safety hardening, DotnetRunner deadlock fix, BackupStore async, SemanticSearch correctness, self-healing truncation, pre/post backups, TFM context in build diagnostics, rename stale-file fix, MSBuildBootstrap hardening (#145, #151, #153–#159, #161–#163, #165–#166) |
+| v0.7.9 | TestHarness split (#167), shutdown fix (#170), TFM context fix in project-level diagnostics (#169); folded into v0.8.0-beta — no separate tag |
 
 ---
 
@@ -88,29 +89,18 @@ The highest-value new tool, hardened defaults for existing tools, and updated co
 
 ---
 
-### v0.7.9-alpha — Hardening and Housekeeping
-
-Targeted fixes and infrastructure improvements before the public launch.
-
-| # | Type | Title | Scope | Refs |
-|---|------|-------|-------|------|
-| — | feature | Global BackupStore pruning | Max-age + max-size eviction with run-count guard; configurable via env vars | #172 |
-| — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
-
-**Theme:** Clean house. Confidence before going public.
-
----
-
 ### v0.8.0-beta — Public Launch
 
-Distribution infrastructure that lets anyone install and try RoslynMcp in under a minute. This is the first beta release — the "IPO".
+Distribution infrastructure and pre-launch hardening. First beta release — the "IPO".
 
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
 | — | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, NuGet CI/CD pipeline, INSTALLATION.md Option A update | #173 |
 | — | feature | MCP marketplace listings | smithery.yaml, listings on Smithery / mcp.so / glama.ai, README badges | #174 |
+| — | feature | Global BackupStore pruning | Max-age + max-size eviction with run-count guard; configurable via env vars | #172 |
+| — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
 
-**Theme:** Distribution. Anyone can install in 30 seconds; AI tool directories surface RoslynMcp to new users.
+**Theme:** Ship it. Anyone can install in 30 seconds; AI tool directories surface RoslynMcp to new users.
 
 ---
 
