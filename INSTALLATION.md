@@ -59,7 +59,7 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 
 ### Step 2: Configure Your MCP Client
 
-Point your MCP client to the published executable. Examples for each client below.
+Point your MCP client to the published executable using an absolute path to `RoslynMcp.exe`. Do not pass project paths as args — each `roslyn_*` tool call specifies `projectPath` directly. Client-specific examples below.
 
 **Published NuGet tool (coming soon):**
 ```bash
@@ -91,10 +91,6 @@ Add to `.mcp.json` at your workspace root:
 }
 ```
 
-**Notes:**
-- Use absolute path to `RoslynMcp.exe`
-- Do NOT pass project paths as `args` — the agent must specify `projectPath` parameter in each tool invocation
-
 **Global config alternative:** Add the same `"servers"` block to `~/.copilot/mcp-config.json` (`%USERPROFILE%\.copilot\mcp-config.json` on Windows) to make the server available across all projects.
 
 **Restart:** Reload window or restart GitHub Copilot extension after editing `.mcp.json`.
@@ -118,10 +114,7 @@ Add to `.mcp.json` at your workspace root:
 
 **Global config** — add the same block to `~/.claude.json` (`%USERPROFILE%\.claude.json` on Windows) to make the server available across all projects. Note: do **not** put MCP config in `~/.claude/settings.json` — it is silently ignored there.
 
-**Notes:**
-- Use absolute path to `RoslynMcp.exe`
-- Do NOT pass project paths as `args` — the agent must specify `projectPath` parameter in each tool invocation
-- Project config (`.mcp.json`) takes precedence over global (`~/.claude.json`)
+> **Note:** Project config (`.mcp.json`) takes precedence over global (`~/.claude.json`).
 
 **Restart:** Restart the Claude Code session after editing either config file.
 
@@ -147,11 +140,6 @@ Add to your Claude Desktop MCP settings file:
 }
 ```
 
-**Path notes:**
-- Use **absolute path** for the executable
-- Replace `/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe` with the full path to the published executable
-- Do NOT pass project paths as `args` — the agent must specify `projectPath` parameter in each tool invocation
-
 **Restart:** Quit and relaunch Claude Desktop.
 
 ---
@@ -172,8 +160,6 @@ Add to `.cursor/mcp.json` in your project root:
 }
 ```
 
-**Note:** Do NOT pass project paths as command-line `args`. The agent must specify `projectPath` parameter in each tool invocation.
-
 **Option 2: Global config**
 
 1. Open Cursor Settings: **File → Preferences → Cursor Settings**
@@ -181,9 +167,7 @@ Add to `.cursor/mcp.json` in your project root:
 3. In **MCP Tools** section, select **New MCP Server**
 4. Add the configuration to the `mcp.json` file that opens
 
-**Path notes:**
-- `${workspaceFolder}` auto-resolves to current workspace directory
-- Use absolute path to the published `RoslynMcp.exe` executable
+> `${workspaceFolder}` auto-resolves to the current workspace directory.
 
 **Restart:** Reload window (Cmd/Ctrl+Shift+P → "Developer: Reload Window").
 
@@ -204,8 +188,6 @@ Add to `.windsurf/mcp_config.json` in your project root:
   }
 }
 ```
-
-**Note:** Do NOT pass project paths as command-line `args`. The agent must specify `projectPath` parameter in each tool invocation.
 
 **Option 2: Global config**
 
@@ -237,8 +219,6 @@ Add to `.windsurf/mcp_config.json` in your project root:
   }
 }
 ```
-
-**Note:** Do NOT pass project paths as command-line `args`. The agent must specify `projectPath` parameter in each tool invocation.
 
 **Option 2: Workspace config**
 
@@ -278,10 +258,6 @@ Add to `.continue/config.json` in your project root:
 }
 ```
 
-**Notes:**
-- Use absolute path to `RoslynMcp.exe`
-- Do NOT pass project paths as `args` — the agent must specify `projectPath` in each tool invocation
-
 **Restart:** Reload window or restart Continue extension.
 
 ---
@@ -303,10 +279,6 @@ Add to `.vscode/mcp.json` in your project root:
 }
 ```
 
-**Notes:**
-- Use absolute path to `RoslynMcp.exe`
-- Do NOT pass project paths as `args` — the agent must specify `projectPath` in each tool invocation
-
 **Restart:** Reload VS Code window.
 
 ---
@@ -327,12 +299,9 @@ Add to `~/.config/zed/settings.json`:
 }
 ```
 
-**Path notes:**
-- Use absolute path to `RoslynMcp.exe`
-- Do NOT pass project paths as `args` — the agent must specify `projectPath` in each tool invocation
-- Config file location:
-  - **macOS/Linux**: `~/.config/zed/settings.json`
-  - **Windows**: `%APPDATA%\Zed\settings.json`
+**Config file location:**
+- **macOS/Linux**: `~/.config/zed/settings.json`
+- **Windows**: `%APPDATA%\Zed\settings.json`
 
 **Restart:** Quit and relaunch Zed.
 
