@@ -88,43 +88,61 @@ The highest-value new tool, hardened defaults for existing tools, and updated co
 
 ---
 
-### v0.8.0-alpha — Unlock Capabilities Grep Can't Match
+### v0.7.9-alpha — Hardening and Housekeeping
 
-Semantic analysis tools that justify RoslynMcp's existence beyond convenience.
+Targeted fixes and infrastructure improvements before the public launch.
 
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
-| ~~18~~ | ~~feature~~ | ~~Implement call graph tools~~ | ~~Shipped in v0.7.6~~ | #32 |
-| 19 | feature | Implement `roslyn_find_unused` and supporting analysis tools | `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`, `roslyn_check_syntax` | #33 |
-| — | enhancement | Additional scope assigned to this milestone | See GitHub issue #99 | #99 |
+| — | feature | Global BackupStore pruning | Max-age + max-size eviction with run-count guard; configurable via env vars | #172 |
+| — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
 
-**Theme:** The "wow" release. Capabilities that text search fundamentally cannot provide.
+**Theme:** Clean house. Confidence before going public.
 
 ---
 
-### v0.9.0-alpha — Style-Aware Editing
+### v0.8.0-beta — Public Launch
+
+Distribution infrastructure that lets anyone install and try RoslynMcp in under a minute. This is the first beta release — the "IPO".
+
+| # | Type | Title | Scope | Refs |
+|---|------|-------|-------|------|
+| — | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, NuGet CI/CD pipeline, INSTALLATION.md Option A update | #173 |
+| — | feature | MCP marketplace listings | smithery.yaml, listings on Smithery / mcp.so / glama.ai, README badges | #174 |
+
+**Theme:** Distribution. Anyone can install in 30 seconds; AI tool directories surface RoslynMcp to new users.
+
+---
+
+### v0.9.0 — Semantic Analysis
+
+Capabilities that text search fundamentally cannot provide — the tools that justify RoslynMcp's existence.
+
+| # | Type | Title | Scope | Refs |
+|---|------|-------|-------|------|
+| — | feature | `roslyn_find_unused` | Find unused types, members, and variables via semantic analysis | #33 |
+| — | feature | `roslyn_get_type_dependencies` | Return type dependency graph (imports, references, coupling) | #36 |
+| — | feature | `roslyn_find_overloads` | List all overloads of a method | #37 |
+| — | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation | — |
+| — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
+| — | investigation | LogViewer rework | `RoslynMcp.LogViewer` currently a dev-only skeleton; evaluate scope for a proper rework | #118 |
+
+**Theme:** The "wow" release. Capabilities that grep can't match and agents can't fake.
+
+---
+
+### v1.0.0-beta — Style-Aware Editing
 
 Agents that use RoslynMcp don't just understand code — they respect the author's formatting choices.
 
 | # | Type | Title | Scope | Audit refs |
 |---|------|-------|-------|------------|
-| 20 | feature | Implement `roslyn_get_style_profile` | StyleSampler helper; trivia-based style inference; returns named style properties | #34 |
-| 21 | feature | Add `preserveStyle` flag to `replace_in_code` | StyleNormalizer helper; contextual trivia normalization during targeted edits | #35 |
+| — | feature | Implement `roslyn_get_style_profile` | StyleSampler helper; trivia-based style inference; returns named style properties | #34 |
+| — | feature | Add `preserveStyle` flag to `replace_in_code` | StyleNormalizer helper; contextual trivia normalization during targeted edits | #35 |
+| — | feature | Implement `roslyn_preview_style` / `roslyn_apply_style` | Two-phase style normalization; column alignment scoped to per-type bodies | — |
+| — | feature | Full file-wide column alignment rebalancing | Cross-type trivia rewriting; the hardest case | — |
 
 **Theme:** Respect. The author's column alignment, blank line patterns, and comment placement survive AI-assisted editing.
-
----
-
-### v1.0.0-beta — Preview Style Application
-
-Whole-file style normalization — testable, inviting feedback, explicitly not battle-tested yet.
-
-| # | Type | Title | Scope | Audit refs |
-|---|------|-------|-------|------------|
-| 22 | feature | Implement `roslyn_preview_style` / `roslyn_apply_style` | Two-phase style normalization; column alignment scoped to per-type bodies | — |
-| 23 | feature | Full file-wide column alignment rebalancing | Cross-type trivia rewriting; the hardest case | — |
-
-**Theme:** Ambition. Signal to contributors that RoslynMcp is going somewhere interesting.
 
 ---
 
@@ -133,7 +151,7 @@ Whole-file style normalization — testable, inviting feedback, explicitly not b
 Everything from alpha and beta, battle-tested.
 
 **Entry criteria:**
-- All planned v1.0.0 issues closed (original 23 audit items plus any subsequently added scope)
+- All planned v1.0.0 issues closed
 - TestHarness passes on net8.0, net10.0, and net11.0
 - README updated with the full tool list and accurate descriptions
 - No open bugs marked as affecting correctness
@@ -147,13 +165,13 @@ v0.4.0 (crashes + invisible tools)
   └─► v0.5.0 (wrong answers)
         └─► v0.6.0 (robustness + performance)
               └─► v0.7.0 (get_member_body + enhancements + AGENTS.md)
-                    ├─► v0.8.0 (semantic analysis tools)
-                    └─► v0.9.0 (style infrastructure)
-                          └─► v1.0.0-beta (style application)
+                    ├─► v0.8.0-beta (dotnet tool + marketplace — public launch)
+                    └─► v0.9.0 (semantic analysis tools)
+                          └─► v1.0.0-beta (style-aware editing)
                                 └─► v1.0.0 (stable)
 ```
 
-v0.8.0 and v0.9.0 are independent — they can be developed in parallel once v0.7.0 ships.
+v0.8.0-beta and v0.9.0 are independent — they can be developed in parallel once v0.7.x ships.
 
 ---
 

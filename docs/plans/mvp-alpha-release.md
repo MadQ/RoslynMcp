@@ -1,5 +1,7 @@
 # MVP Alpha Release Plan
 
+> **Historical note:** This plan was written before v0.7.0. Phases 1–3 are largely complete. Phase 5 maps to the v0.8.0-beta milestone. Kept for reference.
+
 **Goal:** Ship a binary release that makes people say "I can't go back to grep."
 
 **Status:** Pre-release. Engine is solid, product packaging needs work.
@@ -62,15 +64,15 @@ Only after Phases 1-4. This is the front door.
 - [ ] GitHub Release with binaries + changelog
 - [ ] `dotnet tool install` (NuGet package) — stretch goal, nice to have
 - [ ] MCP client configuration examples (Claude Code `.mcp.json`, VS Code, etc.)
-- [ ] Tag as `v0.8.0-alpha` or `v1.0.0-alpha` depending on scope completed
+- [ ] Tag as `v0.8.0-beta` (first beta, public launch)
 - [ ] Announce somewhere (Reddit r/dotnet? Twitter/X? Hacker News?)
 
 ---
 
 ## Parking Lot (post-MVP, don't block on these)
 
-- Call graph tools (#32) and find_unused (#33) — v0.8.0 milestone, huge differentiators but not MVP-blocking
-- Style-aware editing (#34, #35) — v0.9.0
+- Call graph tools (#32) — shipped in v0.7.6; find_unused (#33) and others — v0.9.0 milestone
+- Style-aware editing (#34, #35) — v1.0.0-beta
 - Security boundaries (#9) — important for multi-user, not for alpha
 - `ExpandEnvironmentVariables` sweep — nice to have
 - `roslyn_insert_lines` anchor improvements — ship, iterate
