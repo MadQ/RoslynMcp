@@ -1,4 +1,4 @@
-﻿namespace RoslynMcp;
+namespace RoslynMcp;
 
 /// <summary>
 ///     Process-global startup configuration parsed once from CLI args and environment variables.
@@ -54,10 +54,31 @@ internal sealed class ServerArgs
     public string[] PreloadPaths { get; }
 
     /// <summary>
-    ///     Log file path. CLI: <c>--log-path</c>. Env: <c>ROSLYNMCP_LOG_PATH</c>.
+    ///     Configured log file base path. CLI: <c>--log-path</c>. Env: <c>ROSLYNMCP_LOG_PATH</c>.
     ///     <c>null</c> → default path. Empty string → logging disabled.
+    ///     The actual log file uses <see cref="ResolvedLogPath"/>, which injects the PID.
     /// </summary>
     public string? LogPath { get; }
+
+    /// <summary>
+    ///     Effective log file path with PID injected before the extension — the single source of
+    ///     truth for <see cref="FileLogger"/>, the unhandled-exception handler, and LogViewer
+    ///     discovery. <c>null</c> if logging is disabled.
+    ///     Resolved once at startup so all consumers agree on the same path.
+    /// </summary>
+    public string? ResolvedLogPath { get; }
+
+    /// <summary>Maximum age for backup snapshots in days. Env: <c>ROSLYNMCP_BACKUP_MAX_AGE_DAYS</c>. Default: 90.</summary>
+    public int BackupMaxAgeDays { get; }
+
+    /// <summary>Maximum age for per-PID log files in days. Env: <c>ROSLYNMCP_LOG_MAX_AGE_DAYS</c>. Default: 30.</summary>
+    public int LogMaxAgeDays { get; }
+
+    /// <summary>
+    ///     Minimum server start count before a pruning pass runs.
+    ///     Env: <c>ROSLYNMCP_PRUNE_MIN_RUNS</c>. Default: 3.
+    /// </summary>
+    public int PruneMinRuns { get; }
 
     /// <summary>
     ///     Override MSBuild installation path. CLI: <c>--msbuild-path</c>. Env: <c>ROSLYNMCP_MSBUILD_PATH</c>.
@@ -134,6 +155,41 @@ internal sealed class ServerArgs
         MsBuildPath = msBuildFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_MSBUILD_PATH");
 
         BackupPath = Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH");
+
+        BackupMaxAgeDays = int.TryParse(Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_MAX_AGE_DAYS"), out var bakAge)
+            ? Math.Max(1, bakAge)
+            : FilePruner.DefaultBackupAgeDays;
+
+        LogMaxAgeDays = int.TryParse(Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_MAX_AGE_DAYS"), out var logAge)
+            ? Math.Max(1, logAge)
+            : FilePruner.DefaultLogAgeDays;
+
+        PruneMinRuns = int.TryParse(Environment.GetEnvironmentVariable("ROSLYNMCP_PRUNE_MIN_RUNS"), out var minRuns)
+            ? Math.Max(1, minRuns)
+            : FilePruner.DefaultMinRuns;
+
+        // Resolve the effective log path once — PID injected before the extension.
+        // FileLogger, the crash handler, and LogViewer all read this instead of
+        // independently computing a path.
+        var logBase = LogPath?.Length == 0
+            ? null  // explicitly disabled
+            : LogPath
+              ?? Path.Combine(
+                  Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                  "RoslynMcp", "logs", "roslynmcp.log"
+              );
+
+        if(logBase is null) {
+            ResolvedLogPath = null;
+        }
+        else {
+
+            var dir  = Path.GetDirectoryName(logBase) ?? ".";
+            var stem = Path.GetFileNameWithoutExtension(logBase);
+            var ext  = Path.GetExtension(logBase);
+
+            ResolvedLogPath = Path.Combine(dir, $"{stem}.{Environment.ProcessId}{ext}");
+        }
 
         DisablePathCache = string.Equals(
             Environment.GetEnvironmentVariable("ROSLYNMCP_DISABLE_PATH_CACHE"),

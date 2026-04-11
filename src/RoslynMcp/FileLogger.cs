@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace RoslynMcp;
 
@@ -28,22 +28,30 @@ internal sealed class FileLogger : IDisposable
 
 	public FileLogger()
 	{
-		var configured = ServerArgs.Current.LogPath;
+		// ResolvedLogPath is the single source of truth — PID-injected path or null if disabled.
+		logPath = ServerArgs.Current.ResolvedLogPath;
 
-		// Explicitly set to empty → disabled.
-		if(configured is not null && configured.Length == 0) {
-			logPath = null;
+		if(logPath is null)
 			return;
-		}
-
-		logPath = configured
-			?? Path.Combine(
-				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-				"RoslynMcp", "logs", "roslynmcp.log"
-			);
 
 		try {
-			Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+
+			var logDir = Path.GetDirectoryName(logPath)!;
+
+			Directory.CreateDirectory(logDir);
+
+			// Prune old per-PID log files (including their rotation siblings) by age.
+			// Pattern: "roslynmcp.*.log*" matches roslynmcp.1234.log, roslynmcp.1234.log.1, etc.
+			var rawLog  = ServerArgs.Current.LogPath;
+			var rawStem = rawLog is { Length: > 0 } ? Path.GetFileNameWithoutExtension(rawLog) : "roslynmcp";
+			var rawExt  = rawLog is { Length: > 0 } ? Path.GetExtension(rawLog)                : ".log";
+
+			FilePruner.Prune(
+				logDir,
+				$"{rawStem}.*{rawExt}*",
+				TimeSpan.FromDays(ServerArgs.Current.LogMaxAgeDays),
+				ServerArgs.Current.PruneMinRuns
+			);
 		}
 		catch {
 			// If we can't create the log directory, silently disable logging rather than crashing the server.

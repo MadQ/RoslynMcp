@@ -97,8 +97,7 @@ Distribution infrastructure and pre-launch hardening. First beta release — the
 |---|------|-------|-------|------|
 | — | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, NuGet CI/CD pipeline, INSTALLATION.md Option A update | #173 |
 | — | feature | MCP marketplace listings | smithery.yaml, listings on Smithery / mcp.so / glama.ai, README badges | #174 |
-| — | feature | Global BackupStore pruning | Max-age + max-size eviction with run-count guard; configurable via env vars | #172 |
-| — | bug | Per-PID log files for multi-process safety | Always suffix log file name with PID; LogViewer globs and merges | #175 |
+| — | feature | Global BackupStore pruning + per-PID logs | Max-age eviction with run-count guard; PID-suffixed log files for multi-process safety | #172 |
 | — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
 
 **Theme:** Ship it. Anyone can install in 30 seconds; AI tool directories surface RoslynMcp to new users.

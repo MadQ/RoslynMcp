@@ -48,7 +48,10 @@ internal sealed class BackupStore
 		catch {
 			// Can't create backup dir — silently disable rather than crashing.
 			backupRoot = null;
+			return;
 		}
+
+		PruneExpiredGlobal();
 	}
 
 	/// <summary>
@@ -499,11 +502,117 @@ internal sealed class BackupStore
 			WriteMetaAtomic(metaFile, entries);
 	}
 
+	// Deletes backup snapshots older than ROSLYNMCP_BACKUP_MAX_AGE_DAYS across all hash
+	// directories. Meta-aware: reads each meta.json, removes expired entries, rewrites it
+	// atomically, and removes empty directories. Only runs when the server has started at
+	// least PruneMinRuns times. Uses the same global mutex as FilePruner.Prune so only one
+	// process prunes at a time.
+	void PruneExpiredGlobal()
+	{
+		if(backupRoot is null)
+			return;
+
+		if(FilePruner.CachedRunCount < ServerArgs.Current.PruneMinRuns)
+			return;
+
+		var owned = false;
+
+		using var mutex = new Mutex(false, @"Global\RoslynMcp_FilePruner");
+
+		try {
+
+			try {
+				owned = mutex.WaitOne(0);
+
+				if(!owned)
+					return;  // another process is pruning — skip this run
+			}
+			catch(AbandonedMutexException) {
+				owned = true;
+			}
+			catch {
+				return;
+			}
+
+			var cutoff = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays);
+
+			try {
+
+				foreach(var dir in Directory.EnumerateDirectories(backupRoot)) {
+
+					try {
+						PruneExpiredInDir(dir, cutoff);
+					}
+					catch {
+						// TODO #176: surface persistent prune failures (e.g. write a sentinel file).
+					}
+				}
+			}
+			catch {
+				// Enumeration of backup root failed — entire prune pass silently skipped.
+				// TODO #176: surface persistent prune failures (e.g. write a sentinel file).
+			}
+
+			FilePruner.RequestReset();
+		}
+		finally {
+
+			if(owned)
+				try { mutex.ReleaseMutex(); }
+				catch { }
+		}
+	}
+
+	void PruneExpiredInDir(string dir, DateTime cutoff)
+	{
+		var metaFile = Path.Combine(dir, MetaFileName);
+		var entries  = ReadAllMetaEntries(metaFile);
+
+		if(entries.Count == 0)
+			return;
+
+		var changed = false;
+
+		foreach(var (token, meta) in entries.ToArray()) {
+
+			if(!DateTime.TryParse(
+				meta.Timestamp,
+				null,
+				System.Globalization.DateTimeStyles.RoundtripKind,
+				out var ts))
+				continue;
+
+			if(ts >= cutoff)
+				continue;
+
+			entries.Remove(token);
+			changed = true;
+
+			var bakFile = FindBakFile(dir, token, meta.AbsolutePath);
+
+			if(bakFile is not null)
+				try { File.Delete(bakFile); }
+				catch { }
+		}
+
+		if(!changed)
+			return;
+
+		if(entries.Count == 0) {
+
+			try { File.Delete(metaFile); } catch { }
+			try { Directory.Delete(dir); } catch { }
+
+			return;
+		}
+
+		WriteMetaAtomic(metaFile, entries);
+	}
+
 	void PruneOldBackups(string dir, string absolutePath)
 	{
 		var metaFile = Path.Combine(dir, MetaFileName);
 		var entries  = ReadAllMetaEntries(metaFile);
-		var fileName = Path.GetFileName(absolutePath);
 
 		// Sort ascending by token (timestamp suffix) — oldest first.
 		var ordered = entries.OrderBy(kv => kv.Key).ToList();
@@ -514,20 +623,7 @@ internal sealed class BackupStore
 			ordered.RemoveAt(0);
 			entries.Remove(oldToken);
 
-			// Delete matching .bak file — handle v0/v1 (.bak) and v2 (.pre.bak / .post.bak).
-			var tokenParts = oldToken.Split('_');
-			string bakFile;
-
-			if(tokenParts.Length >= 4 && (tokenParts[^1] == "pre" || tokenParts[^1] == "post")) {
-				var phase = tokenParts[^1];
-				var core  = oldToken[(tokenParts[0].Length + 1)..oldToken.LastIndexOf('_')];
-				bakFile   = Directory.EnumerateFiles(dir, $"{fileName}_{core}.{phase}.bak").FirstOrDefault()!;
-			}
-			else {
-				var hashEnd = oldToken.IndexOf('_');
-				var suffix  = hashEnd >= 0 ? oldToken[(hashEnd + 1)..] : oldToken;
-				bakFile     = Directory.EnumerateFiles(dir, $"{fileName}_{suffix}.bak").FirstOrDefault()!;
-			}
+			var bakFile = FindBakFile(dir, oldToken, absolutePath);
 
 			if(bakFile is not null)
 				try { File.Delete(bakFile); }
@@ -536,6 +632,29 @@ internal sealed class BackupStore
 		}
 
 		WriteMetaAtomic(metaFile, entries);
+	}
+
+	// Resolves the .bak file path for a token. Handles all token formats:
+	//   v0: {hash}_{unixMs}
+	//   v1: {hash}_{unixMs}_{nonce}
+	//   v2: {hash}_{unixMs}_{nonce}_{pre|post}
+	static string? FindBakFile(string dir, string token, string absolutePath)
+	{
+		var fileName   = Path.GetFileName(absolutePath);
+		var tokenParts = token.Split('_');
+
+		if(tokenParts.Length >= 4 && (tokenParts[^1] == "pre" || tokenParts[^1] == "post")) {
+
+			var phase = tokenParts[^1];
+			var core  = token[(tokenParts[0].Length + 1)..token.LastIndexOf('_')];
+
+			return Directory.EnumerateFiles(dir, $"{fileName}_{core}.{phase}.bak").FirstOrDefault();
+		}
+
+		var hashEnd = token.IndexOf('_');
+		var suffix  = hashEnd >= 0 ? token[(hashEnd + 1)..] : token;
+
+		return Directory.EnumerateFiles(dir, $"{fileName}_{suffix}.bak").FirstOrDefault();
 	}
 
 	// Writes meta.json atomically via a temp file + rename, eliminating partial-write corruption
