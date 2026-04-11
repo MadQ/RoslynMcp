@@ -32,7 +32,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	// Whitespace around ':' (when present) avoids false matches on drive-letter colons in paths.
 	// Code must be letters + digits (e.g. NU1101, MSB3245, NETSDK1045) to avoid false positives.
 	private static readonly Regex ProjectLevelDiagnosticLine = new(
-		@"^(?:(?<file>.+?)\s+:\s+)?(?<severity>error|warning)\s+(?<code>[A-Za-z]+\d+):\s+(?<message>.+?)(?:\s+\[[^\]]+\])*$",
+		@"^(?:(?<file>.+?)\s+:\s+)?(?<severity>error|warning)\s+(?<code>[A-Za-z]+\d+):\s+(?<message>.+?)(?<context>(?:\s+\[[^\]]+\])+)?$",
 		RegexOptions.Compiled | RegexOptions.IgnoreCase
 	);
 	
@@ -249,8 +249,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			if(IgnoredDiagnostics.Contains(projCode))
 				continue;
 			
-			// TFM extraction skipped for project-level diagnostics — the bracket suffix
-			// on NU*/MSB* lines carries project path identity, not TargetFramework context.
+			var projContext = m.Groups["context"].Success ? m.Groups["context"].Value : null;
+			
 			results.Add((new DiagnosticItem(
 				Code:     projCode,
 				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
@@ -258,7 +258,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				Line:     0,
 				Column:   0,
 				Message:  m.Groups["message"].Value.Trim()
-			), null));
+			), projContext));
 		}
 		
 		// Multi-target builds emit each diagnostic once per TFM — group by identity and
@@ -300,7 +300,13 @@ internal sealed class BuildTool : RoslynMcpTool
 		if(idx < 0)
 			return null;
 		
-		return context[(idx + "TargetFramework=".Length)..].Trim();
+		var value = context[(idx + "TargetFramework=".Length)..].Trim();
+		
+		// Context may include the surrounding brackets (e.g. " [proj::TargetFramework=net10.0]"),
+		// so strip everything from the first terminator character onwards.
+		var end = value.IndexOfAny([']', ':', ';', ' ']);
+		
+		return end >= 0 ? value[..end] : value;
 	}
 
 
