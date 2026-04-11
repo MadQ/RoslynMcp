@@ -95,10 +95,9 @@ Distribution infrastructure and pre-launch hardening. First beta release — the
 
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
+| ✅ | feature | Global BackupStore pruning + per-PID logs | Max-age eviction with run-count guard; PID-suffixed log files for multi-process safety | #172 |
 | — | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, NuGet CI/CD pipeline, INSTALLATION.md Option A update | #173 |
 | — | feature | MCP marketplace listings | smithery.yaml, listings on Smithery / mcp.so / glama.ai, README badges | #174 |
-| — | feature | Global BackupStore pruning + per-PID logs | Max-age eviction with run-count guard; PID-suffixed log files for multi-process safety | #172 |
-| — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
 
 **Theme:** Ship it. Anyone can install in 30 seconds; AI tool directories surface RoslynMcp to new users.
 
@@ -116,6 +115,8 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 | — | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation | — |
 | — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
 | — | investigation | LogViewer rework | `RoslynMcp.LogViewer` currently a dev-only skeleton; evaluate scope for a proper rework | #118 |
+| — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
+| — | enhancement | Surface persistent prune/log failures | Sentinel file or `roslyn_info` field for silent prune failures | #176 |
 
 **Theme:** The "wow" release. Capabilities that grep can't match and agents can't fake.
 
