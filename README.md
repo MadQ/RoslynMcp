@@ -25,6 +25,8 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 ## Quick Start
 
+> **TL;DR:** Download the [latest release zip](https://github.com/MadQ/RoslynMcp/releases/latest), extract it, and add `"command": "/absolute/path/to/RoslynMcp.exe"` to your client's MCP config. Tell your agent to pass `projectPath` with every `roslyn_*` call. Done. Details below.
+
 **1. Get RoslynMcp**
 
 **Option A — Download and extract** (simplest, no SDK required):

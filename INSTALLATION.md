@@ -1,5 +1,3 @@
-# Installation Guide
-
 # RoslynMcp Installation Guide
 
 Complete setup instructions for all major MCP-compatible AI coding assistants.
@@ -13,13 +11,32 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 > All `roslyn_*` tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
 
-> **Quick start:** Most clients use one of two patterns:
-> - **Workspace config**: `.mcp.json` or similar file in your project root
-> - **Global config**: Client-specific settings file in your home directory
+---
+
+## Quick Start
+
+1. **Get the binary:** Download [RoslynMcp-vX.Y.Z-net10.0.zip](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere.
+
+2. **Add to your client config.** Most clients take a JSON block like this (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
+
+   ```json
+   {
+     "roslyn": {
+       "type": "stdio",
+       "command": "/absolute/path/to/RoslynMcp.exe"
+     }
+   }
+   ```
+
+3. **Restart your client.** That's it.
+
+> Each `roslyn_*` tool call specifies `projectPath` directly — do NOT pass project paths as `args`.
+
+See the client sections below for exact config file locations and JSON structure.
 
 ---
 
-## Installation
+## Full Installation
 
 ### Step 1: Get RoslynMcp
 
