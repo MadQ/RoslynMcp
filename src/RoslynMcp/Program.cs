@@ -12,15 +12,21 @@ using System.Text.Json.Serialization.Metadata;
 
 ServerArgs.Initialize(args);
 
+// Increment the server start counter for pruning throttle — must run before DI construction
+// so FileLogger and BackupStore constructors see the updated count.
+FilePruner.IncrementAndGetRunCount();
+
 // Log unhandled exceptions before the host/DI is available.
 // This is the last line of defence — catches crashes that occur before tool handlers run.
+// Uses ResolvedLogPath (same path FileLogger writes to) so crash traces land in the same file.
+// TODO: File.AppendAllText here races with FileLogger's writeLock on the same process;
+//       acceptable for now — crash handler and logger share the same per-PID file so only
+//       the intra-process lock race remains. Track as a separate issue.
 AppDomain.CurrentDomain.UnhandledException += (_, e) => {
 
-    // ServerArgs.Initialize is called first, so Current is always available here.
-    var path = ServerArgs.Current.LogPath
-        ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "RoslynMcp", "logs", "roslynmcp.log");
+    var path = ServerArgs.Current.ResolvedLogPath;
 
-    if(!string.IsNullOrEmpty(path)) {
+    if(path is not null) {
 
         try {
 
@@ -61,6 +67,9 @@ builder.Services
 ;
 
 var host = builder.Build();
+
+// Reset the run counter after all DI constructors have run their prune passes.
+FilePruner.ApplyPendingReset();
 
 var logger      = host.Services.GetRequiredService<FileLogger>();
 

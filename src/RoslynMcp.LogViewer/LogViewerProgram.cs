@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Reflection;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -16,6 +16,25 @@ class Program
 			.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
 			?.InformationalVersion ?? "?"
 	;
+
+	// Returns the path of the most recently modified per-PID log file in the log directory,
+	// or null if none exist. Matches roslynmcp.*.log (base name only — not rotation siblings).
+	static string? DiscoverLatestLog(string logDir)
+	{
+		if(!Directory.Exists(logDir))
+			return null;
+
+		try {
+
+			return Directory
+				.EnumerateFiles(logDir, "roslynmcp.*.log")
+				.OrderByDescending(f => File.GetLastWriteTimeUtc(f))
+				.FirstOrDefault();
+		}
+		catch {
+			return null;
+		}
+	}
 	
 	static async Task Main(string[] args)
 	{
@@ -41,11 +60,42 @@ class Program
 			logPath = envLogPath;
 		}
 		else {
-			
-			logPath = Path.Combine(
+
+			// Discover the most recently active per-PID log file (e.g. roslynmcp.1234.log).
+			// If no file exists yet, poll until one appears or the user cancels.
+			var logDir  = Path.Combine(
 				Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-				"RoslynMcp", "logs", "roslynmcp.log"
+				"RoslynMcp", "logs"
 			);
+
+			logPath = DiscoverLatestLog(logDir);
+
+			if(logPath is null) {
+
+				Console.Error.WriteLine("No active RoslynMcp log found — waiting for a server to start...");
+
+				using var cts2 = new CancellationTokenSource();
+
+				Console.CancelKeyPress += (_, e2) => {
+					e2.Cancel = true;
+					cts2.Cancel();
+				};
+
+				while(logPath is null && !cts2.IsCancellationRequested) {
+
+					try {
+						await Task.Delay(1000, cts2.Token);
+					}
+					catch(OperationCanceledException) {
+						return;
+					}
+
+					logPath = DiscoverLatestLog(logDir);
+				}
+
+				if(logPath is null)
+					return;
+			}
 		}
 		
 		Console.Error.WriteLine($"RoslynMcp Log Viewer {GetVersion()}");

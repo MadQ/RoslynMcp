@@ -125,10 +125,11 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RoslynMcpTool.Discovery.cs`, `InfoTool.cs`, `RespawnTool.cs` (debug-only), `DebugAttachTool.cs` (debug-only)
 
 **File logging:** Every tool invocation, server start/stop, and workspace error is logged to a rolling file.
-- Default path: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`
-- Override: set `ROSLYNMCP_LOG_PATH` env var to any path
+- Default path: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` (PID always injected)
+- Override base path: set `ROSLYNMCP_LOG_PATH` to any path — PID is still injected into the filename
 - Disable: set `ROSLYNMCP_LOG_PATH` to an empty string
-- Rotation: 10 MB cap, 3 rotated backups (`roslynmcp.log`, `.log.1`, `.log.2`, `.log.3`)
+- Rotation: 10 MB cap, 3 rotated backups (`roslynmcp.{pid}.log`, `.log.1`, `.log.2`, `.log.3`)
+- Pruning: old logs deleted after `ROSLYNMCP_LOG_MAX_AGE_DAYS` days (default: 30); backups after `ROSLYNMCP_BACKUP_MAX_AGE_DAYS` days (default: 90); pruning runs only after the server has started at least `ROSLYNMCP_PRUNE_MIN_RUNS` times (default: 3)
 - Format: NDJSON — one `LogEntry` object per line
 - Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `message` (non-TOOL entries), `tool_name`, `workspace_mode` (MSB/ADH), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`, `response_peek` (truncated JSON preview of response)
 
