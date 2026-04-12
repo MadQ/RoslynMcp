@@ -1,4 +1,4 @@
-﻿using System.Text.Encodings.Web;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -16,6 +16,7 @@ internal static class RoslynMcpJson
 	///     For <see cref="FileLogger"/> — NDJSON log lines. Omits null properties; no indent.
 	/// </summary>
 	internal static readonly JsonSerializerOptions Log = new() {
+		
 		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
 		Encoder                = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
@@ -29,9 +30,18 @@ internal static class RoslynMcpJson
 	};
 	
 	/// <summary>
+	///     For session note injection — matches the SDK's WithToolsFromAssembly serializer
+	///     options: camelCase property names and relaxed Unicode encoding.
+	/// </summary>
+	internal static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web) {
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+	};
+	
+	/// <summary>
 	///     For <see cref="BackupStore"/> meta.json files — indented, camelCase, omits nulls.
 	/// </summary>
 	internal static readonly JsonSerializerOptions Backup = new() {
+		
 		WriteIndented          = true,
 		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
 		PropertyNamingPolicy   = JsonNamingPolicy.CamelCase,

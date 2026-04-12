@@ -26,6 +26,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_usings", filePath);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var rootPath   = workspace.GetRootPath(projectPath);
@@ -57,9 +58,10 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		return scope.Outcome(filePath, new GetUsingsResult(
 			Path.GetRelativePath(rootPath, tree.FilePath),
 			usings,
-			globalUsings,
-			AdhocCaution(projectPath)
-		));
+			globalUsings)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	private static async Task<string[]> ExtractGlobalUsings(Compilation compilation)

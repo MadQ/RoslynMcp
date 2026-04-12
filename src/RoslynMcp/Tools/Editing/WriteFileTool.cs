@@ -44,6 +44,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		if(createNew) {
 			
 			if(!TryResolveTargetPath(filePath, rootPath, out var target, out var pathError))
+				
 				return scope.Failed("invalid path", new ErrorResult(pathError));
 			
 			fullPath = target;
@@ -53,6 +54,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			var existing = ResolveFilePath(filePath, rootPath);
 			
 			if(existing is null)
+				
 				return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}. Set createNew: true to create a new file."));
 			
 			fullPath = existing;
@@ -61,7 +63,8 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		// Attempt to read the existing file to detect line-ending style.
 		// Catching FileNotFoundException is more correct than File.Exists — avoids the
 		// TOCTOU race and correctly treats access-denied as an error rather than "new file".
-		string? existingContent = null;
+		string? existingContent = null
+		;
 		
 		try {
 			existingContent = await File.ReadAllTextAsync(fullPath);
@@ -71,13 +74,15 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		var isNewFile = existingContent is null;
 		
 		// Detect line ending style from existing file; always write UTF-8 without BOM.
-		var targetEncoding = FileWriter.Utf8NoBom;
+		var targetEncoding = FileWriter.Utf8NoBom
+		;
 		var hasCrlf        = existingContent?.Contains("\r\n") ?? true; // CRLF default for new files on Windows
 		var normalizedContent = NormalizeContentLineEndings(content, hasCrlf);
 		
 		var lineCount = CountLines(normalizedContent);
 		
 		if(dryRun)
+			
 			return scope.Outcome("dry run", new WriteFileResult(
 				Written:      false,
 				FilePath:     filePath,
@@ -89,7 +94,8 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		
 		// Compute the exact bytes that will land on disk so we can pass them to BackupStore.
 		// This lets Save() do correct dedup (skip if identical) and store PostWriteHash upfront.
-		byte[] writeBytes = targetEncoding.GetBytes(normalizedContent);
+		byte[] writeBytes = targetEncoding.GetBytes(normalizedContent)
+		;
 		
 		// Save pre-change snapshot (existing files only) and post-change snapshot (always).
 		// Abort without touching the file if either snapshot fails to save.
@@ -98,44 +104,52 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			skipPre: isNewFile, fileState: isNewFile ? "created" : "modified");
 		
 		if(backupErr is not null)
+			
 			return scope.Error(backupErr);
-
+		
 		// Atomic write: temp file in the same directory → rename.
-		var dir     = Path.GetDirectoryName(fullPath)!;
+		var dir     = Path.GetDirectoryName(fullPath)!
+		;
 		var tmpFile = Path.Combine(dir, $".roslynmcp_write_{Guid.NewGuid():N}.tmp");
 		
 		try {
+			
 			Directory.CreateDirectory(dir);
 			
 			// For .cs files: FSW suppression ensures the rename event is ignored, and
 			// InvalidateFile is called by WriteAndInvalidate to sync workspace state.
 			// For all other types: direct atomic write, then InvalidateFile.
 			if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
+				
 				await workspace.WriteAndInvalidate(projectPath, fullPath, async () => {
+					
 					await FileWriter.WriteAllBytesAsync(tmpFile, writeBytes);
 					FileWriter.Move(tmpFile, fullPath, overwrite: true);
 				});
 			}
 			else {
+				
 				await FileWriter.WriteAllBytesAsync(tmpFile, writeBytes);
 				FileWriter.Move(tmpFile, fullPath, overwrite: true);
 				workspace.InvalidateFile(projectPath, fullPath);
 			}
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
 			TryDeleteTemp(tmpFile);
-
+			
 			return scope.Error(new ErrorResult(
 				$"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.",
-				Hint: BackupRecoveryHint(filePath)));
+				BackupRecoveryHint(filePath)));
 		}
-
+		
 		// Verify the rename produced a non-empty file — filesystem/AV interference can silently empty it.
 		if(writeBytes.Length > 4 && new FileInfo(fullPath).Length <= 4)
+			
 			return scope.Error(new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
-				Hint: BackupRecoveryHint(filePath)));
-
+				BackupRecoveryHint(filePath)));
+		
 		return scope.Outcome($"{lineCount} line(s) written", new WriteFileResult(
 			Written:     true,
 			FilePath:    filePath,
@@ -148,7 +162,8 @@ internal sealed class WriteFileTool : RoslynMcpTool
 	static string NormalizeContentLineEndings(string content, bool hasCrlf)
 	{
 		// Normalize to LF first, then to CRLF if the target file uses CRLF.
-		var lf = content.Replace("\r\n", "\n");
+		var lf = content.Replace("\r\n", "\n")
+		;
 		
 		return hasCrlf ? lf.Replace("\n", "\r\n") : lf;
 	}
@@ -156,6 +171,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 	static int CountLines(string content)
 	{
 		if(content.Length == 0)
+			
 			return 0;
 		
 		var count = 1;

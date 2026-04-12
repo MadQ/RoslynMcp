@@ -111,10 +111,11 @@ internal sealed class WorkspaceResolver
 	public bool ApplyChanges(string projectPath, Solution newSolution)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
+		
 		return manager.ApplyChanges(resolved, newSolution);
 	}
 	
-
+	
 	public void InvalidateFile(string projectPath, string fullPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);

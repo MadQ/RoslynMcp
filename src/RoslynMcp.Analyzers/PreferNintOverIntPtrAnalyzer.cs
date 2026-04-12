@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -42,7 +42,8 @@ public sealed class PreferNintOverIntPtrAnalyzer : DiagnosticAnalyzer
 	);
 	
 	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-		[NintRule, NuintRule];
+		[NintRule, NuintRule]
+		;
 	
 	public override void Initialize(AnalysisContext context)
 	{
@@ -59,11 +60,13 @@ public sealed class PreferNintOverIntPtrAnalyzer : DiagnosticAnalyzer
 		
 		// Check if this is "IntPtr" or "UIntPtr"
 		if(text != "IntPtr" && text != "UIntPtr")
+			
 			return;
 		
 		// Verify it actually resolves to System.IntPtr or System.UIntPtr
 		var symbolInfo = context.SemanticModel.GetSymbolInfo(identifierName);
 		if(symbolInfo.Symbol is not INamedTypeSymbol typeSymbol)
+			
 			return;
 		
 		DiagnosticDescriptor? rule = typeSymbol.SpecialType switch
@@ -74,10 +77,12 @@ public sealed class PreferNintOverIntPtrAnalyzer : DiagnosticAnalyzer
 		};
 		
 		if(rule is null)
+			
 			return;
 		
 		// Don't warn if this is in a using directive or namespace declaration
 		if(identifierName.Parent is UsingDirectiveSyntax or QualifiedNameSyntax)
+			
 			return;
 		
 		var diagnostic = Diagnostic.Create(rule, identifierName.GetLocation());

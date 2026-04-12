@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using ModelContextProtocol.Server;
 
@@ -24,6 +24,7 @@ internal sealed class DebugAttachTool : RoslynMcpTool
 		var pid = Environment.ProcessId;
 		
 		if(Debugger.IsAttached)
+			
 			return scope.Outcome("already attached", new DebugAlreadyAttachedResult(true, pid, "A debugger is already attached."));
 		
 		Debugger.Launch();

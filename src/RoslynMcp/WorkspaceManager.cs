@@ -32,7 +32,8 @@ internal sealed partial class WorkspaceManager : IDisposable
 	
 	// Secondary index: maps normalized .csproj paths → cache keys for solution-level entries.
 	// Enables O(1) lookup when a tool passes a .csproj that's part of an already-loaded solution.
-	readonly Dictionary<string, string> projectToCacheKey = new(StringComparer.OrdinalIgnoreCase);
+	readonly Dictionary<string, string> projectToCacheKey = new(StringComparer.OrdinalIgnoreCase)
+	;
 	
 	readonly object     cacheLock = new();
 	readonly int        maxCachedWorkspaces;
@@ -41,7 +42,8 @@ internal sealed partial class WorkspaceManager : IDisposable
 	// Deferred disposal: evicted instances are held here with a grace period so concurrent
 	// callers that already hold a reference can finish before the instance is disposed.
 	// Swept on each eviction and in Dispose(). See issue #145 item 1.
-	readonly List<(WorkspaceInstance Instance, DateTime EvictedAt)> retired = new();
+	readonly List<(WorkspaceInstance Instance, DateTime EvictedAt)> retired = new()
+	;
 	const    int RetiredGraceSeconds = 30;
 	
 	
@@ -67,18 +69,23 @@ internal sealed partial class WorkspaceManager : IDisposable
 		lock(cacheLock) {
 			
 			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey) && cache.TryGetValue(mappedKey, out var mappedEntry)) {
+				
 				cache[mappedKey] = mappedEntry with { LastAccess = DateTime.UtcNow };
+				
 				return mappedEntry.Instance;
 			}
 			
 			if(cache.TryGetValue(normalizedPath, out var entry)) {
+				
 				cache[normalizedPath] = entry with { LastAccess = DateTime.UtcNow };
+				
 				return entry.Instance;
 			}
 		}
 		
 		// Slow path: load outside lock so other tool calls can still hit the cache.
-		WorkspaceInstance	instance;
+		WorkspaceInstance	instance
+		;
 		string				cacheKey;
 		
 		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc) {
@@ -94,16 +101,19 @@ internal sealed partial class WorkspaceManager : IDisposable
 			var solutionPath = FindSolutionFileUpwards(Path.GetDirectoryName(normalizedPath)!);
 			
 			if(solutionPath is not null) {
+				
 				instance = WorkspaceInstance.ForSolution(solutionPath, logger);
 				cacheKey = Path.GetFullPath(solutionPath);
 			}
 			
 			else {
+				
 				instance = WorkspaceInstance.ForProject(normalizedPath, logger);
 				cacheKey = normalizedPath;
 			}
 		}
 		else {
+			
 			instance = WorkspaceInstance.ForDirectory(normalizedPath, logger);
 			cacheKey = normalizedPath;
 		}
@@ -147,7 +157,8 @@ internal sealed partial class WorkspaceManager : IDisposable
 					projectToCacheKey.Remove(k);
 				
 				// Defer disposal — concurrent callers may still hold a reference.
-				retired.Add((lru.Value.Instance, DateTime.UtcNow));
+				retired.Add((lru.Value.Instance, DateTime.UtcNow))
+				;
 				SweepRetired();
 			}
 			
@@ -208,7 +219,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		}
 	}
 	
-
+	
 	/// <summary>
 	///     Applies an updated solution to the workspace and writes changed documents to disk
 	///     (MSBuildWorkspace only). FSW events are suppressed during the write to prevent
@@ -225,25 +236,29 @@ internal sealed partial class WorkspaceManager : IDisposable
 				&& cache.TryGetValue(mappedKey, out var entry)) {
 				
 				if(entry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+					
 					return true;
 				
 				entry.Instance.MarkReloadNeeded();
+				
 				return false;
 			}
 			
 			if(cache.TryGetValue(normalizedPath, out var directEntry)) {
 				
 				if(directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+					
 					return true;
 				
 				directEntry.Instance.MarkReloadNeeded();
+				
 				return false;
 			}
 			
 			return false;
 		}
 	}
-
+	
 	public bool TryApplyTextChange(string resolvedProjectPath, string fullPath, SourceText text)
 	{
 		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
@@ -256,6 +271,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 				return entry.Instance.TryApplyTextChange(fullPath, text);
 			
 			if(cache.TryGetValue(normalizedPath, out var directEntry))
+				
 				return directEntry.Instance.TryApplyTextChange(fullPath, text);
 		}
 		
@@ -285,10 +301,11 @@ internal sealed partial class WorkspaceManager : IDisposable
 			// No cached workspace — write directly. A concurrent thread could load the
 			// workspace between the null-check and the write, but the resulting FSW event
 			// is self-healing: the debounce timer re-reads the (correct) file from disk.
-			await write();
+			await write()
+			;
 	}
 	
-
+	
 	// ── Retired instance management ──────────────────────────────────────
 	
 	/// <summary>
@@ -302,12 +319,13 @@ internal sealed partial class WorkspaceManager : IDisposable
 		for(var i = retired.Count - 1; i >= 0; i--) {
 			
 			if(retired[i].EvictedAt < cutoff) {
+				
 				retired[i].Instance.Dispose();
 				retired.RemoveAt(i);
 			}
 		}
 	}
-
+	
 	public void Dispose()
 	{
 		lock(cacheLock) {

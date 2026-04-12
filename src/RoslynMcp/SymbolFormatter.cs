@@ -95,6 +95,7 @@ if(symbol.IsSealed && symbol.Kind != SymbolKind.NamedType)
 parts.Add("sealed");
 
 var access = symbol.DeclaredAccessibility switch {
+
 Accessibility.Public               => "public",
 Accessibility.Private              => "private",
 Accessibility.Protected            => "protected",

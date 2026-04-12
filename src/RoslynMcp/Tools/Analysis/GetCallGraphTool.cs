@@ -9,7 +9,7 @@ namespace RoslynMcp.Tools;
 internal sealed class GetCallGraphTool : RoslynMcpTool
 {
 	public GetCallGraphTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
-
+	
 	[McpServerTool(Name = "roslyn_get_call_graph", ReadOnly = true, Title = "Get Call Graph", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns all methods directly invoked within the named method body — answers 'what does this method depend on?' without reading it. " +
@@ -29,33 +29,37 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_call_graph", symbolName, new { containingType, skip, take });
-
+		
 		if(scope.TryServeCachedPage<CallSiteEntry>(page_token, ref skip, ref take, 200, out var cached))
+			
 			return scope.Outcome("cached page", cached);
-
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
-
+		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var symbol   = FindSymbol(compilation, symbolName, containingType);
-
+		
 		if(symbol is null)
+			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
-
+		
 		var allCalls = new List<CallSiteEntry>();
-
+		
 		foreach(var syntaxRef in symbol.DeclaringSyntaxReferences) {
-
+			
 			var syntaxNode    = await syntaxRef.GetSyntaxAsync(cancellationToken);
 			var semanticModel = compilation.GetSemanticModel(syntaxNode.SyntaxTree);
 			var operation     = semanticModel.GetOperation(syntaxNode, cancellationToken);
-
+			
 			if(operation is null)
 				continue;
-
+			
 			foreach(var descendant in operation.DescendantsAndSelf()) {
-
+				
 				ISymbol? callee = descendant switch {
+					
 					IInvocationOperation inv       => inv.TargetMethod,
 					IObjectCreationOperation ctor  => ctor.Constructor,
 					_ => null
@@ -63,13 +67,13 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 				
 				if(callee is null)
 					continue;
-
+				
 				var loc  = descendant.Syntax.GetLocation();
 				var span = loc.GetLineSpan();
 				var file = span.Path is { Length: > 0 } p
 					? Path.GetRelativePath(rootPath, p)
 					: "?";
-
+				
 				allCalls.Add(new CallSiteEntry(
 					Callee: FormatSymbolName(callee),
 					File:   file,
@@ -77,34 +81,37 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 				));
 			}
 		}
-
+		
 		var allResults = allCalls
 			.OrderBy(c => c.File)
 			.ThenBy(c => c.Line)
 			.ToArray()
 		;
-
+		
 		if(allResults.Length == 0)
+			
 			return scope.Outcome("no outgoing calls", new GetCallGraphResult(
 				Method:     FormatSymbolName(symbol),
 				TotalCalls: 0,
 				Skip: skip, Take: take,
 				Calls:     [],
 				PageToken: null,
-				HasMore:   false,
-				Caution:   AdhocCaution(projectPath)
-			));
-
+				HasMore:   false)
+			{
+				Caution = AdhocCaution(projectPath)
+			});
+		
 		var result = PaginateAndStore(allResults, ref skip, take);
-
+		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} call(s)", new GetCallGraphResult(
 			Method:     FormatSymbolName(symbol),
 			TotalCalls: result.Total,
 			Skip: skip, Take: take,
 			Calls:     result.Items,
 			PageToken: result.PageToken,
-			HasMore:   result.HasMore,
-			Caution:   AdhocCaution(projectPath)
-		));
+			HasMore:   result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 }

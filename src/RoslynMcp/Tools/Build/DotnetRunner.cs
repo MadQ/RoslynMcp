@@ -33,13 +33,15 @@ internal static class DotnetRunner
 		// child `dotnet build` inherits it, the child skips its own SDK discovery and uses the
 		// parent's MSBuild DLL path — which causes a pre-compilation MSBuild failure with
 		// "Build FAILED. 0 Warning(s) 0 Error(s)". Unset it so the child does clean discovery.
-		psi.Environment.Remove("MSBUILD_EXE_PATH");
+		psi.Environment.Remove("MSBUILD_EXE_PATH")
+		;
 		psi.Environment.Remove("MSBuildExtensionsPath");
 		psi.Environment.Remove("MSBuildSDKsPath");
 		
 		// Disable the MSBuild build server — when the server runs `dotnet build` as a child,
 		// a shared build server node may have stale state from the parent's dotnet run context.
-		psi.Environment["MSBUILDUSESERVER"] = "0";
+		psi.Environment["MSBUILDUSESERVER"] = "0"
+		;
 		
 		// ArgumentList avoids shell quoting/injection issues with paths containing spaces or
 		// special characters — do not use the Arguments string property instead.
@@ -47,12 +49,14 @@ internal static class DotnetRunner
 			psi.ArgumentList.Add(arg);
 		
 		var argsDisplay = string.Join(" ", args);
-		record?.Invoke($"dotnet {argsDisplay}");
+		record?.Invoke($"dotnet {argsDisplay}")
+		;
 		record?.Invoke($"cwd={workingDirectory}");
 		
 		Process? process = null;
 		
 		try {
+			
 			process = new Process { StartInfo = psi };
 			
 			if(!process.Start())
@@ -61,6 +65,7 @@ internal static class DotnetRunner
 			record?.Invoke($"pid={process.Id}");
 		}
 		catch(Exception ex) when(ex is Win32Exception or InvalidOperationException) {
+			
 			process?.Dispose();
 			throw new InvalidOperationException("Failed to start dotnet process. Is dotnet installed and in PATH?", ex);
 		}
@@ -74,25 +79,29 @@ internal static class DotnetRunner
 			// Use CancellationToken.None for the drains: ct controls process lifetime (WaitForExitAsync
 			// + Kill below), but once the process has exited the pipes will close naturally. Passing
 			// ct here would abandon already-produced output if ct fires after WaitForExitAsync returns.
-			var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+			var stdoutTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None)
+			;
 			var stderrTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
 			
 			await process.WaitForExitAsync(ct);
 			sw.Stop();
 			
 			// Capture exit code before disposing.
-			var exitCode = process.ExitCode;
+			var exitCode = process.ExitCode
+			;
 			record?.Invoke($"exit={exitCode} elapsed={sw.Elapsed.TotalSeconds:F1}s");
 			
 			string stdout, stderr;
 			
 			try {
+				
 				stdout = await stdoutTask;
 				stderr = await stderrTask;
 				record?.Invoke($"stdout={stdout.Length} stderr={stderr.Length} chars");
 				
 				// Preview first 300 chars so log entries reveal suppressed diagnostics.
-				var preview = (stdout + stderr).Replace('\r', ' ').Replace('\n', '↵');
+				var preview = (stdout + stderr).Replace('\r', ' ').Replace('\n', '↵')
+				;
 				if(preview.Length > 0)
 					record?.Invoke($"output_preview={preview[..Math.Min(300, preview.Length)]}");
 			}
@@ -125,7 +134,8 @@ internal static class DotnetRunner
 			
 			// Wait for the OS to confirm exit before returning — otherwise the caller may see
 			// stale file locks even though we returned.
-			await process.WaitForExitAsync(CancellationToken.None);
+			await process.WaitForExitAsync(CancellationToken.None)
+			;
 			throw;
 		}
 		finally {

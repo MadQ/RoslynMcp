@@ -18,7 +18,8 @@ Enum.GetValues(typeof(SyntaxKind))
 .Where(k => k != SyntaxKind.None && k != SyntaxKind.List)
 .Select(k => k.ToString())
 .OrderBy(s => s)
-];
+]
+;
 
 private static readonly string[] AllTriviaKinds = [..
 Enum.GetValues(typeof(SyntaxKind))
@@ -26,7 +27,8 @@ Enum.GetValues(typeof(SyntaxKind))
 .Where(k => k.ToString().EndsWith("Trivia"))
 .Select(k => k.ToString())
 .OrderBy(s => s)
-];
+]
+;
 
 protected static readonly string[] CommonSyntaxKinds = [
 // Control flow
@@ -75,26 +77,31 @@ bool listSearchContexts,
 discovery = null;
 
 if(listSyntaxKinds) {
+
 discovery = ListSyntaxKinds();
 return true;
 }
 
 if(listTriviaKinds) {
+
 discovery = ListTriviaKinds();
 return true;
 }
 
 if(listMemberKinds) {
+
 discovery = ListMemberKinds();
 return true;
 }
 
 if(listTypeKinds) {
+
 discovery = ListTypeKinds();
 return true;
 }
 
 if(listSearchContexts) {
+
 discovery = ListSearchContexts();
 return true;
 }
@@ -128,27 +135,30 @@ private static object ListMemberKinds()
 {
 return new DiscoveryValuesResult(
 "list_member_kinds",
-["field", "property", "method", "event", "enum"],
-"Use these values with roslyn_get_type_members memberKind parameter"
-);
+["field", "property", "method", "event", "enum"])
+{
+Hint = "Use these values with roslyn_get_type_members memberKind parameter"
+};
 }
 
 private static object ListTypeKinds()
 {
 return new DiscoveryValuesResult(
 "list_type_kinds",
-["class", "interface", "enum", "struct", "record", "delegate"],
-"Use these values with roslyn_list_types kindFilter parameter"
-);
+["class", "interface", "enum", "struct", "record", "delegate"])
+{
+Hint = "Use these values with roslyn_list_types kindFilter parameter"
+};
 }
 
 private static object ListSearchContexts()
 {
 return new DiscoveryContextsResult(
 "list_search_contexts",
-["comments", "strings", "identifiers", "code", "xmldocs", "all"],
-"Use these values with roslyn_semantic_search context parameter"
-);
+["comments", "strings", "identifiers", "code", "xmldocs", "all"])
+{
+Hint = "Use these values with roslyn_semantic_search context parameter"
+};
 }
 
 // ── Error Helpers: No Matching Nodes ──────────────────────────────────────────
@@ -156,33 +166,36 @@ return new DiscoveryContextsResult(
 protected static object NoMatchingSyntaxKindError(string providedKind)
 {
 return new DiscoveryNoMatchResult(
-"no_matching_nodes",
 $"No syntax nodes of kind '{providedKind}' found in the specified range.",
-"Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
 providedKind,
-CommonSyntaxKinds
-);
+CommonSyntaxKinds)
+{
+Error = "no_matching_nodes",
+Hint  = "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if')."
+};
 }
 
 protected static object NoMatchingMemberKindError(string providedKind)
 {
 return new DiscoveryNoMatchResult(
-"invalid_member_kind",
 $"Invalid member kind: '{providedKind}'.",
-"Use listMemberKinds=true to see all available member kinds.",
 providedKind,
-["field", "property", "method", "event", "enum"]
-);
+["field", "property", "method", "event", "enum"])
+{
+Error = "invalid_member_kind",
+Hint  = "Use listMemberKinds=true to see all available member kinds."
+};
 }
 
 protected static object NoMatchingTypeKindError(string providedKind)
 {
 return new DiscoveryNoMatchResult(
-"invalid_type_kind",
 $"Invalid type kind: '{providedKind}'.",
-"Use listTypeKinds=true to see all available type kinds.",
 providedKind,
-["class", "interface", "enum", "struct", "record", "delegate"]
-);
+["class", "interface", "enum", "struct", "record", "delegate"])
+{
+Error = "invalid_type_kind",
+Hint  = "Use listTypeKinds=true to see all available type kinds."
+};
 }
 }

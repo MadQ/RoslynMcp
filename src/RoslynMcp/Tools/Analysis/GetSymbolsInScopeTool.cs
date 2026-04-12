@@ -29,6 +29,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}", new { column });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var normalized = NormalizePath(filePath);
@@ -37,12 +38,14 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		;
 		
 		if(tree is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var text     = await tree.GetTextAsync();
 		var position = GetPosition(text, line, column);
 		
 		if(position < 0)
+			
 			return scope.Error(new ErrorResult($"Line {line}, column {column} is out of range."));
 		
 		var model   = compilation.GetSemanticModel(tree);
@@ -111,9 +114,10 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 			propertiesArr,
 			methodsArr,
 			typesArr,
-			otherArr,
-			AdhocCaution(projectPath)
-		));
+			otherArr)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	private static SymbolInfo FormatSymbol(ISymbol symbol)

@@ -19,7 +19,60 @@ internal abstract partial class RoslynMcpTool
 	// requiring callers to thread the scope through as a parameter.
 	// AsyncLocal flows across await continuations, unlike [ThreadStatic] which is bound to a
 	// single thread and would be null if TryGetCompilation ran after an await on a different thread.
-	private static readonly AsyncLocal<ToolScope?> activeScope = new();
+	private static readonly AsyncLocal<ToolScope?> activeScope = new()
+	;
+	
+	// 0 = not shown, 1 = shown. Interlocked.CompareExchange ensures exactly one thread injects the note.
+	internal static int _sessionNoteShown
+	;
+	
+	// Cached once per process — hooks don't change while the server is running.
+	static bool? _hooksInstalled
+	;
+	
+	internal static bool HooksInstalled()
+	{
+		if(_hooksInstalled.HasValue)
+			
+			return _hooksInstalled.Value;
+		
+		// Check global Claude Code settings for any reference to roslynmcp.
+		var claudeSettings = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+			".claude", "settings.json"
+		);
+		
+		if(File.Exists(claudeSettings)) {
+			
+			try {
+				
+				if(File.ReadAllText(claudeSettings).Contains("roslynmcp", StringComparison.OrdinalIgnoreCase))
+					
+					return (_hooksInstalled = true).Value;
+			}
+			catch { }
+		}
+		
+		// Walk up from CWD looking for a Copilot CLI hook file written by setup-hooks.
+		var dir = Environment.CurrentDirectory
+		;
+		
+		while(true) {
+			
+			if(File.Exists(Path.Combine(dir, ".github", "hooks", "roslynmcp.json")))
+				
+				return (_hooksInstalled = true).Value;
+			
+			var parent = Directory.GetParent(dir);
+			
+			if(parent is null || parent.FullName == dir)
+				break;
+			
+			dir = parent.FullName;
+		}
+		
+		return (_hooksInstalled = false).Value;
+	}
 	
 	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
 	{
@@ -47,21 +100,23 @@ internal abstract partial class RoslynMcpTool
 	protected ToolScope BeginTool<T>(string name, string? subject, T args)
 	{
 		var scope = BeginTool(name, subject);
-
+		
 		scope.SetArgs(args);
-
+		
 		return scope;
 	}
 	
 	// Static cache for project path inference: maps relative/bare paths to resolved full paths.
 	// Enabled by default; disable via ROSLYNMCP_DISABLE_PATH_CACHE=true env var.
 	// Entries evicted above 500 to prevent unbounded growth in long-running server sessions.
-	const int PathCacheMaxSize = 500;
+	const int PathCacheMaxSize = 500
+	;
 	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
 	static readonly object pathCacheLock = new();
-
+	
 	// Computed on every access so the read is guaranteed to happen after ServerArgs.Initialize().
-	static bool pathCacheEnabled => !ServerArgs.Current.DisablePathCache;
+	static bool pathCacheEnabled => !ServerArgs.Current.DisablePathCache
+	;
 	
 	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
@@ -73,7 +128,7 @@ internal abstract partial class RoslynMcpTool
 	protected bool TryGetCompilation(
 		string projectPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Compilation? compilation,
-		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolErrorResult? error)
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
 	{
 		error		= null;
 		compilation	= null;
@@ -81,6 +136,7 @@ internal abstract partial class RoslynMcpTool
 		if(pathCacheEnabled && !Path.IsPathRooted(projectPath))
 			lock(pathCacheLock)
 				if(pathCache.TryGetValue(projectPath, out var cached)) {
+					
 					logger.LogInfo("TryGetCompilation", $"Path cache hit: '{projectPath}' → '{cached}'");
 					projectPath = cached;
 				}
@@ -90,11 +146,12 @@ internal abstract partial class RoslynMcpTool
 			if(!Path.IsPathRooted(projectPath) || (!File.Exists(projectPath) && !Directory.Exists(projectPath))) {
 				
 				error = new PathErrorResult(
-					"invalid_project_path",
 					$"Path '{projectPath}' does not exist or is not rooted.",
-					ProvidedPath: projectPath,
-					Hint: "Use an absolute path (e.g., 'J:\\Projects\\MyProject') or ensure the relative path exists. If you have a valid full path, provide it and the server will cache the association."
-				);
+					ProvidedPath: projectPath)
+				{
+					Error = "invalid_project_path",
+					Hint  = "Use an absolute path (e.g., 'J:\\Projects\\MyProject') or ensure the relative path exists. If you have a valid full path, provide it and the server will cache the association."
+				};
 				logger.LogError("TryGetCompilation", $"Path does not exist: '{projectPath}'");
 				
 				return false;
@@ -107,7 +164,8 @@ internal abstract partial class RoslynMcpTool
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
 			// Annotate when non-obvious resolution occurred.
-			var kind = workspace.GetResolutionKind(projectPath);
+			var kind = workspace.GetResolutionKind(projectPath)
+			;
 			
 			activeScope.Value?.Record(kind switch {
 				
@@ -121,14 +179,14 @@ internal abstract partial class RoslynMcpTool
 			if(pathCacheEnabled && !Path.IsPathRooted(originalPath)) {
 				
 				var resolvedFull = workspace.GetWorkspaceInfo(projectPath).RootPath;
-				
+
                           lock(pathCacheLock) {
-                                  
+
                                   if(pathCache.Count >= PathCacheMaxSize)
                                       pathCache.Clear();
-                                  
+
                                   if(!pathCache.ContainsKey(originalPath)) {
-                                      
+
                                       pathCache[originalPath] = resolvedFull;
                                       logger.LogInfo("TryGetCompilation", $"Cached path: '{originalPath}' → '{resolvedFull}'");
                                   }
@@ -138,6 +196,7 @@ internal abstract partial class RoslynMcpTool
 			return true;
 		}
 		catch(ProjectNotFoundException ex) {
+			
 			error = ProjectNotFoundError(ex);
 			
 			logger.LogError("TryGetCompilation", ex.Message);
@@ -145,6 +204,7 @@ internal abstract partial class RoslynMcpTool
 			return false;
 		}
 		catch(MultipleProjectsFoundException ex) {
+			
 			error = MultipleProjectsError(ex);
 			
 			logger.LogError("TryGetCompilation", ex.Message);
@@ -152,6 +212,7 @@ internal abstract partial class RoslynMcpTool
 			return false;
 		}
 		catch(InvalidProjectPathException ex) {
+			
 			error = InvalidPathError(ex);
 			
 			logger.LogError("TryGetCompilation", ex.Message);
@@ -159,6 +220,7 @@ internal abstract partial class RoslynMcpTool
 			return false;
 		}
 		catch(AmbiguousFileException ex) {
+			
 			error = AmbiguousFileError(ex);
 			
 			logger.LogError("TryGetCompilation", ex.Message);
@@ -167,11 +229,11 @@ internal abstract partial class RoslynMcpTool
 		}
 		catch(ArgumentException ex) {
 			
-			error = new PathErrorResult(
-				"missing_project_path",
-				ex.Message,
-				Hint: "projectPath is required. Pass the .csproj file path or a directory containing one."
-			);
+			error = new PathErrorResult(ex.Message)
+			{
+				Error = "missing_project_path",
+				Hint  = "projectPath is required. Pass the .csproj file path or a directory containing one."
+			};
 			logger.LogError("TryGetCompilation", ex.Message);
 			
 			return false;
@@ -191,7 +253,7 @@ internal abstract partial class RoslynMcpTool
 	protected bool TryGetProject(
 		string projectPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Project? project,
-		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolErrorResult? error)
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
 	{
 		error = null;
 		project = null;
@@ -203,7 +265,8 @@ internal abstract partial class RoslynMcpTool
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
 			// Annotate when non-obvious resolution occurred.
-			var kind = workspace.GetResolutionKind(projectPath);
+			var kind = workspace.GetResolutionKind(projectPath)
+			;
 			
 			activeScope.Value?.Record(kind switch {
 				
@@ -246,11 +309,11 @@ internal abstract partial class RoslynMcpTool
 		}
 		catch(ArgumentException ex) {
 			
-			error = new PathErrorResult(
-				"missing_project_path",
-				ex.Message,
-				Hint: "projectPath is required. Pass the .csproj file path or a directory containing one."
-			);
+			error = new PathErrorResult(ex.Message)
+			{
+				Error = "missing_project_path",
+				Hint  = "projectPath is required. Pass the .csproj file path or a directory containing one."
+			};
 			logger.LogError("TryGetProject", ex.Message);
 			
 			return false;
@@ -264,50 +327,43 @@ internal abstract partial class RoslynMcpTool
 		}
 	}
 	
-	private static ToolErrorResult ProjectNotFoundError(ProjectNotFoundException ex)
-		=> new PathErrorResult(
-			"project_not_found",
-			ex.Message,
-			SearchPath: ex.SearchPath,
-			Hint: "Provide a valid projectPath pointing to a directory containing a .csproj file, or the .csproj file itself."
-		);
+	private static ToolResult ProjectNotFoundError(ProjectNotFoundException ex)
+		=> new PathErrorResult(ex.Message, SearchPath: ex.SearchPath)
+		{
+			Error = "project_not_found",
+			Hint  = "Provide a valid projectPath pointing to a directory containing a .csproj file, or the .csproj file itself."
+		};
 	
-	private static ToolErrorResult MultipleProjectsError(MultipleProjectsFoundException ex)
+	private static ToolResult MultipleProjectsError(MultipleProjectsFoundException ex)
 	{
 		string[] foundProjects = [.. ex.ProjectFiles.Select(Path.GetFileName).Where(f => f is not null)!];
 		
-		return new PathErrorResult(
-			"multiple_projects_found",
-			ex.Message,
-			Directory: ex.Directory,
-			FoundProjects: foundProjects,
-			Hint: "Specify the exact .csproj file path instead of the directory."
-		);
+		return new PathErrorResult(ex.Message, Directory: ex.Directory, FoundProjects: foundProjects)
+		{
+			Error = "multiple_projects_found",
+			Hint  = "Specify the exact .csproj file path instead of the directory."
+		};
 	}
 	
-	private static ToolErrorResult AmbiguousFileError(AmbiguousFileException ex)
-		=> new PathErrorResult(
-			"ambiguous_file",
-			ex.Message,
-			FileName: ex.FileName,
-			FoundIn: ex.CsprojPaths,
-			Hint: "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
-		);
+	private static ToolResult AmbiguousFileError(AmbiguousFileException ex)
+		=> new PathErrorResult(ex.Message, FileName: ex.FileName, FoundIn: ex.CsprojPaths)
+		{
+			Error = "ambiguous_file",
+			Hint  = "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
+		};
 	
-	private static ToolErrorResult InvalidPathError(InvalidProjectPathException ex)
-		=> new PathErrorResult(
-			"invalid_project_path",
-			ex.Message,
-			ProvidedPath: ex.Path,
-			Hint: "Ensure the path exists and contains a valid .csproj file."
-		);
+	private static ToolResult InvalidPathError(InvalidProjectPathException ex)
+		=> new PathErrorResult(ex.Message, ProvidedPath: ex.Path)
+		{
+			Error = "invalid_project_path",
+			Hint  = "Ensure the path exists and contains a valid .csproj file."
+		};
 	
-	private static ToolErrorResult UnexpectedError(Exception ex)
-		=> new UnexpectedErrorResult(
-			"unexpected_error",
-			ex.Message,
-			ex.GetType().Name
-		);
+	private static ToolResult UnexpectedError(Exception ex)
+		=> new UnexpectedErrorResult(ex.Message, ex.GetType().Name)
+		{
+			Error = "unexpected_error"
+		};
 	
 	/// <summary>
 	///     Returns a caution string when the resolved workspace is AdhocWorkspace (no .csproj).
@@ -373,20 +429,24 @@ internal abstract partial class RoslynMcpTool
 	protected static string? ResolveFilePath(string filePath, string rootPath)
 	{
 		try {
+			
 			if(Path.IsPathRooted(filePath))
+				
 				return File.Exists(filePath) ? filePath : null;
 			
 			var normalized = NormalizePath(filePath);
 			var direct     = Path.GetFullPath(Path.Combine(rootPath, normalized));
 			
 			if(File.Exists(direct))
+				
 				return direct;
 			
 			// Fallback: suffix match — handles agents passing project-relative paths
 			// when rootPath is the solution directory. Prefer strict suffix matches
 			// over bare filename matches, and return null on ambiguity rather than
 			// silently picking an arbitrary file.
-			var suffix        = Path.DirectorySeparatorChar + normalized;
+			var suffix        = Path.DirectorySeparatorChar + normalized
+			;
 			var fileName      = Path.GetFileName(normalized);
 			string? suffixHit = null;
 			string? nameHit   = null;
@@ -395,9 +455,11 @@ internal abstract partial class RoslynMcpTool
 			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
 				
 				try {
+					
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
 						
 						if(suffixHit is not null) {
+							
 							ambiguous = true;
 							break;
 						}
@@ -418,16 +480,18 @@ internal abstract partial class RoslynMcpTool
 			}
 			
 			if(!ambiguous && suffixHit is not null)
+				
 				return suffixHit;
 			
 			if(nameHit is not null)
+				
 				return nameHit;
 		}
 		catch(Exception ex) when(ex is ArgumentException or IOException or UnauthorizedAccessException) { }
 		
 		return null;
 	}
-		
+	
 	/// <summary>
 	///     Returns a truncation <see cref="ErrorResult"/> if <paramref name="fullPath"/> is empty
 	///     on disk after a write that was expected to produce <paramref name="expectedLength"/> bytes.
@@ -438,9 +502,9 @@ internal abstract partial class RoslynMcpTool
 		expectedLength > 0 && new FileInfo(fullPath).Length == 0
 			? new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
-				Hint: BackupRecoveryHint(filePath))
+				BackupRecoveryHint(filePath))
 			: null;
-
+	
 	/// <summary>
 	///     Checks whether a workspace-tracked write truncated <paramref name="fullPath"/> to 0 bytes
 	///     and, if so, attempts transparent self-healing recovery: flushes the stale workspace state
@@ -456,42 +520,46 @@ internal abstract partial class RoslynMcpTool
 		// (no truncation). Use FileInfo to check both existence and length in one
 		// stat call — FileInfo.Length throws FileNotFoundException if the file is
 		// absent, so existence must be checked first.
-		var fi = new FileInfo(fullPath);
+		var fi = new FileInfo(fullPath)
+		;
 		
 		if(contentBytes.Length == 0 || (fi.Exists && fi.Length > 0))
+			
 			return null;
-
+		
 		var dir = Path.GetDirectoryName(fullPath)!;
 		var tmp = Path.Combine(dir, $".roslynmcp_recover_{Guid.NewGuid():N}.tmp");
-
+		
 		try {
 			// WriteAndInvalidate handles FSW suppression and workspace resync atomically.
 			await workspace.WriteAndInvalidate(projectPath, fullPath, async () => {
+				
 				await FileWriter.WriteAllBytesAsync(tmp, contentBytes);
 				FileWriter.Move(tmp, fullPath, overwrite: true);
 			});
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
 			return new ErrorResult(
 				$"Workspace write truncated '{filePath}' to 0 bytes and recovery also failed: {ex.Message}",
-				Hint: BackupRecoveryHint(filePath));
+				BackupRecoveryHint(filePath));
 		}
-
+		
 		return new FileInfo(fullPath).Length == 0
 			? new ErrorResult(
 				$"Workspace write truncated '{filePath}' to 0 bytes; self-healing also produced an empty file — filesystem or antivirus interference is suspected.",
-				Hint: BackupRecoveryHint(filePath))
+				BackupRecoveryHint(filePath))
 			: null;
 	}
-
+	
 	// Returns recovery guidance that agents can act on when a write produces bad results.
 	protected static string BackupRecoveryHint(string relPath) =>
 		$"Both pre- and post-write snapshots were saved before the write. " +
 		$"Use roslyn_local_history (action: \"list\", filePath: \"{relPath}\") to find tokens — " +
 		"apply the \"post\" snapshot to restore the intended content, or the \"pre\" snapshot to roll back. " +
 		$"As a last resort: git checkout -- {relPath}";
-
-
+		
+		
 		/// <summary>
 	///     Resolves where a file <em>would</em> be created — does not require the file to exist.
 	///     Returns false with an error message if the path escapes the root or is otherwise invalid.
@@ -595,6 +663,7 @@ internal abstract partial class RoslynMcpTool
 		var hasCrlf = fileContent.Contains("\r\n");
 		
 		if(hasCrlf && !replacement.Contains("\r\n"))
+			
 			return replacement.Replace("\n", "\r\n");
 		
 		return replacement;
@@ -621,6 +690,7 @@ internal abstract partial class RoslynMcpTool
 	protected static string? TryMakeRelative(string? path, string rootPath)
 	{
 		if(string.IsNullOrEmpty(path))
+			
 			return null;
 		
 		try {
@@ -645,21 +715,26 @@ internal abstract partial class RoslynMcpTool
 		var location = diagnostic.Location;
 		
 		if(location.Kind == LocationKind.None)
+			
 			return true;
 		
 		// ExternalFile / MetadataFile / XmlFile — not project source; exclude them.
 		if(location.Kind != LocationKind.SourceFile)
+			
 			return false;
 		
 		var filePath = location.SourceTree?.FilePath;
 		
 		if(string.IsNullOrEmpty(filePath))
+			
 			return true;
 		
 		if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+			
 			return false;
 		
 		// Guard against prefix collisions (e.g. "Foo" matching "FooBar\file.cs").
+		
 		return filePath.Length == rootPath.Length || filePath[rootPath.Length] is '\\' or '/';
 	}
 	
@@ -682,6 +757,7 @@ internal abstract partial class RoslynMcpTool
 			?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(name));
 		
 		if(typeSymbol is not null)
+			
 			return typeSymbol;
 		
 		return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
@@ -696,12 +772,15 @@ internal abstract partial class RoslynMcpTool
 	protected static ISymbol[] FindSymbols(Compilation compilation, string symbolName, string? containingType)
 	{
 		if(containingType is not null) {
+			
 			var symbol = FindSymbol(compilation, symbolName, containingType);
+			
 			return symbol is not null ? [symbol] : [];
 		}
 		
 		var finder = new AllSymbolsFinder(symbolName);
 		finder.Visit(compilation.Assembly.GlobalNamespace);
+		
 		return [.. finder.Results];
 	}
 	
@@ -713,7 +792,7 @@ internal abstract partial class RoslynMcpTool
 	protected static ErrorResult SymbolNotFoundError(string symbolName) =>
 		new(
 			$"Symbol '{symbolName}' not found.",
-			Hint: "Use roslyn_get_type_members or roslyn_find_references to verify the name.");
+			"Use roslyn_get_type_members or roslyn_find_references to verify the name.");
 	
 	/// <summary>
 	///     Saves pre- and post-change backup snapshots, returning the pre-change token on success
@@ -729,15 +808,19 @@ internal abstract partial class RoslynMcpTool
 		bool    preSaved = false;
 		
 		try {
+			
 			if(!skipPre) {
+				
 				preToken = await backups.SavePreAsync(fullPath, projectPath, toolName);
 				preSaved = preToken is not null;
 			}
 			
 			await backups.SavePostAsync(fullPath, projectPath, toolName, postBytes);
+			
 			return (preToken, null);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
 			var phase = preSaved ? "post" : "pre";
 			var hint  = preSaved
 				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
@@ -745,7 +828,7 @@ internal abstract partial class RoslynMcpTool
 			
 			return (null, new ErrorResult(
 				$"Write aborted — could not save {phase}-change backup: {ex.Message}. The file was not {fileState}.",
-				Hint: hint));
+				hint));
 		}
 	}
 	
@@ -755,16 +838,18 @@ internal abstract partial class RoslynMcpTool
 	protected static string FormatSymbolName(ISymbol symbol)
 	{
 		if(symbol is INamedTypeSymbol)
+			
 			return symbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 		
 		var ct = symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 		
 		return ct is not null ? $"{ct}.{symbol.Name}" : symbol.Name;
 	}
-
+	
 	protected static int GetPosition(SourceText text, int line, int column)
 	{
 		if(line < 1 || line > text.Lines.Count || column < 1)
+			
 			return -1;
 		
 		var lineSpan = text.Lines[line - 1];

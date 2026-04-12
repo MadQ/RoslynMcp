@@ -32,14 +32,17 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName, new { skip, take });
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var type = FindType(compilation, typeName);
 		
 		if(type is null)
+			
 			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
 		
 		var baseTypes   = GetBaseTypeChain(type);
@@ -77,17 +80,20 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 			Take: take,
 			InterfacesAndDerived: result.Items,
 			PageToken:          result.PageToken,
-			HasMore:            result.HasMore,
-			Caution:            AdhocCaution(projectPath)
-		));
+			HasMore:            result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
 		// Try metadata name lookup first (handles fully-qualified names).
-		var direct = compilation.GetTypeByMetadataName(typeName);
+		var direct = compilation.GetTypeByMetadataName(typeName)
+		;
 		
 		if(direct is not null)
+			
 			return direct;
 		
 		// Fall back to simple name search.

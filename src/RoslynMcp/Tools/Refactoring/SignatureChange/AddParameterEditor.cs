@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
@@ -17,16 +17,20 @@ internal sealed class AddParameterEditor : SignatureEditor
 	public override string? Validate(IMethodSymbol method, SignatureChangeRequest request)
 	{
 		if(request.AddParameters.Length == 0)
+			
 			return "No parameters to add.";
 		
 		if(method.IsAbstract)
+			
 			return "Cannot add parameters to abstract methods — override chain would break.";
 		
 		// Check for name collisions with existing parameters.
-		var existingNames = method.Parameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+		var existingNames = method.Parameters.Select(p => p.Name).ToHashSet(StringComparer.Ordinal)
+		;
 		
 		foreach(var p in request.AddParameters)
 			if(existingNames.Contains(p.Name))
+				
 				return $"Parameter '{p.Name}' already exists on '{method.Name}'.";
 		
 		return null;
@@ -41,13 +45,15 @@ internal sealed class AddParameterEditor : SignatureEditor
 		CancellationToken cancellationToken)
 	{
 		// Build the new parameter list (existing + added).
-		List<ParameterSyntax> newParams = [.. declaration.ParameterList.Parameters];
+		List<ParameterSyntax> newParams = [.. declaration.ParameterList.Parameters]
+		;
 		
 		foreach(var p in request.AddParameters) {
 			
 			var typeSyntax = SyntaxFactory.ParseTypeName(p.Type + " ");
 			
 			if(typeSyntax.ContainsDiagnostics)
+				
 				return SignatureChangeResult.Failed(solution, $"Parameter type '{p.Type}' for '{p.Name}' is not valid C#.");
 			
 			var param = SyntaxFactory.Parameter(SyntaxFactory.Identifier(p.Name))
@@ -59,6 +65,7 @@ internal sealed class AddParameterEditor : SignatureEditor
 				var defaultExpr = SyntaxFactory.ParseExpression(p.DefaultValue);
 				
 				if(defaultExpr.ContainsDiagnostics)
+					
 					return SignatureChangeResult.Failed(solution, $"Default value '{p.DefaultValue}' for '{p.Name}' is not valid C#.");
 				
 				param = param.WithDefault(SyntaxFactory.EqualsValueClause(defaultExpr));
@@ -72,7 +79,8 @@ internal sealed class AddParameterEditor : SignatureEditor
 		);
 		
 		// Build the forwarding overload (old signature → calls new method with defaults).
-		var forwardingArgs = new List<ArgumentSyntax>();
+		var forwardingArgs = new List<ArgumentSyntax>()
+		;
 		
 		foreach(var existingParam in declaration.ParameterList.Parameters)
 			forwardingArgs.Add(SyntaxFactory.Argument(SyntaxFactory.IdentifierName(existingParam.Identifier)));
@@ -82,6 +90,7 @@ internal sealed class AddParameterEditor : SignatureEditor
 			var defaultExpr = SyntaxFactory.ParseExpression(p.DefaultValue ?? "default");
 			
 			if(defaultExpr.ContainsDiagnostics)
+				
 				return SignatureChangeResult.Failed(solution, $"Default value '{p.DefaultValue}' for '{p.Name}' is not valid C#.");
 			
 			forwardingArgs.Add(SyntaxFactory.Argument(defaultExpr));
@@ -119,19 +128,22 @@ internal sealed class AddParameterEditor : SignatureEditor
 		;
 		
 		// Apply to the syntax tree.
-		var tree    = declaration.SyntaxTree;
+		var tree    = declaration.SyntaxTree
+		;
 		var root    = await tree.GetRootAsync(cancellationToken);
 		var newRoot = root.ReplaceNode(declaration, new SyntaxNode[] { updatedMethod, forwardingMethod });
 		
 		var docId = solution.GetDocumentIdsWithFilePath(tree.FilePath).FirstOrDefault();
 		
 		if(docId is null)
+			
 			return SignatureChangeResult.Failed(solution, "Could not resolve document in solution.");
 		
 		var newSolution = solution.WithDocumentSyntaxRoot(docId, newRoot);
 		var diff        = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
 		
 		return new SignatureChangeResult {
+			
 			Success            = true,
 			BaseSolution       = solution,
 			NewSolution        = newSolution,

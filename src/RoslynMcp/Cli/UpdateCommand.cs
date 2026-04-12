@@ -9,18 +9,21 @@ class UpdateCommand : CliCommand
         if(executablePath is null)
         {
             Console.Error.WriteLine("error: could not determine the current executable path.");
+
             return 1;
         }
 
         var results = AgentDetector.ProbeAll()
             .Where(r => r.ConfigExists && r.Entry is not null)
-            .ToArray();
+            .ToArray()
+;
 
         if(results.Length == 0)
         {
             Console.WriteLine();
             Console.WriteLine("  No configured agents found. Run 'roslynmcp setup' to configure.");
             Console.WriteLine();
+
             return 0;
         }
 
@@ -79,6 +82,7 @@ class UpdateCommand : CliCommand
         }
 
         Console.WriteLine();
+
         return failedCount > 0 ? 1 : 0;
     }
 

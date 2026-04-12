@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
 
@@ -19,6 +19,7 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 			var r = m.Accept(this);
 			
 			if(r is not null)
+				
 				return r;
 		}
 		
@@ -30,6 +31,7 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 		if(symbol is T t && symbol.Name == simpleName)
 			// When a dotted name was provided, verify the full qualification matches.
 			if(!isDotted || symbol.ToDisplayString().EndsWith(name, StringComparison.Ordinal))
+				
 				return t;
 		
 		foreach(var n in symbol.GetTypeMembers()) {
@@ -37,6 +39,7 @@ internal sealed class SimpleNameFinder<T>(string name) : SymbolVisitor<T?>
 			var r = n.Accept(this);
 			
 			if(r is not null)
+				
 				return r;
 		}
 		
@@ -64,7 +67,7 @@ internal sealed class AllSymbolsFinder(string name)
 				Visit(childNs);
 			else if(m is INamedTypeSymbol type)
 				VisitType(type);
-		
+	
 	}
 	
 	void VisitType(INamedTypeSymbol type)
@@ -90,6 +93,7 @@ internal sealed class AnySymbolFinder(string name) : SymbolVisitor<ISymbol?>
 			var r = m.Accept(this);
 			
 			if(r is not null)
+				
 				return r;
 		}
 		
@@ -99,11 +103,13 @@ internal sealed class AnySymbolFinder(string name) : SymbolVisitor<ISymbol?>
 	public override ISymbol? VisitNamedType(INamedTypeSymbol symbol)
 	{
 		if(symbol.Name == name)
+			
 			return symbol;
 		
 		var member = symbol.GetMembers(name).FirstOrDefault();
 		
 		if(member is not null)
+			
 			return member;
 		
 		foreach(var n in symbol.GetTypeMembers()) {
@@ -111,6 +117,7 @@ internal sealed class AnySymbolFinder(string name) : SymbolVisitor<ISymbol?>
 			var r = n.Accept(this);
 			
 			if(r is not null)
+				
 				return r;
 		}
 		
