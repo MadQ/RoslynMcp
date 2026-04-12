@@ -17,7 +17,8 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		"Use this after editing code to verify correctness before committing or continuing work. " +
 		"Returns a structured summary (error count, warning count) plus paginated individual items " +
 		"with code, file, line, and message. Pass take: 0 for a lightweight error-count-only check " +
-		"with no items returned. " +
+		"with no items returned. When take: 0, the response includes full counts but items is null — " +
+		"not an empty array. An empty array means items were requested but none matched; null means items were not requested. " +
 		"Covers C# type/symbol errors only. For NuGet restore failures, MSBuild target errors, or " +
 		"source generator issues, use roslyn_build_project instead.")]
 	public object GetDiagnostics(
@@ -25,7 +26,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project.")] string? filePath = null,
 		[Description("Filter by severity: 'errors', 'warnings', or 'all'. Omit to return all (errors and warnings).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
-		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items.")] int take = 50,
+		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items. When take: 0, items in the response is null (not an empty array).")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { severity, skip, take });
@@ -87,18 +88,19 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		
 		take = Math.Clamp(take, 0, 200);
 		
-		// take: 0 fast path — return counts only, no items, no page token needed.
+		// take: 0 fast path — return counts only. items is null (not []) to distinguish
+		// "not requested" from "requested but empty".
 		if(take == 0) {
 			return scope.Outcome(summary, new {
 				summary,
-				source    = "roslyn",
-				errors    = errorCount,
-				warnings  = warningCount,
+				source     = "roslyn",
+				errors     = errorCount,
+				warnings   = warningCount,
 				total,
 				returned   = 0,
-				has_more   = false,
+				has_more   = total > 0,
 				page_token = (string?) null,
-				items      = Array.Empty<object>()
+				items      = (object[]?) null
 			});
 		}
 		
