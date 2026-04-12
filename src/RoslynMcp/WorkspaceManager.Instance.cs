@@ -928,17 +928,16 @@ internal sealed partial class WorkspaceManager
 			var newSolution = currentSolution;
 			var modified    = false;
 			
-			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument.
-			// Clear the text instead — an empty file produces no diagnostics or types.
+			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument, and clearing
+			// document text then calling TryApplyChanges writes an empty file back to disk,
+			// silently recreating the deleted file as a zero-byte ghost.
+			// Flag for full workspace reload instead — symmetric with the new-file case below.
 			foreach(var path in deleted) {
 				
 				var docIds = newSolution.GetDocumentIdsWithFilePath(path);
 				
-				foreach(var id in docIds) {
-					
-					newSolution = newSolution.WithDocumentText(id, SourceText.From(""));
-					modified    = true;
-				}
+				if(docIds.Length > 0)
+					Interlocked.Increment(ref reloadVersion);
 			}
 			
 			foreach(var path in changed) {
