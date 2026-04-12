@@ -720,9 +720,11 @@ internal sealed partial class WorkspaceManager
 			try {
 				applied = ws.TryApplyChanges(newSolution);
 			}
-			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
-				// Workspace was disposed by a concurrent ReloadIfNeeded between the staleness
-				// check and TryApplyChanges — treat the same as a false return.
+			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException or NotSupportedException) {
+				// ObjectDisposedException/InvalidOperationException: workspace disposed by a concurrent
+				// ReloadIfNeeded between the staleness check and TryApplyChanges.
+				// NotSupportedException: TryApplyChanges throws for unsupported change kinds
+				// (e.g. AddDocument/RemoveDocument on MSBuildWorkspace). Both treated as false return.
 				_ = ex;
 				applied = false;
 			}

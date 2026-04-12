@@ -215,7 +215,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 	///     reload loops. Use this instead of direct file I/O + <see cref="InvalidateFile"/>
 	///     for tools that already hold the updated <see cref="Solution"/> in memory.
 	/// </summary>
-	public void ApplyChanges(string resolvedProjectPath, Solution newSolution)
+	public bool ApplyChanges(string resolvedProjectPath, Solution newSolution)
 	{
 		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
 		
@@ -224,15 +224,23 @@ internal sealed partial class WorkspaceManager : IDisposable
 			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry)) {
 				
-				if(!entry.Instance.ApplyChangesWithFswSuppressed(newSolution))
-					entry.Instance.MarkReloadNeeded();
+				if(entry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+					return true;
 				
-				return;
+				entry.Instance.MarkReloadNeeded();
+				return false;
 			}
 			
-			if(cache.TryGetValue(normalizedPath, out var directEntry)
-				&& !directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+			if(cache.TryGetValue(normalizedPath, out var directEntry)) {
+				
+				if(directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+					return true;
+				
 				directEntry.Instance.MarkReloadNeeded();
+				return false;
+			}
+			
+			return false;
 		}
 	}
 

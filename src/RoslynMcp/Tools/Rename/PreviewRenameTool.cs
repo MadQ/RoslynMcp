@@ -36,8 +36,17 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}");
 		
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+		// Use TryGetProject so symbol and solution both derive from the same workspace
+		// snapshot — Renamer.RenameSymbolAsync requires the symbol to belong to the
+		// solution it receives.
+		if(!TryGetProject(projectPath, out var project, out var error))
 			return scope.Failed("workspace error", new PreviewRenameResult(null, null, JsonSerializer.Serialize(error, RoslynMcpJson.Compact), false));
+		
+		var compilation = await project.GetCompilationAsync(cancellationToken);
+		
+		if(compilation is null)
+			return scope.Failed("compilation unavailable", new PreviewRenameResult(
+				null, null, "Compilation unavailable — the project may have unresolved references or errors.", false));
 		
 		var symbol = FindSymbol(compilation, symbolName, containingType);
 		
@@ -48,7 +57,8 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 				false
 			));
 		
-		var solution    = workspace.GetSolution(projectPath);
+		// symbol and solution are from the same snapshot — no stale-ref risk.
+		var solution    = project.Solution;
 		var symbolKey   = SymbolKey(symbol);
 		
 		// RenameFile: when the renamed symbol is a type whose file matches the type name,

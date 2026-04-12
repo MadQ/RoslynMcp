@@ -441,7 +441,13 @@ internal abstract partial class RoslynMcpTool
 	protected async Task<ErrorResult?> TryRecoverTruncation(
 		string filePath, string fullPath, string projectPath, byte[] contentBytes)
 	{
-		if(contentBytes.Length == 0 || new FileInfo(fullPath).Length > 0)
+		// Skip if there's nothing to write, or if the file exists with content
+		// (no truncation). Use FileInfo to check both existence and length in one
+		// stat call — FileInfo.Length throws FileNotFoundException if the file is
+		// absent, so existence must be checked first.
+		var fi = new FileInfo(fullPath);
+		
+		if(contentBytes.Length == 0 || (fi.Exists && fi.Length > 0))
 			return null;
 
 		var dir = Path.GetDirectoryName(fullPath)!;

@@ -21,6 +21,7 @@ internal abstract partial class RoslynMcpTool
 		readonly PaginationCache paginationCache;
 		
 		bool    failed;
+		bool    completed;
 		string? detail;
 		string? responsePeek;
 		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
@@ -93,24 +94,26 @@ internal abstract partial class RoslynMcpTool
 		}
 		
 		/// <summary>Records a success detail appended to the log line on dispose.</summary>
-		public void Outcome(string detail) => this.detail = detail;
+		public void Outcome(string detail) { this.detail = detail; completed = true; }
 		
 		/// <summary>Records a success detail and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
 		public T Outcome<T>(string detail, T returnValue)
 		{
 			this.detail     = detail;
+			completed       = true;
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			
 			return returnValue;
 		}
 		
 		/// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
-		public void Failed(string reason) { failed = true; detail = reason; }
+		public void Failed(string reason) { failed = true; completed = true; detail = reason; }
 		
 		/// <summary>Marks the invocation as failed, estimates tokens, and returns the error result for fluent use.</summary>
 		public T Error<T>(T returnValue) where T : ToolErrorResult
 		{
 			failed                          = true;
+			completed                       = true;
 			detail                          = returnValue.Error;
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			
@@ -121,6 +124,7 @@ internal abstract partial class RoslynMcpTool
 		public T Failed<T>(string reason, T returnValue)
 		{
 			failed                          = true;
+			completed                       = true;
 			detail                          = reason;
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			
@@ -132,6 +136,13 @@ internal abstract partial class RoslynMcpTool
 		
 		public void Dispose()
 		{
+			// An unhandled exception bypasses Outcome/Failed — detect it here so the log
+			// entry correctly shows success:false instead of silently logging success:true.
+			if(!completed) {
+				failed = true;
+				detail ??= "unhandled exception";
+			}
+			
 			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag, estimatedTokens, responsePeek, args);
 			
 			onDispose();

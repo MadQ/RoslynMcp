@@ -108,10 +108,10 @@ internal sealed class WorkspaceResolver
 	///     Prefer this over direct file I/O + <see cref="InvalidateFile"/> when the caller
 	///     already holds the updated <see cref="Solution"/> in memory.
 	/// </summary>
-	public void ApplyChanges(string projectPath, Solution newSolution)
+	public bool ApplyChanges(string projectPath, Solution newSolution)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-		manager.ApplyChanges(resolved, newSolution);
+		return manager.ApplyChanges(resolved, newSolution);
 	}
 	
 

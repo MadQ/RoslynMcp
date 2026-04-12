@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -60,10 +61,14 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		;
 		
 		// changedDocs: all files to write — both renamed-in-place changes and new files at the renamed path.
+		// Deduped by physical path: multi-TFM produces the same file in multiple projects; writing once is enough.
 		var changedDocs = projectChanges
 			.SelectMany(p => p.GetChangedDocuments().Concat(p.GetAddedDocuments())
-				.Select(id => operation.NewSolution.GetDocument(id)!))
+				.Select(id => operation.NewSolution.GetDocument(id))
+				.OfType<Document>())
 			.Where(d => d.FilePath is not null)
+			.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
+			.Select(g => g.First())
 			.ToArray()
 		;
 		
@@ -73,7 +78,8 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		// in another.
 		var removedDocs = projectChanges
 			.SelectMany(p => p.GetRemovedDocuments()
-				.Select(id => operation.BaseSolution.GetDocument(id)!))
+				.Select(id => operation.BaseSolution.GetDocument(id))
+				.OfType<Document>())
 			.Where(d => d.FilePath is not null)
 			.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
 			.Select(g => g.First())
@@ -115,68 +121,68 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 				"The approval token has been consumed — run roslyn_preview_rename again to get a new token, then retry.");
 		}
 		
-		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
-		if(!workspace.IsAdhoc(projectPath)) {
+		// Token already consumed — wrap the write phase so any exception produces a
+		// clear recovery message rather than a raw MCP error with no guidance.
+		try {
 			
-			workspace.ApplyChanges(projectPath, operation.NewSolution);
-			
-			// Self-healing recovery: if TryApplyChanges truncated or skipped a file, re-write from memory.
+			// Write changed files directly to disk for both MSBuildWorkspace and AdhocWorkspace.
+			// Bypasses TryApplyChanges entirely — that path is unreliable because the stored solution
+			// snapshot can be rejected as stale if a FSW-triggered reload fires between preview and apply.
 			foreach(var doc in changedDocs) {
 				var path    = doc.FilePath!;
 				var relPath = TryMakeRelative(path, rootPath) ?? path;
-				var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
+				var content = (await doc.GetTextAsync()).ToString();
 				
-				if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
-					return scope.Failed("truncation detected", truncErr.Error);
-			}
-		}
-		else {
-			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
-			async (path, content) => {
 				await workspace.WriteAndInvalidate(projectPath, path,
 					() => FileWriter.WriteAllTextAsync(path, content));
 				
-				var relPath = TryMakeRelative(path, rootPath) ?? path;
-				
 				if(CheckForTruncation(relPath, path, content.Length) is { } truncErr)
-					throw new IOException(truncErr.Error);
-			});
-		}
-		
-		// Compute the physical paths of newly-created files (from added docs).
-		// All of these must exist on disk before we delete the old files — this guards
-		// against data loss when TryApplyChanges failed to create any new files.
-		var addedFilePaths = changedDocs
-			.Where(d => addedDocIds.Contains(d.Id))
-			.Select(d => d.FilePath!)
-			.ToArray()
-		;
-		
-		var filesDeleted = 0;
-		
-		// Only delete old files when new files are confirmed on disk.
-		if(removedDocs.Length > 0 && addedFilePaths.Length > 0 && addedFilePaths.All(File.Exists)) {
-			
-			foreach(var doc in removedDocs) {
-				var path = doc.FilePath!;
-				
-				await workspace.WriteAndInvalidate(projectPath, path, () => {
-					File.Delete(path);
-					return Task.CompletedTask;
-				});
-				
-				filesDeleted++;
+					return scope.Failed("truncation detected", truncErr.Error);
 			}
+			
+			// Compute the physical paths of newly-created files (from added docs).
+			// All of these must exist on disk before we delete the old files — this guards
+			// against data loss when TryApplyChanges failed to create any new files.
+			var addedFilePaths = changedDocs
+				.Where(d => addedDocIds.Contains(d.Id))
+				.Select(d => d.FilePath!)
+				.ToArray()
+			;
+			
+			var filesDeleted = 0;
+			
+			// Only delete old files when new files are confirmed on disk.
+			if(removedDocs.Length > 0 && addedFilePaths.Length > 0 && addedFilePaths.All(File.Exists)) {
+				
+				foreach(var doc in removedDocs) {
+					var path = doc.FilePath!;
+					
+					await workspace.WriteAndInvalidate(projectPath, path, () => {
+						File.Delete(path);
+						return Task.CompletedTask;
+					});
+					
+					filesDeleted++;
+				}
+			}
+			
+			var filesChanged = changedDocs.Length;
+			var sessionNote  = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
+			
+			var summary = filesDeleted > 0
+				? $"{filesChanged} file(s) written, {filesDeleted} old file(s) deleted"
+				: $"{filesChanged} file(s) written"
+			;
+			
+			return scope.Outcome(summary, $"Rename applied.{sessionNote} Files written to disk. Compilation will refresh automatically.");
 		}
-		
-		var filesChanged = changedDocs.Length;
-		var sessionNote  = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
-		
-		var summary = filesDeleted > 0
-			? $"{filesChanged} file(s) written, {filesDeleted} old file(s) deleted"
-			: $"{filesChanged} file(s) written"
-		;
-		
-		return scope.Outcome(summary, $"Rename applied.{sessionNote} Files written to disk. Compilation will refresh automatically.");
+		catch(OperationCanceledException) {
+			throw;
+		}
+		catch(Exception ex) {
+			return scope.Failed("write failed",
+				$"Rename failed during apply: {ex.GetType().Name}: {ex.Message} " +
+				"Token has been consumed — run roslyn_preview_rename again to get a new token, then retry.");
+		}
 	}
 }
