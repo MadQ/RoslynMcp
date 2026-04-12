@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -25,6 +25,7 @@ internal sealed class RespawnTool : RoslynMcpTool
 		
 		// Exit after a brief delay to let the response flush.
 		Task.Run(async () => {
+			
 			await Task.Delay(150);
 			Environment.Exit(0);
 		});

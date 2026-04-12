@@ -29,7 +29,8 @@ int exitCode;
 
 try {
 // -tl:off: disable terminal logger for predictable plain-text output.
-		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", csprojPath, "/nologo", "-tl:off"], rootPath, scope.Record);
+		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", csprojPath, "/nologo", "-tl:off"], rootPath, scope.Record)
+		;
 }
 catch(InvalidOperationException ex) {
 return scope.Failed(ex.Message, new RestoreResult(false, ex.Message, ex.InnerException?.Message));

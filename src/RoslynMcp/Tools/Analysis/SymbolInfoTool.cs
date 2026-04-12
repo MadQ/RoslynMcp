@@ -74,8 +74,9 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 				IFieldSymbol    f => f.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 				ILocalSymbol    l => l.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 				_                 => null
-			},
-			AdhocCaution(projectPath)
-		));
+			})
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 }

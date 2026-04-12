@@ -35,9 +35,11 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var solution = workspace.GetSolution(projectPath);
@@ -46,9 +48,11 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		// When containingType is specified, search one symbol. Otherwise search ALL
 		// symbols matching the name — prevents silently incomplete results when
 		// multiple types have members with the same name.
-		var symbols = FindSymbols(compilation, symbolName, containingType);
+		var symbols = FindSymbols(compilation, symbolName, containingType)
+		;
 		
 		if(symbols.Length == 0)
+			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
 		var allLocations = new List<string>();
@@ -78,7 +82,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		;
 		
 		if(allResults.Length == 0)
-			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], null, false, AdhocCaution(projectPath)));
+			
+			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], null, false) { Caution = AdhocCaution(projectPath) });
 		
 		string[] symbolsSearched = [.. symbols.Select(s => FormatSymbolName(s)).Distinct()];
 		
@@ -90,9 +95,10 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			Skip: skip, Take: take,
 			References: result.Items,
 			PageToken: result.PageToken,
-			HasMore:   result.HasMore,
-			Caution:   AdhocCaution(projectPath)
-		));
+			HasMore:   result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 
 }

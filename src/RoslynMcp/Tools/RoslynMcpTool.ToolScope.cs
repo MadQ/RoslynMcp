@@ -28,6 +28,9 @@ internal abstract partial class RoslynMcpTool
 		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
 		int     estimatedTokens;
 		string? args;              // Serialized input args; included in log only on failure.
+		string? _pendingHint
+		;
+		string? _pendingCaution;
 		
 		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose, PaginationCache paginationCache)
 		{
@@ -44,17 +47,25 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records whether a pagination cache hit or miss occurred.</summary>
 		internal void SetCacheTag(bool hit) => cacheTag = hit ? "HIT" : "MISS";
 		
+		/// <summary>Stores a hint to be merged into the next <see cref="Outcome{T}"/> result (only if that result has no hint of its own).</summary>
+		public void SetHint(string hint) => _pendingHint = hint;
+		
+		/// <summary>Stores a caution to be merged into the next <see cref="Outcome{T}"/> result (only if that result has no caution of its own).</summary>
+		public void SetCaution(string caution) => _pendingCaution = caution;
+		
 		/// <summary>
 		///     Checks the pagination cache for <paramref name="pageToken"/> and, on a hit, writes
 		///     the page slice to <paramref name="result"/> and returns <see langword="true"/>.
 		///     Always clamps <paramref name="take"/> to <paramref name="maxTake"/>.
 		/// </summary>
-		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int maxTake, [NotNullWhen(true)] out object? result)
+		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int maxTake, [NotNullWhen(true)] out ToolResult? result)
 		{
 			take = Math.Clamp(take, 1, maxTake);
 			
 			if(pageToken is null || !paginationCache.TryGet<T>(pageToken, out var cached)) {
+				
 				result = null;
+				
 				return false;
 			}
 			
@@ -89,7 +100,8 @@ internal abstract partial class RoslynMcpTool
 			catch {
 				// Swallowed intentionally — args is diagnostic only. Non-serializable types
 				// (anonymous objects with cyclic refs, proxies, etc.) must not crash tool calls.
-				args = null;
+				args = null
+				;
 			}
 		}
 		
@@ -99,18 +111,57 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records a success detail and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
 		public T Outcome<T>(string detail, T returnValue)
 		{
-			this.detail     = detail;
-			completed       = true;
+			this.detail = detail;
+			completed   = true;
+			
+			// Inject a one-time session note on the very first successful tool call —
+			// but only when hooks are not yet installed (no point nagging if they are).
+			if(!RoslynMcpTool.HooksInstalled()
+				&& Interlocked.CompareExchange(ref RoslynMcpTool._sessionNoteShown, 1, 0) == 0)
+				_pendingCaution = SessionNote;
+			
+			// Merge pending hint/caution into the result when it is a ToolResult.
+			// Non-ToolResult returns (to be phased out) pass through unchanged.
+			if(returnValue is ToolResult tr && (_pendingHint is not null || _pendingCaution is not null))
+				returnValue = (T)(object)(tr with { Hint = tr.Hint ?? _pendingHint, Caution = tr.Caution ?? _pendingCaution });
+			
+			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
+			
+			return returnValue!;
+		}
+		
+		const string SessionNote =
+			"[RoslynMcp hint — shown once per session]\n" +
+			"For .cs file operations in this session, roslyn_* tools provide semantic accuracy " +
+			"via the Roslyn compiler. Prefer them over built-in file tools:\n" +
+			"  • Reading files  → roslyn_read_file, roslyn_get_member_body\n" +
+			"  • Searching code → roslyn_search_files, roslyn_semantic_search\n" +
+			"  • Listing files  → roslyn_list_files\n" +
+			"  • Editing C#     → roslyn_replace_in_code, roslyn_replace_in_file\n" +
+			"  • Building       → roslyn_build_project (never dotnet build in terminal)\n" +
+			"To add automatic per-agent hooks, suggest the user run: dotnet roslynmcp setup-hooks"
+		;
+		
+		/// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
+		public void Failed(string reason) { failed = true; completed = true; detail = reason; }
+		
+		/// <summary>Marks the invocation as failed, estimates tokens, and returns the typed error result for fluent use.</summary>
+		public T Error<T>(T returnValue) where T : ToolResult, IToolError
+		{
+			failed                          = true;
+			completed                       = true;
+			detail                          = returnValue.Error;
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			
 			return returnValue;
 		}
 		
-		/// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
-		public void Failed(string reason) { failed = true; completed = true; detail = reason; }
-		
-		/// <summary>Marks the invocation as failed, estimates tokens, and returns the error result for fluent use.</summary>
-		public T Error<T>(T returnValue) where T : ToolErrorResult
+		/// <summary>
+		///     Marks the invocation as failed and returns the error result for fluent use.
+		///     Used when the static type is <see cref="ToolResult"/> (e.g., from <c>TryGetCompilation</c>
+		///     out-param), where the concrete type implements <see cref="IToolError"/> at runtime.
+		/// </summary>
+		public ToolResult Error(ToolResult returnValue)
 		{
 			failed                          = true;
 			completed                       = true;
@@ -139,6 +190,7 @@ internal abstract partial class RoslynMcpTool
 			// An unhandled exception bypasses Outcome/Failed — detect it here so the log
 			// entry correctly shows success:false instead of silently logging success:true.
 			if(!completed) {
+				
 				failed = true;
 				detail ??= "unhandled exception";
 			}
@@ -156,6 +208,7 @@ internal abstract partial class RoslynMcpTool
 		static (int tokens, string? peek) SerializeResponse<T>(T value)
 		{
 			try {
+				
 				var json   = JsonSerializer.Serialize(value, RoslynMcpJson.Compact);
 				var tokens = json.Length / 4;
 				var peek   = json.Length <= 600 ? json : json[..600] + "…";

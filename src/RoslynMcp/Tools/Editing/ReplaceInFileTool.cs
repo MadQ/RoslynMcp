@@ -46,21 +46,23 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var fullPath = ResolveFilePath(filePath, rootPath);
 		
 		if(fullPath is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		Regex regex;
 		
 		try {
-
+			
 			if(!useRegex)
 				regex = BuildLiteralRegex(pattern, caseSensitive);
 			
 			else {
+				
 				var options = RegexOptions.Compiled;
-
+				
 				if(!caseSensitive)
 					options |= RegexOptions.IgnoreCase;
-
+				
 				regex = new Regex(pattern, options);
 			}
 		}
@@ -78,7 +80,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		}
 		
 		// Split into lines to compute 1-based line numbers for each match position.
-		var lines        = originalContent.Split('\n');
+		var lines        = originalContent.Split('\n')
+		;
 		var lineStarts   = BuildLineStartMap(lines);
 		var matches      = regex.Matches(originalContent);
 		int[] changedLines = [..
@@ -89,9 +92,11 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		];
 		
 		if(matches.Count == 0)
+			
 			return scope.Failed("No matches found.", new ReplaceInFileResult(false, 0, [], "No matches found."));
 		
 		if(dryRun)
+			
 			return scope.Outcome("dry run", new ReplaceInFileResult(false, matches.Count, changedLines, Message: $"Dry run: {matches.Count} replacement(s) would be made."));
 		
 		
@@ -99,38 +104,40 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var newContent = regex.Replace(originalContent, effectiveReplacement);
 		
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newContent);
-
+		
 		var (_, backupErr) = await SaveBackupsAsync(
 			backups, fullPath, projectPath, "roslyn_replace_in_file", newBytes);
 		
 		if(backupErr is not null)
+			
 			return scope.Error(backupErr);
-
+		
 		// For .cs files: single write via workspace API (MSBuild-tracked goes through
 		// TryApplyChanges; untracked/Adhoc goes through FileWriter with FSW suppressed).
 		// For all other types: direct FileWriter write, then InvalidateFile.
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
-
+			
 			try {
 				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(newContent, FileWriter.Utf8NoBom));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 			}
 		}
 		else {
-
+			
 			try {
 				await FileWriter.WriteAllTextAsync(fullPath, newContent);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 			}
-
+			
 			workspace.InvalidateFile(projectPath, fullPath);
 		}
 		
 		if(CheckForTruncation(filePath, fullPath, newContent.Length) is { } truncErr)
+			
 			return scope.Error(truncErr);
 		
 		return scope.Outcome($"{matches.Count} replacement(s)", new ReplaceInFileResult(true, matches.Count, changedLines));

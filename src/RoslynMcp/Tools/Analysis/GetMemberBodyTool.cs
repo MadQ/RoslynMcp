@@ -28,13 +28,15 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_member_body", symbolName, new { containingType });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var symbol   = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
-			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", Hint: "Use get_type_members or find_references to verify the name."));
+			
+			return scope.Failed("symbol not found", new ErrorResult($"Symbol '{symbolName}' not found.", "Use get_type_members or find_references to verify the name."));
 		
 		var syntaxRefs = symbol.DeclaringSyntaxReferences;
 		
@@ -43,9 +45,10 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 			return scope.Error(new MetadataSymbolResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
-				"metadata",
-				"This symbol is defined in metadata (compiled assembly), not source code."
-			));
+				"metadata")
+			{
+				Error = "This symbol is defined in metadata (compiled assembly), not source code."
+			});
 		
 		var parts = new List<object>();
 		
@@ -60,7 +63,8 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 			var endLine   = span.EndLinePosition.Line;
 			
 			// Extract source lines with 1-based line numbers.
-			var lines = new string[endLine - startLine + 1];
+			var lines = new string[endLine - startLine + 1]
+			;
 			
 			for(var ln = startLine; ln <= endLine; ln++)
 				lines[ln - startLine] = text.Lines[ln].ToString();
@@ -81,24 +85,32 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		
 		var totalLines = parts.Cast<MemberBodyPart>().Sum(p => p.EndLine - p.StartLine + 1);
 		
-		return scope.Outcome($"{totalLines} line(s)", syntaxRefs.Length == 1
+		var single = syntaxRefs.Length == 1;
+		var symbolName2 = FormatSymbolName(symbol);
+		var symbolKind2 = symbol.Kind.ToString().ToLowerInvariant();
+		
+		ToolResult bodyResult = single
 			? new MemberBodySingleResult(
-				FormatSymbolName(symbol),
-				symbol.Kind.ToString().ToLowerInvariant(),
+				symbolName2,
+				symbolKind2,
 				((MemberBodyPart) parts[0]).File,
 				((MemberBodyPart) parts[0]).StartLine,
 				((MemberBodyPart) parts[0]).EndLine,
-				((MemberBodyPart) parts[0]).Body,
-				AdhocCaution(projectPath)
-			)
-			: (object) new MemberBodyPartialResult(
-				FormatSymbolName(symbol),
-				symbol.Kind.ToString().ToLowerInvariant(),
+				((MemberBodyPart) parts[0]).Body)
+			{
+				Caution = AdhocCaution(projectPath)
+			}
+			: new MemberBodyPartialResult(
+				symbolName2,
+				symbolKind2,
 				parts,
-				$"Partial declaration — {syntaxRefs.Length} parts across {parts.Cast<MemberBodyPart>().Select(p => p.File).Distinct().Count()} file(s).",
-				AdhocCaution(projectPath)
-			)
-		);
+				$"Partial declaration — {syntaxRefs.Length} parts across {parts.Cast<MemberBodyPart>().Select(p => p.File).Distinct().Count()} file(s).")
+			{
+				Caution = AdhocCaution(projectPath)
+			}
+		;
+		
+		return scope.Outcome($"{totalLines} line(s)", bodyResult);
 	}
 
 

@@ -50,29 +50,36 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		var fullPath = ResolveFilePath(filePath, rootPath);
 		
 		if(fullPath is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+			
 			return scope.Error(new ErrorResult("File must be a C# source file (.cs)"));
 		
 		if(!TryParseSyntaxKind(nodeKind, out var kind))
-			return scope.Error(new ErrorResult($"Unknown node kind: {nodeKind}.", Hint: "Examples: MethodDeclaration, FieldDeclaration, IdentifierName."));
+			
+			return scope.Error(new ErrorResult($"Unknown node kind: {nodeKind}.", "Examples: MethodDeclaration, FieldDeclaration, IdentifierName."));
 		
 		SourceText sourceText;
 		SyntaxTree syntaxTree;
 		
 		// Prefer the in-memory workspace document to avoid races with concurrent edits.
-		var solution = workspace.GetSolution(projectPath		   );
+		var solution = workspace.GetSolution(projectPath		   )
+		;
 		var docIds   = solution.GetDocumentIdsWithFilePath(fullPath);
 		
 		if(docIds.Length > 0) {
+			
 			var doc = solution.GetDocument(docIds[0])!;
 			sourceText = await doc.GetTextAsync(cancellationToken);
 			syntaxTree = (await doc.GetSyntaxTreeAsync(cancellationToken))!;
 		}
 		
 		else {
+			
 			try {
+				
 				using var stream = File.OpenRead(fullPath);
 				sourceText = SourceText.From(stream, FileWriter.Utf8NoBom);
 			}
@@ -93,9 +100,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// For declaration nodes, match against the declared name only — not the full body.
 		// This prevents "ParseDocumentation" from matching every method that *calls* it.
 		if(!string.IsNullOrWhiteSpace(textPattern)) {
+			
 			matchedNodes = matchedNodes
 				.Where(n => {
+					
 					var name = GetDeclaredName(n);
+					
 					return name.Contains(textPattern, StringComparison.OrdinalIgnoreCase);
 				})
 				.ToArray()
@@ -103,6 +113,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		}
 		
 		if(matchedNodes.Length == 0)
+			
 			return scope.Failed("No matching nodes found.", new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
 		
 		var changedNodeInfo = matchedNodes.Select(n => {
@@ -117,10 +128,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		}).ToArray();
 		
 		if(dryRun)
+			
 			return scope.Outcome("dry run", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Dry run: {matchedNodes.Length} node(s) would be replaced."));
 		
 		// Safety guard: multiple matches require explicit opt-in via force=true.
 		if(matchedNodes.Length > 1 && !force)
+			
 			return scope.Outcome("multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one."));
 		
 		// Empty replacement = delete matched node(s). Documented behavior: omitting replacement removes the node.
@@ -134,11 +147,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			;
 			
 			if(deleteErrors.Length > 0) {
+				
 				return scope.Error(new ReplaceInCodeSyntaxError(
-					"Deletion would introduce syntax errors",
 					string.Join("; ", deleteErrors.Select(d => d.GetMessage())),
-					changedNodeInfo
-				));
+					changedNodeInfo)
+				{
+					Error = "Deletion would introduce syntax errors"
+				});
 			}
 			
 			var deletedText  = deletedRoot.ToFullString();
@@ -148,8 +163,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			backups, fullPath, projectPath, "roslyn_replace_in_code", deletedBytes);
 		
 		if(deleteBackupErr is not null)
+			
 			return scope.Error(deleteBackupErr);
-
+		
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 			// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
 			// for untracked files (e.g. AdhocWorkspace or files outside the project).
@@ -160,27 +176,31 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				workspace.ApplyChanges(projectPath, newSolution);
 				
 				if(await TryRecoverTruncation(filePath, fullPath, projectPath, deletedBytes) is { } truncErr)
+					
 					return scope.Error(truncErr);
 			}
 			else {
 				
 				try {
+					
 					await workspace.WriteAndInvalidate(projectPath, fullPath,
 						() => FileWriter.WriteAllTextAsync(fullPath, deletedText));
 					
 					if(CheckForTruncation(filePath, fullPath, deletedText.Length) is { } truncErr)
+						
 						return scope.Error(truncErr);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
+					return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 				}
 			}
-
+			
 			return scope.Outcome($"deleted {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));
 		}
 		
 		// Parse and validate the replacement text.
-		SyntaxNode? replacementNode;
+		SyntaxNode? replacementNode
+		;
 		
 		try {
 			
@@ -210,19 +230,24 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			};
 			
 			if(replacementNode is null)
+				
 				return scope.Error(new ErrorResult("Failed to parse replacement text — parser returned null"));
 			
 			if(replacementNode.ContainsDiagnostics)
+				
 				return scope.Error(new ReplaceInCodeSyntaxError(
-					"Replacement text contains syntax errors",
-					string.Join("; ", replacementNode.GetDiagnostics().Select(d => d.GetMessage()))
-				));
+					string.Join("; ", replacementNode.GetDiagnostics().Select(d => d.GetMessage())))
+				{
+					Error = "Replacement text contains syntax errors"
+				});
 		}
 		catch(Exception ex) {
+			
 			return scope.Error(new ReplaceInCodeSyntaxError(
-				"Failed to parse replacement text as valid C# syntax",
-				ex.Message
-			));
+				ex.Message)
+			{
+				Error = "Failed to parse replacement text as valid C# syntax"
+			});
 		}
 		
 		// Apply replacements
@@ -239,51 +264,57 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		;
 		
 		if(newDiagnostics.Length > 0)
+			
 			return scope.Error(new ReplaceInCodeSyntaxError(
-				"Replacement would introduce syntax errors",
 				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
-				changedNodeInfo
-			));
+				changedNodeInfo)
+			{
+				Error = "Replacement would introduce syntax errors"
+			});
 		
 		var newText  = newRoot.ToFullString();
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newText);
-
+		
 		var (_, replaceBackupErr) = await SaveBackupsAsync(
 			backups, fullPath, projectPath, "roslyn_replace_in_code", newBytes);
 		
 		if(replaceBackupErr is not null)
+			
 			return scope.Error(replaceBackupErr);
-
+		
 		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
 		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
 		// for untracked files (e.g. AdhocWorkspace or files outside the project).
 		if(docIds.Length > 0) {
-
+			
 			var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(newRoot);
 			var newSolution = newDoc.Project.Solution;
 			workspace.ApplyChanges(projectPath, newSolution);
-
+			
 			if(await TryRecoverTruncation(filePath, fullPath, projectPath, newBytes) is { } truncErr)
+				
 				return scope.Error(truncErr);
 		}
 		else {
-
+			
 			try {
+				
 				await workspace.WriteAndInvalidate(projectPath, fullPath,
 					() => FileWriter.WriteAllTextAsync(fullPath, newText));
-
+				
 				if(CheckForTruncation(filePath, fullPath, newText.Length) is { } truncErr)
+					
 					return scope.Error(truncErr);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 			}
 		}
 		
 		return scope.Outcome($"replaced {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo));
 	}
 	
-
+	
 	private static string GetDeclaredName(SyntaxNode node) => node switch {
 		
 		MethodDeclarationSyntax     m => m.Identifier.Text,
@@ -301,6 +332,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	{
 		// Try exact match first
 		if(Enum.TryParse<SyntaxKind>(kindName, ignoreCase: true, out kind))
+			
 			return true;
 		
 		// Common aliases/shortcuts

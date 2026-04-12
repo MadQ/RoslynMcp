@@ -6,7 +6,8 @@ namespace RoslynMcp.Cli;
 abstract class CliCommand
 {
     // Full path of the currently running roslynmcp executable.
-    protected static string? ExecutablePath => Environment.ProcessPath;
+    protected static string? ExecutablePath => Environment.ProcessPath
+;
 
     // Informational version string of the running executable (e.g. "0.8.0-beta").
     protected static string CurrentVersion { get; } =
@@ -23,6 +24,7 @@ abstract class CliCommand
         try
         {
             var info = FileVersionInfo.GetVersionInfo(path);
+
             return string.IsNullOrWhiteSpace(info.ProductVersion)
                 ? info.FileVersion
                 : info.ProductVersion;
@@ -38,6 +40,7 @@ abstract class CliCommand
         var running = ProcessChecker.FindRunningInstances();
 
         if(running.Count == 0)
+
             return;
 
         Console.WriteLine();

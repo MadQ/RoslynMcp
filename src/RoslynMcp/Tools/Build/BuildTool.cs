@@ -66,12 +66,14 @@ internal sealed class BuildTool : RoslynMcpTool
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 		
 		if(csprojPath is null)
+			
 			return scope.Error(new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode."));
 		
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true).
 		if(!forceBuild) {
 			
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
+				
 				return scope.Error(error!);
 			
 			var roslynDiagnostics = GetRoslynDiagnostics(compilation, rootPath);
@@ -95,7 +97,8 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		
 		// Slow path: run actual dotnet build.
-		var args = BuildArgs(csprojPath, targetFramework);
+		var args = BuildArgs(csprojPath, targetFramework)
+		;
 		
 		string		output;
 		TimeSpan	elapsed;
@@ -122,13 +125,15 @@ internal sealed class BuildTool : RoslynMcpTool
 		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
 		
 		DiagnosticItem[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
-		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")];
+		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")]
+		;
 		
 		// dotnet build sometimes exits with a non-zero code despite a clean compilation —
 		// MSBuild analyzer diagnostics (MSBL*, NU*) can set the exit code without emitting
 		// a parseable CS error line. Trust the output text over the exit code: if the output
 		// says "Build succeeded." and we found no structured errors, the build succeeded.
-		var buildSucceededText = output.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase);
+		var buildSucceededText = output.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase)
+		;
 		var succeeded          = exitCode == 0 || (errors.Length == 0 && buildSucceededText);
 		
 		// When genuinely failed with no structured errors (locked file, linker, restore),
@@ -156,9 +161,11 @@ internal sealed class BuildTool : RoslynMcpTool
 		// --no-restore: restore is separate; /v:quiet: only errors/warnings + summary line.
 		// -tl:off: disable terminal logger — it activates even with redirected output in some
 		// SDK versions and produces an indented format that breaks the DiagnosticLine regex.
-		var args = new List<string> { "build", csprojPath, "--no-restore", "/nologo", "/v:quiet", "-tl:off" };
+		var args = new List<string> { "build", csprojPath, "--no-restore", "/nologo", "/v:quiet", "-tl:off" }
+		;
 		
 		if(tfm is not null) {
+			
 			args.Add("-f");
 			args.Add(tfm);
 		}
@@ -239,7 +246,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			// Project-level diagnostics have no source location (NU*, MSB*, etc.).
 			// Try the looser pattern so these appear in structured errors[] rather than
 			// being buried in error_details.
-			m = ProjectLevelDiagnosticLine.Match(line);
+			m = ProjectLevelDiagnosticLine.Match(line)
+			;
 			
 			if(!m.Success)
 				continue;
@@ -264,6 +272,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		// Multi-target builds emit each diagnostic once per TFM — group by identity and
 		// aggregate target framework names from the MSBuild bracket suffix. Sort TFMs for
 		// deterministic output across MSBuild evaluation orders.
+		
 		return [..
 			results
 				.GroupBy(r => (r.Item.Severity, r.Item.Code, r.Item.File, r.Item.Line, r.Item.Column, r.Item.Message))
@@ -274,7 +283,8 @@ internal sealed class BuildTool : RoslynMcpTool
 						.OfType<string>()
 						.Distinct(StringComparer.OrdinalIgnoreCase)
 						.Order(StringComparer.OrdinalIgnoreCase)
-						.ToArray();
+						.ToArray()
+						;
 					
 					return g.First().Item with { TargetFrameworks = tfms.Length > 0 ? tfms : null };
 				})
@@ -293,23 +303,26 @@ internal sealed class BuildTool : RoslynMcpTool
 	private static string? ExtractTargetFramework(string? context)
 	{
 		if(context is null)
+			
 			return null;
 		
 		var idx = context.IndexOf("TargetFramework=", StringComparison.OrdinalIgnoreCase);
 		
 		if(idx < 0)
+			
 			return null;
 		
 		var value = context[(idx + "TargetFramework=".Length)..].Trim();
 		
 		// Context may include the surrounding brackets (e.g. " [proj::TargetFramework=net10.0]"),
 		// so strip everything from the first terminator character onwards.
-		var end = value.IndexOfAny([']', ':', ';', ' ']);
+		var end = value.IndexOfAny([']', ':', ';', ' '])
+		;
 		
 		return end >= 0 ? value[..end] : value;
 	}
-
-
+	
+	
 	private static string TailLines(string output, int count)
 	{
 		ReadOnlySpan<char> span  = output.AsSpan().Trim();
@@ -319,6 +332,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		for(var i = 0; i <= span.Length; i++) {
 			
 			if(i == span.Length || span[i] == '\n') {
+				
 				lines.Add(new Range(start, i));
 				start = i + 1;
 			}

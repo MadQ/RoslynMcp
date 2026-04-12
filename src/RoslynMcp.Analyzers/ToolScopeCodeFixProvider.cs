@@ -1,4 +1,4 @@
-﻿
+
 using System.Collections.Immutable;
 using System.Composition;
 using Microsoft.CodeAnalysis;
@@ -24,43 +24,44 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 	public override ImmutableArray<string> FixableDiagnosticIds =>
 		["RMCP003", "RMCP004", "RMCP005", "RMCP006"]
 		;
-
+	
 	public override FixAllProvider GetFixAllProvider() =>
 		WellKnownFixAllProviders.BatchFixer
 		;
-
+	
 	public override async Task RegisterCodeFixesAsync(CodeFixContext context)
 	{
 		var root = await context.Document.GetSyntaxRootAsync(context.CancellationToken)
 			.ConfigureAwait(false)
 			;
-
+		
 		if(root is null)
+			
 			return;
-
+		
 		foreach(var diagnostic in context.Diagnostics) {
-
+			
 			switch(diagnostic.Id) {
-
+				
 				case "RMCP003":
 				RegisterFix003(context, diagnostic, root);
 				break;
-
+				
 				case "RMCP004":
 				RegisterFix004(context, diagnostic, root);
 				break;
-
+				
 				case "RMCP005":
 				RegisterFix005(context, diagnostic, root);
 				break;
-
+				
 				case "RMCP006":
 				RegisterFix006(context, diagnostic, root);
 				break;
 			}
 		}
 	}
-
+	
 	// RMCP003: The diagnostic is on the method identifier token.
 	// Fix: insert `using var scope = BeginTool("toolName");` as the first statement.
 	private static void RegisterFix003(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
@@ -68,10 +69,11 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		var method = root.FindToken(diagnostic.Location.SourceSpan.Start).Parent
 			as MethodDeclarationSyntax
 			;
-
+		
 		if(method?.Body is null)
+			
 			return;
-
+		
 		context.RegisterCodeFix(
 			CodeAction.Create(
 				"Insert 'using var scope = BeginTool(...)'",
@@ -81,7 +83,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			diagnostic
 		);
 	}
-
+	
 	private static async Task<Document> InsertBeginToolAsync(
 		Document document,
 		MethodDeclarationSyntax method,
@@ -90,13 +92,14 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		var root = await document.GetSyntaxRootAsync(cancellationToken)
 			.ConfigureAwait(false)
 			;
-
+		
 		if(root is null)
+			
 			return document;
-
+		
 		var body     = method.Body!;
 		var toolName = GetMcpToolName(method) ?? "TODO: set tool name";
-
+		
 		// Mirror the leading trivia of the first existing statement so indentation is correct.
 		// If the body is empty, fall back to two tabs.
 		var indent = body.Statements.Count > 0
@@ -106,29 +109,29 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 				SyntaxFactory.ElasticWhitespace("\t\t")
 			)
 			;
-
+		
 		// Detect the end-of-line style from the opening brace so the inserted statement
 		// is followed by a proper line terminator and the next statement stays on its own line.
 		var eolToken = body.OpenBraceToken.TrailingTrivia
 			.FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia))
 			;
-
+		
 		var eol = eolToken != default
 			? SyntaxFactory.TriviaList(eolToken)
 			: SyntaxFactory.TriviaList(SyntaxFactory.ElasticEndOfLine("\r\n"))
 			;
-
+		
 		var statement = SyntaxFactory.ParseStatement($"using var scope = BeginTool(\"{toolName}\");")
 			.WithLeadingTrivia(indent)
 			.WithTrailingTrivia(eol)
 			;
-
+		
 		var newBody = body.WithStatements(body.Statements.Insert(0, statement));
 		var newRoot = root.ReplaceNode(body, newBody);
-
+		
 		return document.WithSyntaxRoot(newRoot);
 	}
-
+	
 	// RMCP004: The diagnostic is on the `return` keyword token.
 	// Fix (3 alternatives): wrap the return expression in a scope terminal call.
 	private static void RegisterFix004(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
@@ -136,14 +139,16 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		var returnStatement = root.FindToken(diagnostic.Location.SourceSpan.Start).Parent
 			as ReturnStatementSyntax
 			;
-
+		
 		if(returnStatement?.Expression is null)
+			
 			return;
-
+		
 		// Walk up to the enclosing method to infer the detail name from [McpServerTool(Name)].
-		var method = returnStatement.FirstAncestorOrSelf<MethodDeclarationSyntax>();
+		var method = returnStatement.FirstAncestorOrSelf<MethodDeclarationSyntax>()
+		;
 		var detailName = ToolScopeHelpers.InferDetailName(method);
-
+		
 		context.RegisterCodeFix(
 			CodeAction.Create(
 				$"Wrap with scope.Outcome(\"{detailName}\", ...)",
@@ -152,7 +157,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			),
 			diagnostic
 		);
-
+		
 		context.RegisterCodeFix(
 			CodeAction.Create(
 				"Wrap with scope.Error(...)",
@@ -161,7 +166,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			),
 			diagnostic
 		);
-
+		
 		context.RegisterCodeFix(
 			CodeAction.Create(
 				$"Wrap with scope.Failed(\"failed\", ...)",
@@ -171,7 +176,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			diagnostic
 		);
 	}
-
+	
 	private static async Task<Document> WrapReturnAsync(
 		Document document,
 		ReturnStatementSyntax returnStatement,
@@ -182,23 +187,25 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		var root = await document.GetSyntaxRootAsync(cancellationToken)
 			.ConfigureAwait(false)
 			;
-
+		
 		if(root is null)
+			
 			return document;
-
+		
 		var original = returnStatement.Expression!;
-
+		
 		// null / null! can't satisfy the generic T constraint — substitute a typed ErrorResult instead.
 		var result = IsNullExpression(original)
 			? BuildErrorResult(returnStatement)
 			: original.WithoutTrivia()
 			;
-
+		
 		var wrappedExpr = terminal switch {
-
+			
 			"Outcome" => (ExpressionSyntax) SyntaxFactory.InvocationExpression(
 				ScopeMemberAccess("Outcome"),
 				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
+					
 					SyntaxFactory.Argument(
 						SyntaxFactory.LiteralExpression(
 							SyntaxKind.StringLiteralExpression,
@@ -208,17 +215,18 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 					SyntaxFactory.Argument(result)
 				}))
 			),
-
+			
 			"Error" => SyntaxFactory.InvocationExpression(
 				ScopeMemberAccess("Error"),
 				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
 					SyntaxFactory.Argument(result)
 				}))
 			),
-
+			
 			_ => SyntaxFactory.InvocationExpression(
 				ScopeMemberAccess("Failed"),
 				SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
+					
 					SyntaxFactory.Argument(
 						SyntaxFactory.LiteralExpression(
 							SyntaxKind.StringLiteralExpression,
@@ -229,26 +237,27 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 				}))
 			)
 		};
-
+		
 		var newReturn = returnStatement.WithExpression(
 			wrappedExpr.WithTriviaFrom(original)
 		);
-
+		
 		var newRoot = root.ReplaceNode(returnStatement, newReturn);
-
+		
 		return document.WithSyntaxRoot(newRoot);
 	}
-
+	
 	private static bool IsNullExpression(ExpressionSyntax expr)
 	{
 		if(expr.IsKind(SyntaxKind.NullLiteralExpression))
+			
 			return true;
-
+		
 		return expr.IsKind(SyntaxKind.SuppressNullableWarningExpression)
 			&& expr is PostfixUnaryExpressionSyntax suppress
 			&& suppress.Operand.IsKind(SyntaxKind.NullLiteralExpression);
 	}
-
+	
 	// Builds `new ErrorResult(<arg>)` where <arg> is the first scope.Record() string in the method,
 	// or "TODO" if no Record call is found. This avoids the CS0411 type-inference failure that
 	// occurs when the original return expression is null or null!.
@@ -262,7 +271,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			.Select(inv => inv.ArgumentList.Arguments.FirstOrDefault()?.Expression)
 			.FirstOrDefault(arg => arg is not null)
 			;
-
+		
 		var errorArg = recordArg is not null
 			? (ExpressionSyntax) recordArg.WithoutTrivia()
 			: SyntaxFactory.LiteralExpression(
@@ -270,7 +279,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 				SyntaxFactory.Literal("TODO")
 			  )
 			;
-
+		
 		return SyntaxFactory.ObjectCreationExpression(
 			SyntaxFactory.IdentifierName("ErrorResult")).WithArgumentList(
 			SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(new[] {
@@ -278,8 +287,8 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			}))
 		);
 	}
-
-
+	
+	
 	// RMCP005: The diagnostic is on Arguments[0] of the BeginTool call (ArgumentSyntax node).
 	// Fix: replace the string literal with the value from [McpServerTool(Name = "...")].
 	private static void RegisterFix005(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
@@ -290,20 +299,22 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			.OfType<ArgumentSyntax>()
 			.FirstOrDefault()
 			;
-
+		
 		if(arg is null)
+			
 			return;
-
+		
 		var method = arg.Ancestors()
 			.OfType<MethodDeclarationSyntax>()
 			.FirstOrDefault()
 			;
-
+		
 		var toolName = method is not null ? GetMcpToolName(method) : null;
-
+		
 		if(toolName is null)
+			
 			return;
-
+		
 		context.RegisterCodeFix(
 			CodeAction.Create(
 				$"Fix BeginTool name to \"{toolName}\"",
@@ -313,7 +324,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			diagnostic
 		);
 	}
-
+	
 	private static async Task<Document> FixBeginToolNameAsync(
 		Document document,
 		ArgumentSyntax wrongArg,
@@ -323,10 +334,11 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		var root = await document.GetSyntaxRootAsync(cancellationToken)
 			.ConfigureAwait(false)
 			;
-
+		
 		if(root is null)
+			
 			return document;
-
+		
 		var correctLiteral = SyntaxFactory
 			.LiteralExpression(
 				SyntaxKind.StringLiteralExpression,
@@ -334,13 +346,13 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			)
 			.WithTriviaFrom(wrongArg.Expression)
 			;
-
+		
 		var newArg  = wrongArg.WithExpression(correctLiteral);
 		var newRoot = root.ReplaceNode(wrongArg, newArg);
-
+		
 		return document.WithSyntaxRoot(newRoot);
 	}
-
+	
 	// Mirrors ToolScopeAnalyzer.TryGetMcpToolName — syntactic extraction of [McpServerTool(Name = "...")].
 	private static void RegisterFix006(CodeFixContext context, Diagnostic diagnostic, SyntaxNode root)
 	{
@@ -350,17 +362,18 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			.OfType<ArgumentSyntax>()
 			.FirstOrDefault()
 			;
-
+		
 		if(arg?.Expression is not LiteralExpressionSyntax lit)
+			
 			return;
-
+		
 		var method = arg.Ancestors()
 			.OfType<MethodDeclarationSyntax>()
 			.FirstOrDefault()
 			;
-
+		
 		var inferredName = ToolScopeHelpers.InferDetailName(method);
-
+		
 		context.RegisterCodeFix(
 			CodeAction.Create(
 				$"Replace placeholder with \"{inferredName}\"",
@@ -370,7 +383,7 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 			diagnostic
 		);
 	}
-
+	
 	private static async Task<Document> ReplaceStringArgAsync(
 		Document document,
 		LiteralExpressionSyntax literal,
@@ -380,24 +393,25 @@ public sealed class ToolScopeCodeFixProvider : CodeFixProvider
 		var root = await document.GetSyntaxRootAsync(cancellationToken)
 			.ConfigureAwait(false)
 			;
-
+		
 		if(root is null)
+			
 			return document;
-
+		
 		var newLiteral = SyntaxFactory.LiteralExpression(
 			SyntaxKind.StringLiteralExpression,
 			SyntaxFactory.Literal(newValue)
 		).WithTriviaFrom(literal);
-
+		
 		var newRoot = root.ReplaceNode(literal, newLiteral);
-
+		
 		return document.WithSyntaxRoot(newRoot);
 	}
-
-
+	
+	
 	private static string? GetMcpToolName(MethodDeclarationSyntax method)
 		=> ToolScopeHelpers.GetMcpToolName(method);
-
+	
 	private static MemberAccessExpressionSyntax ScopeMemberAccess(string memberName) =>
 		SyntaxFactory.MemberAccessExpression(
 			SyntaxKind.SimpleMemberAccessExpression,

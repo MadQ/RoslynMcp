@@ -34,9 +34,11 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		// Stateless page token overrides skip/severity — agents don't need to track offsets manually.
 		if(page_token is not null)
 			try {
+				
 				var decoded = JsonSerializer.Deserialize<PageTokenData>(Convert.FromBase64String(page_token));
 				
 				if(decoded is not null) {
+					
 					skip     = decoded.Skip;
 					severity = decoded.Severity;
 				}
@@ -44,6 +46,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 			catch { /* malformed token — fall through to explicit params */ }
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
@@ -52,7 +55,8 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		if(filePath is not null) {
 			
 			// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
-			var tree = FindSyntaxTree(compilation, filePath);
+			var tree = FindSyntaxTree(compilation, filePath)
+			;
 			
 			diagnostics = tree is not null
 				? compilation.GetSemanticModel(tree).GetDiagnostics()
@@ -91,17 +95,15 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		// take: 0 fast path — return counts only. items is null (not []) to distinguish
 		// "not requested" from "requested but empty".
 		if(take == 0) {
-			return scope.Outcome(summary, new {
+			
+			return scope.Outcome(summary, new DiagnosticsResult(
 				summary,
-				source     = "roslyn",
-				errors     = errorCount,
-				warnings   = warningCount,
+				"roslyn",
+				errorCount,
+				warningCount,
 				total,
-				returned   = 0,
-				has_more   = total > 0,
-				page_token = (string?) null,
-				items      = (object[]?) null
-			});
+				0,
+				total > 0));
 		}
 		
 		var effectiveSkip  = Math.Clamp(skip, 0, total);
@@ -119,17 +121,16 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		return scope.Outcome(summary, new {
+		return scope.Outcome(summary, new DiagnosticsResult(
 			summary,
-			source    = "roslyn",
-			errors    = errorCount,
-			warnings  = warningCount,
+			"roslyn",
+			errorCount,
+			warningCount,
 			total,
-			returned   = items.Length,
-			has_more   = hasMore,
-			page_token = nextToken,
-			items
-		});
+			items.Length,
+			hasMore,
+			nextToken,
+			items));
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.

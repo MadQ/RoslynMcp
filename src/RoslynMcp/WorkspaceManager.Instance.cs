@@ -26,20 +26,25 @@ internal sealed partial class WorkspaceManager
 		private          FileSystemWatcher?   watcher;
 		
 		// Maps normalized .csproj paths → ProjectIds for all projects in the workspace.
-		private readonly Dictionary<string, ProjectId> projectMap = new(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, ProjectId> projectMap = new(StringComparer.OrdinalIgnoreCase)
+		;
 		
 		// Per-project compilation cache — cleared on any file change.
-		private readonly Dictionary<ProjectId, Compilation> compilationCache = new();
+		private readonly Dictionary<ProjectId, Compilation> compilationCache = new()
+		;
 		
 		// Incremented on each file-system change that requires a reload; cleared after reload completes.
 		// Using a generation counter rather than a bool so a change arriving during a load is not lost.
-		private volatile int reloadVersion;
+		private volatile int reloadVersion
+		;
 		
 		// Set early in Dispose so the timer callback can exit cleanly before the workspace is torn down.
-		private volatile bool disposed;
+		private volatile bool disposed
+		;
 		
 		// The path used to load this workspace (solution or csproj), for reloading.
-		private readonly string     loadPath;
+		private readonly string     loadPath
+		;
 		private readonly LoadMode   loadMode;
 		private readonly FileLogger logger;
 		
@@ -53,18 +58,21 @@ internal sealed partial class WorkspaceManager
 		private readonly HashSet<string>  pendingDeletes = new(StringComparer.OrdinalIgnoreCase);
 		// Tracks file sizes written by RM's own TryApplyChanges calls so FlushMSBuild
 		// can skip reloading files that are already up to date in the workspace.
-		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase);
+		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase)
+		;
 		private const    int                       MaxRmOwnedWriteSizes = 50;
 		// Per-file FSW suppression — ref-counted for concurrent-write safety.
 		// A path is added before each RM-owned write and decremented in the finally block.
 		// ScheduleDebounced skips events where the count is > 0.
-		private readonly ConcurrentDictionary<string, int> ignoredPaths = new(StringComparer.OrdinalIgnoreCase);
+		private readonly ConcurrentDictionary<string, int> ignoredPaths = new(StringComparer.OrdinalIgnoreCase)
+		;
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
 		// Ref-counted FSW suppression — multiple concurrent ApplyChangesWithFswSuppressed
 		// calls each increment on entry and decrement on exit; EnableRaisingEvents is only
 		// restored when the last suppressor finishes (count returns to 0). See issue #145 item 3.
-		private          int              fswSuppressCount;
+		private          int              fswSuppressCount
+		;
 		
 		// ── Factory methods ──────────────────────────────────────────────────
 		
@@ -164,6 +172,7 @@ internal sealed partial class WorkspaceManager
 		public IEnumerable<string> ProjectPaths
 		{
 			get {
+				
 				@lock.EnterReadLock();
 				
 				try {
@@ -183,7 +192,8 @@ internal sealed partial class WorkspaceManager
 			
 			// Snapshot under read lock — prevents use-after-dispose if ReloadIfNeeded
 			// swaps and disposes the old workspace on a concurrent thread.
-			@lock.EnterReadLock();
+			@lock.EnterReadLock()
+			;
 			try {
 				return workspace.CurrentSolution;
 			}
@@ -209,6 +219,7 @@ internal sealed partial class WorkspaceManager
 				gen       = reloadVersion;
 				
 				if(compilationCache.TryGetValue(projectId, out var cached))
+					
 					return cached;
 			}
 			finally {
@@ -239,18 +250,22 @@ internal sealed partial class WorkspaceManager
 		ProjectId ResolveProjectId_NoLock(string? csprojPath)
 		{
 			if(csprojPath is null)
+				
 				return defaultProjectId;
 			
 			if(projectMap.TryGetValue(csprojPath, out var projectId))
+				
 				return projectId;
 			
 			// Match by filename only (agent may pass a relative path that doesn't match fully).
-			var fileName = Path.GetFileName(csprojPath);
+			var fileName = Path.GetFileName(csprojPath)
+			;
 			var match    = projectMap.FirstOrDefault(kvp =>
 				string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase)
 			);
 			
 			if(match.Value is not null)
+				
 				return match.Value;
 			
 			return defaultProjectId;
@@ -264,6 +279,7 @@ internal sealed partial class WorkspaceManager
 			try {
 				
 				if(projectMap.ContainsKey(normalizedPath))
+					
 					return normalizedPath;
 				
 				return projectMap.Keys.FirstOrDefault();
@@ -295,6 +311,7 @@ internal sealed partial class WorkspaceManager
 					);
 					
 					if(hasFile)
+						
 						return csproj;
 				}
 				
@@ -316,6 +333,7 @@ internal sealed partial class WorkspaceManager
 			@lock.EnterReadLock();
 			
 			try {
+				
 				ws              = workspace;
 				currentSolution = workspace.CurrentSolution;
 				adhocProjectId  = defaultProjectId;
@@ -334,7 +352,8 @@ internal sealed partial class WorkspaceManager
 						
 						using var stream = File.OpenRead(fullPath);
 						var newText = SourceText.From(stream, FileWriter.Utf8NoBom);
-						var newSolution = currentSolution;
+						var newSolution = currentSolution
+						;
 						
 						foreach(var id in docIds)
 							newSolution = newSolution.WithDocumentText(id, newText);
@@ -348,6 +367,7 @@ internal sealed partial class WorkspaceManager
 					{ }
 				}
 				else {
+					
 					Interlocked.Increment(ref reloadVersion);
 					InvalidateCompilation();
 				}
@@ -364,21 +384,25 @@ internal sealed partial class WorkspaceManager
 		public void Dispose()
 		{
 			// Signal FlushPendingChanges to bail early on any in-flight or pending callbacks.
-			disposed = true;
+			disposed = true
+			;
 			
 			watcher?.Dispose();
 			
 			// Quiesce the timer: wait for any in-flight callback to complete before
 			// tearing down @lock and workspace, which the callback accesses.
-			Timer? timerToQuiesce;
+			Timer? timerToQuiesce
+			;
 			
 			lock(debounceLock) {
+				
 				timerToQuiesce = debounceTimer;
 				debounceTimer  = null;
 				rmOwnedWriteSizes.Clear();
 			}
 			
 			if(timerToQuiesce is not null) {
+				
 				using var done = new ManualResetEventSlim(false);
 				timerToQuiesce.Dispose(done.WaitHandle);
 				done.Wait();
@@ -398,7 +422,8 @@ internal sealed partial class WorkspaceManager
 		static void AutoDetectAndBootstrap(string path, FileLogger logger)
 		{
 			// Start from the user's explicit choice; auto-detect only if not specified.
-			var mode = ServerArgs.Current.WorkspaceMode;
+			var mode = ServerArgs.Current.WorkspaceMode
+			;
 			
 			if(mode == WorkspaceMode.Auto) {
 				
@@ -408,6 +433,7 @@ internal sealed partial class WorkspaceManager
 					: MSBuildBootstrap.FindFirstCsproj(Path.GetDirectoryName(path) ?? path);
 				
 				if(csprojToCheck is not null) {
+					
 					var detected = MSBuildBootstrap.DetectProjectStyle(csprojToCheck);
 					
 					logger.LogInfo("Workspace", $"auto-detected {detected} from {Path.GetFileName(csprojToCheck)}");
@@ -437,14 +463,17 @@ internal sealed partial class WorkspaceManager
 		static void WarnIfLargeSolution(string path, WorkspaceMode mode, FileLogger logger)
 		{
 			if(mode == WorkspaceMode.Adhoc)
+				
 				return;
 			
 			var dir = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
 			
 			if(dir is null)
+				
 				return;
 			
 			try {
+				
 				var count = Directory.EnumerateFiles(dir, "*.csproj", SearchOption.AllDirectories).Count();
 				
 				if(count > LargeSolutionThreshold)
@@ -475,7 +504,8 @@ internal sealed partial class WorkspaceManager
 				if(solutionPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)) {
 					
 					// .slnx — parse XML and load each project into the same workspace.
-					var doc    = System.Xml.Linq.XDocument.Load(solutionPath);
+					var doc    = System.Xml.Linq.XDocument.Load(solutionPath)
+					;
 					var slnDir = Path.GetDirectoryName(solutionPath)!;
 					
 					var projectPaths = doc.Root!
@@ -494,7 +524,8 @@ internal sealed partial class WorkspaceManager
 						catch(Exception ex) when(ex is not OperationCanceledException) {
 							// Multi-TFM projects or transitive references may already be loaded
 							// by a previous OpenProjectAsync call. Log and skip.
-							log?.LogInfo("Load", $"Skipped {Path.GetFileName(projectPath)}: {ex.GetType().Name}: {ex.Message}");
+							log?.LogInfo("Load", $"Skipped {Path.GetFileName(projectPath)}: {ex.GetType().Name}: {ex.Message}")
+							;
 						}
 					}
 				}
@@ -505,6 +536,7 @@ internal sealed partial class WorkspaceManager
 				return msbuildWorkspace;
 			}
 			catch(Exception ex) when(ex is not OperationCanceledException) {
+				
 				log?.LogError("LoadSolution", $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
 				msbuildWorkspace.Dispose();
 				throw new InvalidOperationException($"Failed to load solution '{solutionPath}': {ex.Message}", ex);
@@ -514,6 +546,7 @@ internal sealed partial class WorkspaceManager
 		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log)
 		{
 			try {
+				
 				var msbuildWorkspace = MSBuildWorkspace.Create();
 				
 				msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
@@ -601,12 +634,14 @@ internal sealed partial class WorkspaceManager
 		void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
 		{
 			if(!path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+				
 				return;
 			
 			using var stream = File.OpenRead(path);
 			
 			var text = SourceText.From(stream, FileWriter.Utf8NoBom);
-			var name = Path.GetRelativePath(rootPath, path);
+			var name = Path.GetRelativePath(rootPath, path)
+			;
 			
 			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
 			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
@@ -631,6 +666,7 @@ internal sealed partial class WorkspaceManager
 			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
 			
 			if(existing is null)
+				
 				return;
 			
 			adhocWorkspace.TryApplyChanges(adhocWorkspace.CurrentSolution.RemoveDocument(existing.Id));
@@ -653,6 +689,7 @@ internal sealed partial class WorkspaceManager
 			@lock.EnterReadLock();
 			
 			try {
+				
 				ws           = workspace;
 				baseSolution = workspace.CurrentSolution;
 			}
@@ -665,9 +702,10 @@ internal sealed partial class WorkspaceManager
 		
 		// Triggers a full workspace reload on the next GetCompilation call. Used by
 		// callers (WorkspaceManager.ApplyChanges) that cannot retry the apply themselves.
-		internal void MarkReloadNeeded() => Interlocked.Increment(ref reloadVersion);
+		internal void MarkReloadNeeded() => Interlocked.Increment(ref reloadVersion)
+		;
 		
-
+		
 		
 		// Carries the caller's immutable Solution snapshot for diff computation and the expected
 		// Workspace reference for a best-effort staleness check before TryApplyChanges.
@@ -677,13 +715,16 @@ internal sealed partial class WorkspaceManager
 		{
 			// Best-effort staleness guard: if another thread completed a reload and replaced
 			// the workspace since the caller snapshotted it, discard rather than apply stale edits.
-			@lock.EnterReadLock();
+			@lock.EnterReadLock()
+			;
 			Workspace ws;
 			
 			try {
+				
 				ws = workspace;
 				
 				if(!ReferenceEquals(ws, expectedWs))
+					
 					return false;
 			}
 			finally {
@@ -694,7 +735,8 @@ internal sealed partial class WorkspaceManager
 			// (MSBuild only — Adhoc.TryApplyChanges is in-memory only, no disk write).
 			// Use caller's baseSolution snapshot — not ws.CurrentSolution post-unlock —
 			// so the diff reflects exactly what changed relative to the caller's view.
-			string[] ownedPaths = [];
+			string[] ownedPaths = []
+			;
 			
 			if(isMSBuild) {
 				
@@ -711,6 +753,7 @@ internal sealed partial class WorkspaceManager
 			// Ref-counted suppression: always disable before TryApplyChanges (idempotent),
 			// only re-enable when the last concurrent suppressor finishes.
 			if(watcher is not null) {
+				
 				Interlocked.Increment(ref fswSuppressCount);
 				watcher.EnableRaisingEvents = false;
 			}
@@ -725,10 +768,12 @@ internal sealed partial class WorkspaceManager
 				// ReloadIfNeeded between the staleness check and TryApplyChanges.
 				// NotSupportedException: TryApplyChanges throws for unsupported change kinds
 				// (e.g. AddDocument/RemoveDocument on MSBuildWorkspace). Both treated as false return.
-				_ = ex;
+				_ = ex
+				;
 				applied = false;
 			}
 			finally {
+				
 				if(watcher is not null && Interlocked.Decrement(ref fswSuppressCount) == 0)
 					watcher.EnableRaisingEvents = true;
 			}
@@ -751,16 +796,18 @@ internal sealed partial class WorkspaceManager
 						}
 						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 							// File gone or locked — skip recording; FlushMSBuild will reload normally.
-							_ = ex;
+							_ = ex
+							;
 						}
 					}
 				}
 			}
 			
 			InvalidateCompilation();
+			
 			return applied;
 		}
-
+		
 		
 		// For MSBuild-tracked .cs files: routes through TryApplyChanges as the single
 		// disk write (FSW-suppressed via ApplyChangesWithFswSuppressed). Returns false
@@ -771,6 +818,7 @@ internal sealed partial class WorkspaceManager
 			// Adhoc workspace TryApplyChanges is in-memory only — no disk write.
 			// Return false so the caller's WriteAndInvalidate path handles disk persistence.
 			if(!isMSBuild)
+				
 				return false;
 			
 			Workspace ws;
@@ -779,6 +827,7 @@ internal sealed partial class WorkspaceManager
 			@lock.EnterReadLock();
 			
 			try {
+				
 				ws              = workspace;
 				currentSolution = workspace.CurrentSolution;
 			}
@@ -789,6 +838,7 @@ internal sealed partial class WorkspaceManager
 			var docIds = currentSolution.GetDocumentIdsWithFilePath(filePath);
 			
 			if(docIds.IsEmpty)
+				
 				return false;
 			
 			var newSolution = currentSolution;
@@ -817,7 +867,7 @@ internal sealed partial class WorkspaceManager
 			InvalidateFile(fullPath);
 		}
 		
-
+		
 		void StartWatcher()
 		{
 			watcher = new FileSystemWatcher(rootPath, "*.cs")
@@ -843,6 +893,7 @@ internal sealed partial class WorkspaceManager
 			// Skip FSW events for paths RM is currently writing — prevents spurious workspace
 			// reloads from our own writes. Ref-counted for safety; normal usage is single-threaded.
 			if(!deleted && ignoredPaths.TryGetValue(fullPath, out var count) && count > 0)
+				
 				return;
 			
 			lock(debounceLock) {
@@ -850,6 +901,7 @@ internal sealed partial class WorkspaceManager
 				// Guard against late-arriving FSW callbacks after Dispose has quiesced the timer.
 				// Without this, a queued callback could create a new timer that never gets disposed.
 				if(disposed)
+					
 					return;
 				
 				if(deleted)
@@ -873,6 +925,7 @@ internal sealed partial class WorkspaceManager
 			try {
 				
 				if(disposed)
+					
 					return;
 				
 				string[] changed;
@@ -890,12 +943,14 @@ internal sealed partial class WorkspaceManager
 					FlushMSBuild(changed, deleted);
 				
 				else {
+					
 					Workspace ws;
 					ProjectId defId;
 					
 					@lock.EnterReadLock();
 					
 					try {
+						
 						ws    = workspace;
 						defId = defaultProjectId;
 					}
@@ -920,6 +975,7 @@ internal sealed partial class WorkspaceManager
 			@lock.EnterReadLock();
 			
 			try {
+				
 				ws              = workspace;
 				currentSolution = workspace.CurrentSolution;
 			}
@@ -953,12 +1009,14 @@ internal sealed partial class WorkspaceManager
 						rmOwnedWriteSizes.Remove(path);
 						
 						try {
+							
 							if(new FileInfo(path).Length == expected)
 								continue;
 						}
 						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 							// Can't read size — fall through to normal reload.
-							_ = ex;
+							_ = ex
+							;
 						}
 					}
 				}
@@ -969,10 +1027,14 @@ internal sealed partial class WorkspaceManager
 					
 					// MSBuildWorkspace doesn't support AddDocument via TryApplyChanges —
 					// it modifies the .csproj, conflicting with SDK-style implicit includes.
-					// Flag for full workspace reload on next tool call.
+					// Flag for full workspace reload on next tool call. Don't double-increment
+					// if a reload is already pending — InvalidateFile already set the flag,
+					// and a second increment would cause the in-flight reload to be discarded.
 					if(docIds.Length == 0) {
 						
-						Interlocked.Increment(ref reloadVersion);
+						if(Volatile.Read(ref reloadVersion) == 0)
+							Interlocked.Increment(ref reloadVersion);
+						
 						continue;
 					}
 					
@@ -1007,21 +1069,24 @@ internal sealed partial class WorkspaceManager
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
 		}
-			
-			
+		
+		
 		// ── Workspace reload ────────────────────────────────────────────────
 		
 		void ReloadIfNeeded()
 		{
 			// Fast path — no pending reload.
-			var gen = reloadVersion;
+			var gen = reloadVersion
+			;
 			
 			if(gen == 0)
+				
 				return;
 			
 			// Load workspace OUTSIDE the write lock — this can take seconds for large solutions
 			// and would block every concurrent reader for the duration.
-			logger.LogInfo("Reload", $"Reloading workspace ({loadMode}: {loadPath})");
+			logger.LogInfo("Reload", $"Reloading workspace ({loadMode}: {loadPath})")
+			;
 			
 			var sw = System.Diagnostics.Stopwatch.StartNew();
 			
@@ -1046,7 +1111,9 @@ internal sealed partial class WorkspaceManager
 				
 				default:
 					// Adhoc workspaces don't support full reload — just clear the pending flag.
-					Interlocked.CompareExchange(ref reloadVersion, 0, gen);
+					Interlocked.CompareExchange(ref reloadVersion, 0, gen)
+					;
+					
 					return;
 			}
 			
@@ -1061,6 +1128,7 @@ internal sealed partial class WorkspaceManager
 				// or another invalidation arrived — discard our load in both cases.
 				// Leave newWorkspace non-null so the finally block disposes it.
 				if(reloadVersion != gen)
+					
 					return;
 				
 				oldWorkspace = workspace;
@@ -1077,11 +1145,13 @@ internal sealed partial class WorkspaceManager
 				
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.
-				Interlocked.CompareExchange(ref reloadVersion, 0, gen);
+				Interlocked.CompareExchange(ref reloadVersion, 0, gen)
+				;
 				
 				projectCount = workspace.CurrentSolution.Projects.Count();
 			}
 			finally {
+				
 				@lock.ExitWriteLock();
 				
 				// Dispose and log happen outside the write lock — readers are unblocked first.
@@ -1101,17 +1171,21 @@ internal sealed partial class WorkspaceManager
 			
 			// GetCompilationAsync can take seconds — run outside the lock so concurrent
 			// readers are not blocked.
-			var compilation = project.GetCompilationAsync().GetAwaiter().GetResult() ?? CSharpCompilation.Create("empty");
+			var compilation = project.GetCompilationAsync().GetAwaiter().GetResult() ?? CSharpCompilation.Create("empty")
+			;
 			
 			// Briefly take the write lock only to cache the result.
 			// A concurrent thread may have compiled and stored first — prefer theirs.
 			// Only cache if the workspace generation hasn't changed — a concurrent reload
 			// clears compilationCache and bumps reloadVersion; storing here would reinsert
 			// a stale entry that callers would pick up before the next reload.
-			@lock.EnterWriteLock();
+			@lock.EnterWriteLock()
+			;
 			
 			try {
+				
 				if(compilationCache.TryGetValue(projectId, out var concurrent))
+					
 					return concurrent;
 				
 				if(reloadVersion == capturedGen)

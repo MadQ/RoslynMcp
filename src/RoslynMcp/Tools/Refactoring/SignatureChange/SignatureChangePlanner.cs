@@ -24,29 +24,37 @@ internal sealed class SignatureChangePlanner
 		CancellationToken cancellationToken)
 	{
 		// Find an editor that can handle this method kind.
-		var editor = Editors.FirstOrDefault(e => e.CanHandle(method));
+		var editor = Editors.FirstOrDefault(e => e.CanHandle(method))
+		;
 		
 		if(editor is null)
+			
 			return SignatureChangeResult.Failed(solution,$"No editor available for {method.MethodKind} method '{method.Name}'.");
 		
 		// Validate the request against the method.
-		var validationError = editor.Validate(method, request);
+		var validationError = editor.Validate(method, request)
+		;
 		
 		if(validationError is not null)
+			
 			return SignatureChangeResult.Failed(solution, validationError);
 		
 		// Find the declaration syntax.
-		var declRef = method.DeclaringSyntaxReferences.FirstOrDefault();
+		var declRef = method.DeclaringSyntaxReferences.FirstOrDefault()
+		;
 		
 		if(declRef is null)
+			
 			return SignatureChangeResult.Failed(solution, "Method is defined in metadata, not source.");
 		
 		var declaration = await declRef.GetSyntaxAsync(cancellationToken) as MethodDeclarationSyntax;
 		
 		if(declaration is null)
+			
 			return SignatureChangeResult.Failed(solution, "Symbol resolves to a non-method syntax node.");
 		
 		// Delegate to the editor.
+		
 		return await editor.ApplyAsync(method, declaration, request, solution, compilation, cancellationToken);
 	}
 }

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Reflection;
 using ModelContextProtocol.Server;
 
@@ -15,7 +15,7 @@ internal sealed class InfoTool : RoslynMcpTool
 		"Returns server metadata: version, build hash, process ID, uptime, and MSBuild discovery method. " +
 		"Use to confirm which server instance is running, verify the version, or diagnose server state. " +
 		"Optionally logs a marker entry — useful for marking test boundaries in the log viewer.")]
-	public object Info(
+	public ToolResult Info(
 		[Description("Optional label for the log marker, e.g. 'benchmark test 1 start'.")] string? marker = null)
 	{
 		using var scope = BeginTool("roslyn_info", marker);
@@ -29,13 +29,6 @@ internal sealed class InfoTool : RoslynMcpTool
 		if(marker is not null)
 			scope.Record($"marker: {marker}");
 		
-		return scope.Outcome("info", new {
-			
-			version,
-			pid,
-			uptime_seconds    = uptime,
-			msbuild_discovery = msbuild,
-			marker
-		});
+		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, marker));
 	}
 }

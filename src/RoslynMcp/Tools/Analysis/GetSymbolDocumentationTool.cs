@@ -28,22 +28,26 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName, new { containingType });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var symbol = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
+			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
 		var xml = symbol.GetDocumentationCommentXml();
 		
 		if(string.IsNullOrWhiteSpace(xml))
+			
 			return scope.Error(new SymbolDocumentationEmptyResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
-				null,
-				"No documentation comments found for this symbol."
-			));
+				null)
+			{
+				Error = "No documentation comments found for this symbol."
+			});
 		
 		var parsed = ParseDocumentation(xml);
 		
@@ -54,9 +58,10 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			parsed.Parameters,
 			parsed.Returns,
 			parsed.Remarks,
-			parsed.Example,
-			AdhocCaution(projectPath)
-		));
+			parsed.Example)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	
@@ -69,6 +74,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			var root = doc.Root;
 			
 			if(root is null)
+				
 				return new DocumentationComment();
 			
 			var summary    = GetElementText(root, "summary");
@@ -98,6 +104,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		var element = root.Element(elementName);
 		
 		if(element is null)
+			
 			return null;
 		
 		var text = element.Value.Trim();
