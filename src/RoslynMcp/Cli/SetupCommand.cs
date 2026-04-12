@@ -122,6 +122,8 @@ class SetupCommand : CliCommand
         {
             Console.WriteLine();
             Console.WriteLine("  Restart your agents (or reload the MCP config) to pick up the changes.");
+            Console.WriteLine();
+            Console.WriteLine($"  RoslynMcp v{CurrentVersion} — feedback & issues: https://github.com/MadQ/RoslynMcp");
         }
 
         Console.WriteLine();

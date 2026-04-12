@@ -71,6 +71,13 @@ class UpdateCommand : CliCommand
         }
 
         Console.WriteLine($"  {updatedCount} updated, {failedCount} failed.");
+
+        if(updatedCount > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"  RoslynMcp v{CurrentVersion} — feedback & issues: https://github.com/MadQ/RoslynMcp");
+        }
+
         Console.WriteLine();
         return failedCount > 0 ? 1 : 0;
     }
