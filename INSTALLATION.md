@@ -15,9 +15,24 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 ## Quick Start
 
-1. **Get the binary:** Download [RoslynMcp-vX.Y.Z-net10.0.zip](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere.
+1. **Get the binary:** Either download [RoslynMcp-vX.Y.Z-net10.0.zip](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere, **or** install via dotnet tool:
+
+   ```bash
+   dotnet tool install -g RoslynMcp
+   ```
 
 2. **Add to your client config.** Most clients take a JSON block like this (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
+
+   ```json
+   {
+     "roslyn": {
+       "type": "stdio",
+       "command": "roslynmcp"
+     }
+   }
+   ```
+
+   Or with an absolute path if you downloaded the zip:
 
    ```json
    {
@@ -44,7 +59,15 @@ See the client sections below for exact config file locations and JSON structure
 
 Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0`). Extract it anywhere and note the full path to `RoslynMcp.exe`.
 
-**Option B — Clone and build** (requires .NET 8, 10, or 11 SDK):
+**Option B — dotnet tool** (recommended for .NET developers, requires .NET SDK):
+
+```bash
+dotnet tool install -g RoslynMcp
+```
+
+This installs `roslynmcp` globally on PATH. Use `"roslynmcp"` as the command in your client config — no path needed.
+
+**Option C — Clone and build** (requires .NET 8, 10, or 11 SDK):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
@@ -59,13 +82,52 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 
 ### Step 2: Configure Your MCP Client
 
-Point your MCP client to the published executable using an absolute path to `RoslynMcp.exe`. Do not pass project paths as args — each `roslyn_*` tool call specifies `projectPath` directly. Client-specific examples below.
+Point your MCP client to the server using one of these approaches:
 
-**Published NuGet tool (coming soon):**
-```bash
-dotnet tool install --global RoslynMcp
-# Then use: "command": "roslyn-mcp"
+**Option A / C — absolute path** (download or clone/build):
+
+```json
+{
+  "roslyn": {
+    "type": "stdio",
+    "command": "/absolute/path/to/RoslynMcp.exe"
+  }
+}
 ```
+
+**Option B — dotnet tool (global install):**
+
+```json
+{
+  "roslyn": {
+    "type": "stdio",
+    "command": "roslynmcp"
+  }
+}
+```
+
+**Local tool install (advanced — per-project version pinning):**
+
+```bash
+dotnet tool install --create-manifest-if-needed RoslynMcp
+```
+
+Local tools require `dotnet tool run` as the invocation, and your client config must set `cwd` to the project root so the tool manifest is found:
+
+```json
+{
+  "roslyn": {
+    "type": "stdio",
+    "command": "dotnet",
+    "args": ["tool", "run", "roslynmcp"],
+    "cwd": "/absolute/path/to/your/project"
+  }
+}
+```
+
+> Not all MCP clients support `cwd`. Global install (`-g`) is recommended for most users.
+
+Do not pass project paths as args — each `roslyn_*` tool call specifies `projectPath` directly. Client-specific examples below.
 
 ---
 
