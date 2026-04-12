@@ -25,7 +25,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
-		using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName);
+		using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName, new { containingType });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);

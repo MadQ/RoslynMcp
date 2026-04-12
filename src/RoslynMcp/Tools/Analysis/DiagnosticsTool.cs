@@ -28,7 +28,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_diagnostics", filePath);
+		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { severity, skip, take });
 		
 		// Stateless page token overrides skip/severity — agents don't need to track offsets manually.
 		if(page_token is not null)

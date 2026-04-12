@@ -36,7 +36,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		[Description("Maximum members to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_type_members", typeName);
+		using var scope = BeginTool("roslyn_get_type_members", typeName, new { memberKind, includeInherited, skip, take });
 		
 		if(scope.TryServeCachedPage<object?>(page_token, ref skip, ref take, 200, out var cached))
 			return scope.Outcome("cached page", cached);

@@ -35,7 +35,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		[Description("Preview without writing — returns line count and encoding info. Default: false.")]                                             bool    dryRun    = false
 	)
 	{
-		using var scope   = BeginTool("roslyn_write_file", filePath);
+		using var scope   = BeginTool("roslyn_write_file", filePath, new { createNew, dryRun });
 		
 		var       rootPath = workspace.GetRootPath(projectPath);
 		

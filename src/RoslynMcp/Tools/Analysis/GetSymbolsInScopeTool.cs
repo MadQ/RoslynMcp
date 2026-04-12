@@ -26,7 +26,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		[Description("1-based column number of the target position. Use roslyn_read_file to find column offsets.")] int column,
 		[Description(ProjectPathDescription)] string projectPath)
 	{
-		using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}");
+		using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}", new { column });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);

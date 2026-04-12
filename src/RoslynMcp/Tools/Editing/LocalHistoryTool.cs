@@ -40,7 +40,7 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		bool    force  = false
 	)
 	{
-		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action);
+		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action, new { action, filePath, force });
 
 		Task<object> task = action.ToLowerInvariant() switch {
 

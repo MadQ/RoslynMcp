@@ -36,7 +36,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		[Description("Preview the insertion without writing. Returns what would change. Default: false.")                   ] bool    dryRun       = false
 	)
 	{
-		using var scope = BeginTool("roslyn_insert_lines", filePath);
+		using var scope = BeginTool("roslyn_insert_lines", filePath, new { atLine, insertAfter, insertBefore, dryRun });
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var fullPath = ResolveFilePath(filePath, rootPath);

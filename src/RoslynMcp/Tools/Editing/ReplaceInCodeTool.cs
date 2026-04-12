@@ -43,14 +43,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false
 	)
 	{
-		using var scope    = BeginTool("roslyn_replace_in_code", filePath);
+		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force });
 		
 		var       rootPath = workspace.GetRootPath(projectPath);
-		
-		// Log args upfront so failure entries show what was passed.
-		var replacementPreview = replacement.Length > 120 ? replacement[..120] + "…" : replacement;
-		
-		scope.SetArgs(new { nodeKind, textPattern, replacement = replacementPreview, dryRun, force });
 		
 		var fullPath = ResolveFilePath(filePath, rootPath);
 		

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -39,7 +39,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("When true (default), reads package references directly from the .csproj — fast and accurate for explicit references only. When false, infers packages from resolved metadata reference paths, which may include transitive dependencies.")] bool directOnly = true)
 	{
-		using var scope = BeginTool("roslyn_get_project_info");
+		using var scope = BeginTool("roslyn_get_project_info", null, new { directOnly });
 		
 		if(!TryGetProject(projectPath, out var project, out var error))
 			return scope.Error(error);

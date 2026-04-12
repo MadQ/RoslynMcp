@@ -26,7 +26,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		[Description("Maximum types to return. Default: 100, max: 500.")] int take = 100,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_list_types", namespaceFilter);
+		using var scope = BeginTool("roslyn_list_types", namespaceFilter, new { kindFilter, skip, take });
 		
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 500, out var cached))

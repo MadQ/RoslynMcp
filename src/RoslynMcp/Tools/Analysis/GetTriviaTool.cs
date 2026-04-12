@@ -37,7 +37,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         [Description("Pass true to return all available C# syntax kind names instead of analyzing trivia. No filePath needed.")] bool listSyntaxKinds = false,
         [Description("Pass true to return all available trivia kind names instead of analyzing trivia. No filePath needed.")] bool listTriviaKinds = false)
     {
-        using var scope = BeginTool("roslyn_get_trivia", filePath);
+        using var scope = BeginTool("roslyn_get_trivia", filePath, new { startLine, endLine, syntaxKind, triviaKind, includeLeading, includeTrailing, skip, take, listSyntaxKinds, listTriviaKinds });
 
         if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds: false, listTypeKinds: false, listSearchContexts: false, out var discovery))
             return scope.Outcome("discovery", discovery);

@@ -143,7 +143,7 @@ internal abstract partial class RoslynMcpTool
 				detail ??= "unhandled exception";
 			}
 			
-			log.LogTool(name, sw.ElapsedMilliseconds, !failed, subject, detail, isMSBuild, cacheTag, estimatedTokens, responsePeek, args);
+			log.LogTool(name, sw.ElapsedMilliseconds, !failed, isMSBuild, estimatedTokens, subject, detail, cacheTag, responsePeek, args);
 			
 			onDispose();
 		}

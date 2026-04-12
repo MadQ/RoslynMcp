@@ -31,7 +31,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_find_references", symbolName);
+		using var scope = BeginTool("roslyn_find_references", symbolName, new { containingType, skip, take });
 		
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))

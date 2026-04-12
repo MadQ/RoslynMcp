@@ -26,7 +26,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
         [Description("1-based line to start reading from. Default: 1 (start of file). Combine with endLine to read a specific section.")] int startLine = 1,
         [Description("1-based line to stop reading at (inclusive). Default: end of file. Use roslyn_get_file_outline to find a member's line range.")] int endLine = int.MaxValue)
     {
-        using var scope = BeginTool("roslyn_read_file", filePath);
+        using var scope = BeginTool("roslyn_read_file", filePath, new { startLine, endLine });
 
         var rootPath   = workspace.GetRootPath(projectPath);
         var normalized = NormalizePath(filePath);

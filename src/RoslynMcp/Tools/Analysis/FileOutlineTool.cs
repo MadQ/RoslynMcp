@@ -26,7 +26,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_file_outline", filePath);
+		using var scope = BeginTool("roslyn_get_file_outline", filePath, new { skip, take });
 		
 		
 		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 100, out var cached))

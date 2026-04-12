@@ -24,7 +24,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		[Description("1-based column number.")] int column,
 		[Description(ProjectPathDescription)] string projectPath)
 	{
-		using var scope = BeginTool("roslyn_get_symbol_info", $"{filePath}:{line}");
+		using var scope = BeginTool("roslyn_get_symbol_info", $"{filePath}:{line}", new { column });
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);

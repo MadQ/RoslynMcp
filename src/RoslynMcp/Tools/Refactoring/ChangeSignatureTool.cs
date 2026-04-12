@@ -37,7 +37,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		[Description("Optional containing type to disambiguate when multiple methods share the same name, e.g. 'OrderService'.")] string? containingType = null,
 		[Description("Parameters to add as a JSON array: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]. Each entry requires name, type, and defaultValue. Omit or pass null to preview the overload structure without adding parameters.")] string? addParameters = null)
 	{
-		using var scope = BeginTool("roslyn_change_signature", containingType is not null ? $"{containingType}.{methodName}" : methodName);
+		using var scope = BeginTool("roslyn_change_signature", containingType is not null ? $"{containingType}.{methodName}" : methodName, new { containingType, addParameters });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);

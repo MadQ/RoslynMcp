@@ -42,6 +42,17 @@ internal abstract partial class RoslynMcpTool
 		return scope;
 	}
 	
+	/// <summary>Convenience overload that starts a timed tool scope and immediately records the tool's input arguments.
+	/// Args are serialized to compact JSON and stored on the scope for log emission on dispose.</summary>
+	protected ToolScope BeginTool<T>(string name, string? subject, T args)
+	{
+		var scope = BeginTool(name, subject);
+
+		scope.SetArgs(args);
+
+		return scope;
+	}
+	
 	// Static cache for project path inference: maps relative/bare paths to resolved full paths.
 	// Enabled by default; disable via ROSLYNMCP_DISABLE_PATH_CACHE=true env var.
 	// Entries evicted above 500 to prevent unbounded growth in long-running server sessions.

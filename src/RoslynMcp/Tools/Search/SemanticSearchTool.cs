@@ -64,7 +64,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_semantic_search", pattern);
+		using var scope = BeginTool("roslyn_semantic_search", pattern, new { context, caseSensitive, excludeGenerated, filePattern, containingKind, skip, take });
 		
 		context     ??= "all";
 		filePattern ??= "*.cs";

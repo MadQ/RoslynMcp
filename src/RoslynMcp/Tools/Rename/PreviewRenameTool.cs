@@ -34,7 +34,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		CancellationToken cancellationToken,
 		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null)
 	{
-		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}");
+		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}", new { containingType });
 
 		// Use TryGetProject so symbol and solution both derive from the same workspace
 		// snapshot — Renamer.RenameSymbolAsync requires the symbol to belong to the

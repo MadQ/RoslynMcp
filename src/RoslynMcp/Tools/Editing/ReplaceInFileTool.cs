@@ -40,7 +40,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		)] bool normalizeLineEndings = true
 	)
 	{
-		using var scope = BeginTool("roslyn_replace_in_file", filePath);
+		using var scope = BeginTool("roslyn_replace_in_file", filePath, new { pattern, useRegex, caseSensitive, dryRun, normalizeLineEndings });
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var fullPath = ResolveFilePath(filePath, rootPath);

@@ -33,7 +33,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_search_files", pattern);
+		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, skip, take });
 		
 		filePattern ??= "*.cs";
 		

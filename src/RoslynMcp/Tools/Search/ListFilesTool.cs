@@ -26,7 +26,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_list_files", pattern);
+		using var scope = BeginTool("roslyn_list_files", pattern, new { recursive, skip, take });
 		
 		pattern ??= "**/*";
 		

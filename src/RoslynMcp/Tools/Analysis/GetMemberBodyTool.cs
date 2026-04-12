@@ -25,7 +25,7 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		CancellationToken ct = default)
 	{
-		using var scope = BeginTool("roslyn_get_member_body", symbolName);
+		using var scope = BeginTool("roslyn_get_member_body", symbolName, new { containingType });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			return scope.Error(error!);

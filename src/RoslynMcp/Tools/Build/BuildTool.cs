@@ -61,7 +61,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			"(broken .targets file, generator crash, restore failure) — skips the Roslyn fast-path entirely."
 		)] bool forceBuild = false)
 	{
-		using var scope = BeginTool("roslyn_build_project");
+		using var scope = BeginTool("roslyn_build_project", null, new { targetFramework, forceBuild });
 		
 		var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 		
