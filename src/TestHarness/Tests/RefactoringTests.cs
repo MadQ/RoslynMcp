@@ -4,7 +4,7 @@ internal static class RefactoringTests
 {
 	internal static async Task RunAsync(TestContext ctx, List<(bool pass, string message)> tests)
 	{
-		Console.WriteLine("\nRefactoring Tools (11 tests)");
+		Console.WriteLine("\nRefactoring Tools (12 tests)");
 		Console.WriteLine("─────────────────────────────────────────────────────────────");
 		
 		// ── preview_rename ──────────────────────────────────────────────────────
@@ -222,6 +222,87 @@ internal static class RefactoringTests
 			data => data?["error"]?.GetValue<string>() == "token not found"
 		));
 		
+		// 6. File rename: class name matches file stem → file renamed automatically.
+		{
+			const string TestName   = "roslyn_apply_rename: file renamed when class name matches stem";
+			const string OldFileRel = "src/RoslynMcp/FileRenameWidget.cs";
+			const string NewFileRel = "src/RoslynMcp/FileRenameRenamedWidget.cs";
+
+			Console.Write($"  {TestName,-55}");
+
+			async Task<(bool pass, string msg)> RunFileRename() {
+
+				var oldPath = Path.Combine(ctx.RepoRoot, OldFileRel.Replace('/', Path.DirectorySeparatorChar));
+				var newPath = Path.Combine(ctx.RepoRoot, NewFileRel.Replace('/', Path.DirectorySeparatorChar));
+				var sw      = System.Diagnostics.Stopwatch.StartNew();
+
+				// Pre-test cleanup — handles leftovers from a previous incomplete run.
+				if(File.Exists(oldPath)) File.Delete(oldPath);
+				if(File.Exists(newPath)) File.Delete(newPath);
+
+				try {
+
+					var (wOk, _, _) = await Call("roslyn_write_file", new {
+						filePath    = OldFileRel,
+						projectPath = ctx.TargetPath,
+						createNew   = true,
+						content     = "namespace RoslynMcp;\n\npublic class FileRenameWidget\n{\n}\n"
+					});
+
+					if(!wOk)
+						return (false, $"FAIL  (write fixture failed) [{sw.ElapsedMilliseconds}ms]");
+
+					var (pvOk, pvData, _) = await Call("roslyn_preview_rename", new {
+						symbolName  = "FileRenameWidget",
+						newName     = "FileRenameRenamedWidget",
+						projectPath = ctx.TargetPath
+					});
+
+					var tokenFR = pvData?["token"]?.GetValue<string>();
+
+					if(!pvOk || tokenFR is null)
+						return (false, $"FAIL  (preview failed) [{sw.ElapsedMilliseconds}ms]");
+
+					var (_, apData, _) = await Call("roslyn_apply_rename", new {
+						token = tokenFR, approval = "y", projectPath = ctx.TargetPath
+					});
+
+					if(apData?["error"] is not null)
+						return (false, $"FAIL  (apply: {apData?["message"]}) [{sw.ElapsedMilliseconds}ms]");
+
+					var filesRenamed = apData?["filesRenamed"]?.GetValue<int>();
+
+					if(filesRenamed is not 1)
+						return (false, $"FAIL  (filesRenamed={filesRenamed}, expected 1) [{sw.ElapsedMilliseconds}ms]");
+
+					if(File.Exists(oldPath))
+						return (false, $"FAIL  (old file still exists) [{sw.ElapsedMilliseconds}ms]");
+
+					if(!File.Exists(newPath))
+						return (false, $"FAIL  (new file not found) [{sw.ElapsedMilliseconds}ms]");
+
+					var newContent = await File.ReadAllTextAsync(newPath);
+
+					if(!newContent.Contains("class FileRenameRenamedWidget"))
+						return (false, $"FAIL  (renamed class not in new file) [{sw.ElapsedMilliseconds}ms]");
+
+					return (true, $"PASS  [{sw.ElapsedMilliseconds}ms]");
+				}
+				catch(Exception ex) {
+					return (false, $"FAIL  ({ex.Message}) [{sw.ElapsedMilliseconds}ms]");
+				}
+				finally {
+					if(File.Exists(oldPath)) File.Delete(oldPath);
+					if(File.Exists(newPath)) File.Delete(newPath);
+				}
+			}
+
+			var (p6, m6) = await RunFileRename();
+			Console.WriteLine(m6);
+			tests.Add((p6, m6));
+		}
+
+
 		// ── change_signature tests ──────────────────────────────────────────────
 		
 		// 1. Basic: add a parameter, verify diff has [Obsolete] and forwarding overload.

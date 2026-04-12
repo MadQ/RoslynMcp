@@ -9,13 +9,13 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 {
 	readonly ApprovalStore approvals;
 	readonly BackupStore    backups;
-	
+
 	public ApplyRenameTool(WorkspaceResolver workspace, ApprovalStore approvals, BackupStore backups, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache)
 	{
 		this.approvals = approvals;
 		this.backups   = backups;
 	}
-	
+
 	[McpServerTool(Name = "roslyn_apply_rename", Destructive = true, Title = "Apply Rename", OpenWorld = false)]
 	[Description(
 		"Commits or cancels a rename previewed by roslyn_preview_rename — always call that tool first to obtain a token. " +
@@ -35,17 +35,17 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			approvals.Reject(token);
-			return scope.Failed("rejected", new ApplyRenameResult("Rename rejected. No files were changed.", null, null, "rejected"));
+			return scope.Failed("rejected", new ApplyRenameResult("Rename rejected. No files were changed.", null, null, "rejected", null));
 		}
 
 		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase) && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
-			return scope.Failed("invalid approval", new ApplyRenameResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, null, "invalid approval"));
+			return scope.Failed("invalid approval", new ApplyRenameResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, null, "invalid approval", null));
 
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
 		var operation  = approvals.Consume(token, forSession);
 
 		if(operation is null)
-			return scope.Failed("token not found", new ApplyRenameResult($"Token '{token}' not found or already consumed. Run preview_rename again.", null, null, "token not found"));
+			return scope.Failed("token not found", new ApplyRenameResult($"Token '{token}' not found or already consumed. Run preview_rename again.", null, null, "token not found", null));
 
 		var rootPath       = workspace.GetRootPath(projectPath);
 		var projectChanges = operation.NewSolution.GetChanges(operation.BaseSolution)
@@ -53,15 +53,8 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			.ToArray()
 		;
 
-		// Track which doc IDs are new files (added) vs modified in-place (changed).
-		// Both sets must be written to disk; this set drives the pre-delete safety check.
-		var addedDocIds = projectChanges
-			.SelectMany(p => p.GetAddedDocuments())
-			.ToHashSet()
-		;
-
-		// changedDocs: all files to write — both renamed-in-place changes and new files at the renamed path.
-		// Deduped by physical path: multi-TFM produces the same file in multiple projects; writing once is enough.
+		// changedDocs: all files to write — both in-place changes and added docs at a new path.
+		// Deduped by physical path: multi-TFM produces the same file in multiple projects; write once.
 		var changedDocs = projectChanges
 			.SelectMany(p => p.GetChangedDocuments().Concat(p.GetAddedDocuments())
 				.Select(id => operation.NewSolution.GetDocument(id))
@@ -72,10 +65,9 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			.ToArray()
 		;
 
-		// removedDocs: old files to delete after confirming all new files are written.
-		// Deduped by physical path; paths still referenced anywhere in the new solution
-		// are excluded — linked/shared files can appear removed in one project but live
-		// in another.
+		// removedDocs: old files to delete after all new files are written.
+		// Deduped; paths still referenced anywhere in the new solution are excluded —
+		// linked/shared files can appear removed in one project but live in another.
 		var removedDocs = projectChanges
 			.SelectMany(p => p.GetRemovedDocuments()
 				.Select(id => operation.BaseSolution.GetDocument(id))
@@ -87,10 +79,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			.ToArray()
 		;
 
-		// Save pre- and post-change snapshots for each file before writing.
-		// SavePreAsync reads the current disk content (pre-rename); SavePostAsync saves the intended new content.
-		// For added docs, SavePreAsync returns null (file doesn't exist yet) — that is correct.
-		// Abort without touching any files if any snapshot fails.
+		// Save pre- and post-change snapshots before touching disk.
 		bool preSaved = false;
 
 		try {
@@ -102,92 +91,112 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 				preSaved = true;
 				await backups.SavePostAsync(doc.FilePath!, projectPath, "roslyn_apply_rename", bytes);
 			}
-
-			// Pre-snapshot old files to be deleted — enables roslyn_local_history restore.
-			// No post-snapshot: the post-state is absence of the file.
-			foreach(var doc in removedDocs) {
-				preSaved = false;
-				await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_rename");
-			}
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			var phaseWord = preSaved ? "post" : "pre";
 			var snapNote  = preSaved ? " Any pre-change snapshots already saved are not needed." : string.Empty;
 
-			// The approval token was already consumed — the agent must run roslyn_preview_rename again.
 			return scope.Failed("backup failed", new ApplyRenameResult(
 				$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
 				$"No files were modified.{snapNote} " +
 				"The approval token has been consumed — run roslyn_preview_rename again to get a new token, then retry.",
-				null, null, "backup failed"));
+				null, null, "backup failed", null));
 		}
 
-		// Token already consumed — wrap the write phase so any exception produces a
-		// clear recovery message rather than a raw MCP error with no guidance.
-		try {
+		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
+		if(!workspace.IsAdhoc(projectPath)) {
 
-			// Write changed files directly to disk for both MSBuildWorkspace and AdhocWorkspace.
-			// Bypasses TryApplyChanges entirely — that path is unreliable because the stored solution
-			// snapshot can be rejected as stale if a FSW-triggered reload fires between preview and apply.
+			workspace.ApplyChanges(projectPath, operation.NewSolution);
+
+			// Self-healing recovery: if TryApplyChanges truncated a file, re-write from memory.
 			foreach(var doc in changedDocs) {
 				var path    = doc.FilePath!;
 				var relPath = TryMakeRelative(path, rootPath) ?? path;
-				var content = (await doc.GetTextAsync()).ToString();
+				var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
 
+				if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
+					return scope.Failed("truncation detected", new ApplyRenameResult(truncErr.Error, null, null, "truncation detected", null));
+			}
+		}
+		else {
+			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
+			async (path, content) => {
 				await workspace.WriteAndInvalidate(projectPath, path,
 					() => FileWriter.WriteAllTextAsync(path, content));
 
+				var relPath = TryMakeRelative(path, rootPath) ?? path;
+
 				if(CheckForTruncation(relPath, path, content.Length) is { } truncErr)
-					return scope.Failed("truncation detected", new ApplyRenameResult(truncErr.Error, null, null, "truncation detected"));
+					throw new IOException(truncErr.Error);
+			});
+		}
+
+		// Delete removed files. Roslyn's rename API never produces removed documents
+		// in practice, but handled for correctness in edge cases.
+		var filesDeleted = 0;
+
+		foreach(var doc in removedDocs) {
+
+			try {
+				File.Delete(doc.FilePath!);
+				workspace.InvalidateFile(projectPath, doc.FilePath!);
+				filesDeleted++;
 			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		}
 
-			// Compute the physical paths of newly-created files (from added docs).
-			// All of these must exist on disk before we delete the old files — this guards
-			// against data loss when TryApplyChanges failed to create any new files.
-			var addedFilePaths = changedDocs
-				.Where(d => addedDocIds.Contains(d.Id))
-				.Select(d => d.FilePath!)
-				.ToArray()
-			;
+		// File rename: if preview identified a top-level type whose file stem matched
+		// the symbol name, rename the file now that the new content is on disk.
+		var filesRenamed = 0;
 
-			var filesDeleted = 0;
+		if(operation.FileRename is { } fr) {
 
-			// Only delete old files when new files are confirmed on disk.
-			if(removedDocs.Length > 0 && addedFilePaths.Length > 0 && addedFilePaths.All(File.Exists)) {
+			var (oldFilePath, newFilePath) = fr;
 
-				foreach(var doc in removedDocs) {
-					var path = doc.FilePath!;
+			// Case-only rename (e.g. Foo.cs → foo.cs) on case-insensitive filesystems
+			// requires a two-step move via a temp path to force the case change.
+			var caseOnly = string.Equals(oldFilePath, newFilePath, StringComparison.OrdinalIgnoreCase)
+				&& !string.Equals(oldFilePath, newFilePath, StringComparison.Ordinal);
 
-					await workspace.WriteAndInvalidate(projectPath, path, () => {
-						File.Delete(path);
-						return Task.CompletedTask;
-					});
+			if(!caseOnly && File.Exists(newFilePath))
+				return scope.Failed("file rename conflict",
+					new ApplyRenameResult(
+						$"Symbol renamed, but file rename failed: '{Path.GetFileName(newFilePath)}' already exists. " +
+						"Rename the file manually.",
+						changedDocs.Length, filesDeleted > 0 ? filesDeleted : null, "file rename conflict", null));
 
-					filesDeleted++;
+			try {
+
+				if(caseOnly) {
+
+					// Two-step via temp: old → temp → new, FSW suppressed at each destination.
+					var temp = oldFilePath + ".roslynmcp_rename_tmp";
+					await workspace.WriteAndInvalidate(projectPath, temp,
+						() => { FileWriter.Move(oldFilePath, temp, false); return Task.CompletedTask; });
+					await workspace.WriteAndInvalidate(projectPath, newFilePath,
+						() => { FileWriter.Move(temp, newFilePath, false); return Task.CompletedTask; });
 				}
+				else {
+					await workspace.WriteAndInvalidate(projectPath, newFilePath,
+						() => { FileWriter.Move(oldFilePath, newFilePath, false); return Task.CompletedTask; });
+				}
+
+				filesRenamed++;
 			}
-
-			var filesChanged = changedDocs.Length;
-			var sessionNote  = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
-
-			var summary = filesDeleted > 0
-				? $"{filesChanged} file(s) written, {filesDeleted} old file(s) deleted"
-				: $"{filesChanged} file(s) written"
-			;
-
-			return scope.Outcome(summary, new ApplyRenameResult(
-				$"Rename applied.{sessionNote} Files written to disk. Compilation will refresh automatically.",
-				filesChanged, filesDeleted > 0 ? filesDeleted : null, null));
+			catch(Exception ex) {
+				return scope.Failed("file rename failed",
+					new ApplyRenameResult(
+						$"Symbol renamed, but file rename failed: {ex.Message}. Rename the file manually.",
+						changedDocs.Length, filesDeleted > 0 ? filesDeleted : null, "file rename failed", null));
+			}
 		}
-		catch(OperationCanceledException) {
-			throw;
-		}
-		catch(Exception ex) {
-			return scope.Failed("write failed", new ApplyRenameResult(
-				$"Rename failed during apply: {ex.GetType().Name}: {ex.Message} " +
-				"Token has been consumed — run roslyn_preview_rename again to get a new token, then retry.",
-				null, null, "write failed"));
-		}
+
+		var filesWritten = changedDocs.Length;
+		var sessionNote  = forSession ? " Symbol approved for the remainder of this session." : string.Empty;
+
+		return scope.Outcome($"{filesWritten} file(s) written", new ApplyRenameResult(
+			$"Rename applied.{sessionNote} Files written to disk.",
+			filesWritten, filesDeleted > 0 ? filesDeleted : null, null, filesRenamed > 0 ? filesRenamed : null));
 	}
 }
 
@@ -195,5 +204,6 @@ internal sealed record ApplyRenameResult(
 	string  Message,
 	int?    FilesWritten,
 	int?    FilesDeleted,
-	string? Error
+	string? Error,
+	int?    FilesRenamed
 );
