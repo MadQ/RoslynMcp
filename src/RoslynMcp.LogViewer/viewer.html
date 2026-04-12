@@ -675,9 +675,8 @@
 		<div class="li"><div class="lk"><kbd>S</kbd></div><div>Auto-scroll</div></div>
 		<div class="li"><div class="lk"><kbd>T</kbd></div><div>Theme</div></div>
 		<div class="li"><div class="lk"><kbd>?</kbd></div><div>This legend</div></div>
-		<div class="li"><div class="lk"><kbd>Ctrl+F</kbd></div><div>Search</div></div>
+		<div class="li"><div class="lk"><kbd>/</kbd></div><div>Search</div></div>
 		<div class="li"><div class="lk"><kbd>Ctrl+L</kbd></div><div>Clear</div></div>
-		<div class="li"><div class="lk"><kbd>Ctrl+C</kbd></div><div>Copy entry</div></div>
 		<div class="li"><div class="lk"><kbd>Q</kbd></div><div>Shutdown</div></div>
 		<div class="li"><div class="lk"><kbd>Esc</kbd></div><div>Close / jump to end</div></div>
 	  </div>
@@ -826,7 +825,7 @@
 	  updateStatus();
 	});
 
-	// ── Selection (for Ctrl+C copy) ───────────────────────────────────────
+	// ── Selection ─────────────────────────────────────────────────────────
 	let selectedWrap = null;
 
 	function selectWrap(wrap) {
@@ -1192,20 +1191,13 @@
 		return;
 	  }
 
-	  if(e.ctrlKey && e.key === 'f') {
+	  if(e.key === '/' && !e.ctrlKey && !e.altKey && !e.metaKey && document.activeElement?.tagName !== 'INPUT') {
 		e.preventDefault();
 		searchBar.classList.remove('hidden');
 		searching = true;
 		searchInput.focus();
 		searchInput.select();
 		return;
-	  }
-
-	  if(e.ctrlKey && e.key === 'c') {
-		if(selectedWrap) {
-		  navigator.clipboard.writeText(selectedWrap.dataset.json || '').catch(() => {});
-		  return;
-		}
 	  }
 
 	  if(e.key === 'Escape') {

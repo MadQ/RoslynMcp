@@ -81,13 +81,13 @@ internal sealed class BuildTool : RoslynMcpTool
 				
 				DiagnosticItem[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
 				
-				return scope.Failed("Roslyn reported errors — fix these first, then build will run automatically.", new BuildResult(
+				return scope.Failed("Roslyn reported errors — fix these first, then call roslyn_build_project again.", new BuildResult(
 					Succeeded:    false,
 					Errors:       roslynErrors,
 					Warnings:     roslynWarnings,
 					Source:       "roslyn",
 					BuildSkipped: true,
-					SkipReason:   "Roslyn reported errors — fix these first, then build will run automatically.",
+					SkipReason:   "Roslyn reported errors — fix these first, then call roslyn_build_project again.",
 					DurationMs:   0,
 					ExitCode:     null
 				));
