@@ -472,6 +472,9 @@ internal sealed class BackupStore
 	// meta.json is a JSON object: { "token": BackupMeta, ... }
 	Dictionary<string, BackupMeta> ReadAllMetaEntries(string metaFile)
 	{
+		if(!File.Exists(metaFile))
+			return new Dictionary<string, BackupMeta>();
+
 		try {
 			var json = File.ReadAllText(metaFile);
 
@@ -678,7 +681,7 @@ internal sealed record BackupMeta
 	public required string   Operation       { get; init; }
 	public required string   Timestamp       { get; init; }
 	public required long     FileSizeBytes   { get; init; }
-	public required string   ContentHash     { get; init; }
+	public string ContentHash { get; init; } = string.Empty;
 	// "pre" / "post" for v2 snapshots; null for legacy entries.
 	public          string?  Phase           { get; init; }
 	// Legacy fields — nullable for backward compat with old meta files.
