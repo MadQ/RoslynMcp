@@ -27,7 +27,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		"If the symbol was previously approved for the session, the token is pre-confirmed and the response message will say so. " +
 		"Provide containingType when multiple symbols share the same name to avoid ambiguous matches. " +
 		"For direct text replacement without a review step, use roslyn_replace_in_code instead.")]
-	public async Task<object> PreviewRename(
+	public async Task<PreviewRenameResult> PreviewRename(
 		[Description("Current symbol name to rename, e.g. 'WindowKey'. Use roslyn_get_type_members or roslyn_find_references to verify the exact name before renaming.")] string symbolName,
 		[Description("New name for the symbol, e.g. 'WindowIdentity'. Must be a valid C# identifier.")] string newName,
 		[Description(ProjectPathDescription)] string projectPath,

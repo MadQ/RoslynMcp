@@ -24,7 +24,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		"or 'n' to cancel without writing any files. " +
 		"Tokens are single-use — once consumed or rejected, run roslyn_change_signature again if another change is needed. " +
 		"On success, writes all changed files to disk — including the new overload and any updated call sites — and reports the number of files modified.")]
-	public async Task<object> ApplySignatureChange(
+	public async Task<ApplySignatureChangeResult> ApplySignatureChange(
 		[Description("The confirmation token returned by roslyn_change_signature. Tokens are single-use — they expire after being applied or rejected.")] string token,
 		[Description("'y' to apply this signature change once; 'session' to apply and auto-approve the same method for all future changes in this session; 'n' to cancel without writing any files.")] string approval,
 		[Description(ProjectPathDescription)] string projectPath)
