@@ -25,7 +25,8 @@ internal static class FileWriter
     internal static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     // null! is safe — Initialize() is always called at startup before any writes are attempted.
-    static FileLogger _logger = null!;
+    static FileLogger _logger = null!
+;
 
     /// <summary>Wires the singleton logger. Must be called once at startup before any writes.</summary>
     internal static void Initialize(FileLogger fileLogger) => _logger = fileLogger;
@@ -33,22 +34,28 @@ internal static class FileWriter
     // ── Named overloads ───────────────────────────────────────────────────────
 
     internal static Task WriteAllTextAsync(string path, string content) =>
-        WriteWithRetryAsync(() => File.WriteAllTextAsync(path, content, Utf8NoBom), path);
+        WriteWithRetryAsync(() => File.WriteAllTextAsync(path, content, Utf8NoBom), path)
+;
 
     internal static Task WriteAllBytesAsync(string path, byte[] bytes) =>
-        WriteWithRetryAsync(() => File.WriteAllBytesAsync(path, bytes), path);
+        WriteWithRetryAsync(() => File.WriteAllBytesAsync(path, bytes), path)
+;
 
     internal static void WriteAllText(string path, string content) =>
-        WriteWithRetry(() => File.WriteAllText(path, content, Utf8NoBom), path);
+        WriteWithRetry(() => File.WriteAllText(path, content, Utf8NoBom), path)
+;
 
     internal static void WriteAllBytes(string path, byte[] bytes) =>
-        WriteWithRetry(() => File.WriteAllBytes(path, bytes), path);
+        WriteWithRetry(() => File.WriteAllBytes(path, bytes), path)
+;
 
     internal static void WriteAllLines(string path, IEnumerable<string> lines) =>
-        WriteWithRetry(() => File.WriteAllLines(path, lines, Utf8NoBom), path);
+        WriteWithRetry(() => File.WriteAllLines(path, lines, Utf8NoBom), path)
+;
 
     internal static void Move(string source, string dest, bool overwrite) =>
-        WriteWithRetry(() => File.Move(source, dest, overwrite), dest);
+        WriteWithRetry(() => File.Move(source, dest, overwrite), dest)
+;
 
     // ── Core retry implementations ────────────────────────────────────────────
 
@@ -58,7 +65,8 @@ internal static class FileWriter
     ///     Three attempts: immediate, ~50 ms, ~150 ms cumulative.
     /// </summary>
     internal static Task WriteWithRetryAsync(Func<Task> writeAction, string? filePath) =>
-        WriteWithRetryAsync(writeAction, 3, filePath);
+        WriteWithRetryAsync(writeAction, 3, filePath)
+;
 
     /// <summary>
     ///     Executes an async file-write action with exponential-backoff retry on transient
@@ -77,8 +85,10 @@ internal static class FileWriter
         for(var attempt = 0; attempt < maxAttempts - 1; attempt++) {
 
             try {
+
                 await writeAction();
                 state.LogRecovered();
+
                 return;
             }
             catch(Exception ex) when(IsHandled(ex)) {
@@ -95,6 +105,7 @@ internal static class FileWriter
             await writeAction();
         }
         catch(Exception ex) when(IsHandled(ex)) {
+
             state.LogTerminal(ex);
             throw;
         }
@@ -106,7 +117,8 @@ internal static class FileWriter
     ///     Three attempts: immediate, ~50 ms, ~150 ms cumulative.
     /// </summary>
     internal static void WriteWithRetry(Action writeAction, string? filePath) =>
-        WriteWithRetry(writeAction, 3, filePath);
+        WriteWithRetry(writeAction, 3, filePath)
+;
 
     /// <summary>
     ///     Executes a synchronous file-write action with exponential-backoff retry on transient
@@ -125,8 +137,10 @@ internal static class FileWriter
         for(var attempt = 0; attempt < maxAttempts - 1; attempt++) {
 
             try {
+
                 writeAction();
                 state.LogRecovered();
+
                 return;
             }
             catch(Exception ex) when(IsHandled(ex)) {
@@ -143,13 +157,15 @@ internal static class FileWriter
             writeAction();
         }
         catch(Exception ex) when(IsHandled(ex)) {
+
             state.LogTerminal(ex);
             throw;
         }
     }
 
     private static bool IsHandled(Exception ex) =>
-        ex is IOException or UnauthorizedAccessException or NotSupportedException;
+        ex is IOException or UnauthorizedAccessException or NotSupportedException
+;
 
     // Mutable struct — all methods that modify fields must be called on the local directly.
     private struct RetryState(string? filePath)
@@ -167,7 +183,9 @@ internal static class FileWriter
         public bool OnCaught(Exception ex, int attempt)
         {
             if(ex is not IOException and not UnauthorizedAccessException) {
+
                 _logger.LogError("write_retry", $"non-retryable {ex.GetType().Name}{FileLabel}");
+
                 return false;
             }
 

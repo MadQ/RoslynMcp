@@ -187,14 +187,14 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 					// Two-step via temp: old → temp → new, FSW suppressed at each destination.
 					var temp = oldFilePath + ".roslynmcp_rename_tmp"
 					;
-					await workspace.WriteAndInvalidate(projectPath, temp,
+					await workspace.WriteAndInvalidate(projectPath, temp, oldFilePath,
 						() => { FileWriter.Move(oldFilePath, temp, false); return Task.CompletedTask; });
-					await workspace.WriteAndInvalidate(projectPath, newFilePath,
+					await workspace.WriteAndInvalidate(projectPath, newFilePath, temp,
 						() => { FileWriter.Move(temp, newFilePath, false); return Task.CompletedTask; });
 				}
 				else {
 					
-					await workspace.WriteAndInvalidate(projectPath, newFilePath,
+					await workspace.WriteAndInvalidate(projectPath, newFilePath, oldFilePath,
 						() => { FileWriter.Move(oldFilePath, newFilePath, false); return Task.CompletedTask; });
 				}
 				

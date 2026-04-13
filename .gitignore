@@ -4,9 +4,9 @@
 # Claude Code local state
 .claude/
 
-# Scratch files
+# Scratch files — _Name_.cs test fixtures in the RoslynMcp project are transient and never committed.
 log.txt
-src/RoslynMcp/_Scratch_.cs
+src/RoslynMcp/_*_.cs
 
 # User-specific files
 *.rsuser

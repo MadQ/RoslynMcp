@@ -63,8 +63,16 @@ internal sealed partial class WorkspaceManager
 		private const    int                       MaxRmOwnedWriteSizes = 50;
 		// Per-file FSW suppression — ref-counted for concurrent-write safety.
 		// A path is added before each RM-owned write and decremented in the finally block.
-		// ScheduleDebounced skips events where the count is > 0.
-		private readonly ConcurrentDictionary<string, int> ignoredPaths = new(StringComparer.OrdinalIgnoreCase)
+		// ScheduleDebounced skips non-Deleted events where the count is > 0 (Deleted events
+		// use ownedDeletePaths below instead — they are intentionally excluded here).
+		private readonly ConcurrentDictionary<string, int> ignoredPaths    = new(StringComparer.OrdinalIgnoreCase)
+		;
+		// Per-path owned-delete suppression for file rename operations. When RM moves a file
+		// (old → new), the FSW fires Deleted(oldPath) which is excluded from ignoredPaths by
+		// design. This set tracks the old paths whose delete events should be consumed rather
+		// than dispatched. Ref-counted for concurrent-rename safety; consumed on first match in
+		// ScheduleDebounced.
+		private readonly ConcurrentDictionary<string, int> ownedDeletePaths = new(StringComparer.OrdinalIgnoreCase)
 		;
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
@@ -849,22 +857,44 @@ internal sealed partial class WorkspaceManager
 			return ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws);
 		}
 		
-		// For untracked and Adhoc .cs files: suppresses the per-file FSW event during
-		// the write, then calls InvalidateFile to sync in-memory workspace state.
-		// No double write — Adhoc.InvalidateFile calls AddOrUpdateDocument (in-memory
-		// only); MSBuild-untracked InvalidateFile increments reloadVersion (no TryApplyChanges).
-		internal async Task WriteAndInvalidate(string fullPath, Func<Task> write)
+		
+		// ── FSW-safe write entry point ────────────────────────────────────────
+		//
+		// ⚠ THIS CODE IS THE RESULT OF EXTENSIVE STAGED ANALYSIS (issue #179, Stages 1–5).
+		//   DO NOT CHANGE WriteAndInvalidate, ScheduleDebounced, ownedDeletePaths, or
+		//   the InvalidateFile placement without first reading:
+		//   docs/development/WORKSPACE_SYNC.md
+		//
+		//   The ordering of InvalidateFile vs the finally-decrement is not arbitrary.
+		//   The ownedDeletePaths pattern for rename suppression is not redundant.
+		//   The FSW Deleted/Created split is intentional. Change any of it carefully.
+		//
+		// Forwarding overload — non-rename writes have no movedFromPath to suppress.
+		internal Task WriteAndInvalidate(string fullPath, Func<Task> write)
+			=> WriteAndInvalidate(fullPath, null, write);
+		
+		// movedFromPath: for file renames, the old path whose FSW Deleted event should be consumed
+		// and not trigger a full reload — the new path's InvalidateFile handles workspace sync.
+		internal async Task WriteAndInvalidate(string fullPath, string? movedFromPath, Func<Task> write)
 		{
 			ignoredPaths.AddOrUpdate(fullPath, 1, (_, count) => count + 1);
 			
+			if(movedFromPath != null)
+				ownedDeletePaths.AddOrUpdate(movedFromPath, 1, (_, count) => count + 1);
+			
 			try {
+				
 				await write();
+				
+				// Bug #3 fix: InvalidateFile must run while ignoredPaths is still incremented.
+				// Moving it after the finally decrement opened a race window where a late FSW
+				// event fired unsuppressed between the decrement and the workspace invalidation.
+				InvalidateFile(fullPath)
+				;
 			}
 			finally {
 				ignoredPaths.AddOrUpdate(fullPath, 0, (_, count) => count - 1);
 			}
-			
-			InvalidateFile(fullPath);
 		}
 		
 		
@@ -895,6 +925,16 @@ internal sealed partial class WorkspaceManager
 			if(!deleted && ignoredPaths.TryGetValue(fullPath, out var count) && count > 0)
 				
 				return;
+			
+			// Consume owned-delete entry for file rename operations — the delete of the old path
+			// is expected and should not trigger a reload (the rename's WriteAndInvalidate call
+			// handles the workspace sync for the new path). See ownedDeletePaths field comment.
+			if(deleted && ownedDeletePaths.TryGetValue(fullPath, out var delCount) && delCount > 0) {
+				
+				ownedDeletePaths.AddOrUpdate(fullPath, 0, (_, c) => Math.Max(0, c - 1));
+				
+				return;
+			}
 			
 			lock(debounceLock) {
 				

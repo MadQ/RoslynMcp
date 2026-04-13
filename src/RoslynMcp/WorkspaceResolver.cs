@@ -145,11 +145,14 @@ internal sealed class WorkspaceResolver
 	///     Use for .cs files where callers manage the write (e.g. atomic tmp→rename).
 	/// </summary>
 	public Task WriteAndInvalidate(string projectPath, string fullPath, Func<Task> write)
+	=> WriteAndInvalidate(projectPath, fullPath, null, write);
+	
+	public Task WriteAndInvalidate(string projectPath, string fullPath, string? movedFromPath, Func<Task> write)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
 		
 		paginationCache.InvalidateAll();
 		
-		return manager.WriteAndInvalidate(resolved, fullPath, write);
+		return manager.WriteAndInvalidate(resolved, fullPath, movedFromPath, write);
 	}
 }

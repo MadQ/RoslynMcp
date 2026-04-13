@@ -278,7 +278,10 @@ internal sealed partial class WorkspaceManager : IDisposable
 		return false;
 	}
 	
-	public async Task WriteAndInvalidate(string resolvedProjectPath, string fullPath, Func<Task> write)
+	public Task WriteAndInvalidate(string resolvedProjectPath, string fullPath, Func<Task> write)
+	=> WriteAndInvalidate(resolvedProjectPath, fullPath, null, write);
+	
+	public async Task WriteAndInvalidate(string resolvedProjectPath, string fullPath, string? movedFromPath, Func<Task> write)
 	{
 		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
 		WorkspaceInstance? instance = null;
@@ -296,7 +299,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		}
 		
 		if(instance is not null)
-			await instance.WriteAndInvalidate(fullPath, write);
+			await instance.WriteAndInvalidate(fullPath, movedFromPath, write);
 		else
 			// No cached workspace — write directly. A concurrent thread could load the
 			// workspace between the null-check and the write, but the resulting FSW event
