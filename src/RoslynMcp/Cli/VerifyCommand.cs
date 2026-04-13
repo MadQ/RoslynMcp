@@ -86,7 +86,6 @@ class VerifyCommand : CliCommand
             Console.WriteLine("  All configured agents look good.");
 
         Console.WriteLine();
-
         return hasIssues ? 1 : 0;
     }
 }

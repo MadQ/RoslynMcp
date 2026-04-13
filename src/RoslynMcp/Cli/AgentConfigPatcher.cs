@@ -15,13 +15,11 @@ record PatchOutcome(
 static class AgentConfigPatcher
 {
     static readonly JsonSerializerOptions WriteOptions = new() {
-
         WriteIndented = true,
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     static readonly JsonDocumentOptions ReadOptions = new() {
-
         AllowTrailingCommas = true,
         CommentHandling = JsonCommentHandling.Skip
     };
@@ -51,14 +49,12 @@ static class AgentConfigPatcher
 
                 // Backup before touching anything — one .roslynmcp.bak per config,
                 // overwritten on each run so it always holds the last pre-roslynmcp state.
-                backupPath = configPath + ".roslynmcp.bak"
-;
+                backupPath = configPath + ".roslynmcp.bak";
                 File.WriteAllText(backupPath, json);
 
                 var parsed = JsonNode.Parse(json, documentOptions: ReadOptions);
 
                 if(parsed is not JsonObject obj)
-
                     return new(PatchResult.Failed, backupPath,
                         Error: "Config file does not contain a JSON object at the root");
 
@@ -68,8 +64,7 @@ static class AgentConfigPatcher
             var isUpdate = client.UpsertEntry(root, commandPath);
 
             // Atomic write: temp → final so a crash mid-write can't corrupt the config.
-            tempPath = configPath + ".roslynmcp.tmp"
-;
+            tempPath = configPath + ".roslynmcp.tmp";
             File.WriteAllText(tempPath, root.ToJsonString(WriteOptions));
             File.Move(tempPath, configPath, overwrite: true);
 

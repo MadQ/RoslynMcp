@@ -105,12 +105,11 @@ internal sealed class ServerArgs
         // Single forward pass: collect all flag–value pairs.
         // A token is treated as a flag value only if it does not itself start with '-'.
         // Paths starting with '-' are not supported — use './' prefix or absolute paths.
-        string? workspaceFlag = null
-;
+        string? workspaceFlag = null;
         string? logPathFlag   = null;
         string? msBuildFlag   = null;
         var     preload       = new List<string>();
-		
+
 		var length = args.Length;
 		
 		for(var i = 0; i < length; i++) {
@@ -205,7 +204,6 @@ internal sealed class ServerArgs
     }
 
     static WorkspaceMode ParseWorkspaceMode(string? value) => value?.ToLowerInvariant() switch {
-
         "sdk"   => WorkspaceMode.Sdk,
         "vs"    => WorkspaceMode.Vs,
         "adhoc" => WorkspaceMode.Adhoc,

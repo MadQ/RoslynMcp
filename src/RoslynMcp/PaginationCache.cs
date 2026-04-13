@@ -26,8 +26,7 @@ internal sealed class PaginationCache
 			
 			while(cache.Count >= MaxEntries) {
 				// O(n) scan is fine — MaxEntries is 50, so this is at most 50 comparisons.
-				var oldest = cache.OrderBy(kvp => kvp.Value.LastAccess).First()
-				;
+				var oldest = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
 				
 				cache.Remove(oldest.Key);
 			}
@@ -47,8 +46,7 @@ internal sealed class PaginationCache
 				&& entry.Items is T[] typed) {
 				
 				// Sliding window: reset TTL on each access.
-				cache[token] = entry with { LastAccess = DateTime.UtcNow }
-				;
+				cache[token] = entry with { LastAccess = DateTime.UtcNow };
 				
 				items = typed.AsMemory();
 				

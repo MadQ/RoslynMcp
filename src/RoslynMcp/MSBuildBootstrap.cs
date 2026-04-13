@@ -17,8 +17,7 @@ internal static class MSBuildBootstrap
 	static readonly SemaphoreSlim gate = new(1, 1);
 	// volatile: the fast-path DCL check (if(completed) return failureReason) runs without the
 	// gate, so the JIT/CPU must not cache completed or reorder reads of the other fields past it.
-	static volatile bool    completed
-	;
+	static volatile bool    completed;
 	static volatile string? failureReason;
 	static volatile string  discoveryMethod = "not attempted";
 	
@@ -39,11 +38,9 @@ internal static class MSBuildBootstrap
 	public static WorkspaceMode DetectProjectStyle(string csprojPath)
 	{
 		if(!File.Exists(csprojPath))
-			
 			return WorkspaceMode.Sdk;
 		
 		try {
-			
 			using var reader = new StreamReader(csprojPath);
 			
 			for(var i = 0; i < 5 && !reader.EndOfStream; i++) {
@@ -54,7 +51,6 @@ internal static class MSBuildBootstrap
 					break;
 				
 				if(line.Contains("Sdk=", StringComparison.OrdinalIgnoreCase))
-					
 					return WorkspaceMode.Sdk;
 				
 				if(line.Contains("ToolsVersion=", StringComparison.OrdinalIgnoreCase) ||
@@ -74,7 +70,6 @@ internal static class MSBuildBootstrap
 	public static string? FindFirstCsproj(string directory)
 	{
 		try {
-			
 			return Directory.EnumerateFiles(directory, "*.csproj", SearchOption.AllDirectories)
 				.FirstOrDefault()
 			;
@@ -92,7 +87,6 @@ internal static class MSBuildBootstrap
 	public static string? EnsureReady(WorkspaceMode mode = WorkspaceMode.Auto)
 	{
 		if(completed)
-			
 			return failureReason;
 		
 		gate.Wait();
@@ -100,7 +94,6 @@ internal static class MSBuildBootstrap
 		try {
 			
 			if(completed)
-				
 				return failureReason;
 			
 			resolvedMode = mode;
@@ -109,9 +102,7 @@ internal static class MSBuildBootstrap
 				
 				// Adhoc mode: skip MSBuild entirely.
 				if(mode == WorkspaceMode.Adhoc) {
-					
 					discoveryMethod = "adhoc mode (MSBuild skipped)";
-					
 					return null;
 				}
 				
@@ -119,22 +110,17 @@ internal static class MSBuildBootstrap
 				if(mode == WorkspaceMode.Vs) {
 					
 					if(!OperatingSystem.IsWindows()) {
-						
 						failureReason = "VS workspace mode requires Windows (Visual Studio MSBuild).";
 						discoveryMethod = "not found — " + failureReason;
-						
 						return failureReason;
 					}
 					
 					var msbuildDir = TryVsWhere();
 					
 					if(msbuildDir is not null) {
-						
 						PrependToPath(msbuildDir);
 						if(TryRegister()) {
-							
 							discoveryMethod = $"resolved via vswhere — VS mode ({msbuildDir})";
-							
 							return null;
 						}
 					}
@@ -200,8 +186,7 @@ internal static class MSBuildBootstrap
 				// Unexpected exception before any known failure was recorded. Without this catch,
 				// the finally block would set completed=true with failureReason=null, which callers
 				// interpret as successful initialization.
-				failureReason   = $"MSBuild initialization failed unexpectedly: {ex.GetType().Name}: {ex.Message}"
-				;
+				failureReason   = $"MSBuild initialization failed unexpectedly: {ex.GetType().Name}: {ex.Message}";
 				discoveryMethod = "not found — unexpected error";
 			}
 			
@@ -222,8 +207,7 @@ internal static class MSBuildBootstrap
 	static bool TryDiscoverDotnet(out string dotnetDir, out string source)
 	{
 		// DOTNET_ROOT is the official cross-platform override.
-		var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT")
-		;
+		var dotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
 		
 		if(dotnetRoot is not null && Directory.Exists(dotnetRoot)) {
 			
@@ -248,8 +232,7 @@ internal static class MSBuildBootstrap
 		}
 		
 		// DOTNET_HOST_PATH — set by some .NET hosting scenarios.
-		var hostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH")
-		;
+		var hostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
 		
 		if(hostPath is not null && File.Exists(hostPath)) {
 			
@@ -279,8 +262,7 @@ internal static class MSBuildBootstrap
 		}
 		
 		// Well-known install paths per platform.
-		var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
-		;
+		var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 		
 		string[] candidates = OperatingSystem.IsWindows()
 			? [
@@ -324,7 +306,6 @@ internal static class MSBuildBootstrap
 		try {
 			
 			if(!MSBuildLocator.CanRegister)
-				
 				return false;
 			
 			MSBuildLocator.RegisterDefaults();
@@ -350,11 +331,9 @@ internal static class MSBuildBootstrap
 		var vsWherePath  = Path.Combine(programFiles, "Microsoft Visual Studio", "Installer", "vswhere.exe");
 		
 		if(!File.Exists(vsWherePath))
-			
 			return null;
 		
 		try {
-			
 			var psi = new ProcessStartInfo(vsWherePath) {
 				// -products * is required to discover standalone Build Tools installs (not just IDE editions).
 				Arguments              = "-latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\\**\\Bin\\MSBuild.exe",
@@ -367,19 +346,16 @@ internal static class MSBuildBootstrap
 			using var process = Process.Start(psi);
 			
 			if(process is null)
-				
 				return null;
 			
 			// Read both streams concurrently on thread pool — sequential reads deadlock if either
 			// pipe buffer fills. Both tasks unblock when the process exits (pipes close).
-			var stdoutTask = Task.Run(() => { try { return process.StandardOutput.ReadToEnd(); } catch { return ""; } })
-			;
+			var stdoutTask = Task.Run(() => { try { return process.StandardOutput.ReadToEnd(); } catch { return ""; } });
 			Task.Run(() => { try { process.StandardError.ReadToEnd(); } catch { } });
 			
 			// Enforce a hard timeout. WaitForExit(ms) returns false if the process hasn't exited,
 			// so ExitCode is only valid after a true return.
-			var exited = process.WaitForExit(5_000)
-			;
+			var exited = process.WaitForExit(5_000);
 			
 			if(!exited) {
 				
@@ -391,23 +367,18 @@ internal static class MSBuildBootstrap
 			}
 			
 			if(process.ExitCode != 0)
-				
 				return null;
 			
 			// After a normal exit the pipes are closed; stdoutTask should drain near-instantly.
-			var output = stdoutTask.Wait(1_000) ? stdoutTask.Result.Trim() : ""
-			;
+			var output = stdoutTask.Wait(1_000) ? stdoutTask.Result.Trim() : "";
 			
 			if(string.IsNullOrEmpty(output))
-				
 				return null;
 			
 			// vswhere returns the full path to MSBuild.exe — we need its directory.
-			var firstLine = output.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim()
-			;
+			var firstLine = output.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault()?.Trim();
 			
 			if(firstLine is null || !File.Exists(firstLine))
-				
 				return null;
 			
 			return Path.GetDirectoryName(firstLine);
@@ -440,7 +411,6 @@ internal static class MSBuildBootstrap
 				) as string;
 				
 				if(value is not null && Directory.Exists(value))
-					
 					return value;
 			}
 		}

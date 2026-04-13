@@ -9,7 +9,6 @@ class SetupCommand : CliCommand
         if(executablePath is null)
         {
             Console.Error.WriteLine("error: could not determine the current executable path.");
-
             return 1;
         }
 
@@ -23,8 +22,7 @@ class SetupCommand : CliCommand
         var results = AgentDetector.ProbeAll();
 
         // Present numbered list of detected agents.
-        Console.WriteLine("  Detected agents:")
-;
+        Console.WriteLine("  Detected agents:");
         Console.WriteLine();
 
         var candidates = new List<(int Number, AgentProbeResult Result)>();
@@ -54,14 +52,12 @@ class SetupCommand : CliCommand
         if(selected is null)
         {
             Console.WriteLine("  Cancelled.");
-
             return 0;
         }
 
         if(selected.Count == 0)
         {
             Console.WriteLine("  Nothing selected.");
-
             return 0;
         }
 
@@ -69,7 +65,6 @@ class SetupCommand : CliCommand
 
         // Warn about malformed configs before touching anything.
         if(!PreflightCheck(selected))
-
             return 1;
 
         WarnIfProcessesRunning();
@@ -128,13 +123,10 @@ class SetupCommand : CliCommand
             Console.WriteLine();
             Console.WriteLine("  Restart your agents (or reload the MCP config) to pick up the changes.");
             Console.WriteLine();
-            Console.WriteLine("  Tip: run 'dotnet roslynmcp setup-hooks' to add per-agent tool guidance hooks.");
-            Console.WriteLine();
             Console.WriteLine($"  RoslynMcp v{CurrentVersion} — feedback & issues: https://github.com/MadQ/RoslynMcp");
         }
 
         Console.WriteLine();
-
         return failedCount > 0 ? 1 : 0;
     }
 
@@ -144,15 +136,12 @@ class SetupCommand : CliCommand
         List<(int Number, AgentProbeResult Result)> candidates)
     {
         if(input.Equals("none", StringComparison.OrdinalIgnoreCase))
-
             return [];
 
         if(input.Equals("all", StringComparison.OrdinalIgnoreCase))
-
             return candidates.Select(c => c.Result).ToList();
 
         if(string.IsNullOrWhiteSpace(input))
-
             return null;
 
         var selected = new List<AgentProbeResult>();
@@ -162,7 +151,6 @@ class SetupCommand : CliCommand
             if(!int.TryParse(part, out var num) || num < 1 || num > candidates.Count)
             {
                 Console.WriteLine($"  Invalid selection: '{part}'");
-
                 return null;
             }
 
@@ -187,7 +175,6 @@ class SetupCommand : CliCommand
                 var json = File.ReadAllText(r.ConfigPath);
                 System.Text.Json.JsonDocument.Parse(json,
                     new System.Text.Json.JsonDocumentOptions {
-
                         AllowTrailingCommas = true,
                         CommentHandling = System.Text.Json.JsonCommentHandling.Skip
                     });
@@ -217,14 +204,12 @@ class SetupCommand : CliCommand
                         Console.WriteLine();
 
                         if(choice2 != "S")
-
                             return false;
 
                         selected.Remove(r);
                         break;
 
                     default:
-
                         return false;
                 }
             }

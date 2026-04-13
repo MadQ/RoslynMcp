@@ -16,36 +16,35 @@ class Program
 			.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
 			?.InformationalVersion ?? "?"
 	;
-	
+
 	
 	static async Task Main(string[] args)
 	{
 		var envLogPath = Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH");
-		
+
 		// Single-file mode (explicit path).
-		string? logPath  = null
-		;
+		string? logPath  = null;
 		string? watchDir = null;
-		
+
 		if(args.Length > 0) {
 			logPath = args[0];
 		}
 		else if(envLogPath is not null) {
-			
+
 			if(envLogPath.Length == 0) {
-				
+
 				Console.Error.WriteLine("RoslynMcp Log Viewer");
 				Console.Error.WriteLine("ROSLYNMCP_LOG_PATH is set to an empty string, so logging is disabled.");
 				Console.Error.WriteLine("Provide a log file path as an argument to view logs, e.g.:");
 				Console.Error.WriteLine("    RoslynMcp.LogViewer.exe <path-to-log-file>");
-				
+
 				return;
 			}
-			
+
 			logPath = envLogPath;
 		}
 		else {
-			
+
 			// Directory-watch mode — LogTailer discovers the latest per-PID log and auto-
 			// switches when a new RoslynMcp process starts (i.e. a new roslynmcp.*.log appears).
 			watchDir = Path.Combine(
@@ -53,24 +52,24 @@ class Program
 				"RoslynMcp", "logs"
 			);
 		}
-		
+
 		Console.Error.WriteLine($"RoslynMcp Log Viewer {GetVersion()}");
 		Console.Error.WriteLine($"Watching : {logPath ?? Path.Combine(watchDir!, "roslynmcp.*.log")}");
 		Console.Error.WriteLine($"Open     : http://localhost:5123");
-		
+
 		var cts = new CancellationTokenSource();
-		
+
 		Console.CancelKeyPress += (_, e) => {
-			
+
 			e.Cancel = true;
 			cts.Cancel();
 		};
-		
+
 		var builder = WebApplication.CreateBuilder();
-		
+
 		builder.WebHost.UseUrls("http://localhost:5123");
 		builder.Logging.ClearProviders();
-		
+
 		builder.Services.AddSingleton(
 			logPath is not null
 				? new LogTailer(logPath)
@@ -103,7 +102,6 @@ class Program
 				}
 				
 				if(!isLoopback)
-					
 					return Results.Forbid();
 			}
 			

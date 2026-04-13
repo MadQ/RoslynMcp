@@ -55,7 +55,6 @@ class ListCommand : CliCommand
         }
 
         Console.WriteLine();
-
         return 0;
     }
 }

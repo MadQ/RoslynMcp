@@ -17,26 +17,21 @@ if(args.Length > 0)
     Console.OutputEncoding = System.Text.Encoding.UTF8;
 
     var exit = args[0].ToLowerInvariant() switch {
-
-        "setup"       => RoslynMcp.Cli.SetupCommand.Run(),
-        "list"        => RoslynMcp.Cli.ListCommand.Run(),
-        "verify"      => RoslynMcp.Cli.VerifyCommand.Run(),
-        "update"      => RoslynMcp.Cli.UpdateCommand.Run(),
-        "setup-hooks" => RoslynMcp.Cli.SetupHooksCommand.Run(),
-        "hook"        => RoslynMcp.Cli.HookCommand.Run(),
-        "--version"   => PrintVersion(),
-        "-v"          => PrintVersion(),
-        _             => -1,
+        "setup"     => RoslynMcp.Cli.SetupCommand.Run(),
+        "list"      => RoslynMcp.Cli.ListCommand.Run(),
+        "verify"    => RoslynMcp.Cli.VerifyCommand.Run(),
+        "update"    => RoslynMcp.Cli.UpdateCommand.Run(),
+        "--version" => PrintVersion(),
+        "-v"        => PrintVersion(),
+        _           => -1,
     };
 
     if(exit >= 0)
-
         return exit;
 
     static int PrintVersion()
     {
         Console.WriteLine($"roslynmcp v{Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
-
         return 0;
     }
 }
@@ -45,14 +40,12 @@ ServerArgs.Initialize(args);
 
 // Increment the server start counter for pruning throttle — must run before DI construction
 // so FileLogger and BackupStore constructors see the updated count.
-FilePruner.IncrementAndGetRunCount()
-;
+FilePruner.IncrementAndGetRunCount();
 
 // Log unhandled exceptions before the host/DI is available.
 // This is the last line of defence — catches crashes that occur before tool handlers run.
 // Uses ResolvedLogPath (same path FileLogger writes to) so crash traces land in the same file.
-// TODO: File.AppendAllText here races with FileLogger's writeLock on the same process
-;
+// TODO: File.AppendAllText here races with FileLogger's writeLock on the same process;
 //       acceptable for now — crash handler and logger share the same per-PID file so only
 //       the intra-process lock race remains. Track as a separate issue.
 AppDomain.CurrentDomain.UnhandledException += (_, e) => {
@@ -102,8 +95,7 @@ builder.Services
 var host = builder.Build();
 
 // Reset the run counter after all DI constructors have run their prune passes.
-FilePruner.ApplyPendingReset()
-;
+FilePruner.ApplyPendingReset();
 
 var logger      = host.Services.GetRequiredService<FileLogger>();
 
@@ -115,10 +107,9 @@ lifetime.ApplicationStarted.Register(() => {
 	
 	logger.LogStart();
 	logger.LogInfo("Workspace", $"mode={ServerArgs.Current.WorkspaceMode}");
-	
+
 	// Warn if any agent config points to a stale path (e.g. after dotnet tool update).
-	var currentExe = Environment.ProcessPath
-	;
+	var currentExe = Environment.ProcessPath;
 	if(currentExe is not null)
 	{
 		foreach(var r in RoslynMcp.Cli.AgentDetector.ProbeAll()
@@ -141,7 +132,6 @@ if(ServerArgs.Current.PreloadPaths.Length > 0) {
     foreach(var path in ServerArgs.Current.PreloadPaths) {
 
         if(!Directory.Exists(path) && !File.Exists(path)) {
-
             logger.LogInfo("Preload", $"path not found, skipping: {path}");
             continue;
         }

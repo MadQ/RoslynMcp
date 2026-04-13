@@ -14,11 +14,11 @@ internal sealed class FileLogger : IDisposable
 {
 	const int MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
 	const int MaxRotatedFiles  = 3;
-	
-	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Log;
-	
-	readonly string? logPath;
 
+	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Log;
+
+	readonly string? logPath;
+	
 #if NET9_0_OR_GREATER
 		private readonly Lock             writeLock   = new();
 #else
@@ -26,34 +26,31 @@ internal sealed class FileLogger : IDisposable
 #endif
 	
 	readonly int     pid       = Environment.ProcessId;
-	
+
 	int  instanceCounter;
 	long sessionTokens;
-	
+
 	public bool IsEnabled => logPath is not null;
-	
+
 	public FileLogger()
 	{
 		logPath = ServerArgs.Current.ResolvedLogPath;
-		
+
 		if(logPath is null)
-			
 			return;
-		
+
 		try {
-			
 			var logDir = Path.GetDirectoryName(logPath)!;
-			
+
 			Directory.CreateDirectory(logDir);
-			
+
 			// Prune old per-PID log files (including their rotation siblings) by age.
 			// Pattern: "roslynmcp.*.log*" matches roslynmcp.1234.log, roslynmcp.1234.log.1, etc.
-			var rawLog			 = ServerArgs.Current.LogPath
-			;
+			var rawLog			 = ServerArgs.Current.LogPath;
 			var rawLogHasContent = rawLog is { Length: > 0 };
 			var rawStem			 = rawLogHasContent ? Path.GetFileNameWithoutExtension(rawLog) : "roslynmcp";
 			var rawExt			 = rawLogHasContent ? Path.GetExtension(rawLog)                : ".log";
-			
+
 			FilePruner.Prune(
 				  logDir
 				, $"{rawStem}.*{rawExt}*"
@@ -69,7 +66,6 @@ internal sealed class FileLogger : IDisposable
 	/// <summary>Logs server start with PID and working directory.</summary>
 	public void LogStart()
 		=> Write(new LogEntry {
-			
 			  Timestamp = Timestamp()
 			, Pid       = pid
 			, Level     = "START"
@@ -79,7 +75,6 @@ internal sealed class FileLogger : IDisposable
 	/// <summary>Logs server stop.</summary>
 	public void LogStop()
 		=> Write(new LogEntry {
-			
 			  Timestamp = Timestamp()
 			, Pid       = pid
 			, Level     = "STOP"
@@ -113,7 +108,6 @@ internal sealed class FileLogger : IDisposable
 			tokens = Interlocked.Add(ref sessionTokens, estimatedTokens);
 		
 		Write(new LogEntry {
-			
 			  Timestamp       = Timestamp()
 			, Pid             = pid
 			, Level           = "TOOL"
@@ -135,7 +129,6 @@ internal sealed class FileLogger : IDisposable
 	/// <summary>Logs an error outside of a tool call (e.g. workspace load failure).</summary>
 	public void LogError(string context, string message)
 		=> Write(new LogEntry {
-			
 			  Timestamp = Timestamp()
 			, Pid       = pid
 			, Level     = "ERROR"
@@ -145,7 +138,6 @@ internal sealed class FileLogger : IDisposable
 	/// <summary>Logs informational diagnostic messages (verbose logging).</summary>
 	public void LogInfo(string context, string message)
 		=> Write(new LogEntry {
-			
 			  Timestamp = Timestamp()
 			, Pid       = pid
 			, Level     = "INFO"
@@ -155,7 +147,6 @@ internal sealed class FileLogger : IDisposable
 	void Write(LogEntry entry)
 	{
 		if(logPath is null)
-			
 			return;
 		
 		var line = JsonSerializer.Serialize(entry, JsonOptions) + Environment.NewLine;
@@ -176,11 +167,9 @@ internal sealed class FileLogger : IDisposable
 	void RotateIfNeeded()
 	{
 		if(!File.Exists(logPath))
-			
 			return;
 		
 		if(new FileInfo(logPath).Length < MaxFileSizeBytes)
-			
 			return;
 		
 		// Shift existing rotated files: .2 → .3, .1 → .2, (current) → .1

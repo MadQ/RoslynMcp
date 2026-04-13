@@ -30,8 +30,7 @@ static class AgentDetector
     ];
 
     public static IReadOnlyList<AgentProbeResult> ProbeAll() =>
-        AllClients.Select(Probe).ToArray()
-;
+        AllClients.Select(Probe).ToArray();
 
     public static AgentProbeResult Probe(AgentClient client)
     {
@@ -39,7 +38,6 @@ static class AgentDetector
         var configPath = paths.FirstOrDefault(File.Exists) ?? paths[0];
 
         if(!File.Exists(configPath))
-
             return new(client, configPath, ConfigExists: false, Entry: null);
 
         DetectedEntry? entry = null;
@@ -48,7 +46,6 @@ static class AgentDetector
         {
             var json = File.ReadAllText(configPath);
             var root = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions {
-
                 AllowTrailingCommas = true,
                 CommentHandling = JsonCommentHandling.Skip
             }) as JsonObject;

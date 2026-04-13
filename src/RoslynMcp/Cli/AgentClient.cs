@@ -11,27 +11,22 @@ abstract partial class AgentClient
     public abstract string Id { get; }
 
     // Checked in order when searching for an existing entry — catches hand-edited names.
-    public virtual string[] KnownServerNames => ["RoslynMcp", "roslyn", "roslynmcp"]
-;
+    public virtual string[] KnownServerNames => ["RoslynMcp", "roslyn", "roslynmcp"];
 
     // Ordered candidate paths to probe (first existing one wins).
     // Global/profile-level only for v0.8.0 — workspace-local configs are out of scope.
-    public abstract string[] GetConfigPaths()
-;
+    public abstract string[] GetConfigPaths();
 
     // Find an existing RoslynMcp entry by known name or by matching the command path.
     // Returns the key used in the config and the entry node, or null if not present.
-    public abstract (string Key, JsonObject Entry)? FindEntry(JsonObject root)
-;
+    public abstract (string Key, JsonObject Entry)? FindEntry(JsonObject root);
 
     // Add or update the RoslynMcp entry in root.
     // Returns true when an existing entry was updated, false when one was added.
-    public abstract bool UpsertEntry(JsonObject root, string commandPath)
-;
+    public abstract bool UpsertEntry(JsonObject root, string commandPath);
 
     // Extract the configured command path from an entry (schema varies per client).
-    public abstract string? GetCommandPath(JsonObject entry)
-;
+    public abstract string? GetCommandPath(JsonObject entry);
 }
 
 // Shared by Claude Desktop, Cursor, and Windsurf:
@@ -43,13 +38,11 @@ abstract class McpServersDictClient : AgentClient
     public override (string Key, JsonObject Entry)? FindEntry(JsonObject root)
     {
         if(root[SectionKey] is not JsonObject servers)
-
             return null;
 
         foreach(var name in KnownServerNames)
         {
             if(servers[name] is JsonObject entry)
-
                 return (name, entry);
         }
 
@@ -57,7 +50,6 @@ abstract class McpServersDictClient : AgentClient
         foreach(var (key, value) in servers)
         {
             if(value is JsonObject entry && IsRoslynMcpCommand(entry))
-
                 return (key, entry);
         }
 
@@ -77,17 +69,14 @@ abstract class McpServersDictClient : AgentClient
         var isUpdate = existing is not null;
 
         servers[key] = BuildEntry(commandPath);
-
         return isUpdate;
     }
 
     public override string? GetCommandPath(JsonObject entry) =>
-        entry["command"]?.GetValue<string>()
-;
+        entry["command"]?.GetValue<string>();
 
     protected virtual JsonObject BuildEntry(string commandPath) =>
         new() {
-
             ["command"] = commandPath,
             ["args"] = new JsonArray()
         };
@@ -95,11 +84,9 @@ abstract class McpServersDictClient : AgentClient
     static bool IsRoslynMcpCommand(JsonObject entry)
     {
         var cmd = entry["command"]?.GetValue<string>();
-
         return cmd is not null &&
             Path.GetFileNameWithoutExtension(cmd)
-                .Equals("roslynmcp", StringComparison.OrdinalIgnoreCase)
-;
+                .Equals("roslynmcp", StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -114,11 +101,9 @@ sealed class ClaudeDesktopClient : McpServersDictClient
     public override string[] GetConfigPaths()
     {
         if(RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-
             return [Path.Combine(Home, "Library", "Application Support", "Claude", "claude_desktop_config.json")];
 
         if(RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-
             return [Path.Combine(AppData, "Claude", "claude_desktop_config.json")];
 
         return [Path.Combine(XdgConfig, "Claude", "claude_desktop_config.json")];
@@ -133,8 +118,7 @@ sealed class CursorClient : McpServersDictClient
     protected override string SectionKey => "mcpServers";
 
     public override string[] GetConfigPaths() =>
-        [Path.Combine(Home, ".cursor", "mcp.json")]
-;
+        [Path.Combine(Home, ".cursor", "mcp.json")];
 }
 
 // Windsurf: ~/.codeium/windsurf/mcp_config.json (all platforms)
@@ -145,8 +129,7 @@ sealed class WindsurfClient : McpServersDictClient
     protected override string SectionKey => "mcpServers";
 
     public override string[] GetConfigPaths() =>
-        [Path.Combine(Home, ".codeium", "windsurf", "mcp_config.json")]
-;
+        [Path.Combine(Home, ".codeium", "windsurf", "mcp_config.json")];
 }
 
 // VS Code (Copilot): %APPDATA%\Code\User\mcp.json (Windows)
@@ -160,11 +143,9 @@ sealed class VsCodeCopilotClient : McpServersDictClient
     public override string[] GetConfigPaths()
     {
         if(RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-
             return [Path.Combine(Home, "Library", "Application Support", "Code", "User", "mcp.json")];
 
         if(RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-
             return [Path.Combine(AppData, "Code", "User", "mcp.json")];
 
         return [Path.Combine(XdgConfig, "Code", "User", "mcp.json")];
@@ -172,7 +153,6 @@ sealed class VsCodeCopilotClient : McpServersDictClient
 
     protected override JsonObject BuildEntry(string commandPath) =>
         new() {
-
             ["type"] = "stdio",
             ["command"] = commandPath,
             ["args"] = new JsonArray()
@@ -189,7 +169,6 @@ sealed class ZedClient : AgentClient
     public override string[] GetConfigPaths()
     {
         if(RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-
             return [Path.Combine(AppData, "Zed", "settings.json")];
 
         return [Path.Combine(XdgConfig, "zed", "settings.json")];
@@ -198,13 +177,11 @@ sealed class ZedClient : AgentClient
     public override (string Key, JsonObject Entry)? FindEntry(JsonObject root)
     {
         if(root["context_servers"] is not JsonObject servers)
-
             return null;
 
         foreach(var name in KnownServerNames)
         {
             if(servers[name] is JsonObject entry)
-
                 return (name, entry);
         }
 
@@ -213,7 +190,6 @@ sealed class ZedClient : AgentClient
             if(value is JsonObject entry && GetCommandPath(entry) is string cmd &&
                Path.GetFileNameWithoutExtension(cmd)
                    .Equals("roslynmcp", StringComparison.OrdinalIgnoreCase))
-
                 return (key, entry);
         }
 
@@ -233,9 +209,7 @@ sealed class ZedClient : AgentClient
         var isUpdate = existing is not null;
 
         servers[key] = new JsonObject {
-
             ["command"] = new JsonObject {
-
                 ["path"] = commandPath,
                 ["args"] = new JsonArray()
             }
@@ -245,8 +219,7 @@ sealed class ZedClient : AgentClient
     }
 
     public override string? GetCommandPath(JsonObject entry) =>
-        (entry["command"] as JsonObject)?["path"]?.GetValue<string>()
-;
+        (entry["command"] as JsonObject)?["path"]?.GetValue<string>();
 }
 
 abstract partial class AgentClient
@@ -254,8 +227,7 @@ abstract partial class AgentClient
     protected static string Home => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     // %APPDATA% on Windows already includes \Roaming — no \Roaming suffix needed.
-    protected static string AppData => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
-;
+    protected static string AppData => Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
 
     // Prefer $XDG_CONFIG_HOME when set; fall back to ~/.config per XDG spec.
     protected static string XdgConfig =>
