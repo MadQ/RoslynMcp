@@ -25,7 +25,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		"Tokens are single-use — once consumed or rejected, run roslyn_preview_rename again if another rename is needed. " +
 		"On success, writes all changed files to disk and reports the number of files modified. " +
 		"When the renamed symbol is a type whose file name matches the type name, the old file is also deleted and a new file is created at the new path.")]
-	public async Task<object> ApplyRename(
+	public async Task<ApplyRenameResult> ApplyRename(
 		[Description("The confirmation token returned by roslyn_preview_rename. Tokens are single-use — they expire after being applied or rejected.")] string token,
 		[Description("'y' to apply this rename once; 'session' to apply and auto-approve the same symbol for all future renames in this session; 'n' to cancel without writing any files.")] string approval,
 		[Description(ProjectPathDescription)] string projectPath
