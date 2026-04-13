@@ -9,7 +9,7 @@ namespace RoslynMcp;
 internal static class SolutionDiff
 {
 	static readonly string[] LineSeparators = ["\r\n", "\n"];
-
+	
 	/// <summary>
 	///     Returns a unified diff string comparing the changed documents between
 	///     <paramref name="before"/> and <paramref name="after"/>.
@@ -97,7 +97,8 @@ internal static class SolutionDiff
 					// SourceText.Encoding is unreliable — StreamReader.CurrentEncoding returns a
 					// BOM-emitting instance regardless of whether the file had a BOM. RM's policy
 					// is always UTF-8 without BOM, so we never use sourceText.Encoding here.
-					await writeFile(newDoc.FilePath, sourceText.ToString());
+					await writeFile(newDoc.FilePath, sourceText.ToString())
+					;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					throw new InvalidOperationException($"Failed to write '{newDoc.FilePath}': {ex.Message}", ex);
@@ -106,7 +107,7 @@ internal static class SolutionDiff
 		}
 	}
 	
-
+	
 	// ── File-level add / remove diffs ────────────────────────────────────────
 	
 	// All lines shown as additions (for a newly created file).
@@ -137,7 +138,7 @@ internal static class SolutionDiff
 		return sb.ToString();
 	}
 	
-
+	
 	// ── Minimal line-level unified diff ──────────────────────────────────────
 	
 	private static string BuildHunks(string oldText, string newText)
@@ -148,7 +149,8 @@ internal static class SolutionDiff
 		
 		// Simple greedy diff: find changed regions with 3-line context.
 		// Not a full Myers diff — sufficient for readable output on typical refactoring changes.
-		var lcs    = LongestCommonSubsequence(oldLines, newLines);
+		var lcs    = LongestCommonSubsequence(oldLines, newLines)
+		;
 		var hunks  = BuildHunkList(oldLines, newLines, lcs, context: 3);
 		
 		foreach(var hunk in hunks) {
@@ -173,7 +175,8 @@ internal static class SolutionDiff
 		var inLcs = new bool[oldLines.Length];
 		
 		// Map each line to its positions in the old file.
-		var oldPositions = new Dictionary<string, List<int>>();
+		var oldPositions = new Dictionary<string, List<int>>()
+		;
 		
 		for(var i = 0; i < oldLines.Length; i++) {
 			
@@ -185,7 +188,8 @@ internal static class SolutionDiff
 		
 		// Walk the new file, greedily matching each line to the earliest
 		// unused position in the old file (preserving order).
-		var lastMatchedOld = -1;
+		var lastMatchedOld = -1
+		;
 		
 		foreach(var line in newLines) {
 			
@@ -193,7 +197,8 @@ internal static class SolutionDiff
 				continue;
 			
 			// Binary search for first position > lastMatchedOld.
-			var lo	 = 0;
+			var lo	 = 0
+			;
 			var hi	 = positions.Count - 1;
 			var best = -1;
 			
@@ -202,6 +207,7 @@ internal static class SolutionDiff
 				var mid = lo + (hi - lo) / 2;
 				
 				if(positions[mid] > lastMatchedOld) {
+					
 					best = mid;
 					hi   = mid - 1;
 				}
@@ -226,7 +232,8 @@ internal static class SolutionDiff
 	private static List<Hunk> BuildHunkList(string[] oldLines, string[] newLines, bool[] inLcs, int context)
 	{
 		// Map LCS positions to new-file positions.
-		var hunks   = new List<Hunk>();
+		var hunks   = new List<Hunk>()
+		;
 		var oi      = 0; // old index
 		var ni      = 0; // new index
 		var lcsIdx  = 0;
@@ -237,6 +244,7 @@ internal static class SolutionDiff
 		while(oi < oldLen || ni < newLen) {
 			
 			if(lcsIdx < lcsLen && inLcs[lcsIdx] && oi < oldLen && ni < newLen && oldLines[oi] == newLines[ni]) {
+				
 				oi++;
 				ni++;
 				lcsIdx++;
@@ -244,7 +252,8 @@ internal static class SolutionDiff
 			}
 			
 			// Start of a changed region.
-			var hunkOldStart = Math.Max(0, oi - context);
+			var hunkOldStart = Math.Max(0, oi - context)
+			;
 			var hunkNewStart = Math.Max(0, ni - context);
 			var lines        = new List<string>();
 			
@@ -253,7 +262,8 @@ internal static class SolutionDiff
 				lines.Add(" " + oldLines[c]);
 			
 			// Changed lines.
-			var hunkOi = oi;
+			var hunkOi = oi
+			;
 			var hunkNi = ni;
 			
 			while(oi < oldLen || ni < newLen) {
@@ -267,6 +277,7 @@ internal static class SolutionDiff
 				
 				// If ni is exhausted, the LCS match can never be reached — treat as deletion.
 				if(oi < oldLen && (lcsIdx >= lcsLen || !inLcs[lcsIdx] || ni >= newLen)) {
+					
 					lines.Add("-" + oldLines[oi++]);
 					lcsIdx++;
 				}

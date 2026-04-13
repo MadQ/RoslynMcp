@@ -36,21 +36,25 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		[Description("Preview the insertion without writing. Returns what would change. Default: false.")                   ] bool    dryRun       = false
 	)
 	{
-		using var scope = BeginTool("roslyn_insert_lines", filePath);
+		using var scope = BeginTool("roslyn_insert_lines", filePath, new { atLine, insertAfter, insertBefore, dryRun });
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var fullPath = ResolveFilePath(filePath, rootPath);
 		
 		if(fullPath is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
 		// Exactly one location specifier required.
-		var specCount = (atLine.HasValue ? 1 : 0) + (insertAfter is not null ? 1 : 0) + (insertBefore is not null ? 1 : 0);
+		var specCount = (atLine.HasValue ? 1 : 0) + (insertAfter is not null ? 1 : 0) + (insertBefore is not null ? 1 : 0)
+		;
 		
 		if(specCount == 0)
+			
 			return scope.Failed("no location", new ErrorResult("Specify exactly one of: atLine, insertAfter, or insertBefore."));
 		
 		if(specCount > 1)
+			
 			return scope.Failed("multiple locations", new ErrorResult("Specify only one of: atLine, insertAfter, or insertBefore."));
 		
 		string   rawContent;
@@ -64,7 +68,8 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		}
 		
 		// Detect existing line-ending style before splitting strips them.
-		var eol = rawContent.Contains("\r\n") ? "\r\n" : "\n";
+		var eol = rawContent.Contains("\r\n") ? "\r\n" : "\n"
+		;
 		lines   = rawContent.Split(LineSeparators, StringSplitOptions.None);
 		
 		// Split produces a trailing empty element when the file ends with a newline — trim it
@@ -73,11 +78,13 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			lines = lines[..^1];
 		
 		// Resolve insertion index (0-based, insert BEFORE this index).
-		int insertIndex;
+		int insertIndex
+		;
 		
 		if(atLine.HasValue)
 			// atLine is 1-based, clamp to valid range [1, lines.Length + 1].
-			insertIndex = Math.Clamp(atLine.Value, 1, lines.Length + 1) - 1;
+			insertIndex = Math.Clamp(atLine.Value, 1, lines.Length + 1) - 1
+			;
 		
 		else if(insertAfter is not null) {
 			
@@ -91,9 +98,11 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		}
 		
 		else {
+			
 			var matchIndex = Array.FindIndex(lines, l => l.Contains(insertBefore!, StringComparison.Ordinal));
 			
 			if(matchIndex < 0)
+				
 				return scope.Failed("anchor not found", new ErrorResult($"insertBefore pattern not found: {insertBefore}"));
 			
 			insertIndex = matchIndex;
@@ -110,59 +119,67 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		resultLines.AddRange(lines[insertIndex..]);
 		
 		// 1-based line numbers of inserted lines.
-		var insertedLines = Enumerable.Range(insertIndex + 1, newLines.Length).ToArray();
+		var insertedLines = Enumerable.Range(insertIndex + 1, newLines.Length).ToArray()
+		;
 		
 		if(dryRun)
+			
 			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
 				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
 		// Preserve the file's original line-ending style — computed once, used for backup,
 		// write, and post-write verification.
-		var resultText  = string.Join(eol, resultLines) + eol;
-		var resultBytes = FileWriter.Utf8NoBom.GetBytes(resultText);
+		var resultText  = string.Join(eol, resultLines) + eol
+		;
+		var resultBytes = FileWriter.Utf8NoBom.GetBytes(resultText)
+		;
 		
 		bool preSaved = false;
-
+		
 		try {
+			
 			preSaved = await backups.SavePreAsync(fullPath, projectPath, "roslyn_insert_lines") is not null;
 			await backups.SavePostAsync(fullPath, projectPath, "roslyn_insert_lines", resultBytes);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
 			var hint = preSaved
 				? "Resolve the issue and retry. The pre-change snapshot that was saved is not needed since the file was not touched."
 				: "Resolve the issue (disk space or permissions) and retry.";
-
+			
 			return scope.Error(new ErrorResult(
 				$"Write aborted — could not save {(preSaved ? "post" : "pre")}-change backup: {ex.Message}. The file was not modified.",
-				Hint: hint));
+				hint));
 		}
-
+		
 		// For .cs files: single write via workspace API with FSW suppression + self-healing recovery.
 		// For all other types: direct FileWriter write, then InvalidateFile.
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
-
+			
 			try {
 				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 			}
-
+			
 			if(await TryRecoverTruncation(filePath, fullPath, projectPath, resultBytes) is { } truncErr)
+				
 				return scope.Error(truncErr);
 		}
 		else {
-
+			
 			try {
 				FileWriter.WriteAllText(fullPath, resultText);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", Hint: BackupRecoveryHint(filePath)));
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 			}
-
+			
 			workspace.InvalidateFile(projectPath, fullPath);
-
+			
 			if(CheckForTruncation(filePath, fullPath, resultText.Length) is { } truncErr)
+				
 				return scope.Error(truncErr);
 		}
 		

@@ -108,13 +108,14 @@ internal sealed class WorkspaceResolver
 	///     Prefer this over direct file I/O + <see cref="InvalidateFile"/> when the caller
 	///     already holds the updated <see cref="Solution"/> in memory.
 	/// </summary>
-	public void ApplyChanges(string projectPath, Solution newSolution)
+	public bool ApplyChanges(string projectPath, Solution newSolution)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-		manager.ApplyChanges(resolved, newSolution);
+		
+		return manager.ApplyChanges(resolved, newSolution);
 	}
 	
-
+	
 	public void InvalidateFile(string projectPath, string fullPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
@@ -144,11 +145,14 @@ internal sealed class WorkspaceResolver
 	///     Use for .cs files where callers manage the write (e.g. atomic tmp→rename).
 	/// </summary>
 	public Task WriteAndInvalidate(string projectPath, string fullPath, Func<Task> write)
+	=> WriteAndInvalidate(projectPath, fullPath, null, write);
+	
+	public Task WriteAndInvalidate(string projectPath, string fullPath, string? movedFromPath, Func<Task> write)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
 		
 		paginationCache.InvalidateAll();
 		
-		return manager.WriteAndInvalidate(resolved, fullPath, write);
+		return manager.WriteAndInvalidate(resolved, fullPath, movedFromPath, write);
 	}
 }

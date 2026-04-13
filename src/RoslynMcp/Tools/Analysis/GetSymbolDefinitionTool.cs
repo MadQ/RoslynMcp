@@ -23,26 +23,30 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
-		using var scope = BeginTool("roslyn_get_symbol_definition", symbolName);
+		using var scope = BeginTool("roslyn_get_symbol_definition", symbolName, new { containingType });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
+			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
 		var location = symbol.Locations.FirstOrDefault(loc => loc.IsInSource);
 		
 		if(location is null)
+			
 			return scope.Error(new MetadataSymbolResult(
 				FormatSymbolName(symbol),
 				symbol.Kind.ToString().ToLowerInvariant(),
-				"metadata",
-				"This symbol is defined in metadata (compiled assembly), not source code."
-			));
+				"metadata")
+			{
+				Error = "This symbol is defined in metadata (compiled assembly), not source code."
+			});
 		
 		var span      = location.GetLineSpan();
 		var filePath  = span.Path;
@@ -58,8 +62,9 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			span.StartLinePosition.Line + 1,
 			span.StartLinePosition.Character + 1,
 			signature,
-			docSummary,
-			AdhocCaution(projectPath)
-		));
+			docSummary)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 }

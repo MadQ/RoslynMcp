@@ -40,20 +40,20 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		bool    force  = false
 	)
 	{
-		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action);
-
+		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action, new { action, filePath, force });
+		
 		Task<object> task = action.ToLowerInvariant() switch {
-
+			
 			"list"    => Task.FromResult<object>(HandleList(projectPath, token, filePath)),
 			"preview" => HandlePreviewAsync(token),
 			"apply"   => HandleApply(projectPath, token, force),
 			_         => Task.FromResult<object>(new ErrorResult($"Unknown action '{action}'. Valid values: list, preview, apply."))
 		};
-
+		
 		object result = await task;
-
-		return result is ToolErrorResult err
-			? scope.Error(err)
+		
+		return result is IToolError
+			? scope.Error((ToolResult) result)
 			: scope.Outcome(action, result);
 	}
 	
@@ -62,23 +62,25 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	object HandleList(string projectPath, string? token, string? filePath)
 	{
 		string? absolutePath = null;
-
+		
 		if(filePath is not null) {
+			
 			var rootPath = workspace.GetRootPath(projectPath);
 			absolutePath = ResolveFilePath(filePath, rootPath);
 		}
-
+		
 		else if(token is not null) {
-
+			
 			// Token used as a file-scope filter: extract path from backup metadata.
-			var entries = backups.List();
+			var entries = backups.List()
+			;
 			absolutePath = entries.FirstOrDefault(e => e.Token == token)?.Meta.AbsolutePath;
 		}
-
+		
 		var all           = backups.List(absolutePath);
 		var rootDir       = workspace.GetRootPath(projectPath);
 		var currentBranch = backups.GetCurrentBranch(rootDir);
-
+		
 		var items = all.Select(e => new LocalHistoryEntry(
 			Token:           e.Token,
 			AbsolutePath:    e.Meta.AbsolutePath,
@@ -89,32 +91,38 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			ChangedLineHint: e.Meta.ChangedLineHint,
 			GitBranch:       e.Meta.GitBranch
 		)).ToArray();
-
+		
 		string? caution = null;
-
+		
 		if(currentBranch is not null && all.Any(e => e.Meta.GitBranch is not null && e.Meta.GitBranch != currentBranch))
 			caution = "One or more backups were taken on a different branch. Verify branch context before restoring.";
-
+		
 		return new LocalHistoryListResult(items, items.Length, caution);
 	}
 	
 	async Task<object> HandlePreviewAsync(string? token)
 	{
 		if(token is null)
+			
 			return new ErrorResult("token is required for action: preview.");
-
+		
 		// Find the entry metadata (pure meta read — no disk I/O).
-		var entries = backups.List();
+		var entries = backups.List()
+		;
 		var entry   = entries.FirstOrDefault(e => e.Token == token);
-
+		
 		if(entry is null)
+			
 			return new ErrorResult($"No backup found for token '{token}'.");
-
+		
 		// Run the conflict check on demand rather than eagerly at list time.
-		var (failure, checkedRestore) = await backups.TryCheckAsync(token, force: false);
-
+		var (failure, checkedRestore) = await backups.TryCheckAsync(token, force: false)
+		;
+		
 		if(failure is not null) {
+			
 			if(failure.IsConflict)
+				
 				return new LocalHistoryConflictResult(
 					Conflict:     true,
 					AbsolutePath: failure.AbsolutePath!,
@@ -122,11 +130,12 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 					CurrentHash:  failure.CurrentHash,
 					BackupHash:   failure.BackupHash
 				);
-
+			
 			// Any other failure (not found, invalid token, read error) — surface it as an error.
+			
 			return new ErrorResult(failure.ErrorMessage ?? "Preview failed.");
 		}
-
+		
 		return new LocalHistoryPreviewResult(
 			Token:        token,
 			AbsolutePath: entry.Meta.AbsolutePath,
@@ -142,13 +151,15 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	async Task<object> HandleApply(string projectPath, string? token, bool force)
 	{
 		if(token is null)
+			
 			return new ErrorResult("token is required for action: apply.");
-
+		
 		var (failure, checkedRestore) = await backups.TryCheckAsync(token, force);
-
+		
 		if(failure is not null) {
-
+			
 			if(failure.IsConflict)
+				
 				return new LocalHistoryConflictResult(
 					Conflict:     true,
 					AbsolutePath: failure.AbsolutePath!,
@@ -156,33 +167,36 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 					CurrentHash:  failure.CurrentHash,
 					BackupHash:   failure.BackupHash
 				);
-
+			
 			return new ErrorResult(failure.ErrorMessage ?? "Restore failed.");
 		}
-
+		
 		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath, async () => {
 			// Use a Guid-based tmp name to avoid collisions; always clean up on failure.
 			var tmp = Path.Combine(
 				Path.GetDirectoryName(checkedRestore.AbsolutePath)!,
 				$".roslynmcp_restore_{Guid.NewGuid():N}.tmp"
 			);
-
+			
 			try {
+				
 				await FileWriter.WriteAllBytesAsync(tmp, checkedRestore.Content);
 				FileWriter.Move(tmp, checkedRestore.AbsolutePath, overwrite: true);
 			}
 			catch {
+				
 				try { File.Delete(tmp); } catch { }
 				throw;
 			}
 		});
-
+		
 		await backups.CompleteRestoreAsync(checkedRestore);
-
+		
 		var message = checkedRestore.Warning is null
 			? $"Restored '{checkedRestore.AbsolutePath}' from backup."
-			: $"Restored '{checkedRestore.AbsolutePath}' from backup. Warning: {checkedRestore.Warning}";
-
+			: $"Restored '{checkedRestore.AbsolutePath}' from backup. Warning: {checkedRestore.Warning}"
+			;
+		
 		return new LocalHistoryApplyResult(
 			Restored:     true,
 			AbsolutePath: checkedRestore.AbsolutePath,

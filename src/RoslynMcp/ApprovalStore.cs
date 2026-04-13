@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp;
 
@@ -8,15 +8,19 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class ApprovalStore
 {
-	private readonly Dictionary<string, PendingOperation> pending = new();
-	private readonly LinkedList<string>                   insertionOrder = new();
+	private readonly Dictionary<string, PendingOperation> pending        = new();
+	private readonly LinkedList<string>                   insertionOrder  = new();
 	private readonly HashSet<string>                      sessionApproved = new(StringComparer.Ordinal);
-	private readonly object                               syncRoot = new();
+	private readonly object                               syncRoot        = new();
 	
 	// Each PendingOperation holds two Solution snapshots — cap to prevent unbounded memory growth.
-	private const int MaxPending = 10;
+	private const int MaxPending = 10
+	;
 	
 	public string Register(Solution baseSolution, Solution newSolution, string diff, string symbolKey)
+		=> Register(baseSolution, newSolution, diff, symbolKey, null);
+	
+	public string Register(Solution baseSolution, Solution newSolution, string diff, string symbolKey, (string OldPath, string NewPath)? fileRename)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
 		
@@ -31,7 +35,7 @@ internal sealed class ApprovalStore
 			}
 			
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed);
+			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename);
 			insertionOrder.AddLast(token);
 		}
 		
@@ -45,6 +49,7 @@ internal sealed class ApprovalStore
 	public PendingOperation? Peek(string token)
 	{
 		lock(syncRoot)
+			
 			return pending.GetValueOrDefault(token);
 	}
 	
@@ -57,6 +62,7 @@ internal sealed class ApprovalStore
 		lock(syncRoot) {
 			
 			if(!pending.Remove(token, out var op))
+				
 				return null;
 			
 			insertionOrder.Remove(token);
@@ -81,14 +87,16 @@ internal sealed class ApprovalStore
 	public bool IsSessionApproved(string symbolKey)
 	{
 		lock(syncRoot)
+			
 			return sessionApproved.Contains(symbolKey);
 	}
 }
 
 internal sealed record PendingOperation(
-	Solution BaseSolution,
-	Solution NewSolution,
-	string   Diff,
-	string   SymbolKey,
-	bool     PreConfirmed
+	Solution                          BaseSolution,
+	Solution                          NewSolution,
+	string                            Diff,
+	string                            SymbolKey,
+	bool                              PreConfirmed,
+	(string OldPath, string NewPath)? FileRename
 );

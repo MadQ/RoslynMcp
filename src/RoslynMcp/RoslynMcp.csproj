@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -22,6 +22,16 @@
     <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
     <PublishSingleFile>true</PublishSingleFile>
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+  </PropertyGroup>
+
+  <!-- dotnet tool packaging — only active when building with -c Pack -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Pack'">
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>roslynmcp</ToolCommandName>
+    <PackageId>RoslynMcp</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Tool assemblies must be loose on disk — BuildHost requires it -->
+    <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
 
   <!-- Detect if .NET 11 SDK is available and add it to TargetFrameworks -->
@@ -61,6 +71,10 @@
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net11.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- Exclude the TestHarness sub-project from the SDK glob — it has its own csproj. -->

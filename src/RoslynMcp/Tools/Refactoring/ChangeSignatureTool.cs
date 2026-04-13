@@ -37,31 +37,36 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		[Description("Optional containing type to disambiguate when multiple methods share the same name, e.g. 'OrderService'.")] string? containingType = null,
 		[Description("Parameters to add as a JSON array: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]. Each entry requires name, type, and defaultValue. Omit or pass null to preview the overload structure without adding parameters.")] string? addParameters = null)
 	{
-		using var scope = BeginTool("roslyn_change_signature", containingType is not null ? $"{containingType}.{methodName}" : methodName);
+		using var scope = BeginTool("roslyn_change_signature", containingType is not null ? $"{containingType}.{methodName}" : methodName, new { containingType, addParameters });
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var symbol = FindSymbol(compilation, methodName, containingType);
 		
 		if(symbol is not IMethodSymbol method)
+			
 			return scope.Failed("not a method", symbol is null
-				? new ErrorResult($"Symbol '{methodName}' not found.", Hint: "Use get_type_members or find_references to verify the name.")
+				? new ErrorResult($"Symbol '{methodName}' not found.", "Use get_type_members or find_references to verify the name.")
 				: new ErrorResult($"'{methodName}' is a {symbol.Kind}, not a method."));
 		
 		// Parse the parameters to add.
-		NewParameter[] paramsToAdd;
+		NewParameter[] paramsToAdd
+		;
 		
 		try {
+			
 			paramsToAdd = string.IsNullOrWhiteSpace(addParameters)
 				? []
 				: JsonSerializer.Deserialize<NewParameter[]>(addParameters, new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? []
 			;
 		}
 		catch(JsonException ex) {
+			
 			return scope.Failed("invalid parameters", new ErrorResult(
 				$"Failed to parse addParameters JSON: {ex.Message}",
-				Hint: "Expected: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]")
+				"Expected: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]")
 			);
 		}
 		
@@ -73,20 +78,23 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		}, solution, compilation, cancellationToken);
 		
 		if(!result.Success)
+			
 			return scope.Failed("change failed", new ErrorResult(result.Error!));
 		
 		var token = approvals.Register(result.BaseSolution, result.NewSolution, result.Diff!,
 			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})"
-		);
+		)
+		;
 		
 		return scope.Outcome($"+{result.ParametersAdded.Length} param ({string.Join(", ", result.ParametersAdded)})", new ChangeSignatureResult(
-			Diff:                result.Diff!,
-			Token:               token,
-			Message:             $"Review the diff, then call apply_signature_change with token '{token}' and approval 'y' or 'session'.",
+			Diff:               result.Diff!,
+			Token:              token,
+			Message:            $"Review the diff, then call apply_signature_change with token '{token}' and approval 'y' or 'session'.",
 			ParametersAdded:    result.ParametersAdded,
 			DeprecationMessage: result.DeprecationMessage,
-			FilesAffected:      result.FilesAffected,
-			Caution:            AdhocCaution(projectPath)
-		));
+			FilesAffected:      result.FilesAffected)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 }

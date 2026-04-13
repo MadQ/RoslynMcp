@@ -26,19 +26,22 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_file_outline", filePath);
+		using var scope = BeginTool("roslyn_get_file_outline", filePath, new { skip, take });
 		
 		
 		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 100, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
 		var tree     = FindSyntaxTree(compilation, filePath);
 		
 		if(tree is null)
+			
 			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
 		var root     = await tree.GetRootAsync();
@@ -47,14 +50,15 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		var result   = PaginateAndStore(allTypes, ref skip, take);
 		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new FileOutlineResult(
-			File:        Path.GetRelativePath(rootPath, tree.FilePath),
+			File:       Path.GetRelativePath(rootPath, tree.FilePath),
 			TotalTypes: result.Total,
 			Skip: skip, Take: take,
-			Types:      result.Items,
+			Types:     result.Items,
 			PageToken: result.PageToken,
-			HasMore:   result.HasMore,
-			Caution:   AdhocCaution(projectPath)
-		));
+			HasMore:   result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	private static TypeOutline[] ExtractTypes(SyntaxNode root, SemanticModel model)

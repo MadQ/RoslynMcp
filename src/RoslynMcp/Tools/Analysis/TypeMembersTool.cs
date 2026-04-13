@@ -36,26 +36,31 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		[Description("Maximum members to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_type_members", typeName);
+		using var scope = BeginTool("roslyn_get_type_members", typeName, new { memberKind, includeInherited, skip, take });
 		
 		if(scope.TryServeCachedPage<object?>(page_token, ref skip, ref take, 200, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var type = FindType(compilation, typeName);
 		
 		if(type is null)
+			
 			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
 		
 		IEnumerable<ISymbol> members = type.GetMembers();
 		
 		if(includeInherited) {
 			// Walk the base type chain and collect inherited members.
-			var current = type.BaseType;
+			var current = type.BaseType
+			;
 			
 			while(current is not null && current.SpecialType != SpecialType.System_Object) {
+				
 				members = members.Concat(current.GetMembers());
 				current = current.BaseType;
 			}
@@ -79,17 +84,20 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 			Skip: skip, Take: take,
 			Members:    result.Items,
 			PageToken: result.PageToken,
-			HasMore:   result.HasMore,
-			Caution:   AdhocCaution(projectPath)
-		));
+			HasMore:   result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
 		// Try global namespace lookup first (handles simple names).
-		var direct = compilation.GetTypeByMetadataName(typeName);
+		var direct = compilation.GetTypeByMetadataName(typeName)
+		;
 		
 		if(direct is not null)
+			
 			return direct;
 		
 		return compilation.GlobalNamespace
@@ -114,6 +122,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		
 		// Skip special compiler-generated methods (property accessors, etc.).
 		if(member is IMethodSymbol { MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove })
+			
 			return null;
 		
 		var signature = member switch {

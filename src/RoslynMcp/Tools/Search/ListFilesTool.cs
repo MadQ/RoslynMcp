@@ -26,11 +26,12 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_list_files", pattern);
+		using var scope = BeginTool("roslyn_list_files", pattern, new { recursive, skip, take });
 		
 		pattern ??= "**/*";
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 500, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
@@ -65,7 +66,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			
 			var closeMatches = BuildCloseMatches(allRelativePaths, pattern);
 			
-			return scope.Outcome("no files matched", new ListFilesEmptyResult([], 0, closeMatches, AdhocCaution(projectPath)));
+			return scope.Outcome("no files matched", new ListFilesEmptyResult([], 0, closeMatches) { Caution = AdhocCaution(projectPath) });
 		}
 		
 		var result = PaginateAndStore(allResults, ref skip, take);
@@ -75,9 +76,10 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			result.Total,
 			skip, take,
 			result.PageToken,
-			result.HasMore,
-			AdhocCaution(projectPath)
-		));
+			result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	static string[]? BuildCloseMatches(string[] allRelativeFiles, string pattern)
@@ -96,11 +98,13 @@ internal sealed class ListFilesTool : RoslynMcpTool
 	{
 		var filename = Path.GetFileName(pattern);
 		if(string.IsNullOrEmpty(filename))
+			
 			return [];
 		
 		// Strategy 1: ignore directory prefix — find the filename pattern anywhere in the tree.
 		// Skip if pattern already has no directory component or is already a ** recursive pattern.
-		var broadPattern = $"**/{filename}";
+		var broadPattern = $"**/{filename}"
+		;
 		
 		if(pattern.Contains('/') && broadPattern != pattern) {
 			
@@ -114,11 +118,13 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			;
 			
 			if(found.Length > 0)
+				
 				return found;
 		}
 		
 		// Strategy 2: fall back to just the extension — tells the agent what kinds of files exist.
-		var ext = Path.GetExtension(filename);
+		var ext = Path.GetExtension(filename)
+		;
 		
 		if(!string.IsNullOrEmpty(ext) && ext != filename) {
 			

@@ -26,10 +26,12 @@ class TestContext
 	}
 	
 	// Closes the stdin pipe to signal EOF to the server.
-	internal void CloseInput() => _writer.Close();
+	internal void CloseInput() => _writer.Close()
+	;
 	
 	// Returns the next JSON-RPC request ID and increments the counter.
-	internal int NextId() => _reqId++;
+	internal int NextId() => _reqId++
+	;
 	
 	internal async Task SendAsync(object payload)
 	{
@@ -59,17 +61,18 @@ class TestContext
 		}
 	}
 	
+	// Sends a tool call and validates the response. The test name is owned by
+	// the calling TestCase — this method only concerns itself with the wire protocol.
 	internal async Task<(bool pass, string message)> RunTestAsync(
-		string testName,
 		string toolName,
 		object arguments,
 		Func<JsonNode?, bool> validate,
 		bool expectJson = true)
 	{
-		Console.Write($"  {testName,-50} ");
 		var sw = Stopwatch.StartNew();
 		
 		await SendAsync(new {
+			
 			jsonrpc = "2.0",
 			id      = NextId(),
 			method  = "tools/call",
@@ -80,21 +83,25 @@ class TestContext
 		sw.Stop();
 		
 		if(response is null)
+			
 			return (false, $"FAIL  (timeout) [{sw.ElapsedMilliseconds}ms]");
 		
 		var error = response["error"];
 		
 		if(error is not null)
+			
 			return (false, $"FAIL  (error: {error["message"]}) [{sw.ElapsedMilliseconds}ms]");
 		
 		var result = response["result"];
 		
 		if(result is null)
+			
 			return (false, $"FAIL  (no result) [{sw.ElapsedMilliseconds}ms]");
 		
 		var content = result["content"]?[0]?["text"]?.GetValue<string>();
 		
 		if(content is null)
+			
 			return (false, $"FAIL  (no content) [{sw.ElapsedMilliseconds}ms]");
 		
 		JsonNode? data;
@@ -109,14 +116,15 @@ class TestContext
 			}
 		}
 		else {
-			// Wrap plain string content as JSON for validation
-			data = JsonValue.Create(content);
+			// Wrap plain string content as JSON for validation.
+			data = JsonValue.Create(content)
+			;
 		}
 		
 		var pass = validate(data);
 		
 		return pass
-			? (true, $"PASS  [{sw.ElapsedMilliseconds}ms]")
-			: (false, $"FAIL  (validation failed: {testName}) [{sw.ElapsedMilliseconds}ms]");
+			? (true,  $"PASS  [{sw.ElapsedMilliseconds}ms]")
+			: (false, $"FAIL  (validation failed) [{sw.ElapsedMilliseconds}ms]");
 	}
 }

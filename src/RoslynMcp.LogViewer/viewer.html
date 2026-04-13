@@ -1,4 +1,4 @@
-<!-- Developer tool — not a production web app. Accessibility (WCAG) not targeted unless requested. -->
+﻿<!-- Developer tool — not a production web app. Accessibility (WCAG) not targeted unless requested. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -17,18 +17,19 @@
 	  --bg-kbd:       #3c3c3c;
 	  --border:       #555;
 	  --text:         #d4d4d4;
-	  --text-dim:     rgb(55 52 32);
+	  --text-dim:     #888;
 	  --text-heading: #569cd6;
 	  --btn-bg:       #3c3c3c;
 	  --btn-hover:    #505050;
 	  --btn-active:   #264f78;
 	  --btn-active-border: #569cd6;
-	  --highlight:    #4a4a00;
+	  --highlight:    rgba(220,185,0,0.28);
 	  --error-border: #f44747;
 	  --lvl-start:    #569cd6;
 	  --lvl-stop:     #999;
 	  --lvl-tool:     #6a9955;
 	  --lvl-error:    #f44747;
+	  --lvl-new:      #c08000;
 	  --ws-msb:       #6a9955;
 	  --ws-adh:       #ce9178;
 	  --tool-name:    #d4d4d4;
@@ -76,12 +77,13 @@
 	  --btn-hover:    #d0d0d0;
 	  --btn-active:   #0066b8;
 	  --btn-active-border: #005a9e;
-	  --highlight:    #fff3b0;
+	  --highlight:    #ffd93d;
 	  --error-border: #c00;
 	  --lvl-start:    #0066b8;
 	  --lvl-stop:     #666;
 	  --lvl-tool:     #008000;
 	  --lvl-error:    #c00;
+	  --lvl-new:      #7a5500;
 	  --ws-msb:       #008000;
 	  --ws-adh:       #b85c00;
 	  --tool-name:    #1e1e1e;
@@ -129,12 +131,13 @@
 	  --btn-hover:    rgb(180 176 132);
 	  --btn-active:   rgb(50 70 150);
 	  --btn-active-border: rgb(30 55 140);
-	  --highlight:    rgb(255 255 180);
+	  --highlight:    rgb(255 205 30);
 	  --error-border: rgb(160 0 0);
 	  --lvl-start:    rgb(30 55 140);
 	  --lvl-stop:     rgb(95 90 55);
 	  --lvl-tool:     rgb(20 100 40);
 	  --lvl-error:    rgb(160 0 0);
+	  --lvl-new:      rgb(160 110 0);
 	  --ws-msb:       rgb(20 100 40);
 	  --ws-adh:       rgb(170 100 0);
 	  --tool-name:    rgb(30 25 10);
@@ -183,12 +186,13 @@
 		--btn-hover:    #d0d0d0;
 		--btn-active:   #0066b8;
 		--btn-active-border: #005a9e;
-		--highlight:    #fff3b0;
+		--highlight:    #ffd93d;
 		--error-border: #c00;
 		--lvl-start:    #0066b8;
 		--lvl-stop:     #666;
 		--lvl-tool:     #008000;
 		--lvl-error:    #c00;
+		--lvl-new:      #7a5500;
 		--ws-msb:       #008000;
 		--ws-adh:       #b85c00;
 		--tool-name:    #1e1e1e;
@@ -508,6 +512,8 @@
 	.lvl-TOOL  { color: var(--lvl-tool); }
 	.lvl-ERROR { color: var(--lvl-error); }
 	.lvl-OTHER { color: var(--text-dim); }
+	.lvl-NEW   { color: var(--lvl-new); font-style: italic; }
+	.entry-wrap[data-level='NEW'] .entry-row { border-top: 1px dashed var(--lvl-new); opacity: 0.75; }
 
 	.ws-msb  { color: var(--ws-msb); }
 	.ws-adh  { color: var(--ws-adh); }
@@ -542,6 +548,15 @@
 	}
 	.detail-section-label:first-child { margin-top: 2px; }
 	.show-more { margin-top: 4px; font-size: 11px; padding: 2px 6px; }
+	.trunc-note { font-size: 10px; color: var(--text-dim); font-style: italic; }
+
+	/* Args key-value grid */
+	.args-grid { display: grid; grid-template-columns: max-content 1fr; column-gap: 10px; row-gap: 0; font-size: 12px; }
+	.args-key { color: var(--j-key); font-weight: 600; white-space: nowrap; align-self: start; padding: 3px 0 3px; }
+	.args-val { color: var(--text-dim); overflow-wrap: break-word; min-width: 0; padding: 3px 0; border-bottom: 1px solid rgba(128,128,128,0.18); }
+	.args-key.args-even, .args-val.args-even { background: rgba(128,128,128,0.08); }
+	.args-key { border-bottom: 1px solid rgba(128,128,128,0.18); }
+	.args-val pre { margin: 2px 0 0; max-height: 200px; overflow-y: auto; overflow-x: auto; }
 
 	/* ── JSON + C# syntax tokens ── */
 	.jk  { color: var(--j-key); }
@@ -675,9 +690,8 @@
 		<div class="li"><div class="lk"><kbd>S</kbd></div><div>Auto-scroll</div></div>
 		<div class="li"><div class="lk"><kbd>T</kbd></div><div>Theme</div></div>
 		<div class="li"><div class="lk"><kbd>?</kbd></div><div>This legend</div></div>
-		<div class="li"><div class="lk"><kbd>Ctrl+F</kbd></div><div>Search</div></div>
+		<div class="li"><div class="lk"><kbd>/</kbd></div><div>Search</div></div>
 		<div class="li"><div class="lk"><kbd>Ctrl+L</kbd></div><div>Clear</div></div>
-		<div class="li"><div class="lk"><kbd>Ctrl+C</kbd></div><div>Copy entry</div></div>
 		<div class="li"><div class="lk"><kbd>Q</kbd></div><div>Shutdown</div></div>
 		<div class="li"><div class="lk"><kbd>Esc</kbd></div><div>Close / jump to end</div></div>
 	  </div>
@@ -805,9 +819,9 @@
 		filter = btn.dataset.filter;
 		document.querySelectorAll('.entry-wrap').forEach(el => {
 		  if(filter === 'FAIL')
-			el.classList.toggle('hidden', el.dataset.fail !== 'true');
+			el.classList.toggle('hidden', el.dataset.level !== 'NEW' && el.dataset.fail !== 'true');
 		  else
-			el.classList.toggle('hidden', filter !== 'ALL' && el.dataset.level !== filter);
+			el.classList.toggle('hidden', filter !== 'ALL' && el.dataset.level !== filter && el.dataset.level !== 'NEW');
 		});
 	  });
 	});
@@ -826,7 +840,7 @@
 	  updateStatus();
 	});
 
-	// ── Selection (for Ctrl+C copy) ───────────────────────────────────────
+	// ── Selection ─────────────────────────────────────────────────────────
 	let selectedWrap = null;
 
 	function selectWrap(wrap) {
@@ -841,6 +855,13 @@
 	  const chev   = wrap?.querySelector('.col-expand');
 
 	  if(!detail) return;
+
+	  // Lazy render: build detail content the first time it is opened.
+	  if(open && !detail.dataset.rendered) {
+		try { renderDetail(detail, JSON.parse(wrap.dataset.json)); }
+		catch { /* malformed — leave empty */ }
+		detail.dataset.rendered = 'true';
+	  }
 
 	  detail.classList.toggle('hidden', !open);
 	  if(chev) chev.textContent = open ? '▼' : '▶';
@@ -894,7 +915,7 @@
 	  wrap.dataset.json  = JSON.stringify(e);
 	  if(isFail) wrap.dataset.fail = 'true';
 
-	  if(filter === 'FAIL' ? !isFail : (filter !== 'ALL' && level !== filter))
+	  if(level !== 'NEW' && (filter === 'FAIL' ? !isFail : (filter !== 'ALL' && level !== filter)))
 		wrap.classList.add('hidden');
 
 	  // ── Summary row ──────────────────────────────────────────────────────
@@ -949,32 +970,9 @@
 	  wrap.appendChild(row);
 
 	  // ── Detail panel ────────────────────────────────────────────────────
+	  // Content is built lazily on first expand — see renderDetail() + setDetail().
 	  const detail = document.createElement('div');
 	  detail.className = 'entry-detail hidden';
-
-	  // Response peek section (TOOL entries only)
-	  if(e.response_peek) {
-		detail.appendChild(mk('div', 'detail-section-label', 'Response'));
-		const peekPre = document.createElement('pre');
-		peekPre.innerHTML = highlightJSON(e.response_peek);
-		detail.appendChild(peekPre);
-	  }
-
-	  // Raw log entry JSON
-	  detail.appendChild(mk('div', 'detail-section-label', 'Log entry'));
-	  const raw   = JSON.stringify(e, null, 2);
-	  const TRUNC = 800;
-	  const pre   = document.createElement('pre');
-	  pre.innerHTML = highlightJSON(raw.length <= TRUNC ? raw : raw.slice(0, TRUNC) + '\n…');
-	  detail.appendChild(pre);
-
-	  if(raw.length > TRUNC) {
-		const more = document.createElement('button');
-		more.className   = 'btn show-more';
-		more.textContent = 'Show full';
-		more.addEventListener('click', ev => { ev.stopPropagation(); pre.innerHTML = highlightJSON(raw); more.remove(); });
-		detail.appendChild(more);
-	  }
 
 	  chev.addEventListener('click', ev => { ev.stopPropagation(); toggleDetail(wrap); });
 	  row.addEventListener('dblclick', ev => { ev.stopPropagation(); toggleDetail(wrap); window.getSelection()?.removeAllRanges(); });
@@ -1006,6 +1004,150 @@
 	}
 
 	// ── JSON + C# syntax highlighting ────────────────────────────────────────
+
+	// Walk a parsed JSON value and truncate long strings and large arrays
+	// so the detail panel stays readable without hiding important data.
+	function smartTruncate(v) {
+	  const MAX_STR = 200;
+	  const MAX_ARR = 20;
+
+	  if(typeof v === 'string')
+		return v.length > MAX_STR ? v.slice(0, MAX_STR) + `…(${v.length} chars)` : v;
+
+	  if(Array.isArray(v)) {
+		const out = v.slice(0, MAX_ARR).map(smartTruncate);
+		if(v.length > MAX_ARR) out.push(`…(${v.length - MAX_ARR} more items)`);
+		return out;
+	  }
+
+	  if(v !== null && typeof v === 'object') {
+		const out = {};
+		for(const [k, val] of Object.entries(v)) out[k] = smartTruncate(val);
+		return out;
+	  }
+
+	  return v;
+	}
+
+	// Render a pretty-printed, highlighted JSON block from a compact JSON string.
+	// Falls back to regex highlighting if the string is truncated/invalid.
+	function renderPeek(str) {
+	  const pre = document.createElement('pre');
+
+	  try {
+		const truncated = smartTruncate(JSON.parse(str));
+		pre.innerHTML = highlightJSON(JSON.stringify(truncated, null, 2));
+	  }
+	  catch {
+		pre.innerHTML = highlightJSON(str);
+		const note = document.createElement('span');
+		note.className   = 'trunc-note';
+		note.textContent = '⚠ truncated or invalid JSON';
+		pre.appendChild(note);
+	  }
+
+	  return pre;
+	}
+
+	// Render tool args as a human-readable key-value table.
+	// String values containing newlines are shown as unescaped code blocks;
+	// string values that are valid JSON are pretty-printed inline;
+	// everything else is shown as a plain inline value.
+	function renderArgs(container, argsStr) {
+	  let parsed;
+
+	  try { parsed = JSON.parse(argsStr); }
+	  catch { container.appendChild(renderPeek(argsStr)); return; }
+
+	  if(typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+		container.appendChild(renderPeek(argsStr));
+		return;
+	  }
+
+	  const grid = document.createElement('div');
+	  grid.className = 'args-grid';
+
+	  let rowIndex = 0;
+	  for(const [key, val] of Object.entries(parsed)) {
+
+		const kEl = mk('span', 'args-key', key);
+		const vEl = document.createElement('span');
+		vEl.className = 'args-val';
+		if(rowIndex % 2 === 0) { kEl.classList.add('args-even'); vEl.classList.add('args-even'); }
+		rowIndex++;
+
+		if(typeof val === 'string' && val.includes('\n')) {
+		  // Multi-line string — show as highlighted code block.
+		  const pre = document.createElement('pre');
+		  pre.innerHTML = highlightCSharp(val);
+		  vEl.appendChild(pre);
+
+		} else if(typeof val === 'string' && (val.trimStart().startsWith('{') || val.trimStart().startsWith('['))) {
+		  // String that looks like JSON — try to parse and pretty-print.
+		  try {
+			const inner = smartTruncate(JSON.parse(val));
+			const pre = document.createElement('pre');
+			pre.innerHTML = highlightJSON(JSON.stringify(inner, null, 2));
+			vEl.appendChild(pre);
+		  } catch {
+			vEl.textContent = val.length > 200 ? val.slice(0, 200) + `…(${val.length} chars)` : val;
+		  }
+
+		} else if(val === null) {
+		  const s = document.createElement('span');
+		  s.className   = 'jz';
+		  s.textContent = 'null';
+		  vEl.appendChild(s);
+
+		} else if(typeof val === 'boolean') {
+		  const s = document.createElement('span');
+		  s.className   = 'jb';
+		  s.textContent = String(val);
+		  vEl.appendChild(s);
+
+		} else if(typeof val === 'number') {
+		  const s = document.createElement('span');
+		  s.className   = 'jn';
+		  s.textContent = String(val);
+		  vEl.appendChild(s);
+
+		} else {
+		  const raw = typeof val === 'string' ? val : JSON.stringify(val);
+		  vEl.textContent = raw.length > 300 ? raw.slice(0, 300) + `…(${raw.length} chars)` : raw;
+		}
+
+		grid.appendChild(kEl);
+		grid.appendChild(vEl);
+	  }
+
+	  container.appendChild(grid);
+	}
+
+
+
+	// Build the full content of an entry's detail panel (called lazily on first expand).
+	function renderDetail(detail, e) {
+
+	  // Args section — tool input parameters, rendered as human-readable key-value table
+	  if(e.args) {
+		detail.appendChild(mk('div', 'detail-section-label', 'Args'));
+		renderArgs(detail, e.args);
+	  }
+
+	  // Response section — tool output preview
+	  if(e.response_peek) {
+		detail.appendChild(mk('div', 'detail-section-label', 'Response'));
+		detail.appendChild(renderPeek(e.response_peek));
+	  }
+
+	  // Full log entry — raw NDJSON object
+	  detail.appendChild(mk('div', 'detail-section-label', 'Log entry'));
+	  const pre = document.createElement('pre');
+	  pre.innerHTML = highlightJSON(JSON.stringify(e, null, 2));
+	  detail.appendChild(pre);
+	}
+
+
 
 	function esc(s) {
 	  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1192,20 +1334,13 @@
 		return;
 	  }
 
-	  if(e.ctrlKey && e.key === 'f') {
+	  if(e.key === '/' && !e.ctrlKey && !e.altKey && !e.metaKey && document.activeElement?.tagName !== 'INPUT') {
 		e.preventDefault();
 		searchBar.classList.remove('hidden');
 		searching = true;
 		searchInput.focus();
 		searchInput.select();
 		return;
-	  }
-
-	  if(e.ctrlKey && e.key === 'c') {
-		if(selectedWrap) {
-		  navigator.clipboard.writeText(selectedWrap.dataset.json || '').catch(() => {});
-		  return;
-		}
 	  }
 
 	  if(e.key === 'Escape') {

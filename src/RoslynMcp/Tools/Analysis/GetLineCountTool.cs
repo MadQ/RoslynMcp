@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -26,6 +26,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_line_count", filePaths);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
@@ -41,11 +42,13 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 			
 			if(isCs) {
+				
 				var tree = compilation.SyntaxTrees
 					.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
 				;
 				
 				if(tree is null) {
+					
 					results.Add(new LineCountEntry(filePath, null, "not found in compilation"));
 					continue;
 				}
@@ -56,14 +59,17 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			}
 			
 			else {
+				
 				var fullPath = ResolveFilePath(filePath, rootPath);
 				
 				if(fullPath is null) {
+					
 					results.Add(new LineCountEntry(filePath, null, "file not found on disk"));
 					continue;
 				}
 				
 				try {
+					
 					var lineCount = await CountLinesAsync(fullPath);
 					results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, fullPath), lineCount, null));
 				}
@@ -77,9 +83,10 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		var filesArr   = results.ToArray();
 		
 		return scope.Outcome($"{total} file(s)", new LineCountResult(
-			Files:    filesArr,
-			Caution: AdhocCaution(projectPath)
-		));
+			Files: filesArr)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 
     /// <summary>

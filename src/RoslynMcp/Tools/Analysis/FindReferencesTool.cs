@@ -31,13 +31,15 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_find_references", symbolName);
+		using var scope = BeginTool("roslyn_find_references", symbolName, new { containingType, skip, take });
 		
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var solution = workspace.GetSolution(projectPath);
@@ -46,9 +48,11 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		// When containingType is specified, search one symbol. Otherwise search ALL
 		// symbols matching the name — prevents silently incomplete results when
 		// multiple types have members with the same name.
-		var symbols = FindSymbols(compilation, symbolName, containingType);
+		var symbols = FindSymbols(compilation, symbolName, containingType)
+		;
 		
 		if(symbols.Length == 0)
+			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
 		var allLocations = new List<string>();
@@ -78,7 +82,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		;
 		
 		if(allResults.Length == 0)
-			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], null, false, AdhocCaution(projectPath)));
+			
+			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], null, false) { Caution = AdhocCaution(projectPath) });
 		
 		string[] symbolsSearched = [.. symbols.Select(s => FormatSymbolName(s)).Distinct()];
 		
@@ -90,9 +95,10 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			Skip: skip, Take: take,
 			References: result.Items,
 			PageToken: result.PageToken,
-			HasMore:   result.HasMore,
-			Caution:   AdhocCaution(projectPath)
-		));
+			HasMore:   result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 
 }

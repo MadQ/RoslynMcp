@@ -72,7 +72,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `RespawnTool` |`roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `FileWriter` | Centralised file write entry point; `WriteWithRetryAsync` and `WriteWithRetry` wrap all disk writes with exponential-backoff retry on `IOException`, structured `INFO`/`ERROR` log entries per attempt, and are accessible from non-tool types (`BackupStore`, `SolutionDiff`) |
 | `TypeMembersTool` |`roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
-| `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path |
+| `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path — returns `items: null` (not `[]`) to distinguish "not requested" from "no results" |
 | `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |
 | `FindCallersTool` | `roslyn_find_callers` — all methods that call a named symbol; filter by `isDirect` to exclude interface/delegate dispatch |
 | `GetCallGraphTool` | `roslyn_get_call_graph` — all methods invoked within a method body; walks the Roslyn IOperation tree for precise semantic results |

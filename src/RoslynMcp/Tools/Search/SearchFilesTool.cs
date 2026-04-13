@@ -33,16 +33,18 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_search_files", pattern);
+		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, skip, take });
 		
 		filePattern ??= "*.cs";
 		
 		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 200, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		Regex regex;
 		
 		try {
+			
 			var options = RegexOptions.Compiled;
 			
 			if(!caseSensitive)
@@ -58,11 +60,12 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		var rootPath   = workspace.GetRootPath(projectPath);
 		var allMatches = new List<MatchResult>();
 		// seenPaths prevents searching the same physical file twice in multi-targeted projects.
-		var seenPaths  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
+		var seenPaths  = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		;
+		
 		foreach(var project in solution.Projects)
 			foreach(var document in project.Documents) {
-
+				
 				if(document.FilePath is null || !seenPaths.Add(document.FilePath))
 					continue;
 				
@@ -98,9 +101,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			result.Total,
 			result.Items.Length,
 			result.PageToken,
-			result.HasMore,
-			AdhocCaution(projectPath)
-		));
+			result.HasMore)
+		{
+			Caution = AdhocCaution(projectPath)
+		});
 	}
 	
 	private sealed class MatchResult

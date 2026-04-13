@@ -32,7 +32,8 @@ internal static class FilePruner
 
     // Set by IncrementAndGetRunCount at startup; read by Prune without re-hitting disk.
     // -1 means not yet initialized (Prune called before Increment, which shouldn't happen).
-    static int  cachedRunCount = -1;
+    static int  cachedRunCount = -1
+;
     static bool resetPending;
 
     /// <summary>Exposes the cached startup run count to BackupStore for its pruning gate check.</summary>
@@ -58,7 +59,8 @@ internal static class FilePruner
             catch(AbandonedMutexException) {
 
                 // Previous holder crashed; ownership transferred to us.
-                owned = true;
+                owned = true
+;
             }
             catch {
                 // Cannot acquire — proceed without cross-process atomicity.
@@ -73,17 +75,21 @@ internal static class FilePruner
                 count++;
 
                 // Atomic write: temp + rename eliminates partial-write corruption on crash.
-                var tmp = RunCountPath + ".tmp";
+                var tmp = RunCountPath + ".tmp"
+;
                 File.WriteAllText(tmp, count.ToString(CultureInfo.InvariantCulture));
                 File.Move(tmp, RunCountPath, overwrite: true);
 
                 cachedRunCount = count;
+
                 return count;
             }
             catch {
 
                 // Counter file missing, locked, or corrupt — fail safe: don't prune.
-                cachedRunCount = 0;
+                cachedRunCount = 0
+;
+
                 return 0;
             }
         }
@@ -110,9 +116,11 @@ internal static class FilePruner
         bool recursive = false)
     {
         // Fall back to disk only if called before Increment (mis-call order).
-        var runCount = cachedRunCount >= 0 ? cachedRunCount : ReadRunCountCore();
+        var runCount = cachedRunCount >= 0 ? cachedRunCount : ReadRunCountCore()
+;
 
         if(runCount < minRuns)
+
             return;
 
         var owned = false;
@@ -122,9 +130,11 @@ internal static class FilePruner
         try {
 
             try {
+
                 owned = mutex.WaitOne(0);
 
                 if(!owned)
+
                     return;  // another process is already pruning — skip this run
             }
             catch(AbandonedMutexException) {
@@ -179,6 +189,7 @@ internal static class FilePruner
     internal static void ApplyPendingReset()
     {
         if(!resetPending)
+
             return;
 
         try {

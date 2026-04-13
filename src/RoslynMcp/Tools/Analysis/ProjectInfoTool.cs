@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -39,9 +39,10 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		[Description(ProjectPathDescription)] string projectPath,
 		[Description("When true (default), reads package references directly from the .csproj — fast and accurate for explicit references only. When false, infers packages from resolved metadata reference paths, which may include transitive dependencies.")] bool directOnly = true)
 	{
-		using var scope = BeginTool("roslyn_get_project_info");
+		using var scope = BeginTool("roslyn_get_project_info", null, new { directOnly });
 		
 		if(!TryGetProject(projectPath, out var project, out var error))
+			
 			return scope.Error(error);
 		
 		var rootPath		  = workspace.GetRootPath(projectPath);
@@ -92,9 +93,10 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			props.RootNamespace,
 			props.TargetFrameworks,
 			props.AllowUnsafeBlocks,
-			props.WarningsAsErrors,
-			caution
-		));
+			props.WarningsAsErrors)
+		{
+			Caution = caution
+		});
 	}
 	
 	private static string? InferTfm(Project project)
@@ -107,6 +109,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			var m = TfmPattern.Match(candidate);
 			
 			if(m.Success)
+				
 				return m.Groups[1].Value;
 		}
 		
@@ -119,6 +122,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			var m = TfmPattern.Match(r.Display);
 			
 			if(m.Success)
+				
 				return m.Groups[1].Value;
 		}
 		
@@ -176,7 +180,8 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			;
 			
 			// Version resolution follows MSBuild order: Version → VersionPrefix[-VersionSuffix] → AssemblyVersion.
-			var version = Prop("Version");
+			var version = Prop("Version")
+			;
 			var prefix  = Prop("VersionPrefix");
 			var suffix  = Prop("VersionSuffix");
 			
@@ -207,7 +212,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		}
 	}
 	
-
+	
 	private static PackageRef[] ExtractDirectPackages(string csprojPath)
 	{
 		try {

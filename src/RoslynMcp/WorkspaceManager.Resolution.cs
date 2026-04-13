@@ -1,4 +1,4 @@
-﻿using RoslynMcp.Tools;
+using RoslynMcp.Tools;
 
 namespace RoslynMcp;
 
@@ -35,6 +35,7 @@ internal sealed partial class WorkspaceManager
 			var csprojPath = FindProjectInDirectory(fullPath);
 			
 			if(csprojPath is not null)
+				
 				return (csprojPath, ResolutionKind.Directory);
 			
 			return (fullPath, ResolutionKind.Adhoc);
@@ -42,12 +43,15 @@ internal sealed partial class WorkspaceManager
 		
 		// File path — walk up to find .csproj.
 		if(File.Exists(fullPath))
+			
 			return (FindProjectFileUpwards(fullPath), ResolutionKind.FileWalkUp);
 		
 		// Last resort: bare filename — scan cached MSBuild workspaces.
-		var inferred = TryInferWorkspaceFromFileName(Path.GetFileName(fullPath));
+		var inferred = TryInferWorkspaceFromFileName(Path.GetFileName(fullPath))
+		;
 		
 		if(inferred is not null)
+			
 			return (inferred, ResolutionKind.InferredFromCache);
 		
 		throw new InvalidProjectPathException(fullPath, "Path does not exist");
@@ -69,13 +73,16 @@ internal sealed partial class WorkspaceManager
 			
 			// Prefer .slnx (newer format) over .sln.
 			if(slnxFiles.Length == 1 && slnFiles.Length == 0)
+				
 				return slnxFiles[0];
 			
 			if(slnFiles.Length == 1 && slnxFiles.Length == 0)
+				
 				return slnFiles[0];
 			
 			// Multiple solutions or both formats present — ambiguous, fall back to project-level.
 			if(slnxFiles.Length + slnFiles.Length > 1)
+				
 				return null;
 			
 			dir = Directory.GetParent(dir)?.FullName;
@@ -91,6 +98,7 @@ internal sealed partial class WorkspaceManager
 	string? TryInferWorkspaceFromFileName(string fileName)
 	{
 		if(string.IsNullOrEmpty(fileName))
+			
 			return null;
 		
 		var suffix = Path.DirectorySeparatorChar + fileName;
@@ -115,9 +123,11 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		if(matches is null)
+			
 			return null;
 		
 		if(matches.Count == 1)
+			
 			return matches[0];
 		
 		throw new AmbiguousFileException(fileName, matches.ToArray());
@@ -128,9 +138,11 @@ internal sealed partial class WorkspaceManager
 		var csprojFiles = GetFilesSafe(directory, "*.csproj");
 		
 		if(csprojFiles.Length == 0)
+			
 			return null;
 		
 		if(csprojFiles.Length == 1)
+			
 			return csprojFiles[0];
 		
 		throw new MultipleProjectsFoundException(directory, csprojFiles);
@@ -150,6 +162,7 @@ internal sealed partial class WorkspaceManager
 			var csprojFiles = GetFilesSafe(dir, "*.csproj");
 			
 			if(csprojFiles.Length == 1)
+				
 				return csprojFiles[0];
 			
 			if(csprojFiles.Length > 1)

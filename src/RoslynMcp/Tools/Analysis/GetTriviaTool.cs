@@ -37,21 +37,26 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         [Description("Pass true to return all available C# syntax kind names instead of analyzing trivia. No filePath needed.")] bool listSyntaxKinds = false,
         [Description("Pass true to return all available trivia kind names instead of analyzing trivia. No filePath needed.")] bool listTriviaKinds = false)
     {
-        using var scope = BeginTool("roslyn_get_trivia", filePath);
+        using var scope = BeginTool("roslyn_get_trivia", filePath, new { startLine, endLine, syntaxKind, triviaKind, includeLeading, includeTrailing, skip, take, listSyntaxKinds, listTriviaKinds });
 
         if(TryHandleDiscovery(listSyntaxKinds, listTriviaKinds, listMemberKinds: false, listTypeKinds: false, listSearchContexts: false, out var discovery))
+
             return scope.Outcome("discovery", discovery);
 
         if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 500, out var cached))
+
             return scope.Outcome("cached page", cached);
 
         if(string.IsNullOrEmpty(filePath))
+
             return scope.Error(new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds"));
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
+
             return scope.Error(error!);
 
         if(take <= 0 || take > 500)
+
             return scope.Error(new ErrorResult("take must be between 1 and 500"));
 
         var normalizedPath = NormalizePath(filePath);
@@ -60,6 +65,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         );
 
         if(tree is null)
+
             return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
 
         var root	   = await tree.GetRootAsync();
@@ -95,12 +101,13 @@ internal sealed class GetTriviaTool : RoslynMcpTool
             if(nodesInSpan.Count == 0) {
 
                 return scope.Error(new GetTriviaNoMatchResult(
-                    "no_matching_nodes",
                     $"No syntax nodes of kind '{syntaxKind}' found in the specified range.",
-                    "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
                     syntaxKind,
-                    CommonSyntaxKinds
-                ));
+                    CommonSyntaxKinds)
+                {
+                    Error = "no_matching_nodes",
+                    Hint  = "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if')."
+                });
             }
         }
 
@@ -170,6 +177,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
     private static string TruncateText(string text, int maxLength)
     {
         if(text.Length <= maxLength)
+
             return text;
 
         return text.Substring(0, maxLength) + "…";

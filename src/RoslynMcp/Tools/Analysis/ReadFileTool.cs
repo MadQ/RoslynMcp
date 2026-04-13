@@ -26,7 +26,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
         [Description("1-based line to start reading from. Default: 1 (start of file). Combine with endLine to read a specific section.")] int startLine = 1,
         [Description("1-based line to stop reading at (inclusive). Default: end of file. Use roslyn_get_file_outline to find a member's line range.")] int endLine = int.MaxValue)
     {
-        using var scope = BeginTool("roslyn_read_file", filePath);
+        using var scope = BeginTool("roslyn_read_file", filePath, new { startLine, endLine });
 
         var rootPath   = workspace.GetRootPath(projectPath);
         var normalized = NormalizePath(filePath);
@@ -39,6 +39,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 
             // .cs files: serve from in-memory compilation — no disk I/O, always reflects unsaved edits.
             if(!TryGetCompilation(projectPath, out var compilation, out var error))
+
                 return scope.Error(error!);
 
             var tree = compilation.SyntaxTrees
@@ -55,25 +56,31 @@ internal sealed class ReadFileTool : RoslynMcpTool
         else {
 
             // Non-.cs: fall back to disk.
-            var fullPath = ResolveFilePath(filePath, rootPath);
+            var fullPath = ResolveFilePath(filePath, rootPath)
+;
 
             if(fullPath is null)
+
                 return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 
             // Stream directly - avoids the ReadAllTextAsync string SourceText double-buffer.
-            using var stream = File.OpenRead(fullPath);
+            using var stream = File.OpenRead(fullPath)
+;
             sourceText    = SourceText.From(stream);
-            canonicalPath = fullPath;
+            canonicalPath = fullPath
+;
         }
 
         var lines      = sourceText.Lines;
         var totalLines = lines.Count;
 
         // Clamp range to actual file bounds.
-        var first = Math.Clamp(startLine, 1, totalLines);
+        var first = Math.Clamp(startLine, 1, totalLines)
+;
         var last  = Math.Clamp(endLine,   1, totalLines);
 
         if(first > last)
+
             return scope.Failed("invalid range", new ErrorResult($"startLine ({startLine}) must be ≤ endLine ({endLine})."));
 
         var result = new string[last - first + 1];
@@ -84,13 +91,14 @@ internal sealed class ReadFileTool : RoslynMcpTool
         var relative = Path.GetRelativePath(rootPath, canonicalPath);
 
         return scope.Outcome($"{result.Length}/{totalLines} line(s)", new ReadFileResult(
-            File:        relative,
-            Source:      isCs ? "roslyn" : "disk",
+            File:       relative,
+            Source:     isCs ? "roslyn" : "disk",
             TotalLines: totalLines,
             StartLine:  first,
             EndLine:    last,
-            Lines:       result,
-            Caution:    AdhocCaution(projectPath)
-        ));
+            Lines:      result)
+        {
+            Caution = AdhocCaution(projectPath)
+        });
     }
 }

@@ -24,7 +24,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		"or 'n' to cancel without writing any files. " +
 		"Tokens are single-use — once consumed or rejected, run roslyn_change_signature again if another change is needed. " +
 		"On success, writes all changed files to disk — including the new overload and any updated call sites — and reports the number of files modified.")]
-	public async Task<string> ApplySignatureChange(
+	public async Task<object> ApplySignatureChange(
 		[Description("The confirmation token returned by roslyn_change_signature. Tokens are single-use — they expire after being applied or rejected.")] string token,
 		[Description("'y' to apply this signature change once; 'session' to apply and auto-approve the same method for all future changes in this session; 'n' to cancel without writing any files.")] string approval,
 		[Description(ProjectPathDescription)] string projectPath)
@@ -32,21 +32,26 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_apply_signature_change", $"{token} ({approval})");
 		
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
+			
 			approvals.Reject(token);
-			return scope.Failed("rejected", "Signature change rejected. No files were changed.");
+			
+			return scope.Failed("rejected", new ApplySignatureChangeResult("Signature change rejected. No files were changed.", null, "rejected"));
 		}
 		
 		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase) && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
-			return scope.Failed("invalid approval", "Invalid approval value. Use 'y', 'session', or 'n'.");
+			
+			return scope.Failed("invalid approval", new ApplySignatureChangeResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, "invalid approval"));
 		
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
 		var operation         = approvals.Consume(token, forSession);
 		
 		if(operation is null)
-			return scope.Failed("token not found", $"Token '{token}' not found or already consumed. Run change_signature again.");
+			
+			return scope.Failed("token not found", new ApplySignatureChangeResult($"Token '{token}' not found or already consumed. Run change_signature again.", null, "token not found"));
 		
 		// Collect changed docs so we can back them up and verify each one after writing.
-		var rootPath    = workspace.GetRootPath(projectPath);
+		var rootPath    = workspace.GetRootPath(projectPath)
+		;
 		var changedDocs = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()
 			.SelectMany(p => p.GetChangedDocuments()
@@ -58,11 +63,13 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		// Save pre- and post-change snapshots for each file before writing.
 		// SavePreAsync reads the current disk content (pre-change); SavePostAsync saves the intended new content.
 		// Abort without touching any files if either snapshot fails.
-		bool preSaved = false;
-
+		bool preSaved = false
+		;
+		
 		try {
-
+			
 			foreach(var doc in changedDocs) {
+				
 				var bytes = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
 				preSaved = false;
 				await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_signature_change");
@@ -71,14 +78,17 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			}
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
 			var phaseWord = preSaved ? "post" : "pre";
 			var snapNote  = preSaved ? " Any pre-change snapshots already saved are not needed." : string.Empty;
-
+			
 			// The approval token was already consumed — the agent must run roslyn_change_signature again.
-			return scope.Failed("backup failed",
+			
+			return scope.Failed("backup failed", new ApplySignatureChangeResult(
 				$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
 				$"No files were modified.{snapNote} " +
-				"The approval token has been consumed — run roslyn_change_signature again to get a new token, then retry.");
+				"The approval token has been consumed — run roslyn_change_signature again to get a new token, then retry.",
+				null, "backup failed"));
 		}
 		
 		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
@@ -88,17 +98,21 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			
 			// Self-healing recovery: if TryApplyChanges truncated a file, re-write from memory.
 			foreach(var doc in changedDocs) {
+				
 				var path    = doc.FilePath!;
 				var relPath = TryMakeRelative(path, rootPath) ?? path;
 				var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
 				
 				if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
-					return scope.Failed("truncation detected", truncErr.Error);
+					
+					return scope.Failed("truncation detected", new ApplySignatureChangeResult(truncErr.Error, null, "truncation detected"));
 			}
 		}
 		else {
+			
 			await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
 			async (path, content) => {
+				
 				await workspace.WriteAndInvalidate(projectPath, path,
 					() => FileWriter.WriteAllTextAsync(path, content));
 				
@@ -113,6 +127,14 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		
 		var sessionNote = forSession ? " Method approved for the remainder of this session." : string.Empty;
 		
-		return scope.Outcome($"{filesChanged} file(s) written", $"Signature change applied.{sessionNote} Files written to disk.");
+		return scope.Outcome($"{filesChanged} file(s) written", new ApplySignatureChangeResult(
+			$"Signature change applied.{sessionNote} Files written to disk.",
+			filesChanged, null));
 	}
 }
+
+internal sealed record ApplySignatureChangeResult(
+	string  Message,
+	int?    FilesWritten,
+	string? Error
+);

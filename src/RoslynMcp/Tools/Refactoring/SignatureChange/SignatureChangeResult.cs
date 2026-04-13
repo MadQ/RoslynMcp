@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 
 namespace RoslynMcp.Tools.SignatureChange;
 
@@ -22,6 +22,7 @@ internal sealed record SignatureChangeResult
 	
 	public static SignatureChangeResult Failed(Solution solution, string error)
 		=> new() {
+			
 			Success      = false,
 			BaseSolution = solution,
 			NewSolution  = solution,

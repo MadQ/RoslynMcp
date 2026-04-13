@@ -30,25 +30,29 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_find_implementations", symbolName);
+		using var scope = BeginTool("roslyn_find_implementations", symbolName, new { containingType, skip, take });
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+			
 			return scope.Outcome("cached page", cached);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			
 			return scope.Error(error!);
 		
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
+			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
 		var solution = workspace.GetSolution(projectPath);
 		
 		// Handle type symbols (interface or abstract class).
 		if(symbol is INamedTypeSymbol typeSymbol) {
+			
 			if((typeSymbol.TypeKind is TypeKind.Interface or TypeKind.Class) && typeSymbol.IsAbstract) {
-					
+				
 				var impls	   = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = impls
 					.OfType<INamedTypeSymbol>()
@@ -61,6 +65,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var typeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat);
 				
 				if(allResults.Length == 0)
+					
 					return scope.Outcome("no implementations", new FindImplementationsResult(typeKind, typeName, 0, skip, take, ["No implementations found."]));
 				
 				var result = PaginateAndStore(allResults, ref skip, take);
@@ -72,9 +77,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					Skip: skip, Take: take,
 					Implementations: result.Items,
 					PageToken:      result.PageToken,
-					HasMore:        result.HasMore,
-					Caution:        AdhocCaution(projectPath)
-				));
+					HasMore:        result.HasMore)
+				{
+					Caution = AdhocCaution(projectPath)
+				});
 			}
 			
 			return scope.Error(new ErrorResult($"'{symbolName}' is not an interface or abstract class."));
@@ -82,8 +88,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		// Handle method symbols (abstract or virtual).
 		if(symbol is IMethodSymbol methodSymbol) {
+			
 			if(methodSymbol.IsAbstract || methodSymbol.IsVirtual || methodSymbol.IsOverride) {
-					
+				
 				var overrides  = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = overrides
 					.OfType<IMethodSymbol>()
@@ -95,6 +102,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var methodDisplay = FormatMethod(methodSymbol);
 				
 				if(allResults.Length == 0)
+					
 					return scope.Outcome("no overrides", new FindOverridesResult("method", methodDisplay, 0, skip, take, ["No overrides found."]));
 				
 				var result = PaginateAndStore(allResults, ref skip, take);
@@ -106,9 +114,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					Skip: skip, Take: take,
 					Overrides:  result.Items,
 					PageToken: result.PageToken,
-					HasMore:   result.HasMore,
-					Caution:   AdhocCaution(projectPath)
-				));
+					HasMore:   result.HasMore)
+				{
+					Caution = AdhocCaution(projectPath)
+				});
 			}
 			
 			return scope.Error(new ErrorResult($"'{symbolName}' is not an abstract, virtual, or override method."));
