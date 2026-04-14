@@ -410,8 +410,9 @@ docs/ScratchPad2.md
 docs/github-issues/
 
 # Local utility scripts
-scripts/
+scripts/*
 !scripts/enforce-roslyn-tools.sh
+!scripts/Test-FswFileRecreation.ps1
 
 # Developer convenience scripts (local only, not part of the repo)
 pub.ps1

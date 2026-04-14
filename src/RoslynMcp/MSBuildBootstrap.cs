@@ -147,6 +147,24 @@ internal static class MSBuildBootstrap
 				
 				// SDK mode (or Auto): standard discovery chain.
 				
+				// 0. Direct path override — set ROSLYNMCP_MSBUILD_PATH to a dotnet SDK directory
+				//    (one containing MSBuild.dll) to bypass MSBuildLocator auto-discovery entirely.
+				//    Intended for self-contained exe scenarios where hostfxr cannot enumerate SDKs.
+				var overridePath = Environment.GetEnvironmentVariable("ROSLYNMCP_MSBUILD_PATH")
+				;
+				
+				if(!string.IsNullOrEmpty(overridePath)) {
+					
+					if(TryRegisterPath(overridePath)) {
+						
+						discoveryMethod = $"resolved via ROSLYNMCP_MSBUILD_PATH env var ({overridePath})";
+						
+						return null;
+					}
+					
+					// Override was set but invalid — fall through to auto-discovery.
+				}
+				
 				// 1. Try MSBuildLocator directly — works when .NET SDK is on PATH.
 				if(TryRegister()) {
 					
@@ -163,6 +181,16 @@ internal static class MSBuildBootstrap
 					if(TryRegister()) {
 						
 						discoveryMethod = source;
+						
+						return null;
+					}
+					
+					// RegisterDefaults() can fail from self-contained executables — the bundled hostfxr
+					// cannot enumerate system-installed SDKs. Fall back to direct SDK enumeration,
+					// which calls RegisterMSBuildPath() and bypasses hostfxr entirely.
+					if(TryRegisterFromDotnetSDK(dotnetDir, out var sdkPath)) {
+						
+						discoveryMethod = $"{source} (direct SDK path: {sdkPath})";
 						
 						return null;
 					}
@@ -190,7 +218,7 @@ internal static class MSBuildBootstrap
 					? "MSBuild not found. Install .NET SDK or Visual Studio Build Tools. "
 						+ "If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH."
 					: "MSBuild not found. Install the .NET SDK (https://dot.net). "
-						+ "If installed in a non-standard location, set DOTNET_ROOT."
+						+ "If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH."
 				;
 				
 				discoveryMethod = "not found — " + failureReason;
@@ -334,6 +362,110 @@ internal static class MSBuildBootstrap
 		catch {
 			return false;
 		}
+	}
+	
+	/// <summary>
+	///     Registers MSBuild from a specific SDK directory path, bypassing
+	///     MSBuildLocator.RegisterDefaults() and the hostfxr P/Invoke it relies on.
+	///     Use when running as a self-contained executable, where the bundled hostfxr
+	///     cannot enumerate system-installed SDKs.
+	/// </summary>
+	static bool TryRegisterPath(string msbuildDir)
+	{
+		try {
+			
+			if(!MSBuildLocator.CanRegister)
+				
+				return false;
+			
+			if(!File.Exists(Path.Combine(msbuildDir, "MSBuild.dll")))
+				
+				return false;
+			
+			MSBuildLocator.RegisterMSBuildPath(msbuildDir);
+			
+			return true;
+		}
+		catch {
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Enumerates dotnet SDK directories under <paramref name="dotnetDir"/>, selects the
+	///     latest version whose major version does not exceed the current runtime version,
+	///     and registers it via <see cref="TryRegisterPath"/>. This mirrors MSBuildLocator's
+	///     <c>allowQueryAllRuntimeVersions=false</c> policy without invoking hostfxr.
+	/// </summary>
+	static bool TryRegisterFromDotnetSDK(string dotnetDir, out string sdkPath)
+	{
+		sdkPath = "";
+		
+		try {
+			
+			var sdkBaseDir = Path.Combine(dotnetDir, "sdk")
+			;
+			
+			if(!Directory.Exists(sdkBaseDir))
+				
+				return false;
+			
+			var currentMajor = Environment.Version.Major
+			;
+			
+			Version? best    = null;
+			string?  bestDir = null;
+			
+			foreach(var dir in Directory.EnumerateDirectories(sdkBaseDir)) {
+				
+				var candidate = TryParseVersionPrefix(Path.GetFileName(dir))
+				;
+				
+				if(candidate is null || candidate.Major > currentMajor)
+					
+					continue;
+				
+				if(!File.Exists(Path.Combine(dir, "MSBuild.dll")))
+					
+					continue;
+				
+				if(best is null || candidate > best) {
+					
+					best    = candidate;
+					bestDir = dir;
+				}
+			}
+			
+			if(bestDir is null)
+				
+				return false;
+			
+			if(!TryRegisterPath(bestDir))
+				
+				return false;
+			
+			sdkPath = bestDir;
+			
+			return true;
+		}
+		catch {
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Parses the version prefix from an SDK directory name, stripping pre-release
+	///     suffixes (e.g. "10.0.100-rc.2.25502.107" becomes <c>10.0.100</c>). Returns
+	///     <see langword="null"/> when the name cannot be parsed as a <see cref="Version"/>.
+	/// </summary>
+	static Version? TryParseVersionPrefix(string dirName)
+	{
+		var dash = dirName.IndexOf('-')
+		;
+		var versionStr = dash >= 0 ? dirName[..dash] : dirName
+		;
+		
+		return Version.TryParse(versionStr, out var v) ? v : null;
 	}
 	
 	/// <summary>
