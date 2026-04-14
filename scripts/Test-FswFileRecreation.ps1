@@ -31,15 +31,24 @@
 .PARAMETER RmExe
     Path to RoslynMcp.exe. Defaults to publish\net10.0\RoslynMcp.exe in the repo root.
 
+.PARAMETER Pause
+    Pause before each scenario waiting for a keypress.
+    SPACE advances to the next scenario; any other key disables further pauses and runs to completion.
+    Useful for manually inspecting the test repo in VS between scenarios.
+
 .EXAMPLE
     .\scripts\Test-FswFileRecreation.ps1
+
+.EXAMPLE
+    .\scripts\Test-FswFileRecreation.ps1 -Pause
 
 .EXAMPLE
     .\scripts\Test-FswFileRecreation.ps1 -FswWaitMs 2000 -Verbose
 #>
 param(
     [int]    $FswWaitMs = 2000,
-    [string] $RmExe     = ''
+    [string] $RmExe     = '',
+    [switch] $Pause
 )
 
 Set-StrictMode -Version Latest
@@ -138,13 +147,14 @@ function Invoke-McpTool {
 
 # -- Test state ------------------------------------------------------------------
 
-$ts       = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
-$tmpDir   = Join-Path ([IO.Path]::GetTempPath()) "RmFswTest_$ts"
-$bareDir  = Join-Path ([IO.Path]::GetTempPath()) "RmFswTest_Bare_$ts"
-$proc     = $null
-$passAll  = $true
-$checks   = 0
-$failures = [System.Collections.Generic.List[string]]::new()
+$ts            = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+$tmpDir        = Join-Path ([IO.Path]::GetTempPath()) "RmFswTest_$ts"
+$bareDir       = Join-Path ([IO.Path]::GetTempPath()) "RmFswTest_Bare_$ts"
+$proc          = $null
+$passAll       = $true
+$checks        = 0
+$failures      = [System.Collections.Generic.List[string]]::new()
+$stepDisabled  = $false  # set to $true once the user presses a non-SPACE key in Wait-Step
 
 function Write-Pass {
     param([string] $msg)
@@ -165,6 +175,115 @@ function Write-ScenarioHeader {
     Write-Host ""
     Write-Host "-- Scenario $label  $desc" -ForegroundColor Cyan
     Write-Host ""
+
+    Wait-Step "Scenario $label"
+}
+
+# Reads a single keypress, ignoring standalone modifier keys (Shift, Ctrl, Alt and their
+# left/right variants) so they don't accidentally trigger "run to end".
+function Read-ActionKey {
+
+    while($true) {
+
+        $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+
+        # VK codes: Shift=16/160/161  Ctrl=17/162/163  Alt=18/164/165
+        if($key.VirtualKeyCode -notin @(16, 17, 18, 160, 161, 162, 163, 164, 165)) {
+            return $key
+        }
+    }
+}
+
+# Pauses for a keypress when -Pause is active and the user has not yet pressed a non-SPACE key.
+# SPACE advances to the next step; C copies $CopyPath to the clipboard and stays paused;
+# any other key disables future pauses and runs to completion.
+function Wait-Step {
+    param(
+        [string] $label    = 'next step',
+        [string] $CopyPath = ''
+    )
+
+    if(!$Pause -or $script:stepDisabled) { return }
+
+    $copyHint = if($CopyPath) { '   C = copy path to clipboard' } else { '' }
+    Write-Host "  [PAUSED: $label]" -ForegroundColor Yellow
+    Write-Host "  SPACE = next step${copyHint}   any other key = run to end..." -ForegroundColor DarkYellow
+
+    while($true) {
+
+        $key = Read-ActionKey
+
+        if($CopyPath -and ($key.Character -eq 'c' -or $key.Character -eq 'C')) {
+
+            Set-Clipboard $CopyPath
+            Write-Host "  Copied: $CopyPath" -ForegroundColor DarkCyan
+            # Stay paused — wait for the next key.
+        }
+        elseif($key.VirtualKeyCode -eq 32) {
+            break  # SPACE — advance to next step
+        }
+        else {
+
+            # Any other key disables further pauses for the rest of the run.
+            $script:stepDisabled = $true
+            Write-Host "  Pause disabled — running to end." -ForegroundColor DarkYellow
+            break
+        }
+    }
+
+    Write-Host ""
+}
+
+# Runs a state-changing git command. When -Pause is active, pauses for a keypress before
+# executing. -Retry: if the command fails, prompts the user to fix the issue and retry
+# (intended for non-force checkouts that can fail due to uncommitted changes).
+# Does not wrap read-only queries (git status, git rev-parse) -- call those directly.
+function Invoke-Git {
+    param(
+        [Parameter(Position = 0)]
+        [string[]] $GitArgs,
+        [switch]   $Retry
+    )
+
+    $display = "git $($GitArgs -join ' ')"
+
+    while($true) {
+
+        if($Pause -and !$script:stepDisabled) {
+            Wait-Step $display
+        }
+
+        $out = & git @GitArgs 2>&1
+        if($LASTEXITCODE -eq 0) { return }
+
+        if($out) { Write-Host "  $display failed: $out" -ForegroundColor Red }
+
+        if(!$Retry -or !$Pause -or $script:stepDisabled) { return }
+
+        Write-Host "  Stash or revert changes in VS, then:" -ForegroundColor Yellow
+        Write-Host "  R = retry   S = skip (continue, failures will be recorded)   any other key = run to end..." -ForegroundColor DarkYellow
+
+        $key = Read-ActionKey
+        Write-Host ""
+
+        if($key.Character -eq 'r' -or $key.Character -eq 'R') {
+            # loop and retry
+        }
+        elseif($key.Character -eq 's' -or $key.Character -eq 'S') {
+            return
+        }
+        else {
+            $script:stepDisabled = $true
+            Write-Host "  Pause disabled — running to end." -ForegroundColor DarkYellow
+            return
+        }
+    }
+}
+
+# Non-force git checkout with retry on failure (uncommitted-changes guard).
+function Invoke-GitCheckout {
+    param([string] $branch)
+    Invoke-Git @('checkout', '-q', $branch) -Retry
 }
 
 # Checks that the current branch and working tree match expectations at the start of a scenario.
@@ -218,8 +337,36 @@ function New-CsprojContent {
         '</Project>'
     ) -join "`n"
 }
+function New-SlnContent {
+    return @(
+        '',
+        'Microsoft Visual Studio Solution File, Format Version 12.00',
+        '# Visual Studio Version 17',
+        'VisualStudioVersion = 17.14.37111.16',
+        'MinimumVisualStudioVersion = 10.0.40219.1',
+        'Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestProject", "TestProject.csproj", "{C5C64610-488D-AA8D-59AF-87C40156CD64}"',
+        'EndProject',
+        'Global',
+        "`tGlobalSection(SolutionConfigurationPlatforms) = preSolution",
+        "`t`tDebug|Any CPU = Debug|Any CPU",
+        "`t`tRelease|Any CPU = Release|Any CPU",
+        "`tEndGlobalSection",
+        "`tGlobalSection(ProjectConfigurationPlatforms) = postSolution",
+        "`t`t{C5C64610-488D-AA8D-59AF-87C40156CD64}.Debug|Any CPU.ActiveCfg = Debug|Any CPU",
+        "`t`t{C5C64610-488D-AA8D-59AF-87C40156CD64}.Debug|Any CPU.Build.0 = Debug|Any CPU",
+        "`t`t{C5C64610-488D-AA8D-59AF-87C40156CD64}.Release|Any CPU.ActiveCfg = Release|Any CPU",
+        "`t`t{C5C64610-488D-AA8D-59AF-87C40156CD64}.Release|Any CPU.Build.0 = Release|Any CPU",
+        "`tEndGlobalSection",
+        "`tGlobalSection(SolutionProperties) = preSolution",
+        "`t`tHideSolutionNode = FALSE",
+        "`tEndGlobalSection",
+        "`tGlobalSection(ExtensibilityGlobals) = postSolution",
+        "`t`tSolutionGuid = {8E17AD62-3D0F-468B-A46F-55AE8A56A2D0}",
+        "`tEndGlobalSection",
+        'EndGlobal'
+    ) -join "`n"
+}
 
-# -- Main ------------------------------------------------------------------------
 
 try {
     Write-Host ""
@@ -228,6 +375,7 @@ try {
     Write-Host "======================================================================"
     Write-Host "  RM exe   : $RmExe"
     Write-Host "  FSW wait : ${FswWaitMs}ms  (DebounceMs=300; default=2000)"
+    Write-Host "  Pause    : $(if($Pause) { 'on (SPACE=step, C=copy path, any other key=run to end)' } else { 'off' })"
     Write-Host "  Temp dir : $tmpDir"
     Write-Host ""
 
@@ -244,6 +392,7 @@ try {
 
     # Minimal SDK project -- no NuGet packages; MSBuildWorkspace loads without extra restore work.
     Set-Content 'TestProject.csproj' (New-CsprojContent) -NoNewline
+    Set-Content 'TestProject.sln'   (New-SlnContent)    -NoNewline
 
     Set-Content 'BaseClass.cs' "namespace TestProject;`npublic class BaseClass { public void DoWork() { } }"
     Set-Content 'AnotherClass.cs' "namespace TestProject;`npublic class AnotherClass { public int Value => 42; }"
@@ -251,7 +400,7 @@ try {
     # Shared.cs is on main and inherited by all feature branches.
     Set-Content 'Shared.cs' "namespace TestProject;`npublic class Shared { public string Name => `"shared`"; public void Run() { } }"
 
-    Set-Content '.gitignore' "bin/`nobj/"
+    Set-Content '.gitignore' "bin/`nobj/`n.vs/`n*.user"
 
     & git add . 2>&1 | Out-Null
     & git commit -q -m 'Initial commit' 2>&1 | Out-Null
@@ -289,6 +438,7 @@ try {
     & git checkout -q feat/alpha 2>&1 | Out-Null
 
     Write-Host "  Repo ready. Branches: main, feat/alpha, feat/beta, feat/gamma"
+    Write-Host "  Local:   $tmpDir"
     Write-Host "  Remote:  $bareDir"
     Write-Host ""
 
@@ -363,6 +513,8 @@ try {
     Write-Host "  MCP session initialized."
     Write-Host ""
 
+    Wait-Step "setup complete — open test repo in VS if needed" -CopyPath $tmpDir
+
     $csprojPath = Join-Path $tmpDir 'TestProject.csproj'
 
     # ============================================================================
@@ -402,7 +554,7 @@ try {
     }
 
     Write-Host "  git checkout main (deletes Alpha.cs, AlphaHelper.cs)..."
-    & git checkout -q main 2>&1 | Out-Null
+    Invoke-GitCheckout 'main'
     Start-Sleep -Milliseconds $FswWaitMs
 
     $alphaDiskA  = Test-Path (Join-Path $tmpDir 'Alpha.cs')
@@ -456,7 +608,7 @@ try {
     Test-ScenarioPreconditions 'B' 'main'
 
     Write-Host "  git checkout feat/beta..."
-    & git checkout -q feat/beta 2>&1 | Out-Null
+    Invoke-GitCheckout 'feat/beta'
     Start-Sleep -Milliseconds $FswWaitMs
 
     $noAlphaB = -not (Test-Path (Join-Path $tmpDir 'Alpha.cs'))
@@ -497,7 +649,7 @@ try {
     }
 
     Write-Host "  git checkout feat/gamma..."
-    & git checkout -q feat/gamma 2>&1 | Out-Null
+    Invoke-GitCheckout 'feat/gamma'
     Start-Sleep -Milliseconds $FswWaitMs
 
     $noBetaG = -not (Test-Path (Join-Path $tmpDir 'Beta.cs'))
@@ -575,7 +727,7 @@ try {
 
     # Force checkout discards the uncommitted edit and switches branches -- Gamma.cs is deleted.
     Write-Host "  git checkout -f feat/alpha (force-discards edit; deletes Gamma.cs)..."
-    & git checkout -f -q feat/alpha 2>&1 | Out-Null
+    Invoke-Git 'checkout', '-f', '-q', 'feat/alpha'
     Start-Sleep -Milliseconds $FswWaitMs
 
     $gammaGoneC = -not (Test-Path (Join-Path $tmpDir 'Gamma.cs'))
@@ -640,7 +792,7 @@ try {
     }
 
     Write-Host "  git checkout -f feat/beta (force-discards edits; deletes Alpha.cs + AlphaHelper.cs)..."
-    & git checkout -f -q feat/beta 2>&1 | Out-Null
+    Invoke-Git 'checkout', '-f', '-q', 'feat/beta'
     Start-Sleep -Milliseconds $FswWaitMs
 
     $alphaGoneD  = -not (Test-Path (Join-Path $tmpDir 'Alpha.cs'))
@@ -722,7 +874,7 @@ try {
     }
 
     Write-Host "  git clean -f (removes untracked files)..."
-    & git clean -f -q 2>&1 | Out-Null
+    Invoke-Git 'clean', '-f', '-q'
     Start-Sleep -Milliseconds $FswWaitMs
 
     if(-not (Test-Path (Join-Path $tmpDir 'NewFeature.cs'))) {
@@ -786,7 +938,7 @@ try {
 
     # Stash only Shared.cs -- avoids capturing any accidental working-tree noise.
     Write-Host "  git stash push -- Shared.cs..."
-    & git stash push -q -- 'Shared.cs' 2>&1 | Out-Null
+    Invoke-Git 'stash', 'push', '-q', '--', 'Shared.cs'
     Start-Sleep -Milliseconds $FswWaitMs
 
     $gitStatusF1 = (@(& git status --porcelain) -join "`n").Trim()
@@ -821,7 +973,7 @@ try {
     }
 
     Write-Host "  git stash pop..."
-    & git stash pop -q 2>&1 | Out-Null
+    Invoke-Git 'stash', 'pop', '-q'
     Start-Sleep -Milliseconds $FswWaitMs
 
     $sharedDiskF3 = Get-Content (Join-Path $tmpDir 'Shared.cs') -Raw -ErrorAction SilentlyContinue
@@ -865,7 +1017,7 @@ try {
 
     # Force checkout discards the Shared.cs modification left by Scenario F.
     Write-Host "  git checkout -f feat/alpha (force-discards Shared.cs edit from Scenario F)..."
-    & git checkout -f -q feat/alpha 2>&1 | Out-Null
+    Invoke-Git 'checkout', '-f', '-q', 'feat/alpha'
     Start-Sleep -Milliseconds $FswWaitMs
 
     Test-ScenarioPreconditions 'G' 'feat/alpha'
@@ -926,8 +1078,8 @@ try {
         # Revert: git reset restores AlphaHelper.cs; git clean removes untracked AlphaUtility.cs.
         # Both commands affect the working tree simultaneously -- use a longer wait.
         Write-Host "  git reset --hard HEAD && git clean -fd (revert rename)..."
-        & git reset --hard -q HEAD 2>&1 | Out-Null
-        & git clean -f -d -q 2>&1 | Out-Null
+        Invoke-Git 'reset', '--hard', '-q', 'HEAD'
+        Invoke-Git 'clean', '-f', '-d', '-q'
         Start-Sleep -Milliseconds ([Math]::Max($FswWaitMs, 1500))
 
         $helperBackG  = Test-Path (Join-Path $tmpDir 'AlphaHelper.cs')
@@ -995,8 +1147,8 @@ try {
     }
 
     Write-Host "  git add Alpha.cs && git commit..."
-    & git add 'Alpha.cs' 2>&1 | Out-Null
-    & git commit -q -m 'test: RM edit committed via FSW test script' 2>&1 | Out-Null
+    Invoke-Git 'add', 'Alpha.cs'
+    Invoke-Git 'commit', '-q', '-m', 'test: RM edit committed via FSW test script'
 
     if($LASTEXITCODE -eq 0) {
         Write-Pass 'H: git commit succeeded'
@@ -1006,7 +1158,7 @@ try {
     }
 
     Write-Host "  git push origin feat/alpha..."
-    & git push -q origin feat/alpha 2>&1 | Out-Null
+    Invoke-Git 'push', '-q', 'origin', 'feat/alpha'
 
     if($LASTEXITCODE -eq 0) {
         Write-Pass 'H: git push to bare remote succeeded'
