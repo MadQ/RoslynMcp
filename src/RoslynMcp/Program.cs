@@ -23,15 +23,17 @@ if(args.Length > 0)
 
     var exit = args[0].ToLowerInvariant() switch {
 
-        "setup"     => RoslynMcp.Cli.SetupCommand.Run(),
-        "list"      => RoslynMcp.Cli.ListCommand.Run(),
-        "verify"    => RoslynMcp.Cli.VerifyCommand.Run(),
-        "update"    => RoslynMcp.Cli.UpdateCommand.Run(),
-        "--version" => PrintVersion(),
-        "-v"        => PrintVersion(),
-        "--help"    => PrintHelp(),
-        "-h"        => PrintHelp(),
-        _           => -1,
+        "setup"       => RoslynMcp.Cli.SetupCommand.Run(),
+        "setup-hooks" => RoslynMcp.Cli.SetupHooksCommand.Run(),
+        "hook"        => RoslynMcp.Cli.HookCommand.Run(),
+        "list"        => RoslynMcp.Cli.ListCommand.Run(),
+        "verify"      => RoslynMcp.Cli.VerifyCommand.Run(),
+        "update"      => RoslynMcp.Cli.UpdateCommand.Run(),
+        "--version"   => PrintVersion(),
+        "-v"          => PrintVersion(),
+        "--help"      => PrintHelp(),
+        "-h"          => PrintHelp(),
+        _             => -1,
     };
 
     if(exit >= 0)
@@ -63,10 +65,12 @@ static int PrintHelp()
           roslynmcp <command> [options]
 
         Commands:
-          setup     Configure AI agent clients (Copilot, Claude, Cursor, ...)
-          list      List configured AI agent clients
-          verify    Verify agent configuration paths
-          update    Update agent config paths after reinstall
+          setup         Configure AI agent clients (Copilot, Claude, Cursor, ...)
+          setup-hooks   Write pre-tool-use hook file to .github/hooks/ (git repo required)
+          hook          Handle pre-tool-use hook events from stdin (used by hook runners)
+          list          List configured AI agent clients
+          verify        Verify agent configuration paths
+          update        Update agent config paths after reinstall
 
         Options:
               --workspace    <mode>   Workspace mode: auto|sdk|vs|adhoc (default: auto)
