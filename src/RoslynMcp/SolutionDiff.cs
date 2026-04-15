@@ -286,7 +286,7 @@ internal static class SolutionDiff
 			}
 			
 			// Trailing context.
-			for(var c = 0; c < context && oi < oldLen; c++, oi++, ni++, lcsIdx++)
+			for(var c = 0; c < context && oi < oldLen && ni < newLen; c++, oi++, ni++, lcsIdx++)
 				lines.Add(" " + oldLines[oi]);
 			
 			hunks.Add(new Hunk(hunkOldStart, oi - hunkOldStart, hunkNewStart, ni - hunkNewStart, lines));
