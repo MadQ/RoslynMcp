@@ -142,20 +142,6 @@ internal abstract partial class RoslynMcpTool
 				}
 		
 		try {
-			// Defensive check: if path doesn't exist, return helpful error.
-			if(!Path.IsPathRooted(projectPath) || (!File.Exists(projectPath) && !Directory.Exists(projectPath))) {
-				
-				error = new PathErrorResult(
-					$"Path '{projectPath}' does not exist or is not rooted.",
-					ProvidedPath: projectPath)
-				{
-					Error = "invalid_project_path",
-					Hint  = "Use an absolute path (e.g., 'J:\\Projects\\MyProject') or ensure the relative path exists. If you have a valid full path, provide it and the server will cache the association."
-				};
-				logger.LogError("TryGetCompilation", $"Path does not exist: '{projectPath}'");
-				
-				return false;
-			}
 			
 			var originalPath = projectPath;
 			
@@ -380,7 +366,8 @@ internal abstract partial class RoslynMcpTool
 	///     Common parameter description for projectPath across all tools.
 	/// </summary>
 	protected const string ProjectPathDescription =
-		"Path to project directory, .csproj file, or source file. REQUIRED - must be explicitly specified. " +
+		"Path to project directory, .csproj file, or source file — absolute or relative (relative paths are resolved against the server's working directory). " +
+		"REQUIRED - must be explicitly specified. " +
 		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj. " +
 		"NOTE: a directory or file path that cannot locate a .csproj falls back to AdhocWorkspace (no MSBuild, " +
 		"reduced functionality). Prefer passing the .csproj path directly for full MSBuild support."
