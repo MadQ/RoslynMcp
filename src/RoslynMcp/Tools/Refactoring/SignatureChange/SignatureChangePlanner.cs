@@ -40,6 +40,10 @@ internal sealed class SignatureChangePlanner
 			return SignatureChangeResult.Failed(solution, validationError);
 		
 		// Find the declaration syntax.
+		// For partial methods, DeclaringSyntaxReferences may have multiple entries (one per partial part).
+		// We take the first — this is intentional: the forwarding overload will be inserted alongside
+		// the first declared part. Partial methods are rarely targets for signature extension, and taking
+		// the first partial part is a reasonable default that avoids ambiguity.
 		var declRef = method.DeclaringSyntaxReferences.FirstOrDefault()
 		;
 		
