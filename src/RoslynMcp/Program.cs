@@ -185,6 +185,8 @@ lifetime.ApplicationStarted.Register(() => {
 	logger.LogStart();
 	logger.LogInfo("Workspace", $"mode={ServerArgs.Current.WorkspaceMode}");
 	
+	ServerHeartbeat.Initialize();
+	
 	// Warn if any agent config points to a stale path (e.g. after dotnet tool update).
 	var currentExe = Environment.ProcessPath
 	;
@@ -197,7 +199,11 @@ lifetime.ApplicationStarted.Register(() => {
 	}
 
 });
-lifetime.ApplicationStopping.Register(() => logger.LogStop());
+lifetime.ApplicationStopping.Register(() => {
+
+	ServerHeartbeat.Delete();
+	logger.LogStop();
+});
 
 
 // Pre-warm cache if projects specified.
