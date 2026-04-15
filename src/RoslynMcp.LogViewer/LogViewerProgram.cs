@@ -40,6 +40,22 @@ class Program
 		);
 	}
 	
+	// Returns true only when the Origin header is present AND resolves to a loopback address.
+	// Absent origin → false (used to require origin on POST; same-origin GETs omit Origin).
+	static bool IsLoopbackOrigin(string? origin)
+	{
+		if(origin is null)
+			return false;
+		
+		if(!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+			return false;
+		
+		var host = uri.Host;
+		
+		return host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+			|| (IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip));
+	}
+	
 	
 	static async Task Main(string[] args)
 	{
@@ -116,22 +132,13 @@ class Program
 		
 		app.MapPost("/shutdown", (HttpContext ctx, IHostApplicationLifetime lifetime) => {
 			
+			// Require a loopback Origin — absent header is rejected to prevent CSRF via
+			// curl / non-browser clients that omit Origin entirely (VULN-003).
 			var origin = ctx.Request.Headers.Origin.FirstOrDefault();
 			
-			if(origin is not null) {
+			if(!IsLoopbackOrigin(origin))
 				
-				var isLoopback = false;
-				
-				if(Uri.TryCreate(origin, UriKind.Absolute, out var uri)) {
-					
-					var host = uri.Host;
-					isLoopback = host.Equals("localhost", StringComparison.OrdinalIgnoreCase) || (IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip));
-				}
-				
-				if(!isLoopback)
-					
-					return Results.Forbid();
-			}
+				return Results.Forbid();
 			
 			lifetime.StopApplication();
 			
@@ -139,6 +146,16 @@ class Program
 		});
 		
 		app.MapGet("/logs/stream", async (HttpContext ctx, LogTailer tailer, IHostApplicationLifetime lifetime, CancellationToken ct) => {
+			
+			// Block cross-origin reads. Same-origin EventSource requests omit Origin, which
+			// is fine — malicious cross-origin pages always include it (VULN-002).
+			var origin = ctx.Request.Headers.Origin.FirstOrDefault();
+			
+			if(origin is not null && !IsLoopbackOrigin(origin)) {
+				
+				ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+				return;
+			}
 			
 			ctx.Response.Headers.Append("Content-Type",      "text/event-stream; charset=utf-8");
 			ctx.Response.Headers.Append("Cache-Control",     "no-cache");
