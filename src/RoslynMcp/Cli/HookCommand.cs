@@ -82,6 +82,13 @@ internal static class HookCommand
 			
 			if(isCopilotFormat) {
 				
+				if(!ServerHeartbeat.IsAlive()) {
+					
+					Console.WriteLine("{}");
+					
+					return 0;
+				}
+				
 				var response = new {
 					
 					permissionDecision = "allow",

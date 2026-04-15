@@ -418,5 +418,8 @@ scripts/*
 pub.ps1
 src/RoslynMcp.LogViewer/drLoop.cmd
 
+# AgentConfigPatcher backups (machine-specific paths; not for VCS)
+*.roslynmcp.bak
+
 # Release artifacts
 RoslynMcp-v*.zip

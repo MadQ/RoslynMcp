@@ -89,6 +89,8 @@ internal abstract partial class RoslynMcpTool
 	/// </summary>
 	protected ToolScope BeginTool(string name, string? subject = null)
 	{
+		ServerHeartbeat.Touch();
+		
 		var scope  = new ToolScope(name, subject, logger, () => activeScope.Value = null, paginationCache);
 		activeScope.Value = scope;
 		

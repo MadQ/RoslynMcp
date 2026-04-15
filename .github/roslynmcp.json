@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "powershell": "dotnet roslynmcp hook",
+        "bash": "dotnet roslynmcp hook",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}
