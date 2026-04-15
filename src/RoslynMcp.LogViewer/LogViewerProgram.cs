@@ -55,7 +55,7 @@ class Program
 		}
 		
 		Console.Error.WriteLine($"RoslynMcp Log Viewer {GetVersion()}");
-		Console.Error.WriteLine($"Watching : {logPath ?? Path.Combine(watchDir!, "roslynmcp.*.log")}");
+		Console.Error.WriteLine($"Watching : {logPath ?? Path.Combine(watchDir!, "roslynmcp.*.log") + " (all matching)"}");
 		Console.Error.WriteLine($"Open     : http://localhost:5123");
 		
 		var cts = new CancellationTokenSource();
