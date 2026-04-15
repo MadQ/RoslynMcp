@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.7.8-alpha (pre-1.0) |
-| **Tool Count** | 38 MCP tools (36 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
+| **Tool Count** | 39 MCP tools (37 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -62,6 +62,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines `ProjectPathDescription` constant |
 | `SearchFilesTool` | `roslyn_search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
 | `SemanticSearchTool` | `roslyn_semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
+| `FindStringLiteralTool` | `roslyn_find_string_literal` — string-literal-only search; matches against decoded `Token.ValueText` by default (escape sequences resolved, quotes stripped); `useGlob: true` for `*`/`?` glob; `matchRaw: true` to match raw source text instead; returns both `text` (raw) and `value` (decoded) per result; covers all string forms including raw and UTF-8 variants |
 | `GlobMatcher` | Filename-only glob matching (`*`, `**`, `?`) extracted from `SemanticSearchTool`; shared by file-search tools; does not support `{a,b}` brace expansion |
 | `ListFilesTool` | `roslyn_list_files` — enumerate files matching glob pattern (fast file listing, no content) |
 | `ReplaceInFileTool` | `roslyn_replace_in_file` — text-level find/replace with regex support (any file type) |
@@ -161,6 +162,7 @@ When discovering files/content:
 - `roslyn_list_files` — fast glob enumeration (find files by name/path)
 - `roslyn_search_files` — content search (find lines matching regex pattern)
 - `roslyn_semantic_search` — context-aware C# search (filter by comments, strings, identifiers, xmldocs, code)
+- `roslyn_find_string_literal` — string-literal-only search with glob support and decoded-value matching
 - `roslyn_find_references` — semantic symbol search (Roslyn-based, finds usage across project)
 
 **Tool tips:**
