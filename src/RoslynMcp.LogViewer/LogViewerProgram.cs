@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -16,6 +17,28 @@ class Program
 			.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
 			?.InformationalVersion ?? "?"
 	;
+	
+	// Tries up to maxAttempts consecutive ports starting from startPort; returns the first
+	// one that accepts a bind. Throws if none are available.
+	static int FindFreePort(int startPort, int maxAttempts = 10)
+	{
+		for(var port = startPort; port < startPort + maxAttempts; port++) {
+			
+			try {
+				
+				var probe = new TcpListener(IPAddress.Loopback, port);
+				probe.Start();
+				probe.Stop();
+				
+				return port;
+			}
+			catch(SocketException) { }
+		}
+		
+		throw new InvalidOperationException(
+			$"No free port found in range {startPort}–{startPort + maxAttempts - 1}."
+		);
+	}
 	
 	
 	static async Task Main(string[] args)
@@ -56,7 +79,10 @@ class Program
 		
 		Console.Error.WriteLine($"RoslynMcp Log Viewer {GetVersion()}");
 		Console.Error.WriteLine($"Watching : {logPath ?? Path.Combine(watchDir!, "roslynmcp.*.log") + " (all matching)"}");
-		Console.Error.WriteLine($"Open     : http://localhost:5123");
+		
+		var port = FindFreePort(5123);
+		
+		Console.Error.WriteLine($"Open     : http://localhost:{port}");
 		
 		var cts = new CancellationTokenSource();
 		
@@ -68,7 +94,7 @@ class Program
 		
 		var builder = WebApplication.CreateBuilder();
 		
-		builder.WebHost.UseUrls("http://localhost:5123");
+		builder.WebHost.UseUrls($"http://localhost:{port}");
 		builder.Logging.ClearProviders();
 		
 		builder.Services.AddSingleton(
