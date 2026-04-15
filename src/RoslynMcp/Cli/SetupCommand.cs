@@ -131,6 +131,37 @@ class SetupCommand : CliCommand
             Console.WriteLine($"  RoslynMcp v{CurrentVersion} — feedback & issues: https://github.com/MadQ/RoslynMcp");
         }
 
+        // Offer to set up the Claude Code global pre-tool-use advisor hook if Claude Code was
+        // selected and successfully configured.
+        var claudeResult = selected.FirstOrDefault(r => r.Client is ClaudeCodeClient);
+
+        if(claudeResult is not null)
+        {
+            Console.WriteLine();
+            Console.WriteLine("  Claude Code supports a user-level advisor hook that guides it to prefer");
+            Console.WriteLine("  roslyn_* tools for .cs files — advisory only, nothing is blocked.");
+            Console.Write("  Set up Claude Code global pre-tool-use advisor hook? [y/N]: ");
+
+            var hookAnswer = Console.ReadLine()?.Trim() ?? "";
+
+            if(hookAnswer.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+               hookAnswer.Equals("yes", StringComparison.OrdinalIgnoreCase))
+            {
+                const string hookCommand = "dotnet roslynmcp hook";
+                var ok = ((ClaudeCodeClient) claudeResult.Client).UpsertHook(hookCommand);
+
+                Console.WriteLine();
+
+                if(ok)
+                    Console.WriteLine("  ✓ Claude Code hook added (applies to all future sessions).");
+                else
+                    Console.WriteLine("  ✗ Failed to update Claude Code hook — check ~/.claude.json permissions.");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("  Tip: run 'dotnet roslynmcp setup-project' in each project/repo directory to");
+        Console.WriteLine("  enable per-project guidance for VS Code Copilot and Copilot CLI.");
         Console.WriteLine();
 
         return failedCount > 0 ? 1 : 0;

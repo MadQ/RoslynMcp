@@ -3,11 +3,11 @@ using System.Text.Json;
 namespace RoslynMcp.Cli;
 
 /// <summary>
-///     Implements the <c>dotnet roslynmcp setup-hooks</c> subcommand. Writes a Copilot CLI
-///     pre-tool-use hook file to the nearest git repository root, enabling per-agent tool
-///     guidance for .cs file operations.
+///     Implements the <c>dotnet roslynmcp setup-project</c> subcommand. Writes a per-project
+///     hook file to the nearest git repository root, enabling per-agent tool guidance for
+///     .cs file operations in VS Code Copilot and Copilot CLI.
 /// </summary>
-internal class SetupHooksCommand : CliCommand
+internal class SetupProjectCommand : CliCommand
 {
 	public static int Run()
 	{
@@ -17,7 +17,7 @@ internal class SetupHooksCommand : CliCommand
 			
 			Console.WriteLine();
 			Console.WriteLine("  ✗ Could not find a git repository root from the current directory.");
-			Console.WriteLine("    Run 'dotnet roslynmcp setup-hooks' from inside a git repository.")
+			Console.WriteLine("    Run 'dotnet roslynmcp setup-project' from inside a git repository.")
 			;
 			Console.WriteLine()
 			;
@@ -25,11 +25,11 @@ internal class SetupHooksCommand : CliCommand
 			return 1;
 		}
 		
-		var hooksDir = Path.Combine(repoRoot, ".github", "hooks");
+		var githubDir = Path.Combine(repoRoot, ".github");
 		
-		Directory.CreateDirectory(hooksDir);
+		Directory.CreateDirectory(githubDir);
 		
-		var hookFile = Path.Combine(hooksDir, "roslynmcp.json");
+		var hookFile = Path.Combine(githubDir, "roslynmcp.json");
 		
 		// dotnet roslynmcp hook reads tool event JSON from stdin and writes allow/additionalContext.
 		// Using the dotnet tool invocation (not a raw binary path) keeps it cross-platform and
@@ -66,9 +66,9 @@ internal class SetupHooksCommand : CliCommand
 		var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, hookFile);
 		
 		Console.WriteLine();
-		Console.WriteLine($"  ✓ Wrote Copilot CLI hook: {relativePath}");
+		Console.WriteLine($"  ✓ Wrote project hook: {relativePath}");
 		Console.WriteLine();
-		Console.WriteLine("  Commit .github/hooks/roslynmcp.json so all project contributors benefit.");
+		Console.WriteLine("  Commit .github/roslynmcp.json so all project contributors benefit.");
 		Console.WriteLine("  The hook guides agents to prefer roslyn_* tools for .cs files —");
 		Console.WriteLine("  no file operations are blocked.");
 		

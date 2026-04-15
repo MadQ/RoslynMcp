@@ -27,6 +27,7 @@ static class AgentDetector
         new CursorClient(),
         new WindsurfClient(),
         new VsCodeCopilotClient(),
+        new CopilotCliClient(),
         new ZedClient()
     ];
 

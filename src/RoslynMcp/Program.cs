@@ -24,7 +24,7 @@ if(args.Length > 0)
     var exit = args[0].ToLowerInvariant() switch {
 
         "setup"       => RoslynMcp.Cli.SetupCommand.Run(),
-        "setup-hooks" => RoslynMcp.Cli.SetupHooksCommand.Run(),
+        "setup-project" => RoslynMcp.Cli.SetupProjectCommand.Run(),
         "hook"        => RoslynMcp.Cli.HookCommand.Run(),
         "list"        => RoslynMcp.Cli.ListCommand.Run(),
         "verify"      => RoslynMcp.Cli.VerifyCommand.Run(),
@@ -66,7 +66,7 @@ static int PrintHelp()
 
         Commands:
           setup         Configure AI agent clients (Copilot, Claude, Cursor, ...)
-          setup-hooks   Write pre-tool-use hook file to .github/hooks/ (git repo required)
+          setup-project Write per-project hook file to .github/ (git repo required)
           hook          Handle pre-tool-use hook events from stdin (used by hook runners)
           list          List configured AI agent clients
           verify        Verify agent configuration paths

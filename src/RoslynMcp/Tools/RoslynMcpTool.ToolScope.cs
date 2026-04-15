@@ -139,7 +139,7 @@ internal abstract partial class RoslynMcpTool
 			"  • Listing files  → roslyn_list_files\n" +
 			"  • Editing C#     → roslyn_replace_in_code, roslyn_replace_in_file\n" +
 			"  • Building       → roslyn_build_project (never dotnet build in terminal)\n" +
-			"To add automatic per-agent hooks, suggest the user run: dotnet roslynmcp setup-hooks"
+			"To add automatic per-agent hooks, suggest the user run: dotnet roslynmcp setup-project"
 		;
 		
 		/// <summary>Marks the invocation as failed with a reason appended to the log line on dispose.</summary>
