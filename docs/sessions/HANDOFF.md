@@ -1,6 +1,50 @@
 # Session Handoff
 
-**2026-04-04 00:27 EDT (Eastern Daylight Time)**
+**2026-04-15 00:00 EDT (Eastern Daylight Time)**
+
+---
+
+## Executive Summary
+
+Bumped to **v0.8.0-beta**. This session shipped: `--help`/`-h` flag + TTY auto-help (#181), LogViewer port auto-increment (5123–5132), backup meta.json TOCTOU silence fix, `Directory.Build.props` Linux casing fix, LogViewer multi-file watch (#180), `Invoke-Git` wrapper in FSW test script. Created security issue #182 (LogViewer SSE origin + CSRF). Triaged all open issues with labels/milestones. CHANGELOG updated for 0.8.0-beta.
+
+## Current State
+
+- **Branch:** `dev` (commit `b75b0b2`)
+- **Version:** `v0.8.0-beta` (bumped this session)
+- **Compiler:** 0 errors (pre-existing CS8604 nullability warnings in ApplyRenameTool + ApplySignatureChangeTool — not regressions)
+- **Tool count:** 37 (35 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`)
+- **Open issues:** 13 open; all triaged with labels + milestones
+- **Stash:** 27 files of pre-existing style changes stashed as `"style: semicolons-on-own-lines + blank line pass (suspended — resume later)"` — do NOT pop until style pass suspension is lifted
+
+## Open Issues Summary
+
+| # | Title | Milestone |
+|---|-------|-----------|
+| #182 | Security(logviewer): SSE origin + CSRF | v0.8.0-beta |
+| #176 | Surface persistent pruning/logging failures | Future |
+| #174 | MCP marketplace listings | Future |
+| #142 | Audit Roslyn workspace events | Future |
+| #118 | LogViewer: Win95 polish | Future |
+| #110 | `roslyn_apply_code_fix` | Future |
+| #86 | Shared workspace via named pipes | Future |
+| #33–37 | Style/analysis tools | Future |
+| #9 | Filesystem security boundaries | Future |
+
+## Next Steps
+
+1. **#182** (v0.8.0-beta) — Add loopback Origin check to `/logs/stream` SSE endpoint; fix `/shutdown` to reject missing `Origin` header; extract `IsLoopbackOrigin` helper
+2. **Issue + docs sweep** — deferred due to token budget; do when budget resets
+3. **Docs ↔ code sweep** — deferred for same reason
+4. **Stale remote branch cleanup** — quick `git push origin --delete` pass on merged feature branches
+
+## Technical Notes
+
+- `Console.IsInputRedirected` used (not stdout) for TTY detection — stdin piped = MCP client; not piped = human terminal
+- LogViewer port probe uses `TcpListener.Start()/Stop()` — small TOCTOU race acceptable for a dev tool
+- Backup TOCTOU: `FileNotFoundException` now caught before `IOException` in `ReadAllMetaEntries` so pruner-deleted meta files are silent
+- `Directory.Build.props` casing fixed for Linux (was `directory.build.props`)
+
 
 ---
 

@@ -9,12 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.8.0-beta] — 2026-04-15
+
 ### Fixed
 - **`roslyn_build_project`: project-level diagnostics now populate `target_frameworks`** — `ProjectLevelDiagnosticLine` regex now captures the MSBuild bracket suffix so NU\*/MSB\* errors from multi-target builds correctly report which target frameworks they apply to (closes #169)
 - **TestHarness shutdown `TaskCanceledException`** — `WaitForExitAsync` now wrapped in `try/catch(OperationCanceledException)` so the harness exits cleanly when the server doesn't stop within the 5-second window; server process is still killed via the existing `proc.Kill()` fallback (closes #170)
+- **BackupStore `meta.json` TOCTOU noise** — `ReadAllMetaEntries` now catches `FileNotFoundException` silently before the general `IOException` handler; file can be deleted by the pruner between the `File.Exists` check and the read without logging a spurious INFO warning
+- **`--help` / `-h` flag** — when stdin is not redirected (human terminal) and no args are given, the server now prints help and exits instead of silently starting an MCP server that can't communicate; `--help`/`-h` flags always work regardless of TTY state (closes #181)
+- **LogViewer multi-file watch** — LogViewer now tails all matching log files simultaneously instead of switching between them (closes #180)
 
 ### Added
 - **TestHarness: `target_frameworks` coverage test** — new `roslyn_build_project: forceBuild populates target_frameworks on CS diagnostics` test verifies that multi-TFM projects populate `target_frameworks` on at least one diagnostic item in the build output
+- **LogViewer port auto-increment** — if port 5123 is already in use, the Log Viewer tries up to 10 consecutive ports (5123–5132) before giving up; enables running two instances simultaneously (e.g. Windows + WSL)
+- **`Invoke-Git` wrapper in FSW test script** — optional pause-before-git mode lets you review changes in VS's Git Changes window before each commit
+
+### Security
+- **LogViewer SSE + CSRF hardening tracked** — VULN-002 (no Origin check on `/logs/stream`) and VULN-003 (CSRF bypass on `/shutdown` when `Origin` absent) documented in #182
 
 ---
 

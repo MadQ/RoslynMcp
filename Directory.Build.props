@@ -1,10 +1,10 @@
 <Project>
 	<PropertyGroup>
         
-        <VersionPrefix>0.7.8</VersionPrefix>
+        <VersionPrefix>0.8.0</VersionPrefix>
         
         
-        <VersionSuffix>alpha</VersionSuffix>
+        <VersionSuffix>beta</VersionSuffix>
         
         <Copyright>Copyright (c) 2026 Quinten Martens &lt;madq42@gmail.com&gt;</Copyright>
         
