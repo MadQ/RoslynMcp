@@ -42,8 +42,8 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			
 			return scope.Failed("invalid approval", new ApplySignatureChangeResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, "invalid approval"));
 		
-		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-		var operation         = approvals.Consume(token, forSession);
+		var forSession        = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
+		var operation         = approvals.Peek(token);
 		
 		if(operation is null)
 			
@@ -60,9 +60,8 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		// Save pre- and post-change snapshots for each file before writing.
-		// SavePreAsync reads the current disk content (pre-change); SavePostAsync saves the intended new content.
-		// Abort without touching any files if either snapshot fails.
+		// Save pre- and post-change snapshots for each file before consuming the token so a
+		// backup failure leaves the token intact — the user can retry without running preview again.
 		bool preSaved = false
 		;
 		
@@ -82,14 +81,15 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			var phaseWord = preSaved ? "post" : "pre";
 			var snapNote  = preSaved ? " Any pre-change snapshots already saved are not needed." : string.Empty;
 			
-			// The approval token was already consumed — the agent must run roslyn_change_signature again.
-			
 			return scope.Failed("backup failed", new ApplySignatureChangeResult(
 				$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
 				$"No files were modified.{snapNote} " +
-				"The approval token has been consumed — run roslyn_change_signature again to get a new token, then retry.",
+				"The approval token is still valid — retry after resolving the issue.",
 				null, "backup failed"));
 		}
+		
+		// Backups saved — now consume the token (point of no return).
+		approvals.Consume(token, forSession);
 		
 		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
 		if(!workspace.IsAdhoc(projectPath)) {

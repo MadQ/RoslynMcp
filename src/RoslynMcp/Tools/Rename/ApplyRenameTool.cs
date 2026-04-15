@@ -45,7 +45,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			return scope.Failed("invalid approval", new ApplyRenameResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, null, "invalid approval", null));
 		
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-		var operation  = approvals.Consume(token, forSession);
+		var operation  = approvals.Peek(token);
 		
 		if(operation is null)
 			
@@ -83,7 +83,8 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		// Save pre- and post-change snapshots before touching disk.
+		// Save pre- and post-change snapshots before consuming the token so a backup failure
+		// leaves the token intact — the user can retry without running preview again.
 		bool preSaved = false
 		;
 		
@@ -106,9 +107,12 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			return scope.Failed("backup failed", new ApplyRenameResult(
 				$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
 				$"No files were modified.{snapNote} " +
-				"The approval token has been consumed — run roslyn_preview_rename again to get a new token, then retry.",
+				"The approval token is still valid — retry after resolving the issue.",
 				null, null, "backup failed", null));
 		}
+		
+		// Backups saved — now consume the token (point of no return).
+		approvals.Consume(token, forSession);
 		
 		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
 		if(!workspace.IsAdhoc(projectPath)) {
