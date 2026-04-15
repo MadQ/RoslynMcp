@@ -102,10 +102,14 @@ abstract class McpServersDictClient : AgentClient
     {
         var cmd = entry["command"]?.GetValue<string>();
 
-        return cmd is not null &&
-            Path.GetFileNameWithoutExtension(cmd)
-                .Equals("roslynmcp", StringComparison.OrdinalIgnoreCase)
-;
+        if(cmd is null)
+            return false;
+
+        var stem = Path.GetFileNameWithoutExtension(cmd);
+
+        return stem.Equals("roslynmcp", StringComparison.OrdinalIgnoreCase) ||
+               stem.Equals("dotnet-roslynmcp", StringComparison.OrdinalIgnoreCase)
+        ;
     }
 }
 
@@ -283,16 +287,16 @@ sealed class VsCodeCopilotClient : McpServersDictClient
         };
 }
 
-// Copilot CLI (GitHub Copilot for CLI): .mcp.json in the current working directory (project-level)
-// Schema: { "servers": { "<name>": { "type": "stdio", "command": "...", "args": [] } } }
+// Copilot CLI (GitHub Copilot for CLI): ~/.copilot/mcp-config.json (global, all platforms)
+// Schema: { "mcpServers": { "<name>": { "type": "stdio", "command": "...", "args": [] } } }
 sealed class CopilotCliClient : McpServersDictClient
 {
     public override string Name => "Copilot CLI";
     public override string Id   => "copilot-cli";
-    protected override string SectionKey => "servers";
+    protected override string SectionKey => "mcpServers";
 
     public override string[] GetConfigPaths() =>
-        [Path.Combine(Directory.GetCurrentDirectory(), ".mcp.json")]
+        [Path.Combine(Home, ".copilot", "mcp-config.json")]
     ;
 
     protected override JsonObject BuildEntry(string commandPath) =>
