@@ -164,19 +164,24 @@ internal abstract partial class RoslynMcpTool
 			
 			if(pathCacheEnabled && !Path.IsPathRooted(originalPath)) {
 				
-				var resolvedFull = workspace.GetWorkspaceInfo(projectPath).RootPath;
-
-                          lock(pathCacheLock) {
-
-                                  if(pathCache.Count >= PathCacheMaxSize)
-                                      pathCache.Clear();
-
-                                  if(!pathCache.ContainsKey(originalPath)) {
-
-                                      pathCache[originalPath] = resolvedFull;
-                                      logger.LogInfo("TryGetCompilation", $"Cached path: '{originalPath}' → '{resolvedFull}'");
-                                  }
-                          }
+				// Cache the absolute .csproj path, not the workspace root directory.
+				// GetWorkspaceInfo().RootPath is the solution root (e.g. J:\Projects\RoslynMcp),
+				// which when passed back on the next call would load an AdhocWorkspace with no
+				// BCL references. Path.GetFullPath resolves relative to CWD — the same resolution
+				// that WorkspaceManager.ResolveProjectPath performs.
+				var resolvedFull = Path.GetFullPath(originalPath);
+				
+				lock(pathCacheLock) {
+					
+					if(pathCache.Count >= PathCacheMaxSize)
+						pathCache.Clear();
+					
+					if(!pathCache.ContainsKey(originalPath)) {
+						
+						pathCache[originalPath] = resolvedFull;
+						logger.LogInfo("TryGetCompilation", $"Cached path: '{originalPath}' → '{resolvedFull}'");
+					}
+				}
 			}
 			
 			return true;
