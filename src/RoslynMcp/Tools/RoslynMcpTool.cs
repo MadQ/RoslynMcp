@@ -493,7 +493,7 @@ internal abstract partial class RoslynMcpTool
 	///     (empty-to-empty writes are non-events).
 	/// </summary>
 	protected static ErrorResult? CheckForTruncation(string filePath, string fullPath, int expectedLength) =>
-		expectedLength > 0 && new FileInfo(fullPath).Length == 0
+		expectedLength > 0 && new FileInfo(fullPath).Length <= 4
 			? new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
 				BackupRecoveryHint(filePath))
