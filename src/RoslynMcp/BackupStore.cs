@@ -522,6 +522,11 @@ internal sealed class BackupStore
 			return JsonSerializer.Deserialize<Dictionary<string, BackupMeta>>(json, JsonOptions)
 				?? new Dictionary<string, BackupMeta>();
 		}
+		catch(FileNotFoundException) {
+			
+			// TOCTOU race: file existed at File.Exists time but was deleted (e.g. by pruner) before read.
+			return new Dictionary<string, BackupMeta>();
+		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or JsonException) {
 			
 			logger.LogInfo("backup_meta", $"could not read meta file \"{Path.GetFileName(metaFile)}\": {ex.Message}");
