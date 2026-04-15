@@ -29,6 +29,6 @@ internal sealed class InfoTool : RoslynMcpTool
 		if(marker is not null)
 			scope.Record($"marker: {marker}");
 		
-		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, marker));
+		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker));
 	}
 }

@@ -504,6 +504,9 @@ internal sealed record InfoResult(
 	[property: JsonPropertyName("pid")]               int     Pid,
 	[property: JsonPropertyName("uptime_seconds")]    long    UptimeSeconds,
 	[property: JsonPropertyName("msbuild_discovery")] string  MsbuildDiscovery,
+	[property: JsonPropertyName("prune_errors")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	IReadOnlyDictionary<string, DateTimeOffset[]>?    PruneErrors = null,
 	[property: JsonPropertyName("marker")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string?                                           Marker = null
