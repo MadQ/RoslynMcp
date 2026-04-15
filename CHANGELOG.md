@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LogViewer multi-file watch** — LogViewer now tails all matching log files simultaneously instead of switching between them (closes #180)
 
 ### Added
+- **`roslyn_check_syntax`** — new tool for validating C# snippets before writing: syntax-only mode (fast, no workspace) and semantic mode (full project compilation including project-defined types and global usings); `wrapInClass: true` default wraps snippet in a dummy class for member-level inputs; line numbers mapped back to original snippet (closes #183 prerequisite)
 - **TestHarness: `target_frameworks` coverage test** — new `roslyn_build_project: forceBuild populates target_frameworks on CS diagnostics` test verifies that multi-TFM projects populate `target_frameworks` on at least one diagnostic item in the build output
 - **LogViewer port auto-increment** — if port 5123 is already in use, the Log Viewer tries up to 10 consecutive ports (5123–5132) before giving up; enables running two instances simultaneously (e.g. Windows + WSL)
 - **`Invoke-Git` wrapper in FSW test script** — optional pause-before-git mode lets you review changes in VS's Git Changes window before each commit

@@ -487,6 +487,16 @@ internal sealed record ChangeSignatureResult(
 	[property: JsonPropertyName("files_affected")]      int      FilesAffected
 ) : ToolResult;
 
+// ── Syntax check ─────────────────────────────────────────────────────────────
+
+/// <summary>Result returned by <c>roslyn_check_syntax</c>.</summary>
+internal sealed record CheckSyntaxResult(
+	[property: JsonPropertyName("valid")]         bool             Valid,
+	[property: JsonPropertyName("error_count")]   int              ErrorCount,
+	[property: JsonPropertyName("warning_count")] int              WarningCount,
+	[property: JsonPropertyName("items")]         DiagnosticItem[] Items
+) : ToolResult;
+
 // ── Server info ──────────────────────────────────────────────────────────────
 
 internal sealed record InfoResult(

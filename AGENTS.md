@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.7.8-alpha (pre-1.0) |
-| **Tool Count** | 37 MCP tools (35 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
+| **Tool Count** | 38 MCP tools (36 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -97,6 +97,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `ReadFileTool` | `roslyn_read_file` — file contents with line numbers (C# from in-memory workspace) |
 | `GetLineCountTool` | `roslyn_get_line_count` — line count for one or more files |
 | `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name; handles partial types |
+| `CheckSyntaxTool` | `roslyn_check_syntax` — validate a C# snippet for syntax (and optionally semantic) errors without writing to disk; fast pre-flight check before writing; returns `valid`, counts, and `DiagnosticItem[]` with 1-indexed lines mapped back to the original snippet |
 | `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `InfoTool` | `roslyn_info` — server version, PID, uptime, MSBuild discovery method, log markers |
 | `DebugAttachTool` | `roslyn_debug_attach` (DEBUG only) — launches the JIT debugger dialog so Visual Studio can attach; blocks the server until dismissed or attached |
@@ -163,6 +164,7 @@ When discovering files/content:
 - `roslyn_find_references` — semantic symbol search (Roslyn-based, finds usage across project)
 
 **Tool tips:**
+- `roslyn_check_syntax` — call this before `roslyn_replace_in_code` or `roslyn_write_file` to catch syntax errors without a write round-trip; use `includeSemantics: true` to also validate against project types; use `wrapInClass: false` for complete class/namespace snippets or snippets containing `using` directives
 - `roslyn_get_member_body` — use this to read a single method/property instead of `roslyn_read_file` on the whole file
 - `roslyn_get_file_outline` — use to understand a file's type/member structure (signatures only, no bodies); more token-efficient than `roslyn_read_file` for exploration
 - `roslyn_find_references` — without `containingType`, searches ALL symbols matching the name (union of results). Use `containingType` to narrow.
