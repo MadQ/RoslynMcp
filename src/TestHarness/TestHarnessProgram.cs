@@ -111,6 +111,7 @@ class Program
 		if(!onlyBuildDiag) {
 			
 			groups.Add(DiscoveryTests.Build(ctx));
+			groups.Add(FindStringLiteralTests.Build(ctx));
 			groups.Add(MemberBodyTests.Build(ctx));
 			groups.Add(TypeTests.Build(ctx));
 			groups.Add(NavigationTests.Build(ctx));
