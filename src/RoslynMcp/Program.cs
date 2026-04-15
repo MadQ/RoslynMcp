@@ -12,6 +12,10 @@ using System.Text.Json.Serialization.Metadata;
 
 
 // Route CLI subcommands before starting the MCP server.
+// No args + stdin is a terminal → human ran this directly; show help instead of silently starting the server.
+if(args.Length == 0 && !Console.IsInputRedirected)
+    return PrintHelp();
+
 if(args.Length > 0)
 {
     Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -24,19 +28,64 @@ if(args.Length > 0)
         "update"    => RoslynMcp.Cli.UpdateCommand.Run(),
         "--version" => PrintVersion(),
         "-v"        => PrintVersion(),
+        "--help"    => PrintHelp(),
+        "-h"        => PrintHelp(),
         _           => -1,
     };
 
     if(exit >= 0)
 
         return exit;
+}
 
-    static int PrintVersion()
-    {
-        Console.WriteLine($"roslynmcp v{Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
+static int PrintVersion()
+{
+    Console.WriteLine($"roslynmcp v{Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
 
-        return 0;
-    }
+    return 0;
+}
+
+static int PrintHelp()
+{
+    var version = Assembly.GetEntryAssembly()
+        ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+        ?.InformationalVersion
+        ?? "unknown"
+    ;
+
+    Console.OutputEncoding = System.Text.Encoding.UTF8;
+    Console.WriteLine($"""
+        roslynmcp v{version} — Roslyn MCP server for AI coding agents
+
+        Usage:
+          roslynmcp [options]            Start MCP server (stdio transport)
+          roslynmcp <command> [options]
+
+        Commands:
+          setup     Configure AI agent clients (Copilot, Claude, Cursor, ...)
+          list      List configured AI agent clients
+          verify    Verify agent configuration paths
+          update    Update agent config paths after reinstall
+
+        Options:
+              --workspace    <mode>   Workspace mode: auto|sdk|vs|adhoc (default: auto)
+          -p, --preload      <path>   Pre-warm workspace on startup (repeatable)
+              --log-path     <path>   Log file base path (empty string = disable logging)
+              --msbuild-path <path>   Override MSBuild installation path
+          -v, --version               Print version and exit
+          -h, --help                  Show this help and exit
+
+        Environment variables (override options above):
+          ROSLYNMCP_WORKSPACE            Workspace mode
+          ROSLYNMCP_LOG_PATH             Log file base path
+          ROSLYNMCP_BACKUP_PATH          Backup storage path
+          ROSLYNMCP_LOG_MAX_AGE_DAYS     Log retention in days (default: 30)
+          ROSLYNMCP_BACKUP_MAX_AGE_DAYS  Backup retention in days (default: 90)
+
+        Documentation: https://github.com/MadQ/RoslynMcp
+        """);
+
+    return 0;
 }
 
 ServerArgs.Initialize(args);
