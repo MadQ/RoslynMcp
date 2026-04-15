@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Reflection;
 using ModelContextProtocol.Server;
 
@@ -23,7 +24,7 @@ internal sealed class InfoTool : RoslynMcpTool
 		var asm     = typeof(InfoTool).Assembly;
 		var version = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
 		var pid     = Environment.ProcessId;
-		var uptime  = Environment.TickCount64 / 1000;
+		var uptime  = (long)(DateTime.Now - Process.GetCurrentProcess().StartTime).TotalSeconds;
 		var msbuild = MSBuildBootstrap.DiscoveryMethod;
 		
 		if(marker is not null)
