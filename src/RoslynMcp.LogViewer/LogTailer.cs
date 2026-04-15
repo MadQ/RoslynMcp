@@ -1,15 +1,18 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 
 namespace RoslynMcp.LogViewer;
 
 using RoslynMcp;
 
 /// <summary>
-///     Tails a RoslynMcp log file and yields parsed entries as they are appended.
-///     Opens the file with FileShare.ReadWrite so the MCP server can keep writing.
-///     On first connect, replays the last <c>tailLines</c> existing lines before switching to live tail.
+///     Tails one or more RoslynMcp log files and yields parsed entries as they are appended.
+///     Opens files with FileShare.ReadWrite so the MCP server can keep writing.
+///     In file mode, replays the last <c>tailLines</c> lines then switches to live tail.
+///     In directory-watch mode, tails ALL matching files simultaneously — including files that
+///     appear after startup — merging their entries into a single stream in arrival order.
 /// </summary>
 sealed class LogTailer
 {
@@ -25,8 +28,8 @@ sealed class LogTailer
 	public LogTailer(string logPath, int tailLines)
 		: this(logPath, tailLines, null, null) { }
 	
-	// Directory-watch mode — discovers the newest matching file and switches automatically
-	// when a new one appears (i.e. when a new RoslynMcp server process starts).
+	// Directory-watch mode — tails ALL currently matching files simultaneously and picks up
+	// new files as they appear (i.e. when new RoslynMcp server processes start).
 	public LogTailer(string watchDir, string watchPattern)
 		: this(null, 200, watchDir, watchPattern) { }
 	
@@ -44,45 +47,25 @@ sealed class LogTailer
 	public async IAsyncEnumerable<LogEntry> TailAsync(
 		[EnumeratorCancellation] CancellationToken ct)
 	{
-		string activePath;
-		
 		if(watchDir is not null) {
 			
-			var discovered = DiscoverLatest();
+			await foreach(var entry in TailDirectoryAsync(ct))
+				yield return entry;
 			
-			if(discovered is not null) {
-				activePath = discovered;
-			}
-			else {
-				
-				Console.Error.WriteLine($"No matching log found in {watchDir} — waiting for a server to start...");
-				activePath = await WaitForNewFileInDirAsync(ct);
-				
-				if(string.IsNullOrEmpty(activePath))
-					yield break;
-			}
+			yield break;
 		}
-		else {
-			
-			await WaitForFileAsync(logPath!, ct);
-			activePath = logPath!;
-		}
+		
+		// ── File mode ─────────────────────────────────────────────────────────
+		
+		await WaitForFileAsync(logPath!, ct);
+		
+		var activePath = logPath!;
 		
 		using var signal = new SemaphoreSlim(0, 1);
-		
-		// pendingSwitch[0] is written by the dir watcher thread (before signal.Release)
-		// and read by the main loop (after signal.WaitAsync). The semaphore provides
-		// the required happens-before guarantee without an additional volatile/Interlocked.
-		var pendingSwitch = new string?[1]
-		;
 		
 		FileStream?       stream      = null;
 		StreamReader?     reader      = null;
 		FileSystemWatcher fileWatcher = CreateFileWatcher(signal, activePath);
-		
-		using var dirWatcher = watchDir is not null
-			? CreateDirWatcher(signal, pendingSwitch)
-			: null;
 		
 		void OpenStreamAndReader(string path)
 		{
@@ -100,9 +83,7 @@ sealed class LogTailer
 				leaveOpen: true
 			);
 			
-			// Dispose previous instances (if any) before switching.
-			reader?.Dispose()
-			;
+			reader?.Dispose();
 			stream?.Dispose();
 			
 			stream = newStream;
@@ -117,46 +98,7 @@ sealed class LogTailer
 			foreach(var entry in ReadLastLines(stream!, reader!, tailLines, ct))
 				yield return entry;
 			
-			// Live tail.
 			while(!ct.IsCancellationRequested) {
-				
-				// Check for a pending file switch(new RoslynMcp process started).
-				var newPath = pendingSwitch[0]
-				;
-				
-				if(newPath is not null && !string.Equals(newPath, activePath, StringComparison.OrdinalIgnoreCase)) {
-					
-					pendingSwitch[0] = null;
-					
-					if(File.Exists(newPath)) {
-						
-						activePath = newPath;
-						
-						// Update file watcher to follow the new file.
-						fileWatcher.Dispose()
-						;
-						fileWatcher = CreateFileWatcher(signal, activePath);
-						
-						OpenStreamAndReader(activePath);
-						
-						Console.Error.WriteLine($"Switched to {Path.GetFileName(activePath)}");
-						
-						// Separator so the viewer shows a clear process boundary.
-						yield return new LogEntry {
-							
-							Timestamp = DateTimeOffset.UtcNow.ToString("o"),
-							Pid       = 0,
-							Level     = "NEW",
-							Message   = $"── new process: {Path.GetFileName(activePath)} ──",
-							Raw       = string.Empty
-						};
-						
-						foreach(var entry in ReadLastLines(stream!, reader!, tailLines, ct))
-							yield return entry;
-						
-						continue;
-					}
-				}
 				
 				var line = await reader!.ReadLineAsync(ct).ConfigureAwait(false);
 				
@@ -172,15 +114,12 @@ sealed class LogTailer
 					if(File.Exists(activePath) && new FileInfo(activePath).Length < stream!.Position) {
 						
 						try {
-							// Under RoslynMcp's rotation strategy, the original stream
-							// now points at the renamed old file. Reopen so we follow
-							// the newly created log file instead of rewinding the old one.
-							OpenStreamAndReader(activePath)
-							;
+							// Under RoslynMcp's rotation strategy, the original stream points at
+							// the renamed old file. Reopen to follow the new log file.
+							OpenStreamAndReader(activePath);
 						}
 						catch {
-							// Non-fatal — if reopening fails (e.g., during rotation window),
-							// we'll try again on the next iteration.
+							// Non-fatal — retry on next iteration.
 						}
 						
 						continue;
@@ -207,6 +146,95 @@ sealed class LogTailer
 	
 	// ── Private ──────────────────────────────────────────────────────────────
 	
+	// Starts one file-mode LogTailer per matching file and merges their entries into a
+	// single channel. New files picked up via FileSystemWatcher are added to the pool
+	// automatically. Entries are yielded in arrival order (no timestamp sorting).
+	async IAsyncEnumerable<LogEntry> TailDirectoryAsync(
+		[EnumeratorCancellation] CancellationToken ct)
+	{
+		if(!Directory.Exists(watchDir))
+			Directory.CreateDirectory(watchDir!);
+		
+		var channel = Channel.CreateUnbounded<LogEntry>(
+			new UnboundedChannelOptions { SingleReader = true }
+		);
+		
+		// Guard against double-tailing a file detected by both DiscoverAll and the watcher
+		// in a race (e.g. a file created between watcher start and enumeration completing).
+		var startedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var startedLock  = new object();
+		
+		void StartFileTailer(string path)
+		{
+			lock(startedLock) {
+				
+				if(!startedFiles.Add(path))
+					return;
+			}
+			
+			var fileTailer = new LogTailer(path, tailLines);
+			
+			// Fire-and-forget per-file task. CancellationToken.None for the Task itself —
+			// the CT is threaded into TailAsync so tailers stop when it fires.
+			_ = Task.Run(async () => {
+				
+				try {
+					
+					await foreach(var entry in fileTailer.TailAsync(ct))
+						await channel.Writer.WriteAsync(entry, ct).ConfigureAwait(false);
+				}
+				catch(OperationCanceledException) { }
+				catch(Exception) { /* non-fatal — file may be deleted or locked */ }
+			}, CancellationToken.None);
+		}
+		
+		// Set up the directory watcher BEFORE enumerating existing files so there is no
+		// window where a newly created file is missed by both paths.
+		using var dirWatcher = new FileSystemWatcher(watchDir!) {
+			
+			NotifyFilter          = NotifyFilters.FileName,
+			Filter                = watchPattern ?? string.Empty,
+			IncludeSubdirectories = false,
+			EnableRaisingEvents   = true
+		};
+		
+		dirWatcher.Created += (_, e) => StartFileTailer(e.FullPath);
+		
+		// Start tailing all currently existing files.
+		var hasExisting = false;
+		
+		foreach(var file in DiscoverAll()) {
+			
+			hasExisting = true;
+			StartFileTailer(file);
+		}
+		
+		if(!hasExisting)
+			Console.Error.WriteLine($"No matching log found in {watchDir} — waiting for a server to start...");
+		
+		// Merge: yield entries from all file tailers in arrival order.
+		await foreach(var entry in channel.Reader.ReadAllAsync(ct))
+			yield return entry;
+	}
+	
+	/// <summary>Returns all files matching the watch pattern, ordered oldest-modified first.</summary>
+	IEnumerable<string> DiscoverAll()
+	{
+		if(watchDir is null || watchPattern is null || !Directory.Exists(watchDir))
+			return [];
+		
+		try {
+			
+			return Directory
+				.EnumerateFiles(watchDir, watchPattern)
+				.OrderBy(File.GetLastWriteTimeUtc)
+			;
+		}
+		catch {
+			return [];
+		}
+	}
+	
 	/// <summary>
 	///     Returns the last <paramref name="count"/> lines from the file using a ring buffer,
 	///     keeping memory bounded to <paramref name="count"/> strings regardless of file size.
@@ -221,8 +249,7 @@ sealed class LogTailer
 			yield break;
 		
 		// Ring buffer — evicts the oldest entry once full, so memory is bounded by `count`.
-		var ring     = new string[count]
-		;
+		var ring     = new string[count];
 		var ringHead = 0;
 		var ringSize = 0;
 		
@@ -248,66 +275,6 @@ sealed class LogTailer
 			yield return Parse(ring[(start + i) % count]);
 	}
 	
-	/// <summary>Returns the most recently modified file matching the watch pattern, or null.</summary>
-	string? DiscoverLatest()
-	{
-		if(watchDir is null || watchPattern is null || !Directory.Exists(watchDir))
-			
-			return null;
-		
-		try {
-			
-			return Directory
-				.EnumerateFiles(watchDir, watchPattern)
-				.OrderByDescending(File.GetLastWriteTimeUtc)
-				.FirstOrDefault()
-			;
-		}
-		catch {
-			return null;
-		}
-	}
-	
-	/// <summary>Watches the log directory for a new matching file and returns its path.</summary>
-	async Task<string> WaitForNewFileInDirAsync(CancellationToken ct)
-	{
-		if(watchDir is null)
-			
-			return string.Empty;
-		
-		if(!Directory.Exists(watchDir))
-			Directory.CreateDirectory(watchDir);
-		
-		var tcs = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-		
-		await using var reg = ct.Register(() => tcs.TrySetCanceled(ct));
-		
-		using var w = new FileSystemWatcher(watchDir) {
-			
-			NotifyFilter        = NotifyFilters.FileName,
-			Filter              = watchPattern ?? string.Empty,
-			EnableRaisingEvents = true
-		};
-		
-		w.Created += (_, e) => tcs.TrySetResult(e.FullPath);
-		
-		// Double-check after watcher is set up to avoid the race between File.Exists
-		// and watcher start.
-		var latest = DiscoverLatest()
-		;
-		
-		if(latest is not null)
-			
-			return latest;
-		
-		try {
-			return await tcs.Task.ConfigureAwait(false);
-		}
-		catch(OperationCanceledException) {
-			return string.Empty;
-		}
-	}
-	
 	FileSystemWatcher CreateFileWatcher(SemaphoreSlim signal, string path)
 	{
 		var fullPath = Path.GetFullPath(path);
@@ -323,7 +290,6 @@ sealed class LogTailer
 		void Notify(object _, FileSystemEventArgs e)
 		{
 			if(!string.Equals(e.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
-				
 				return;
 			
 			if(signal.CurrentCount == 0)
@@ -336,35 +302,10 @@ sealed class LogTailer
 		return w;
 	}
 	
-	// Watches for new matching log files (new RoslynMcp processes).
-	// Stores the new path in pendingSwitch[0] before releasing the signal so the
-	// main loop can pick it up after WaitAsync (semaphore provides the memory barrier).
-	FileSystemWatcher CreateDirWatcher(SemaphoreSlim signal, string?[] pendingSwitch)
-	{
-		var w = new FileSystemWatcher(watchDir!) {
-			
-			NotifyFilter          = NotifyFilters.FileName,
-			Filter                = watchPattern ?? string.Empty,
-			IncludeSubdirectories = false,
-			EnableRaisingEvents   = true
-		};
-		
-		w.Created += (_, e) => {
-			
-			pendingSwitch[0] = e.FullPath;
-			
-			if(signal.CurrentCount == 0)
-				signal.Release();
-		};
-		
-		return w;
-	}
-	
 	/// <summary>Waits until the log file exists, watching the directory for creation if possible.</summary>
 	static async Task WaitForFileAsync(string logPath, CancellationToken ct)
 	{
 		if(File.Exists(logPath))
-			
 			return;
 		
 		Console.Error.WriteLine($"Log file not found — waiting: {logPath}");
@@ -413,13 +354,11 @@ sealed class LogTailer
 			var entry = JsonSerializer.Deserialize<LogEntry>(raw, JsonOptions);
 			
 			if(entry is not null)
-				
 				return entry with { Raw = raw };
 		}
 		catch { }
 		
 		// Unrecognized line (e.g. truncated write, non-JSON content).
-		
 		return new LogEntry {
 			
 			Timestamp = "",
