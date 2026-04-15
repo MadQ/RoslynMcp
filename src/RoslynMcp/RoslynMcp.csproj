@@ -27,7 +27,7 @@
   <!-- dotnet tool packaging — only active when building with -c Pack -->
   <PropertyGroup Condition="'$(Configuration)' == 'Pack'">
     <PackAsTool>true</PackAsTool>
-    <ToolCommandName>roslynmcp</ToolCommandName>
+    <ToolCommandName>dotnet-roslynmcp</ToolCommandName>
     <PackageId>RoslynMcp</PackageId>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <!-- Tool assemblies must be loose on disk — BuildHost requires it -->

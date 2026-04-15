@@ -94,7 +94,8 @@ internal static class HookCommand
 					permissionDecision = "allow",
 					additionalContext  = "ℹ️ RoslynMcp: for .cs files, roslyn_* tools provide semantic " +
 						"accuracy via the Roslyn compiler. Prefer: roslyn_read_file, roslyn_get_member_body, " +
-						"roslyn_search_files, roslyn_list_files, roslyn_replace_in_code, roslyn_build_project."
+						"roslyn_get_file_outline, roslyn_search_files, roslyn_list_files, " +
+						"roslyn_replace_in_code, roslyn_get_diagnostics, roslyn_build_project."
 				};
 				
 				Console.WriteLine(JsonSerializer.Serialize(response, RoslynMcpJson.Compact));
