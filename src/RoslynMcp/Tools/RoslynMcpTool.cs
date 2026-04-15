@@ -23,23 +23,23 @@ internal abstract partial class RoslynMcpTool
 	;
 	
 	// 0 = not shown, 1 = shown. Interlocked.CompareExchange ensures exactly one thread injects the note.
-	internal static int _sessionNoteShown
+	internal static int sessionNoteShown
 	;
 	
 	// Cached once per process — hooks don't change while the server is running.
-	static bool? _hooksInstalled
+	static bool? hooksInstalled
 	;
 	
 	internal static bool HooksInstalled()
 	{
-		if(_hooksInstalled.HasValue)
+		if(hooksInstalled.HasValue)
 			
-			return _hooksInstalled.Value;
+			return hooksInstalled.Value;
 		
 		// Check global Claude Code settings for any reference to roslynmcp.
 		var claudeSettings = Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-			".claude", "settings.json"
+			".claude.json"
 		);
 		
 		if(File.Exists(claudeSettings)) {
@@ -48,7 +48,7 @@ internal abstract partial class RoslynMcpTool
 				
 				if(File.ReadAllText(claudeSettings).Contains("roslynmcp", StringComparison.OrdinalIgnoreCase))
 					
-					return (_hooksInstalled = true).Value;
+					return (hooksInstalled = true).Value;
 			}
 			catch { }
 		}
@@ -61,7 +61,7 @@ internal abstract partial class RoslynMcpTool
 			
 			if(File.Exists(Path.Combine(dir, ".github", "roslynmcp.json")))
 				
-				return (_hooksInstalled = true).Value;
+				return (hooksInstalled = true).Value;
 			
 			var parent = Directory.GetParent(dir);
 			
@@ -71,7 +71,7 @@ internal abstract partial class RoslynMcpTool
 			dir = parent.FullName;
 		}
 		
-		return (_hooksInstalled = false).Value;
+		return (hooksInstalled = false).Value;
 	}
 	
 	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)

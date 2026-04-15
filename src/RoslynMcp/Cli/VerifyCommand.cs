@@ -19,7 +19,7 @@ class VerifyCommand : CliCommand
 
             if(!r.ConfigExists)
             {
-                Console.WriteLine("    Status:  ✗ config file not found — run 'roslynmcp setup' to configure");
+                Console.WriteLine("    Status:  ✗ config file not found — run 'dotnet roslynmcp setup' to configure");
                 Console.WriteLine();
                 continue;
             }
@@ -28,7 +28,7 @@ class VerifyCommand : CliCommand
 
             if(r.Entry is null)
             {
-                Console.WriteLine("    Entry:   ✗ no RoslynMcp entry found — run 'roslynmcp setup' to configure");
+                Console.WriteLine("    Entry:   ✗ no RoslynMcp entry found — run 'dotnet roslynmcp setup' to configure");
                 hasIssues = true;
                 Console.WriteLine();
                 continue;
@@ -48,7 +48,7 @@ class VerifyCommand : CliCommand
 
             if(!r.Entry.CommandExists)
             {
-                Console.WriteLine("    Path:    ✗ file not found — run 'roslynmcp update' to fix");
+                Console.WriteLine("    Path:    ✗ file not found — run 'dotnet roslynmcp update' to fix");
                 hasIssues = true;
                 Console.WriteLine();
                 continue;

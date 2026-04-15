@@ -341,9 +341,13 @@ sealed class ZedClient : AgentClient
 
         foreach(var (key, value) in servers)
         {
-            if(value is JsonObject entry && GetCommandPath(entry) is string cmd &&
-               Path.GetFileNameWithoutExtension(cmd)
-                   .Equals("roslynmcp", StringComparison.OrdinalIgnoreCase))
+            if(value is not JsonObject entry || GetCommandPath(entry) is not string cmd)
+                continue;
+
+            var stem = Path.GetFileNameWithoutExtension(cmd);
+
+            if(stem.Equals("roslynmcp", StringComparison.OrdinalIgnoreCase) ||
+               stem.Equals("dotnet-roslynmcp", StringComparison.OrdinalIgnoreCase))
 
                 return (key, entry);
         }

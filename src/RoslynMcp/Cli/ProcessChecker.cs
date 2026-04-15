@@ -11,9 +11,10 @@ static class ProcessChecker
         var results = new List<RunningProcess>();
         var currentPid = Environment.ProcessId;
 
-        // Match both casing variants — tool install uses lowercase, standalone build uses PascalCase.
+        // Match all known binary names — old bare tool, new dotnet-prefixed tool, PascalCase dev build.
         foreach(var p in Process.GetProcessesByName("roslynmcp")
-            .Concat(Process.GetProcessesByName("RoslynMcp")))
+            .Concat(Process.GetProcessesByName("RoslynMcp"))
+            .Concat(Process.GetProcessesByName("dotnet-roslynmcp")))
         {
             if(p.Id == currentPid)
             {

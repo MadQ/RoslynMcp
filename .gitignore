@@ -423,3 +423,4 @@ src/RoslynMcp.LogViewer/drLoop.cmd
 
 # Release artifacts
 RoslynMcp-v*.zip
+x.mcp.json

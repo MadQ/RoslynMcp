@@ -21,7 +21,7 @@ class UpdateCommand : CliCommand
         if(results.Length == 0)
         {
             Console.WriteLine();
-            Console.WriteLine("  No configured agents found. Run 'roslynmcp setup' to configure.");
+            Console.WriteLine("  No configured agents found. Run 'dotnet roslynmcp setup' to configure.");
             Console.WriteLine();
 
             return 0;

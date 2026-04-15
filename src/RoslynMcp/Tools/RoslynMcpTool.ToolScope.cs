@@ -30,7 +30,7 @@ internal abstract partial class RoslynMcpTool
 		string? args;              // Serialized input args; included in log only on failure.
 		string? _pendingHint
 		;
-		string? _pendingCaution;
+		string? pendingCaution;
 		
 		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose, PaginationCache paginationCache)
 		{
@@ -51,7 +51,7 @@ internal abstract partial class RoslynMcpTool
 		public void SetHint(string hint) => _pendingHint = hint;
 		
 		/// <summary>Stores a caution to be merged into the next <see cref="Outcome{T}"/> result (only if that result has no caution of its own).</summary>
-		public void SetCaution(string caution) => _pendingCaution = caution;
+		public void SetCaution(string caution) => pendingCaution = caution;
 		
 		/// <summary>
 		///     Checks the pagination cache for <paramref name="pageToken"/> and, on a hit, writes
@@ -117,13 +117,13 @@ internal abstract partial class RoslynMcpTool
 			// Inject a one-time session note on the very first successful tool call —
 			// but only when hooks are not yet installed (no point nagging if they are).
 			if(!RoslynMcpTool.HooksInstalled()
-				&& Interlocked.CompareExchange(ref RoslynMcpTool._sessionNoteShown, 1, 0) == 0)
-				_pendingCaution = SessionNote;
+				&& Interlocked.CompareExchange(ref RoslynMcpTool.sessionNoteShown, 1, 0) == 0)
+				pendingCaution = SessionNote;
 			
 			// Merge pending hint/caution into the result when it is a ToolResult.
 			// Non-ToolResult returns (to be phased out) pass through unchanged.
-			if(returnValue is ToolResult tr && (_pendingHint is not null || _pendingCaution is not null))
-				returnValue = (T)(object)(tr with { Hint = tr.Hint ?? _pendingHint, Caution = tr.Caution ?? _pendingCaution });
+			if(returnValue is ToolResult tr && (_pendingHint is not null || pendingCaution is not null))
+				returnValue = (T)(object)(tr with { Hint = tr.Hint ?? _pendingHint, Caution = tr.Caution ?? pendingCaution });
 			
 			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			
