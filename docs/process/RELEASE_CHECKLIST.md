@@ -1,4 +1,4 @@
-﻿# Release Checklist
+# Release Checklist
 
 Use this checklist when preparing a new release of RoslynMcp.
 
@@ -194,7 +194,7 @@ Guidelines for what gets which bump:
 ## First Public Release (v1.0.0) Criteria
 
 Before declaring v1.0.0, ensure:
-- [ ] All 35 public tools stable and well-tested (37 total including 2 debug-only)
+- [ ] All 37 public tools stable and well-tested (39 total including 2 debug-only)
 - [ ] Comprehensive test coverage (>80%)
 - [ ] Documentation complete and polished
 - [ ] CI/CD pipeline operational

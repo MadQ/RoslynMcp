@@ -23,6 +23,7 @@ All milestones through v0.7.8 are complete. Highlights per release:
 | v0.7.6 | `roslyn_find_callers`, `roslyn_get_call_graph`; write-retry telemetry (#136); FSW reload suppression + let Roslyn save (#140); `roslyn_local_history` double-write fix (#141); `roslyn_find_callers` dedup fix (#143); `roslyn_build_project` false-failure fix; `FileWriter` centralised write entry point (#139); RMCP007/008/009 diagnostics; BOM fixes; tool description improvements (#99) |
 | v0.7.8 | Thread-safety hardening, DotnetRunner deadlock fix, BackupStore async, SemanticSearch correctness, self-healing truncation, pre/post backups, TFM context in build diagnostics, rename stale-file fix, MSBuildBootstrap hardening (#145, #151, #153–#159, #161–#163, #165–#166) |
 | v0.7.9 | TestHarness split (#167), shutdown fix (#170), TFM context fix in project-level diagnostics (#169); folded into v0.8.0-beta — no separate tag |
+| v0.8.0-beta | `roslyn_find_string_literal`, `roslyn_check_syntax`; `--help`/`-h` flag + TTY auto-help (#181); LogViewer port auto-increment + multi-file watch (#180); BackupStore pruning + per-PID logs (#172); `setup-hooks` → `setup-project` command rename; BOM fixes |
 
 ---
 
@@ -112,7 +113,7 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 | — | feature | `roslyn_find_unused` | Find unused types, members, and variables via semantic analysis | #33 |
 | — | feature | `roslyn_get_type_dependencies` | Return type dependency graph (imports, references, coupling) | #36 |
 | — | feature | `roslyn_find_overloads` | List all overloads of a method | #37 |
-| — | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation | — |
+| ✅ | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation — shipped in v0.8.0-beta | — |
 | — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
 | — | investigation | LogViewer rework | `RoslynMcp.LogViewer` currently a dev-only skeleton; evaluate scope for a proper rework | #118 |
 | — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |

@@ -38,6 +38,12 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_semantic_search` — Search filtered by semantic context: comments,
   strings, identifiers, XML docs, or code-only. Use when you need to find
   matches in a specific context (e.g., "TODO" in comments only).
+- `roslyn_find_string_literal` — Search C# string literals by pattern, returning
+  both the raw source text and the decoded value (quotes stripped, escape
+  sequences resolved). Supports glob matching (`useGlob: true`) and decoded
+  value matching (e.g., search for a tab character, not `\\t`). Use INSTEAD OF
+  `roslyn_semantic_search` `context:"strings"` when you need glob patterns,
+  decoded-value matching, or the separate `text`/`value` fields per match.
 - `roslyn_list_files` — List files in the project with glob filtering. Use
   INSTEAD OF Glob for .NET project files.
 - `roslyn_list_types` — List all types in the project, optionally filtered by
@@ -77,6 +83,11 @@ built-in tools only if a roslyn tool fails.
 
 ### Editing Code
 
+- `roslyn_check_syntax` — Validate a C# snippet for syntax (and optionally
+  semantic) errors without writing to disk. Use as a pre-flight check BEFORE
+  calling `roslyn_replace_in_code` or `roslyn_write_file` to catch mistakes
+  early without a write round-trip. Set `includeSemantics: true` to validate
+  against project-defined types and all referenced assemblies.
 - `roslyn_replace_in_code` — Syntax-aware find-and-replace. Targets specific
   node kinds (MethodDeclaration, IdentifierName, etc.) so replacements are
   precise. Use INSTEAD OF Edit for C# files when you need structural awareness.
@@ -135,10 +146,11 @@ are more accurate than grep/Read/Edit.
 
 - Reading: `roslyn_get_member_body` (single method) > `roslyn_read_file` > Read
 - Structure: `roslyn_get_file_outline` > reading the whole file
-- Search: `roslyn_search_files` / `roslyn_semantic_search` > Grep
+- Search: `roslyn_search_files` / `roslyn_semantic_search` / `roslyn_find_string_literal` (string literals) > Grep
 - References: `roslyn_find_references` > Grep (semantic, cross-project)
 - Callers: `roslyn_find_callers` (who calls X?) + `roslyn_get_call_graph` (what does X call?)
 - Types: `roslyn_get_type_members` / `roslyn_get_type_hierarchy` > reading files
+- Syntax check: `roslyn_check_syntax` (pre-flight before writes, optional semantic validation)
 - Editing: `roslyn_replace_in_code` (C#) / `roslyn_replace_in_file` (any) > Edit
 - Insert: `roslyn_insert_lines` (by line or anchor) > Edit with context patterns
 - Write/Undo: `roslyn_write_file` (create/rewrite) + `roslyn_local_history` (undo)

@@ -8,7 +8,7 @@ The single highest-value addition for token reduction. Given a method/property n
 **`roslyn_find_callers`**
 The inverse of `find_references` but more useful. Instead of "where is this symbol mentioned", return "which methods contain a call to this method" — caller name, file, line, and optionally one line of call context. `SymbolFinder.FindCallersAsync` exists exactly for this. Grep can find text references; it can't tell you the containing method name without extra work.
 
-**`roslyn_get_call_graph`**
+**`roslyn_get_call_graph`** ✅ *Shipped (v0.7.6)*
 Given a method, list every method it calls (direct calls only, one level deep). Roslyn's `IOperation` tree makes this precise — you walk `IInvocationOperation` nodes in the method body. Essential for "what does this method depend on?" without reading it. Pair with `find_callers` for full dependency tracing.
 
 **`roslyn_find_unused`**

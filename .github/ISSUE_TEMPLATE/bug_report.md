@@ -28,7 +28,7 @@ What actually happened.
 
 ## Environment
 
-- **RoslynMcp version:** (e.g., 0.7.8-alpha, commit hash if dev)
+- **RoslynMcp version:** (e.g., 0.8.0-beta, commit hash if dev)
 - **.NET SDK version:** (`dotnet --version`)
 - **OS:** (e.g., Windows 11, macOS 14, Ubuntu 22.04)
 - **MCP Client:** (e.g., GitHub Copilot, Claude Desktop)

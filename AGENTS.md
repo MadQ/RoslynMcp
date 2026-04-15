@@ -118,8 +118,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging), `LogEntry.cs` (shared NDJSON log schema — linked into both `RoslynMcp` and `RoslynMcp.LogViewer`).
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
-- `Tools/Analysis/` — 17 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
-- `Tools/Search/` — 3 file/content search tools (list files, text search, semantic search)
+- `Tools/Analysis/` — 20 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
+- `Tools/Search/` — 4 file/content search tools (list files, text search, semantic search, string literal search)
 - `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
 - `Tools/Refactoring/` — 2 signature-change tools (`roslyn_change_signature` → `roslyn_apply_signature_change`)

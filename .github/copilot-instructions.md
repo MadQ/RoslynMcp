@@ -1,4 +1,4 @@
-﻿# Copilot Instructions — RoslynMcp 🏴‍☠️
+# Copilot Instructions — RoslynMcp 🏴‍☠️
 
 **Primary Reference:** All architecture, coding standards, tool usage, and working rules are in **[`AGENTS.md`](../AGENTS.md)** at the repository root.
 
@@ -60,7 +60,7 @@ Backup naming: `{originalFileName}_{unixMs}_{nonce}.pre.bak` (pre-write) or `{or
 
 **All details in [`AGENTS.md`](../AGENTS.md):**
 - Project overview and architecture
-- All 37 tool descriptions (35 public + 2 debug-only)
+- All 39 tool descriptions (37 public + 2 debug-only)
 - Code style rules (braces, naming, blank lines, etc.)
 - MCP protocol patterns
 - Roslyn API patterns

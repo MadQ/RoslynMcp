@@ -13,7 +13,7 @@ Bumped to **v0.8.0-beta**. This session shipped: `--help`/`-h` flag + TTY auto-h
 - **Branch:** `dev` (commit `b75b0b2`)
 - **Version:** `v0.8.0-beta` (bumped this session)
 - **Compiler:** 0 errors (pre-existing CS8604 nullability warnings in ApplyRenameTool + ApplySignatureChangeTool — not regressions)
-- **Tool count:** 37 (35 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`)
+- **Tool count:** 39 (37 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`)
 - **Open issues:** 13 open; all triaged with labels + milestones
 - **Stash:** 27 files of pre-existing style changes stashed as `"style: semicolons-on-own-lines + blank line pass (suspended — resume later)"` — do NOT pop until style pass suspension is lifted
 

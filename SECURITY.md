@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-RoslynMcp is in alpha. Security fixes are applied to the latest release on the `dev` branch.
+RoslynMcp is in beta (v0.8.0-beta). Security fixes are applied to the latest release on the `dev` branch.
 
 ## Important: Execution Model
 

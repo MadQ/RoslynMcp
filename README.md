@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 35 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 39 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -107,7 +107,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-35 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
+37 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -115,6 +115,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_search_files` | Regex search across workspace files with paging |
 | `roslyn_semantic_search` | Context-aware C# search -- filter by comments, strings, identifiers, xmldocs |
+| `roslyn_find_string_literal` | Search C# string literals with glob or regex; returns raw and decoded values |
 | `roslyn_list_files` | Glob-based file enumeration (fast, no content) |
 | `roslyn_list_types` | All types in the project with namespace/kind filters |
 
@@ -150,6 +151,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 | Tool | What it does |
 |------|--------------|
+| `roslyn_check_syntax` | Validate a C# snippet for syntax (and optionally semantic) errors without writing to disk |
 | `roslyn_replace_in_code` | Semantic C# editing -- replaces syntax nodes, validates syntax |
 | `roslyn_replace_in_file` | Text-level find-and-replace with regex (any file type) |
 | `roslyn_insert_lines` | Insert lines at a position or anchor pattern |

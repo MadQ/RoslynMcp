@@ -1,4 +1,4 @@
-﻿# Documentation Review Checklist
+# Documentation Review Checklist
 
 Run this checklist before making the repository public or after significant structural changes.
 
@@ -75,7 +75,7 @@ rg "RoslynMcp/RoslynMcp\.csproj" --type md --glob "!HANDOFF*.md"
 # 2. Check for dotnet run in MCP configs (should use published executable)
 rg "dotnet.*run.*--project.*\.mcp\.json" --type md -A 3 -B 3
 
-# 3. Verify tool count is consistent (should be 37 tools, 35 public + 2 debug-only)
+# 3. Verify tool count is consistent (should be 39 tools = 37 public + 2 debug-only)
 rg "23 tools|22 tools|21 tools" --type md
 
 # 4. Check for stale "deferred" or "planned" features that shipped
@@ -105,7 +105,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
   - [ ] AGENTS.md
   - [ ] `docs/sessions/HANDOFF.md` header
   - [ ] TestHarness header comment
-- [ ] Architecture tables list all 35 tools consistently
+- [ ] Architecture tables list all 37 public tools consistently
 - [ ] New tools added to all relevant docs
 
 ### Code Examples
@@ -153,7 +153,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] Examples are copy-paste ready
 
 ### AGENTS.md
-- [ ] Architecture table has all 35 tools
+- [ ] Architecture table has all 37 tools
 - [ ] Code style rules are current
 - [ ] MCP/Roslyn patterns are accurate
 - [ ] Testing section references correct paths
