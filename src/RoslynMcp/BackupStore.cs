@@ -525,6 +525,7 @@ internal sealed class BackupStore
 		catch(FileNotFoundException) {
 			
 			// TOCTOU race: file existed at File.Exists time but was deleted (e.g. by pruner) before read.
+			
 			return new Dictionary<string, BackupMeta>();
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or JsonException) {

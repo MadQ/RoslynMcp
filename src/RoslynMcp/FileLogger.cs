@@ -152,6 +152,20 @@ internal sealed class FileLogger : IDisposable
 			, Message   = $"{context} — {message}"
 		});
 	
+	/// <summary>
+	///     Logs an unhandled-exception crash under the write lock.
+	///     Routed from the <see cref="AppDomain.UnhandledException"/> handler after DI is ready
+	///     so the write is serialised with normal log traffic instead of racing with it.
+	/// </summary>
+	public void LogFatal(string message)
+		=> Write(new LogEntry {
+			
+			  Timestamp = Timestamp()
+			, Pid       = pid
+			, Level     = "FATAL"
+			, Message   = message
+		});
+	
 	void Write(LogEntry entry)
 	{
 		if(logPath is null)

@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace RoslynMcp;
 
@@ -30,19 +30,21 @@ record LogEntry
     public required int Pid { get; init; }
 
     /// <summary>
-    ///     Log level: START, STOP, TOOL, ERROR, or INFO.
+    ///     Log level: START, STOP, TOOL, ERROR, INFO, or FATAL.
+    ///     FATAL is written by the <see cref="AppDomain.UnhandledException"/> handler
+    ///     for process-terminating crashes.
     /// </summary>
     [JsonPropertyName("level")]
     public required string Level { get; init; }
 
     /// <summary>
     ///     Per-process tool-call counter. Increments on each LogTool call.
-    ///     Null for non-TOOL entries (START, STOP, ERROR, INFO).
+    ///     Null for non-TOOL entries (START, STOP, ERROR, INFO, FATAL).
     /// </summary>
     [JsonPropertyName("instance")]
     public int? Instance { get; init; }
 
-    /// <summary>Full message text. Populated for non-TOOL entries (START, STOP, ERROR, INFO).</summary>
+    /// <summary>Full message text. Populated for non-TOOL entries (START, STOP, ERROR, INFO, FATAL).</summary>
     [JsonPropertyName("message")]
     public string? Message { get; init; }
 

@@ -45,9 +45,11 @@ class Program
 	static bool IsLoopbackOrigin(string? origin)
 	{
 		if(origin is null)
+			
 			return false;
 		
 		if(!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+			
 			return false;
 		
 		var host = uri.Host;
@@ -134,7 +136,8 @@ class Program
 			
 			// Require a loopback Origin — absent header is rejected to prevent CSRF via
 			// curl / non-browser clients that omit Origin entirely (VULN-003).
-			var origin = ctx.Request.Headers.Origin.FirstOrDefault();
+			var origin = ctx.Request.Headers.Origin.FirstOrDefault()
+			;
 			
 			if(!IsLoopbackOrigin(origin))
 				
@@ -149,11 +152,13 @@ class Program
 			
 			// Block cross-origin reads. Same-origin EventSource requests omit Origin, which
 			// is fine — malicious cross-origin pages always include it (VULN-002).
-			var origin = ctx.Request.Headers.Origin.FirstOrDefault();
+			var origin = ctx.Request.Headers.Origin.FirstOrDefault()
+			;
 			
 			if(origin is not null && !IsLoopbackOrigin(origin)) {
 				
 				ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+				
 				return;
 			}
 			

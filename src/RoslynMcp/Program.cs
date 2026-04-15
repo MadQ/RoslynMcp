@@ -14,6 +14,7 @@ using System.Text.Json.Serialization.Metadata;
 // Route CLI subcommands before starting the MCP server.
 // No args + stdin is a terminal → human ran this directly; show help instead of silently starting the server.
 if(args.Length == 0 && !Console.IsInputRedirected)
+
     return PrintHelp();
 
 if(args.Length > 0)
@@ -98,13 +99,26 @@ FilePruner.IncrementAndGetRunCount()
 // Log unhandled exceptions before the host/DI is available.
 // This is the last line of defence — catches crashes that occur before tool handlers run.
 // Uses ResolvedLogPath (same path FileLogger writes to) so crash traces land in the same file.
-// TODO: File.AppendAllText here races with FileLogger's writeLock on the same process
+// For pre-DI crashes, File.AppendAllText is the only option; once FileLogger is up, it is
+// promoted into the handler (below) so the write is serialised through the logger's write lock.
+FileLogger? crashLogger = null
 ;
-//       acceptable for now — crash handler and logger share the same per-PID file so only
-//       the intra-process lock race remains. Track as a separate issue.
 AppDomain.CurrentDomain.UnhandledException += (_, e) => {
 
-    var path = ServerArgs.Current.ResolvedLogPath;
+    // Post-DI path: FileLogger is up, use it — serialised through writeLock.
+    var logger = Volatile.Read(ref crashLogger)
+;
+
+    if(logger is not null) {
+
+        logger.LogFatal($"Unhandled exception: {e.ExceptionObject}");
+
+        return;
+    }
+
+    // Pre-DI path: logger not yet created; write directly (rare, acceptable race).
+    var path = ServerArgs.Current.ResolvedLogPath
+;
 
     if(path is not null) {
 
@@ -153,6 +167,10 @@ FilePruner.ApplyPendingReset()
 ;
 
 var logger      = host.Services.GetRequiredService<FileLogger>();
+
+// Promote the crash handler to the locked path now that FileLogger is available.
+Volatile.Write(ref crashLogger, logger)
+;
 
 FileWriter.Initialize(logger);
 

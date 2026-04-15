@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Invoke-Git` wrapper in FSW test script** — optional pause-before-git mode lets you review changes in VS's Git Changes window before each commit
 
 ### Security
-- **LogViewer SSE + CSRF hardening tracked** — VULN-002 (no Origin check on `/logs/stream`) and VULN-003 (CSRF bypass on `/shutdown` when `Origin` absent) documented in #182
+- **LogViewer SSE + CSRF hardening** — `/logs/stream` now blocks requests where `Origin` is present but non-loopback (VULN-002); `/shutdown` now rejects requests where `Origin` is absent or non-loopback, closing the CSRF bypass when a tool omits the header entirely (VULN-003); shared `IsLoopbackOrigin` helper extracted (closes #182)
 
 ---
 

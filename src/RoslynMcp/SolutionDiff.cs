@@ -167,7 +167,8 @@ internal static class SolutionDiff
 	/// <summary>
 	///     Greedy forward-matching of old lines into new lines. Returns a bool[] where
 	///     true = old line was matched (unchanged). O(n+m) space vs O(n*m) for full LCS DP.
-	///     Produces identical results for the common case (few scattered changes);
+	///     Produces identical results for the common case (few scattered changes)
+	;
 	///     slightly noisier hunks when many identical lines exist in different positions.
 	/// </summary>
 	private static bool[] LongestCommonSubsequence(string[] oldLines, string[] newLines)

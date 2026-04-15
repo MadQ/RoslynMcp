@@ -116,7 +116,8 @@ sealed class LogTailer
 						try {
 							// Under RoslynMcp's rotation strategy, the original stream points at
 							// the renamed old file. Reopen to follow the new log file.
-							OpenStreamAndReader(activePath);
+							OpenStreamAndReader(activePath)
+							;
 						}
 						catch {
 							// Non-fatal — retry on next iteration.
@@ -161,7 +162,8 @@ sealed class LogTailer
 		
 		// Guard against double-tailing a file detected by both DiscoverAll and the watcher
 		// in a race (e.g. a file created between watcher start and enumeration completing).
-		var startedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var startedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+		;
 		var startedLock  = new object();
 		
 		void StartFileTailer(string path)
@@ -169,6 +171,7 @@ sealed class LogTailer
 			lock(startedLock) {
 				
 				if(!startedFiles.Add(path))
+					
 					return;
 			}
 			
@@ -201,7 +204,8 @@ sealed class LogTailer
 		dirWatcher.Created += (_, e) => StartFileTailer(e.FullPath);
 		
 		// Start tailing all currently existing files.
-		var hasExisting = false;
+		var hasExisting = false
+		;
 		
 		foreach(var file in DiscoverAll()) {
 			
@@ -221,6 +225,7 @@ sealed class LogTailer
 	IEnumerable<string> DiscoverAll()
 	{
 		if(watchDir is null || watchPattern is null || !Directory.Exists(watchDir))
+			
 			return [];
 		
 		try {
@@ -249,7 +254,8 @@ sealed class LogTailer
 			yield break;
 		
 		// Ring buffer — evicts the oldest entry once full, so memory is bounded by `count`.
-		var ring     = new string[count];
+		var ring     = new string[count]
+		;
 		var ringHead = 0;
 		var ringSize = 0;
 		
@@ -290,6 +296,7 @@ sealed class LogTailer
 		void Notify(object _, FileSystemEventArgs e)
 		{
 			if(!string.Equals(e.FullPath, fullPath, StringComparison.OrdinalIgnoreCase))
+				
 				return;
 			
 			if(signal.CurrentCount == 0)
@@ -306,6 +313,7 @@ sealed class LogTailer
 	static async Task WaitForFileAsync(string logPath, CancellationToken ct)
 	{
 		if(File.Exists(logPath))
+			
 			return;
 		
 		Console.Error.WriteLine($"Log file not found — waiting: {logPath}");
@@ -354,11 +362,13 @@ sealed class LogTailer
 			var entry = JsonSerializer.Deserialize<LogEntry>(raw, JsonOptions);
 			
 			if(entry is not null)
+				
 				return entry with { Raw = raw };
 		}
 		catch { }
 		
 		// Unrecognized line (e.g. truncated write, non-JSON content).
+		
 		return new LogEntry {
 			
 			Timestamp = "",
