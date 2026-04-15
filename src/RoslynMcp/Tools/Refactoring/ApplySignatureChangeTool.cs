@@ -104,8 +104,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 				var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
 				
 				if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
-					
-					return scope.Failed("truncation detected", new ApplySignatureChangeResult(truncErr.Error, null, "truncation detected"));
+					return scope.Failed("truncation detected", new ApplySignatureChangeResult(truncErr.Error ?? "File truncation detected.", null, "truncation detected"));
 			}
 		}
 		else {

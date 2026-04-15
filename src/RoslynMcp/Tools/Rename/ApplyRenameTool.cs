@@ -123,8 +123,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 				var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
 				
 				if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
-					
-					return scope.Failed("truncation detected", new ApplyRenameResult(truncErr.Error, null, null, "truncation detected", null));
+					return scope.Failed("truncation detected", new ApplyRenameResult(truncErr.Error  ?? "File truncation detected.", null, null, "truncation detected", null));
 			}
 		}
 		else {

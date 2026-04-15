@@ -1071,10 +1071,12 @@ internal sealed partial class WorkspaceManager
 					// if a reload is already pending — InvalidateFile already set the flag,
 					// and a second increment would cause the in-flight reload to be discarded.
 					if(docIds.Length == 0) {
-						
+
+						#pragma warning disable CS0420 // A reference to a volatile field will not be treated as volatile
 						if(Volatile.Read(ref reloadVersion) == 0)
 							Interlocked.Increment(ref reloadVersion);
-						
+						#pragma warning restore CS0420
+
 						continue;
 					}
 					
