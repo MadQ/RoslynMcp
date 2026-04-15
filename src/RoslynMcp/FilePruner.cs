@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using System.Collections.Concurrent;
+
 namespace RoslynMcp;
 
 /// <summary>
@@ -36,8 +38,30 @@ internal static class FilePruner
 ;
     static bool resetPending;
 
+    static readonly ConcurrentDictionary<string, ConcurrentBag<DateTimeOffset>> _pruneErrors = new();
+
+
     /// <summary>Exposes the cached startup run count to BackupStore for its pruning gate check.</summary>
     internal static int CachedRunCount => cachedRunCount;
+
+    internal static void RecordPruneError(Exception ex)
+    {
+        var bag = _pruneErrors.GetOrAdd(ex.Message, _ => new ConcurrentBag<DateTimeOffset>());
+        bag.Add(DateTimeOffset.UtcNow);
+    }
+
+    /// <summary>Returns a snapshot of all prune errors grouped by message with sorted timestamps, or null if none.</summary>
+    internal static IReadOnlyDictionary<string, DateTimeOffset[]>? GetPruneErrors()
+    {
+        if(_pruneErrors.IsEmpty)
+            return null;
+
+        return _pruneErrors.ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.OrderBy(t => t).ToArray()
+        );
+    }
+
 
     /// <summary>
     ///     Increments the persistent server run counter and caches the result for this process.
@@ -199,9 +223,9 @@ internal static class FilePruner
             File.Move(tmp, RunCountPath, overwrite: true);
             cachedRunCount = 0;
         }
-        catch {
+        catch(Exception ex) {
             // Counter reset failed — prune will re-trigger on the next run.
-            // TODO #176: surface persistent failures (e.g. write a sentinel file).
+            RecordPruneError(ex);
         }
     }
 

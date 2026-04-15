@@ -599,14 +599,14 @@ internal sealed class BackupStore
 					try {
 						PruneExpiredInDir(dir, cutoff);
 					}
-					catch {
-						// TODO #176: surface persistent prune failures (e.g. write a sentinel file).
+					catch(Exception ex) {
+						FilePruner.RecordPruneError(ex);
 					}
 				}
 			}
-			catch {
+			catch(Exception ex) {
 				// Enumeration of backup root failed — entire prune pass silently skipped.
-				// TODO #176: surface persistent prune failures (e.g. write a sentinel file).
+				FilePruner.RecordPruneError(ex);
 			}
 			
 			FilePruner.RequestReset();
