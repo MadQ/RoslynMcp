@@ -53,13 +53,13 @@ internal abstract partial class RoslynMcpTool
 			catch { }
 		}
 		
-		// Walk up from CWD looking for a Copilot CLI hook file written by setup-hooks.
+		// Walk up from CWD looking for a Copilot CLI hook file written by setup-project.
 		var dir = Environment.CurrentDirectory
 		;
 		
 		while(true) {
 			
-			if(File.Exists(Path.Combine(dir, ".github", "hooks", "roslynmcp.json")))
+			if(File.Exists(Path.Combine(dir, ".github", "roslynmcp.json")))
 				
 				return (_hooksInstalled = true).Value;
 			

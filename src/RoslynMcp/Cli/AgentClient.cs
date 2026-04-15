@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace RoslynMcp.Cli;
@@ -32,6 +33,11 @@ abstract partial class AgentClient
     // Extract the configured command path from an entry (schema varies per client).
     public abstract string? GetCommandPath(JsonObject entry)
 ;
+
+    // Called by SetupCommand after MCP config is patched. Returns true if the hook was
+    // installed or updated; false (default) means this client doesn't support user-level hooks.
+    public virtual bool UpsertHook(string hookCommand) => false;
+
 }
 
 // Shared by Claude Desktop, Cursor, and Windsurf:
@@ -136,6 +142,91 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
     public override string[] GetConfigPaths() =>
         [Path.Combine(Home, ".claude.json")];
+
+    // Adds a pre-tool-use advisor hook to ~/.claude.json that guides Claude Code to prefer
+    // roslyn_* tools for .cs files. Hook applies globally to all Claude Code sessions.
+    public override bool UpsertHook(string hookCommand)
+    {
+        var configPath = GetConfigPaths()[0];
+        JsonObject root;
+
+        if(File.Exists(configPath))
+        {
+            try
+            {
+                var json = File.ReadAllText(configPath);
+                root = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions {
+
+                    AllowTrailingCommas = true,
+                    CommentHandling    = JsonCommentHandling.Skip
+                }) as JsonObject ?? [];
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        else
+        {
+            root = [];
+        }
+
+        if(root["hooks"] is not JsonObject hooks)
+        {
+            hooks = [];
+            root["hooks"] = hooks;
+        }
+
+        if(hooks["PreToolUse"] is not JsonArray preToolUse)
+        {
+            preToolUse = [];
+            hooks["PreToolUse"] = preToolUse;
+        }
+
+        // Check if our entry is already present — avoid duplicates.
+        foreach(var item in preToolUse)
+        {
+            if(item is not JsonObject itemObj)
+                continue;
+
+            if(itemObj["hooks"] is not JsonArray innerHooks)
+                continue;
+
+            foreach(var h in innerHooks)
+            {
+                if(h is JsonObject hObj &&
+                   hObj["command"]?.GetValue<string>() == hookCommand)
+                    return true;
+            }
+        }
+
+        preToolUse.Add(new JsonObject {
+
+            ["matcher"] = "",
+            ["hooks"]   = new JsonArray {
+
+                new JsonObject {
+
+                    ["type"]    = "command",
+                    ["command"] = hookCommand
+                }
+            }
+        });
+
+        var dir = Path.GetDirectoryName(configPath);
+
+        if(dir is not null)
+            Directory.CreateDirectory(dir);
+
+        var updated = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        var tmp     = configPath + ".roslynmcp.tmp";
+
+        File.WriteAllText(tmp, updated);
+        File.Move(tmp, configPath, overwrite: true);
+
+        return true;
+    }
+
 }
 
 
@@ -191,6 +282,29 @@ sealed class VsCodeCopilotClient : McpServersDictClient
             ["args"] = new JsonArray()
         };
 }
+
+// Copilot CLI (GitHub Copilot for CLI): .mcp.json in the current working directory (project-level)
+// Schema: { "servers": { "<name>": { "type": "stdio", "command": "...", "args": [] } } }
+sealed class CopilotCliClient : McpServersDictClient
+{
+    public override string Name => "Copilot CLI";
+    public override string Id   => "copilot-cli";
+    protected override string SectionKey => "servers";
+
+    public override string[] GetConfigPaths() =>
+        [Path.Combine(Directory.GetCurrentDirectory(), ".mcp.json")]
+    ;
+
+    protected override JsonObject BuildEntry(string commandPath) =>
+        new() {
+
+            ["type"]    = "stdio",
+            ["command"] = commandPath,
+            ["args"]    = new JsonArray()
+        }
+    ;
+}
+
 
 // Zed: ~/.config/zed/settings.json (macOS/Linux), %APPDATA%\Zed\settings.json (Windows)
 // Schema: { "context_servers": { "<name>": { "command": { "path": "...", "args": [] } } } }
