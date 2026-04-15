@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LogViewer multi-file watch** — LogViewer now tails all matching log files simultaneously instead of switching between them (closes #180)
 
 ### Added
+- **Claude Code support in `roslynmcp setup`** — `ClaudeCodeClient` added to agent detection; patches `~/.claude.json` under the `mcpServers` key (same schema as Claude Desktop) (closes #184)
 - **Prune failure surfacing in `roslyn_info`** — `FilePruner` now records all backup and log pruning failures in a `ConcurrentDictionary<string, ConcurrentBag<DateTimeOffset>>` keyed by error message; `roslyn_info` response includes a nullable `prune_errors` field (absent when none) with message-keyed timestamp arrays, enabling diagnosis of persistent prune failures that were previously silently swallowed (closes #176)
 - **`roslyn_check_syntax`** — new tool for validating C# snippets before writing: syntax-only mode (fast, no workspace) and semantic mode (full project compilation including project-defined types and global usings); `wrapInClass: true` default wraps snippet in a dummy class for member-level inputs; line numbers mapped back to original snippet (closes #183 prerequisite)
 - **TestHarness: `target_frameworks` coverage test** — new `roslyn_build_project: forceBuild populates target_frameworks on CS diagnostics` test verifies that multi-TFM projects populate `target_frameworks` on at least one diagnostic item in the build output

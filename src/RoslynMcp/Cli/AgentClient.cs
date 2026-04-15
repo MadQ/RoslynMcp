@@ -126,6 +126,19 @@ sealed class ClaudeDesktopClient : McpServersDictClient
 }
 
 // Cursor (v0.47+): ~/.cursor/mcp.json (all platforms)
+
+// Claude Code: ~/.claude.json (all platforms)
+sealed class ClaudeCodeClient : McpServersDictClient
+{
+    public override string Name => "Claude Code";
+    public override string Id => "claude-code";
+    protected override string SectionKey => "mcpServers";
+
+    public override string[] GetConfigPaths() =>
+        [Path.Combine(Home, ".claude.json")];
+}
+
+
 sealed class CursorClient : McpServersDictClient
 {
     public override string Name => "Cursor";

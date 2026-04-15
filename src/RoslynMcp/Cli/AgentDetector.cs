@@ -23,6 +23,7 @@ static class AgentDetector
     static readonly AgentClient[] AllClients =
     [
         new ClaudeDesktopClient(),
+        new ClaudeCodeClient(),
         new CursorClient(),
         new WindsurfClient(),
         new VsCodeCopilotClient(),
