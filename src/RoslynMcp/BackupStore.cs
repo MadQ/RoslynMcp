@@ -356,7 +356,7 @@ internal sealed class BackupStore
 	///     Prefer the TryCheck / WriteAndInvalidate / CompleteRestore split used by LocalHistoryTool.
 	/// </remarks>
 	[Obsolete("Use TryCheckAsync + WriteAndInvalidate + CompleteRestoreAsync instead — this method bypasses WorkspaceManager.")]
-	public RestoreResult TryRestore(string token, bool force = false)
+	private RestoreResult TryRestore(string token, bool force = false)
 	{
 		var (failure, checkedRestore) = TryCheckAsync(token, force).GetAwaiter().GetResult();
 		

@@ -473,6 +473,7 @@ internal sealed record InsertLinesResult(
 	[property: JsonPropertyName("inserted_at")]    int     InsertedAt,
 	[property: JsonPropertyName("line_count")]     int     LineCount,
 	[property: JsonPropertyName("inserted_lines")] int[]   InsertedLines,
+	[property: JsonPropertyName("backup_token")]   string? BackupToken = null,
 	[property: JsonPropertyName("message")]        string? Message = null
 ) : ToolResult;
 

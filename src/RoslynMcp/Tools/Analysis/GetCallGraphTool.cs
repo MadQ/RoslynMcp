@@ -14,7 +14,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 	[Description(
 		"Returns all methods directly invoked within the named method body — answers 'what does this method depend on?' without reading it. " +
 		"Walks the Roslyn IOperation tree for precise semantic results: finds actual invocations, not text patterns. " +
-		"Includes constructors, extension methods, and property accessor calls made within the body. " +
+		"Includes constructors, extension methods, property accessor calls, and event member references made within the body. " +
 		"Each result shows the fully qualified callee name, file path of the call site, and 1-based line number. " +
 		"Provide containingType when multiple methods share the same name. " +
 		"Results are paged; pass page_token from a previous response to get subsequent pages. " +
@@ -60,8 +60,10 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 				
 				ISymbol? callee = descendant switch {
 					
-					IInvocationOperation inv       => inv.TargetMethod,
-					IObjectCreationOperation ctor  => ctor.Constructor,
+					IInvocationOperation inv             => inv.TargetMethod,
+					IObjectCreationOperation ctor        => ctor.Constructor,
+					IPropertyReferenceOperation prop     => prop.Property,
+					IEventReferenceOperation evt         => evt.Event,
 					_ => null
 				};
 				

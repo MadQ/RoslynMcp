@@ -46,7 +46,9 @@ internal abstract partial class RoslynMcpTool
 			
 			try {
 				
-				if(File.ReadAllText(claudeSettings).Contains("roslynmcp", StringComparison.OrdinalIgnoreCase))
+				using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(claudeSettings));
+				
+				if(ContainsRoslynMcpValue(doc.RootElement))
 					
 					return (hooksInstalled = true).Value;
 			}
@@ -72,6 +74,20 @@ internal abstract partial class RoslynMcpTool
 		}
 		
 		return (hooksInstalled = false).Value;
+	}
+	
+	// Recursively check whether any JSON string value in the element contains "roslynmcp".
+	// Scanning values (not keys) avoids false positives from structural JSON content
+	// while still detecting both mcpServers entries and hooks entries.
+	static bool ContainsRoslynMcpValue(System.Text.Json.JsonElement element)
+	{
+		return element.ValueKind switch {
+			
+			System.Text.Json.JsonValueKind.String  => element.GetString()?.Contains("roslynmcp", StringComparison.OrdinalIgnoreCase) == true,
+			System.Text.Json.JsonValueKind.Object  => element.EnumerateObject().Any(p => ContainsRoslynMcpValue(p.Value)),
+			System.Text.Json.JsonValueKind.Array   => element.EnumerateArray().Any(ContainsRoslynMcpValue),
+			_                                      => false
+		};
 	}
 	
 	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
@@ -493,7 +509,7 @@ internal abstract partial class RoslynMcpTool
 	///     (empty-to-empty writes are non-events).
 	/// </summary>
 	protected static ErrorResult? CheckForTruncation(string filePath, string fullPath, int expectedLength) =>
-		expectedLength > 0 && new FileInfo(fullPath).Length == 0
+		expectedLength > 0 && new FileInfo(fullPath).Length <= 4
 			? new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
 				BackupRecoveryHint(filePath))

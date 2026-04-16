@@ -134,11 +134,13 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		var resultBytes = FileWriter.Utf8NoBom.GetBytes(resultText)
 		;
 		
-		bool preSaved = false;
+		bool    preSaved  = false;
+		string? backupToken = null;
 		
 		try {
 			
-			preSaved = await backups.SavePreAsync(fullPath, projectPath, "roslyn_insert_lines") is not null;
+			backupToken = await backups.SavePreAsync(fullPath, projectPath, "roslyn_insert_lines");
+			preSaved    = backupToken is not null;
 			await backups.SavePostAsync(fullPath, projectPath, "roslyn_insert_lines", resultBytes);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -183,6 +185,6 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 				return scope.Error(truncErr);
 		}
 		
-		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines));
+		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines, BackupToken: backupToken));
 	}
 }
