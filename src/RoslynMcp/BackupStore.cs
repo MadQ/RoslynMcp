@@ -347,38 +347,6 @@ internal sealed class BackupStore
 	}
 	
 	
-	/// <summary>
-	///     Attempts to restore a file from the backup identified by <paramref name="token"/>.
-	///     Returns a <see cref="RestoreResult"/> describing success, conflict, or failure.
-	/// </summary>
-	/// <remarks>
-	///     Bypasses WorkspaceManager — the workspace will be out of sync until FSW fires.
-	///     Prefer the TryCheck / WriteAndInvalidate / CompleteRestore split used by LocalHistoryTool.
-	/// </remarks>
-	[Obsolete("Use TryCheckAsync + WriteAndInvalidate + CompleteRestoreAsync instead — this method bypasses WorkspaceManager.")]
-	private RestoreResult TryRestore(string token, bool force = false)
-	{
-		var (failure, checkedRestore) = TryCheckAsync(token, force).GetAwaiter().GetResult();
-		
-		if(failure is not null)
-			
-			return failure;
-		
-		var absPath = checkedRestore!.AbsolutePath;
-		var dir     = Path.GetDirectoryName(absPath)!;
-		
-		Directory.CreateDirectory(dir);
-		
-		var tmp = Path.Combine(dir, $".roslynmcp_restore_{Guid.NewGuid():N}.tmp");
-		
-		FileWriter.WriteAllBytes(tmp, checkedRestore.Content);
-		FileWriter.Move(tmp, absPath, overwrite: true);
-		
-		CompleteRestoreAsync(checkedRestore).GetAwaiter().GetResult();
-		
-		return RestoreResult.Success(absPath);
-	}
-	
 	
 	/// <summary>
 	///     Returns the current git branch for the repo containing <paramref name="startPath"/>,
