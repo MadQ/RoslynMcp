@@ -411,9 +411,11 @@ internal sealed record ReplaceInCodeResult(
 ) : ToolResult;
 
 internal sealed record ReplaceInCodeNodeInfo(
-	[property: JsonPropertyName("original_text")] string OriginalText,
-	[property: JsonPropertyName("line")]          int    Line,
-	[property: JsonPropertyName("column")]        int    Column
+	[property: JsonPropertyName("original_text")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string? OriginalText,
+	[property: JsonPropertyName("line")]   int Line,
+	[property: JsonPropertyName("column")] int Column
 );
 
 internal sealed record ReplaceInCodeSyntaxError(
