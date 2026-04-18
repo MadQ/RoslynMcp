@@ -92,6 +92,12 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 			if(member.IsImplicitlyDeclared)
 				continue;
 			
+			// Skip property/event accessor methods — the property/event entry already conveys the name
+			// and type, and the accessor body (if explicit) is available on demand via roslyn_get_member_body.
+			if(member is IMethodSymbol { MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet
+				or MethodKind.EventAdd or MethodKind.EventRemove })
+				continue;
+			
 			var kind = member.Kind.ToString().ToLowerInvariant();
 			var signature = member switch {
 				
