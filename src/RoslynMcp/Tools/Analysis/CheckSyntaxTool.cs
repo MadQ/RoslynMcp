@@ -13,9 +13,8 @@ internal sealed class CheckSyntaxTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_check_syntax", ReadOnly = true, Title = "Check Syntax", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Validates a C# code snippet for syntax and optionally semantic errors without writing it to disk. " +
-		"Use this as a pre-flight check before calling roslyn_replace_in_code or roslyn_write_file to catch " +
-		"mistakes early without wasting a write round-trip. " +
+		"Call this BEFORE roslyn_replace_in_code or roslyn_write_file to catch syntax (and optionally semantic) " +
+		"errors in a C# snippet without touching disk — saves a write round-trip on bad code. " +
 		"Returns valid (bool), error_count, warning_count, and items with line, column, code, and message. " +
 		"Line numbers correspond to positions in the original snippet (not the wrapped source). " +
 		"By default (wrapInClass: true), the snippet is wrapped in a dummy class so member declarations " +
