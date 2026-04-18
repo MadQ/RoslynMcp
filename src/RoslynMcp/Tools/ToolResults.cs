@@ -321,7 +321,13 @@ internal sealed record DiagnosticsResult(
 	string?                                       PageToken   = null,
 	[property: JsonPropertyName("items")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	DiagnosticItem[]?                             Items       = null
+	DiagnosticItem[]?                             Items       = null,
+	[property: JsonPropertyName("possible_workspace_load_issue")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	bool?                                         PossibleWorkspaceLoadIssue = null,
+	[property: JsonPropertyName("hint")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string?                                       Hint        = null
 ) : ToolResult;
 
 internal sealed record ListFilesResult(
