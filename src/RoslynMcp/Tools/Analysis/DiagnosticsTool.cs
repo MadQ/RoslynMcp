@@ -8,6 +8,13 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class DiagnosticsTool : RoslynMcpTool
 {
+	// Heuristic for detecting transient workspace-load noise — a flood of type-resolution errors
+	// across many files that usually clears once Roslyn finishes resolving dependencies.
+	const int    WorkspaceLoadMinErrors         = 20;
+	const double WorkspaceLoadNamespaceFraction = 0.60;
+	const int    WorkspaceLoadMinDistinctFiles  = 5;
+	static readonly HashSet<string> WorkspaceLoadCodes = ["CS0246", "CS0103", "CS0234", "CS0012"];
+
 	public DiagnosticsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
 		: base(workspace, logger, paginationCache) { }
 	
@@ -91,11 +98,33 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		;
 		
 		take = Math.Clamp(take, 0, 200);
-		
+
+		// Detect transient workspace-load noise: flood of type-resolution failures across many files.
+		// Full-project queries only — a file-scoped query hitting the same pattern is plausibly real
+		// breakage in one file, not workspace load state.
+		bool    possibleLoadIssue = false;
+		string? hint              = null;
+
+		if(filePath is null && errorCount >= WorkspaceLoadMinErrors) {
+
+			var errorsOnly    = Array.FindAll(filtered, d => d.Severity == DiagnosticSeverity.Error);
+			var loadCodeCount = Array.FindAll(errorsOnly, d => WorkspaceLoadCodes.Contains(d.Id)).Length;
+			var distinctFiles = errorsOnly.Select(d => d.Location.SourceTree?.FilePath).Distinct().Count();
+
+			if((double) loadCodeCount / errorsOnly.Length >= WorkspaceLoadNamespaceFraction
+				&& distinctFiles >= WorkspaceLoadMinDistinctFiles) {
+
+				possibleLoadIssue = true;
+				hint = "High volume of CS0246/CS0103/CS0234/CS0012 across many files suggests the workspace "
+					+ "is still resolving dependencies. Wait a few seconds and retry, or call roslyn_build_project "
+					+ "to verify real compilation state.";
+			}
+		}
+
 		// take: 0 fast path — return counts only. items is null (not []) to distinguish
 		// "not requested" from "requested but empty".
 		if(take == 0) {
-			
+
 			return scope.Outcome(summary, new DiagnosticsResult(
 				summary,
 				"roslyn",
@@ -103,7 +132,9 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 				warningCount,
 				total,
 				0,
-				total > 0));
+				total > 0,
+				PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null,
+				Hint: hint));
 		}
 		
 		var effectiveSkip  = Math.Clamp(skip, 0, total);
@@ -130,7 +161,9 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 			items.Length,
 			hasMore,
 			nextToken,
-			items));
+			items,
+			PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null,
+			Hint: hint));
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.
