@@ -30,7 +30,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"that filters by the declared name of the node — not body content. " +
 		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors. " +
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern or set force=true to proceed. " +
-		"Supports dryRun=true to preview which nodes would be replaced without writing."
+		"Supports dryRun=true to preview which nodes would be replaced without writing. " +
+		"Set verbose=true to also include each matched node's original_text in the response (omitted by default to save tokens; always included on error)."
 	)]
 	public async Task<object> ReplaceInCode(
 		[Description("Relative path to the C# file from the workspace root.")] string filePath,
@@ -40,7 +41,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Property/Field/Class etc.) matches the DECLARED NAME. For other nodes matches full text.")] string? textPattern = null,
 		[Description("Replacement text for the matched node. Must be valid C# syntax for the target node kind. Default: empty string — omitting this deletes the matched node.")] string replacement = "",
 		[Description("Preview changes without writing. Returns what would change. Default: false.")] bool dryRun = false,
-		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false
+		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false,
+		[Description("When false (default), omits original node text from the response on success to reduce token usage. Set true to include the full original text of each matched node in changed_nodes[].original_text. Error responses always include the text regardless of this flag.")] bool verbose = false
 	)
 	{
 		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force });
@@ -116,16 +118,20 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			return scope.Failed("No matching nodes found.", new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
 		
-		var changedNodeInfo = matchedNodes.Select(n => {
+		// Local helper so error paths can always include the matched text (diagnostic info the agent needs),
+		// while success paths omit it unless verbose=true to save tokens.
+		ReplaceInCodeNodeInfo[] BuildNodeInfo(bool includeText) => matchedNodes.Select(n => {
 			
 			var lineSpan = syntaxTree.GetLineSpan(n.Span);
 			
 			return new ReplaceInCodeNodeInfo(
-				n.ToString(),
+				includeText ? n.ToString() : null,
 				lineSpan.StartLinePosition.Line + 1,
 				lineSpan.StartLinePosition.Character + 1
 			);
 		}).ToArray();
+		
+		var changedNodeInfo = BuildNodeInfo(verbose);
 		
 		if(dryRun)
 			
@@ -150,7 +156,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				return scope.Error(new ReplaceInCodeSyntaxError(
 					string.Join("; ", deleteErrors.Select(d => d.GetMessage())),
-					changedNodeInfo)
+					BuildNodeInfo(true))
 				{
 					Error = "Deletion would introduce syntax errors"
 				});
@@ -267,7 +273,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			return scope.Error(new ReplaceInCodeSyntaxError(
 				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
-				changedNodeInfo)
+				BuildNodeInfo(true))
 			{
 				Error = "Replacement would introduce syntax errors"
 			});
