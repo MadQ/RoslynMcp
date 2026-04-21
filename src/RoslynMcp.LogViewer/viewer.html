@@ -699,6 +699,13 @@
 	<select id="instSelect" title="Filter by server instance (right-click a row's #N column for more options)">
 	  <option value="__ALL__">All instances</option>
 	</select>
+	<select id="windowSelect" title="Hide entries older than the selected time window">
+	  <option value="0">All time</option>
+	  <option value="300">Last 5m</option>
+	  <option value="900">Last 15m</option>
+	  <option value="3600">Last 1h</option>
+	  <option value="86400">Last 24h</option>
+	</select>
 	<button class="btn" id="clearBtn">Clear</button>
 	<button class="btn" id="loadMoreBtn" title="Reload with 2× per-file history (clears current view)">Load more</button>
 	<button class="btn" id="shutdownBtn">Shutdown</button>
@@ -858,8 +865,25 @@
 	  return true;
 	}
 
+	// Time-window filter. windowSeconds of 0 means "All time" (everything passes).
+	// Entries without a parseable timestamp pass only when the window is 'All' — a
+	// missing timestamp can't be placed on the rolling window, so we exclude rather
+	// than always-show (which would pollute 'Last 5m').
+	let   windowSeconds = 0;
+	const windowSelectEl = document.getElementById('windowSelect');
+
+	function entryMatchesWindow(el) {
+	  if(windowSeconds === 0) return true;
+	  const ts = el.dataset.ts;
+	  if(!ts) return false;
+	  const t = Number(ts);
+	  if(!Number.isFinite(t)) return false;
+	  return (Date.now() - t) <= windowSeconds * 1000;
+	}
+
 	function applyEntryFilters(el) {
-	  el.classList.toggle('hidden', !(entryMatchesLevel(el) && entryMatchesInstance(el)));
+	  el.classList.toggle('hidden',
+		!(entryMatchesLevel(el) && entryMatchesInstance(el) && entryMatchesWindow(el)));
 	}
 
 	function applyAllFilters() {
@@ -899,6 +923,17 @@
 	  instSelected = instSelectEl.value;
 	  applyAllFilters();
 	});
+
+	windowSelectEl.addEventListener('change', () => {
+	  windowSeconds = Number(windowSelectEl.value) || 0;
+	  applyAllFilters();
+	});
+
+	// Re-evaluate the time-window filter every 30s so rolling windows expire old
+	// entries without user interaction. No-op when windowSeconds === 0 (All time).
+	setInterval(() => {
+	  if(windowSeconds > 0) applyAllFilters();
+	}, 30_000);
 
 	// ── Instance right-click menu ─────────────────────────────────────────
 	let instMenuEl = null;
@@ -1087,6 +1122,10 @@
 	  wrap.dataset.level = level;
 	  wrap.dataset.inst  = uniquePidId;
 	  wrap.dataset.json  = JSON.stringify(e);
+	  if(e.timestamp) {
+		const t = Date.parse(e.timestamp);
+		if(Number.isFinite(t)) wrap.dataset.ts = String(t);
+	  }
 	  if(isFail) wrap.dataset.fail = 'true';
 
 	  if(level !== 'NEW') applyEntryFilters(wrap);
