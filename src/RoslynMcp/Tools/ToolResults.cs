@@ -321,7 +321,13 @@ internal sealed record DiagnosticsResult(
 	string?                                       PageToken   = null,
 	[property: JsonPropertyName("items")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	DiagnosticItem[]?                             Items       = null
+	DiagnosticItem[]?                             Items       = null,
+	[property: JsonPropertyName("possible_workspace_load_issue")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	bool?                                         PossibleWorkspaceLoadIssue = null,
+	[property: JsonPropertyName("hint")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string?                                       Hint        = null
 ) : ToolResult;
 
 internal sealed record ListFilesResult(
@@ -411,9 +417,11 @@ internal sealed record ReplaceInCodeResult(
 ) : ToolResult;
 
 internal sealed record ReplaceInCodeNodeInfo(
-	[property: JsonPropertyName("original_text")] string OriginalText,
-	[property: JsonPropertyName("line")]          int    Line,
-	[property: JsonPropertyName("column")]        int    Column
+	[property: JsonPropertyName("original_text")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string? OriginalText,
+	[property: JsonPropertyName("line")]   int Line,
+	[property: JsonPropertyName("column")] int Column
 );
 
 internal sealed record ReplaceInCodeSyntaxError(

@@ -13,13 +13,16 @@ internal sealed class FindCallersTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_find_callers", ReadOnly = true, Title = "Find Callers", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns all methods that call the named symbol — the inverse of roslyn_find_references, " +
-		"and semantically impossible with text search alone. " +
-		"Each result includes the calling method's fully qualified name, file path, and 1-based line number of the call site. " +
+		"Call this before refactoring or removing a method to discover every caller across the project — " +
+		"the inverse of roslyn_find_references, and semantically impossible with text search, which cannot " +
+		"distinguish overloads or track aliases. " +
+		"Returns all methods that invoke the named symbol, with fully qualified caller name, file path, " +
+		"and 1-based line number per call site. " +
 		"Without containingType, searches ALL symbols matching the name; provide containingType to narrow to one type. " +
-		"By default returns only direct callers (isDirect=true); set isDirect=false to also include indirect calls via interface dispatch or delegates. " +
+		"By default returns only direct callers (isDirect=true); set isDirect=false to also include indirect " +
+		"calls via interface dispatch or delegates. " +
 		"Results are paged; pass page_token from a previous response to get subsequent pages. " +
-		"Pair with roslyn_get_call_graph to trace what the callee itself depends on.")]
+		"Pair with roslyn_get_call_graph to also trace what the callee itself depends on.")]
 	public async Task<object> FindCallers(
 		[Description("Symbol name to find callers of, e.g. 'GetCompilation', 'ProcessOrder'.")] string symbolName,
 		[Description(ProjectPathDescription)] string projectPath,
