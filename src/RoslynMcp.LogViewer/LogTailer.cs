@@ -12,7 +12,8 @@ using RoslynMcp;
 ///     Opens files with FileShare.ReadWrite so the MCP server can keep writing.
 ///     In file mode, replays the last <c>tailLines</c> lines then switches to live tail.
 ///     In directory-watch mode, tails ALL matching files simultaneously — including files that
-///     appear after startup — merging their entries into a single stream in arrival order.
+///     appear after startup — merge-sorting each existing file's backlog by timestamp before
+///     switching to live arrival-order streaming. Files created after startup are always live.
 /// </summary>
 sealed class LogTailer
 {
@@ -45,18 +46,19 @@ sealed class LogTailer
 	}
 	
 	public async IAsyncEnumerable<LogEntry> TailAsync(
-		[EnumeratorCancellation] CancellationToken ct)
+		[EnumeratorCancellation] CancellationToken ct,
+		Action? onBacklogDone = null)
 	{
 		if(watchDir is not null) {
-			
+
 			await foreach(var entry in TailDirectoryAsync(ct))
 				yield return entry;
-			
+
 			yield break;
 		}
-		
+
 		// ── File mode ─────────────────────────────────────────────────────────
-		
+
 		await WaitForFileAsync(logPath!, ct);
 		
 		var activePath = logPath!;
@@ -97,7 +99,11 @@ sealed class LogTailer
 			// Replay last N lines from history, then tail live from EOF.
 			foreach(var entry in ReadLastLines(stream!, reader!, tailLines, ct))
 				yield return entry;
-			
+
+			// Signal the directory-mode aggregator that this tailer has finished its backlog
+			// and is about to enter live tailing. Callers in file-only mode pass null.
+			onBacklogDone?.Invoke();
+
 			while(!ct.IsCancellationRequested) {
 				
 				var line = await reader!.ReadLineAsync(ct).ConfigureAwait(false);
@@ -147,77 +153,162 @@ sealed class LogTailer
 	
 	// ── Private ──────────────────────────────────────────────────────────────
 	
-	// Starts one file-mode LogTailer per matching file and merges their entries into a
-	// single channel. New files picked up via FileSystemWatcher are added to the pool
-	// automatically. Entries are yielded in arrival order (no timestamp sorting).
+	// Soft deadline for the initial-load timestamp merge. If an existing file's backlog read
+	// hasn't completed by this cutoff, its remaining entries fall through to live streaming
+	// rather than blocking the viewer. In practice local log-file reads complete in well
+	// under 1s; 5s is a generous ceiling for pathological cases (slow disk, many files).
+	static readonly TimeSpan BacklogMergeDeadline = TimeSpan.FromSeconds(5);
+
+	// Starts one file-mode LogTailer per matching file.
+	//
+	// Each EXISTING file's backlog entries are buffered and merge-sorted by timestamp before
+	// yielding, so initial load is chronological across files rather than whichever tailer's
+	// scheduler slot landed first. After the merge, all tailers switch to arrival-order
+	// streaming via a shared live channel. Files CREATED post-startup (via the dir watcher)
+	// are treated as live from the start — they post-date the merged backlog.
 	async IAsyncEnumerable<LogEntry> TailDirectoryAsync(
 		[EnumeratorCancellation] CancellationToken ct)
 	{
 		if(!Directory.Exists(watchDir))
 			Directory.CreateDirectory(watchDir!);
-		
-		var channel = Channel.CreateUnbounded<LogEntry>(
+
+		var liveChannel = Channel.CreateUnbounded<LogEntry>(
 			new UnboundedChannelOptions { SingleReader = true }
 		);
-		
+
 		// Guard against double-tailing a file detected by both DiscoverAll and the watcher
 		// in a race (e.g. a file created between watcher start and enumeration completing).
-		var startedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-		;
+		var startedFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var startedLock  = new object();
-		
-		void StartFileTailer(string path)
+
+		// Per-existing-file backlog buffers. Each file tailer is the sole writer to its own
+		// buffer; the lock protects the narrow race between a late writer and the main-thread
+		// snapshot at merge time (relevant only when the BacklogMergeDeadline fires).
+		var backlogBuffers      = new Dictionary<string, List<LogEntry>>(StringComparer.OrdinalIgnoreCase);
+		var pendingBacklogCount = 0;
+		var backlogCompleteTcs  = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var mergingStarted      = false;
+
+		void StartFileTailer(string path, bool isExistingAtStartup)
 		{
 			lock(startedLock) {
-				
+
 				if(!startedFiles.Add(path))
-					
+
 					return;
 			}
-			
-			var fileTailer = new LogTailer(path, tailLines);
-			
+
+			List<LogEntry>? buffer = null;
+
+			if(isExistingAtStartup) {
+
+				buffer = [];
+				backlogBuffers[path] = buffer;
+			}
+
+			// Start with backlog-done=true for new files — they have no historical phase
+			// relative to the viewer's startup, so every entry is live.
+			var backlogDoneLocal = !isExistingAtStartup;
+			var fileTailer       = new LogTailer(path, tailLines);
+
 			// Fire-and-forget per-file task. CancellationToken.None for the Task itself —
 			// the CT is threaded into TailAsync so tailers stop when it fires.
 			_ = Task.Run(async () => {
-				
+
 				try {
-					
-					await foreach(var entry in fileTailer.TailAsync(ct))
-						await channel.Writer.WriteAsync(entry, ct).ConfigureAwait(false);
+
+					await foreach(var entry in fileTailer.TailAsync(
+						ct,
+						onBacklogDone: () => {
+
+							if(backlogDoneLocal)
+								return;
+
+							backlogDoneLocal = true;
+
+							if(isExistingAtStartup
+								&& Interlocked.Decrement(ref pendingBacklogCount) == 0)
+								backlogCompleteTcs.TrySetResult();
+						})) {
+
+						var buffered = false;
+
+						if(!backlogDoneLocal && buffer is not null) {
+
+							lock(buffer) {
+
+								if(!Volatile.Read(ref mergingStarted)) {
+
+									buffer.Add(entry);
+									buffered = true;
+								}
+							}
+						}
+
+						if(!buffered)
+							await liveChannel.Writer.WriteAsync(entry, ct).ConfigureAwait(false);
+					}
 				}
 				catch(OperationCanceledException) { }
 				catch(Exception) { /* non-fatal — file may be deleted or locked */ }
 			}, CancellationToken.None);
 		}
-		
+
 		// Set up the directory watcher BEFORE enumerating existing files so there is no
 		// window where a newly created file is missed by both paths.
 		using var dirWatcher = new FileSystemWatcher(watchDir!) {
-			
+
 			NotifyFilter          = NotifyFilters.FileName,
 			Filter                = watchPattern ?? string.Empty,
 			IncludeSubdirectories = false,
 			EnableRaisingEvents   = true
 		};
-		
-		dirWatcher.Created += (_, e) => StartFileTailer(e.FullPath);
-		
-		// Start tailing all currently existing files.
-		var hasExisting = false
-		;
-		
-		foreach(var file in DiscoverAll()) {
-			
-			hasExisting = true;
-			StartFileTailer(file);
-		}
-		
-		if(!hasExisting)
+
+		dirWatcher.Created += (_, e) => StartFileTailer(e.FullPath, isExistingAtStartup: false);
+
+		// Snapshot the existing-file set and seed the backlog counter before starting any
+		// tailers, so the TCS completion decrement can't fire before we know the target.
+		var existing = DiscoverAll().ToList();
+		pendingBacklogCount = existing.Count;
+
+		if(pendingBacklogCount == 0) {
+
+			backlogCompleteTcs.TrySetResult();
 			Console.Error.WriteLine($"No matching log found in {watchDir} — waiting for a server to start...");
-		
-		// Merge: yield entries from all file tailers in arrival order.
-		await foreach(var entry in channel.Reader.ReadAllAsync(ct))
+		}
+
+		foreach(var file in existing)
+			StartFileTailer(file, isExistingAtStartup: true);
+
+		// Wait for all existing files' backlogs to drain, with a soft deadline.
+		await Task.WhenAny(backlogCompleteTcs.Task, Task.Delay(BacklogMergeDeadline, ct)).ConfigureAwait(false);
+
+		// Flip the flag BEFORE snapshotting — any entry a tailer tries to buffer after this
+		// point will hit the lock, observe mergingStarted=true, and route to the live channel.
+		Volatile.Write(ref mergingStarted, true);
+
+		var snapshots = new List<List<LogEntry>>(backlogBuffers.Count);
+
+		foreach(var buf in backlogBuffers.Values) {
+
+			lock(buf)
+				snapshots.Add([..buf]);
+		}
+
+		// Timestamp-ordered merge. Empty-timestamp entries (parse failures) sort to the top
+		// but preserve within-file order via the (fileIdx, lineIdx) tiebreaker.
+		var merged = snapshots
+			.SelectMany((buf, fileIdx) => buf.Select((entry, lineIdx) => (entry, fileIdx, lineIdx)))
+			.OrderBy(t => t.entry.Timestamp, StringComparer.Ordinal)
+			.ThenBy(t => t.fileIdx)
+			.ThenBy(t => t.lineIdx)
+			.Select(t => t.entry);
+
+		foreach(var entry in merged)
+			yield return entry;
+
+		// After the merge, everything flows through the live channel in arrival order.
+		await foreach(var entry in liveChannel.Reader.ReadAllAsync(ct))
 			yield return entry;
 	}
 	
