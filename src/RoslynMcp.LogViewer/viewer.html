@@ -719,6 +719,7 @@
 	  <option value="3600">Last 1h</option>
 	  <option value="86400">Last 24h</option>
 	</select>
+	<button class="btn" id="collapseAllBtn" title="Collapse all expanded entries (Esc)">Collapse all</button>
 	<button class="btn" id="clearBtn">Clear</button>
 	<button class="btn" id="loadMoreBtn" title="Reload with 2× per-file history (clears current view)">Load more</button>
 	<button class="btn" id="shutdownBtn">Shutdown</button>
@@ -737,7 +738,7 @@
 		<div class="li"><div class="lk"><kbd>/</kbd></div><div>Search</div></div>
 		<div class="li"><div class="lk"><kbd>Ctrl+L</kbd></div><div>Clear</div></div>
 		<div class="li"><div class="lk"><kbd>Q</kbd></div><div>Shutdown</div></div>
-		<div class="li"><div class="lk"><kbd>Esc</kbd></div><div>Close / jump to end</div></div>
+		<div class="li"><div class="lk"><kbd>Esc</kbd></div><div>Close search / collapse all / jump to end</div></div>
 	  </div>
 	  <div class="legend-sep"></div>
 	  <div class="legend-group">
@@ -1119,6 +1120,16 @@
 	function toggleDetail(wrap) {
 	  if(wrap) setDetail(wrap, !isDetailOpen(wrap));
 	}
+
+	// Collapses every open entry and returns how many were closed, so callers
+	// (Esc cascade) can decide whether to proceed to the next step.
+	function collapseAllDetails() {
+	  const open = logEl.querySelectorAll('.entry-wrap:has(.entry-detail:not(.hidden))');
+	  open.forEach(w => setDetail(w, false));
+	  return open.length;
+	}
+
+	document.getElementById('collapseAllBtn').addEventListener('click', collapseAllDetails);
 
 	// ── Row navigation ────────────────────────────────────────────────────
 	function visibleWraps() {
@@ -1620,6 +1631,7 @@
 		if(searching) { clearSearch(); return; }
 		const sel = window.getSelection();
 		if(sel && sel.toString().length > 0) { sel.removeAllRanges(); return; }
+		if(collapseAllDetails() > 0) return;
 		logEl.scrollTop = logEl.scrollHeight;
 		scrolledUp = false;
 		return;
