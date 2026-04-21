@@ -406,7 +406,9 @@
 	#status.live { color: var(--status-live); }
 	#status.err  { color: var(--status-err); }
 
-	#themeSelect {
+	#themeSelect,
+	#instSelect,
+	#windowSelect {
 	  padding: 4px 8px;
 	  border: 1px solid var(--border);
 	  background: var(--btn-bg);
@@ -417,7 +419,18 @@
 	  cursor: pointer;
 	}
 
-	[data-theme="parchment"] #themeSelect {
+	/* Native dropdown list items pick up the theme. Chromium honors these on Windows;
+	   other platforms fall back to native chrome, which is fine. */
+	#themeSelect option,
+	#instSelect option,
+	#windowSelect option {
+	  background: var(--bg-toolbar);
+	  color: var(--text);
+	}
+
+	[data-theme="parchment"] #themeSelect,
+	[data-theme="parchment"] #instSelect,
+	[data-theme="parchment"] #windowSelect {
 	  border-width: 1px;
 	  border-style: solid;
 	  border-radius: 1px;
@@ -513,6 +526,7 @@
 	.lvl-TOOL  { color: var(--lvl-tool); }
 	.lvl-ERROR { color: var(--lvl-error); }
 	.lvl-FATAL { color: var(--lvl-error); font-weight: 700; }
+	.lvl-HOOK  { color: var(--text-dim); font-style: italic; }
 	.lvl-OTHER { color: var(--text-dim); }
 	.lvl-NEW   { color: var(--lvl-new); font-style: italic; }
 	.entry-wrap[data-level='NEW']   .entry-row { border-top: 1px dashed var(--lvl-new); opacity: 0.75; }
@@ -600,6 +614,24 @@
 	  align-items: center;
 	  flex-shrink: 0;
 	}
+	#instMenu {
+	  position: fixed;
+	  background: var(--bg-toolbar);
+	  border: 1px solid var(--border);
+	  border-radius: 4px;
+	  padding: 3px 0;
+	  min-width: 170px;
+	  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+	  z-index: 100;
+	  font-size: 12px;
+	}
+	#instMenu .mi {
+	  padding: 5px 12px;
+	  cursor: pointer;
+	  color: var(--text);
+	}
+	#instMenu .mi:hover { background: var(--btn-hover); }
+	#instMenu .mi-sep { height: 1px; background: var(--border); margin: 3px 0; }
 	#searchInput {
 	  flex: 1;
 	  padding: 3px 8px;
@@ -678,7 +710,19 @@
 	<button class="btn filter-STOP  "       data-filter="STOP" >STOP</button>
 	<div id="sep"></div>
 	<label class="chk"><input type="checkbox" id="autoScroll" checked><span class="chk-box"></span> Auto-scroll</label>
+	<select id="instSelect" title="Filter by server instance (right-click a row's #N column for more options)">
+	  <option value="__ALL__">All instances</option>
+	</select>
+	<select id="windowSelect" title="Hide entries older than the selected time window">
+	  <option value="0">All time</option>
+	  <option value="300">Last 5m</option>
+	  <option value="900">Last 15m</option>
+	  <option value="3600">Last 1h</option>
+	  <option value="86400">Last 24h</option>
+	</select>
+	<button class="btn" id="collapseAllBtn" title="Collapse all expanded entries (Esc)">Collapse all</button>
 	<button class="btn" id="clearBtn">Clear</button>
+	<button class="btn" id="loadMoreBtn" title="Reload with 2× per-file history (clears current view)">Load more</button>
 	<button class="btn" id="shutdownBtn">Shutdown</button>
 	<button class="btn" id="helpBtn" title="Keyboard shortcuts">?</button>
 	<div class="sep-thin"></div>
@@ -695,7 +739,7 @@
 		<div class="li"><div class="lk"><kbd>/</kbd></div><div>Search</div></div>
 		<div class="li"><div class="lk"><kbd>Ctrl+L</kbd></div><div>Clear</div></div>
 		<div class="li"><div class="lk"><kbd>Q</kbd></div><div>Shutdown</div></div>
-		<div class="li"><div class="lk"><kbd>Esc</kbd></div><div>Close / jump to end</div></div>
+		<div class="li"><div class="lk"><kbd>Esc</kbd></div><div>Close search / collapse all / jump to end</div></div>
 	  </div>
 	  <div class="legend-sep"></div>
 	  <div class="legend-group">
@@ -813,19 +857,187 @@
 	  return autoScroll.checked && !scrolledUp && !hasSelection;
 	}
 
+	// Explicit user actions (filter change, Load more) should snap to bottom and
+	// re-engage tail-follow when auto-scroll is on — otherwise the viewport would
+	// stay anchored to whatever was on screen, which usually isn't what the user
+	// wants right after picking a filter.
+	function snapToBottomIfAutoScroll() {
+	  if(!autoScroll.checked) return;
+	  scrolledUp = false;
+	  logEl.scrollTop = logEl.scrollHeight;
+	}
+
 	// ── Filters ──────────────────────────────────────────────────────────
+	// Instance filter (composes with the level filter — AND semantics).
+	// Single-select dropdown: '__ALL__' or a specific uniquePidId like '#2'.
+	// Right-click menu on the col-inst column adds 'Hide this' (exclusion) — tracked as
+	// a separate exclusion set so the exclusion persists across dropdown changes to 'All'.
+	let   instSelected  = '__ALL__';           // dropdown state
+	const instExcluded  = new Set();           // right-click 'hide this' state
+	const instSelectEl  = document.getElementById('instSelect');
+
+	function entryMatchesLevel(el) {
+	  if(el.dataset.level === 'NEW')  return true;
+	  if(filter === 'ALL')            return true;
+	  if(filter === 'FAIL')           return el.dataset.fail === 'true';
+	  return el.dataset.level === filter;
+	}
+
+	function entryMatchesInstance(el) {
+	  const inst = el.dataset.inst;
+	  if(instExcluded.has(inst))                               return false;
+	  if(instSelected !== '__ALL__' && inst !== instSelected)  return false;
+	  return true;
+	}
+
+	// Time-window filter. windowSeconds of 0 means "All time" (everything passes).
+	// Entries without a parseable timestamp pass only when the window is 'All' — a
+	// missing timestamp can't be placed on the rolling window, so we exclude rather
+	// than always-show (which would pollute 'Last 5m').
+	const WINDOW_STORAGE_KEY = 'roslynmcp-window';
+	const windowSelectEl = document.getElementById('windowSelect');
+
+	// Restore saved time window (if any). Validated against the select's actual
+	// options so a stale or tampered value can't leave us with an unknown state.
+	let windowSeconds = 0;
+	try {
+	  const saved = localStorage.getItem(WINDOW_STORAGE_KEY);
+	  if(saved !== null && [...windowSelectEl.options].some(o => o.value === saved)) {
+		windowSelectEl.value = saved;
+		windowSeconds        = Number(saved) || 0;
+	  }
+	} catch {}
+
+	function entryMatchesWindow(el) {
+	  if(windowSeconds === 0) return true;
+	  const ts = el.dataset.ts;
+	  if(!ts) return false;
+	  const t = Number(ts);
+	  if(!Number.isFinite(t)) return false;
+	  return (Date.now() - t) <= windowSeconds * 1000;
+	}
+
+	function applyEntryFilters(el) {
+	  el.classList.toggle('hidden',
+		!(entryMatchesLevel(el) && entryMatchesInstance(el) && entryMatchesWindow(el)));
+	}
+
+	function applyAllFilters() {
+	  document.querySelectorAll('.entry-wrap').forEach(applyEntryFilters);
+	}
+
 	document.querySelectorAll('[data-filter]').forEach(btn => {
 	  btn.addEventListener('click', () => {
 		document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
 		btn.classList.add('active');
 		filter = btn.dataset.filter;
-		document.querySelectorAll('.entry-wrap').forEach(el => {
-		  if(filter === 'FAIL')
-			el.classList.toggle('hidden', el.dataset.level !== 'NEW' && el.dataset.fail !== 'true');
-		  else
-			el.classList.toggle('hidden', filter !== 'ALL' && el.dataset.level !== filter && el.dataset.level !== 'NEW');
-		});
+		applyAllFilters();
 	  });
+	});
+
+	// Rebuilds the dropdown options whenever a new PID appears. Preserves the current
+	// selection when possible; falls back to 'All' if the selected instance is no longer
+	// present (can't happen today — pids are never removed — but safe for future evolution).
+	function refreshInstanceDropdown() {
+	  // Newest first under 'All instances' — most recent instance is usually what
+	  // the user wants to drill into, so keep it adjacent to the default option.
+	  const ids = [...pids.values()].sort((a, b) => {
+		const na = parseInt(a.slice(1), 10), nb = parseInt(b.slice(1), 10);
+		return nb - na;
+	  });
+	  const prev = instSelectEl.value;
+	  instSelectEl.innerHTML = '<option value="__ALL__">All instances</option>';
+	  for(const id of ids) {
+		const opt = document.createElement('option');
+		opt.value = id;
+		opt.textContent = id;
+		instSelectEl.appendChild(opt);
+	  }
+	  instSelectEl.value = ids.includes(prev) || prev === '__ALL__' ? prev : '__ALL__';
+	  instSelected       = instSelectEl.value;
+	}
+
+	instSelectEl.addEventListener('change', () => {
+	  instSelected = instSelectEl.value;
+	  applyAllFilters();
+	  snapToBottomIfAutoScroll();
+	});
+
+	windowSelectEl.addEventListener('change', () => {
+	  windowSeconds = Number(windowSelectEl.value) || 0;
+	  try { localStorage.setItem(WINDOW_STORAGE_KEY, windowSelectEl.value); } catch {}
+	  applyAllFilters();
+	  snapToBottomIfAutoScroll();
+	});
+
+	// Re-evaluate the time-window filter every 30s so rolling windows expire old
+	// entries without user interaction. No-op when windowSeconds === 0 (All time).
+	setInterval(() => {
+	  if(windowSeconds > 0) applyAllFilters();
+	}, 30_000);
+
+	// ── Instance right-click menu ─────────────────────────────────────────
+	let instMenuEl = null;
+
+	function closeInstMenu() {
+	  instMenuEl?.remove();
+	  instMenuEl = null;
+	}
+
+	function openInstMenu(clientX, clientY, inst) {
+	  closeInstMenu();
+	  const menu = document.createElement('div');
+	  menu.id = 'instMenu';
+	  menu.style.left = clientX + 'px';
+	  menu.style.top  = clientY + 'px';
+
+	  const items = [
+		{ label: `Show only ${inst}`, action: () => {
+		  instSelectEl.value = inst;
+		  instSelected       = inst;
+		  instExcluded.delete(inst);
+		  applyAllFilters();
+		}},
+		{ label: `Hide ${inst}`, action: () => {
+		  instExcluded.add(inst);
+		  if(instSelected === inst) { instSelectEl.value = '__ALL__'; instSelected = '__ALL__'; }
+		  applyAllFilters();
+		}},
+		{ sep: true },
+		{ label: 'Show all instances', action: () => {
+		  instExcluded.clear();
+		  instSelectEl.value = '__ALL__';
+		  instSelected       = '__ALL__';
+		  applyAllFilters();
+		}},
+	  ];
+
+	  for(const it of items) {
+		if(it.sep) {
+		  const s = document.createElement('div');
+		  s.className = 'mi-sep';
+		  menu.appendChild(s);
+		  continue;
+		}
+		const mi = document.createElement('div');
+		mi.className   = 'mi';
+		mi.textContent = it.label;
+		mi.addEventListener('click', () => { it.action(); closeInstMenu(); });
+		menu.appendChild(mi);
+	  }
+
+	  document.body.appendChild(menu);
+	  instMenuEl = menu;
+
+	  // Clamp within viewport.
+	  const rect = menu.getBoundingClientRect();
+	  if(rect.right  > window.innerWidth)  menu.style.left = (window.innerWidth  - rect.width  - 4) + 'px';
+	  if(rect.bottom > window.innerHeight) menu.style.top  = (window.innerHeight - rect.height - 4) + 'px';
+	}
+
+	document.addEventListener('click',       closeInstMenu);
+	document.addEventListener('contextmenu', ev => {
+	  if(!ev.target.closest?.('.col-inst')) closeInstMenu();
 	});
 
 	// ── Shutdown ──────────────────────────────────────────────────────────
@@ -867,6 +1079,39 @@
 
 	  detail.classList.toggle('hidden', !open);
 	  if(chev) chev.textContent = open ? '▼' : '▶';
+
+	  // When opening, make sure the newly visible content is actually on screen. Defer one
+	  // frame so layout reflects the unhidden detail before we measure. Skip when auto-scroll
+	  // is active and the viewport is pinned to the bottom — the tail follow already covers it.
+	  if(open && !(autoScroll.checked && !scrolledUp)) {
+		requestAnimationFrame(() => scrollDetailIntoView(wrap, detail));
+	  }
+	}
+
+	// Scrolls the log pane so the bottom of an expanded entry is visible. Uses
+	// explicit scrollBy math rather than scrollIntoView — the latter's 'nearest'
+	// and 'start' modes don't reliably reveal the end of the detail when the
+	// wrap is taller than the viewport, which is the common case for long entries.
+	function scrollDetailIntoView(wrap, detail) {
+	  const paneRect = logEl.getBoundingClientRect();
+	  const wrapRect = wrap.getBoundingClientRect();
+
+	  // Bottom clipped → scroll down just enough to align the wrap's bottom with
+	  // the pane's bottom. If the wrap is taller than the viewport, this shows
+	  // the end of the detail (the content the user just revealed) and pushes
+	  // the header off-screen, which is preferable to anchoring on the header
+	  // and leaving the expansion invisible.
+	  const overflowBottom = wrapRect.bottom - paneRect.bottom;
+	  if(overflowBottom > 0) {
+		logEl.scrollBy({ top: overflowBottom, behavior: 'smooth' });
+		return;
+	  }
+
+	  // Top clipped (usually only when expanding an off-screen selection via
+	  // keyboard) → scroll up so the header comes into view.
+	  const overflowTop = paneRect.top - wrapRect.top;
+	  if(overflowTop > 0)
+		logEl.scrollBy({ top: -overflowTop, behavior: 'smooth' });
 	}
 
 	function isDetailOpen(wrap) {
@@ -876,6 +1121,16 @@
 	function toggleDetail(wrap) {
 	  if(wrap) setDetail(wrap, !isDetailOpen(wrap));
 	}
+
+	// Collapses every open entry and returns how many were closed, so callers
+	// (Esc cascade) can decide whether to proceed to the next step.
+	function collapseAllDetails() {
+	  const open = logEl.querySelectorAll('.entry-wrap:has(.entry-detail:not(.hidden))');
+	  open.forEach(w => setDetail(w, false));
+	  return open.length;
+	}
+
+	document.getElementById('collapseAllBtn').addEventListener('click', collapseAllDetails);
 
 	// ── Row navigation ────────────────────────────────────────────────────
 	function visibleWraps() {
@@ -905,20 +1160,27 @@
 
 	// ── Append entry ──────────────────────────────────────────────────────
 	function addEntry(e) {
-		
-		var uniquePidId = pids.getOrInsertComputed(e.pid, () => `#${pids.size + 1}`);
-		
+
+		const isNewPid    = !pids.has(e.pid);
+		const uniquePidId = pids.getOrInsertComputed(e.pid, () => `#${pids.size + 1}`);
+
+		if(isNewPid) refreshInstanceDropdown();
+
 	  emptyEl.style.display = 'none';
 	  const level  = e.level || 'OTHER';
 	  const isFail = level === 'TOOL' && e.success === false;
 	  const wrap   = document.createElement('div');
 	  wrap.className     = 'entry-wrap';
 	  wrap.dataset.level = level;
+	  wrap.dataset.inst  = uniquePidId;
 	  wrap.dataset.json  = JSON.stringify(e);
+	  if(e.timestamp) {
+		const t = Date.parse(e.timestamp);
+		if(Number.isFinite(t)) wrap.dataset.ts = String(t);
+	  }
 	  if(isFail) wrap.dataset.fail = 'true';
 
-	  if(level !== 'NEW' && (filter === 'FAIL' ? !isFail : (filter !== 'ALL' && level !== filter)))
-		wrap.classList.add('hidden');
+	  if(level !== 'NEW') applyEntryFilters(wrap);
 
 	  // ── Summary row ──────────────────────────────────────────────────────
 	  const row = document.createElement('div');
@@ -932,6 +1194,11 @@
 
 	  // #instance
 	  const inst = mk('span', 'col-inst', uniquePidId);
+	  inst.title = 'Right-click to filter by instance';
+	  inst.addEventListener('contextmenu', ev => {
+		ev.preventDefault();
+		openInstMenu(ev.clientX, ev.clientY, uniquePidId);
+	  });
 	  row.appendChild(inst);
 
 	  // time — local HH:mm:ss.fff
@@ -1261,18 +1528,20 @@
 	}
 
 	// ── SSE connection ────────────────────────────────────────────────────
-	let connected = false;
+	let connected   = false;
+	let currentTail = 200;
+	let activeEs    = null;
 
 	function connect() {
-	  const es = new EventSource('/logs/stream');
+	  activeEs = new EventSource(`/logs/stream?tail=${currentTail}`);
 
-	  es.onopen = () => {
+	  activeEs.onopen = () => {
 		connected = true;
 		statusEl.className = 'live';
 		updateStatus();
 	  };
 
-	  es.onmessage = e => {
+	  activeEs.onmessage = e => {
 		try {
 		  const entry = JSON.parse(e.data);
 		  if(entry.level === 'INFO' && entry.message?.toLowerCase().includes('clear'))
@@ -1283,14 +1552,28 @@
 		catch { /* malformed entry — skip */ }
 	  };
 
-	  es.onerror = () => {
+	  activeEs.onerror = () => {
 		connected = false;
 		statusEl.className = 'err';
 		statusEl.textContent = 'Disconnected — reconnecting in 3s…';
-		es.close();
+		activeEs.close();
 		setTimeout(connect, 3000);
 	  };
 	}
+
+	// Doubles the per-file backlog cap and reconnects. Clears the view first — the new
+	// connection will replay the (larger) backlog so de-duping in-place would be noisy.
+	document.getElementById('loadMoreBtn').addEventListener('click', () => {
+	  if(activeEs) activeEs.close();
+	  currentTail = Math.min(currentTail * 2, 10000);
+	  document.getElementById('clearBtn').click();
+	  // Re-engage tail-follow so the replayed backlog streams to the bottom as
+	  // entries arrive, instead of staying anchored wherever the user was before.
+	  snapToBottomIfAutoScroll();
+	  statusEl.className = '';
+	  statusEl.textContent = `Reloading with ${currentTail} lines/file…`;
+	  connect();
+	});
 
 	// ── Help legend toggle ────────────────────────────────────────────
 	document.getElementById('helpBtn').addEventListener('click', () => {
@@ -1349,6 +1632,7 @@
 		if(searching) { clearSearch(); return; }
 		const sel = window.getSelection();
 		if(sel && sel.toString().length > 0) { sel.removeAllRanges(); return; }
+		if(collapseAllDetails() > 0) return;
 		logEl.scrollTop = logEl.scrollHeight;
 		scrolledUp = false;
 		return;

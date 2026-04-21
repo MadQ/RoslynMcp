@@ -132,6 +132,23 @@ internal sealed class FileLogger : IDisposable
 		});
 	}
 	
+	/// <summary>
+	///     Logs a hook invocation (opt-in, enabled by the <c>--log</c> flag on
+	///     <c>dotnet roslynmcp hook</c>). Called once per hook process from its
+	///     finally block so every invocation — including pass-throughs — is captured.
+	/// </summary>
+	public void LogHook(string eventName, string? toolName, long elapsedMs, string outcome)
+		=> Write(new LogEntry {
+
+			  Timestamp = Timestamp()
+			, Pid       = pid
+			, Level     = "HOOK"
+			, ToolName  = toolName
+			, ElapsedMs = elapsedMs
+			, Subject   = eventName
+			, Detail    = outcome
+		});
+
 	/// <summary>Logs an error outside of a tool call (e.g. workspace load failure).</summary>
 	public void LogError(string context, string message)
 		=> Write(new LogEntry {
