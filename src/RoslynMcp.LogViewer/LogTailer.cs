@@ -15,6 +15,13 @@ using RoslynMcp;
 ///     appear after startup — merge-sorting each existing file's backlog by timestamp before
 ///     switching to live arrival-order streaming. Files created after startup are always live.
 /// </summary>
+static class LogTailerDefaults
+{
+	// Default per-file backlog lines replayed on connection. Matches the prior hardcoded value
+	// so default behaviour is unchanged; override via the ?tail= query string on /logs/stream.
+	public const int DefaultTail = 200;
+}
+
 sealed class LogTailer
 {
 	readonly string? logPath;
@@ -24,15 +31,15 @@ sealed class LogTailer
 	
 	// File mode — tail a specific log file.
 	public LogTailer(string logPath)
-		: this(logPath, 200) { }
-	
+		: this(logPath, LogTailerDefaults.DefaultTail) { }
+
 	public LogTailer(string logPath, int tailLines)
 		: this(logPath, tailLines, null, null) { }
-	
+
 	// Directory-watch mode — tails ALL currently matching files simultaneously and picks up
-	// new files as they appear (i.e. when new RoslynMcp server processes start).
+	// new files as they appear (i.e. when new RoslynMcp process starts).
 	public LogTailer(string watchDir, string watchPattern)
-		: this(null, 200, watchDir, watchPattern) { }
+		: this(null, LogTailerDefaults.DefaultTail, watchDir, watchPattern) { }
 	
 	public LogTailer(string watchDir, string watchPattern, int tailLines)
 		: this(null, tailLines, watchDir, watchPattern) { }

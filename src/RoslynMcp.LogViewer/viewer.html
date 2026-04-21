@@ -679,6 +679,7 @@
 	<div id="sep"></div>
 	<label class="chk"><input type="checkbox" id="autoScroll" checked><span class="chk-box"></span> Auto-scroll</label>
 	<button class="btn" id="clearBtn">Clear</button>
+	<button class="btn" id="loadMoreBtn" title="Reload with 2× per-file history (clears current view)">Load more</button>
 	<button class="btn" id="shutdownBtn">Shutdown</button>
 	<button class="btn" id="helpBtn" title="Keyboard shortcuts">?</button>
 	<div class="sep-thin"></div>
@@ -1261,18 +1262,20 @@
 	}
 
 	// ── SSE connection ────────────────────────────────────────────────────
-	let connected = false;
+	let connected   = false;
+	let currentTail = 200;
+	let activeEs    = null;
 
 	function connect() {
-	  const es = new EventSource('/logs/stream');
+	  activeEs = new EventSource(`/logs/stream?tail=${currentTail}`);
 
-	  es.onopen = () => {
+	  activeEs.onopen = () => {
 		connected = true;
 		statusEl.className = 'live';
 		updateStatus();
 	  };
 
-	  es.onmessage = e => {
+	  activeEs.onmessage = e => {
 		try {
 		  const entry = JSON.parse(e.data);
 		  if(entry.level === 'INFO' && entry.message?.toLowerCase().includes('clear'))
@@ -1283,14 +1286,25 @@
 		catch { /* malformed entry — skip */ }
 	  };
 
-	  es.onerror = () => {
+	  activeEs.onerror = () => {
 		connected = false;
 		statusEl.className = 'err';
 		statusEl.textContent = 'Disconnected — reconnecting in 3s…';
-		es.close();
+		activeEs.close();
 		setTimeout(connect, 3000);
 	  };
 	}
+
+	// Doubles the per-file backlog cap and reconnects. Clears the view first — the new
+	// connection will replay the (larger) backlog so de-duping in-place would be noisy.
+	document.getElementById('loadMoreBtn').addEventListener('click', () => {
+	  if(activeEs) activeEs.close();
+	  currentTail = Math.min(currentTail * 2, 10000);
+	  document.getElementById('clearBtn').click();
+	  statusEl.className = '';
+	  statusEl.textContent = `Reloading with ${currentTail} lines/file…`;
+	  connect();
+	});
 
 	// ── Help legend toggle ────────────────────────────────────────────
 	document.getElementById('helpBtn').addEventListener('click', () => {

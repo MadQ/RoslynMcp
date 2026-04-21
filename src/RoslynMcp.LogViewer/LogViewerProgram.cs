@@ -115,12 +115,8 @@ class Program
 		builder.WebHost.UseUrls($"http://localhost:{port}");
 		builder.Logging.ClearProviders();
 		
-		builder.Services.AddSingleton(
-			logPath is not null
-				? new LogTailer(logPath)
-				: new LogTailer(watchDir!, "roslynmcp.*.log")
-		);
-		
+		// No singleton LogTailer — each /logs/stream request constructs its own so the
+		// per-file backlog cap (?tail=N) can vary between connections.
 		var app = builder.Build();
 		
 		app.MapGet("/", (HttpContext ctx) => {
@@ -148,30 +144,41 @@ class Program
 			return Results.Ok("Shutting down…");
 		});
 		
-		app.MapGet("/logs/stream", async (HttpContext ctx, LogTailer tailer, IHostApplicationLifetime lifetime, CancellationToken ct) => {
-			
+		app.MapGet("/logs/stream", async (HttpContext ctx, IHostApplicationLifetime lifetime, CancellationToken ct) => {
+
 			// Block cross-origin reads. Same-origin EventSource requests omit Origin, which
 			// is fine — malicious cross-origin pages always include it (VULN-002).
 			var origin = ctx.Request.Headers.Origin.FirstOrDefault()
 			;
-			
+
 			if(origin is not null && !IsLoopbackOrigin(origin)) {
-				
+
 				ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-				
+
 				return;
 			}
-			
+
+			// Per-file backlog cap — opt-in larger history via ?tail=N. Clamped to a sane
+			// upper bound so a typo (?tail=100000) can't try to replay an unbounded history.
+			var tail = ctx.Request.Query["tail"].FirstOrDefault() is {} raw
+				&& int.TryParse(raw, out var parsed) && parsed > 0
+					? Math.Clamp(parsed, 1, 10000)
+					: LogTailerDefaults.DefaultTail;
+
+			var tailer = logPath is not null
+				? new LogTailer(logPath, tail)
+				: new LogTailer(watchDir!, "roslynmcp.*.log", tail);
+
 			ctx.Response.Headers.Append("Content-Type",      "text/event-stream; charset=utf-8");
 			ctx.Response.Headers.Append("Cache-Control",     "no-cache");
 			ctx.Response.Headers.Append("X-Accel-Buffering", "no");
-			
+
 			using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, lifetime.ApplicationStopping, cts.Token);
-			
+
 			await foreach(var entry in tailer.TailAsync(linked.Token)) {
-				
+
 				var json = JsonSerializer.Serialize(entry, SseOptions);
-				
+
 				await ctx.Response.WriteAsync($"data: {json}\n\n", linked.Token);
 				await ctx.Response.Body.FlushAsync(linked.Token);
 			}
