@@ -406,7 +406,9 @@
 	#status.live { color: var(--status-live); }
 	#status.err  { color: var(--status-err); }
 
-	#themeSelect {
+	#themeSelect,
+	#instSelect,
+	#windowSelect {
 	  padding: 4px 8px;
 	  border: 1px solid var(--border);
 	  background: var(--btn-bg);
@@ -417,7 +419,9 @@
 	  cursor: pointer;
 	}
 
-	[data-theme="parchment"] #themeSelect {
+	[data-theme="parchment"] #themeSelect,
+	[data-theme="parchment"] #instSelect,
+	[data-theme="parchment"] #windowSelect {
 	  border-width: 1px;
 	  border-style: solid;
 	  border-radius: 1px;
