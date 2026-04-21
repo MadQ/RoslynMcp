@@ -600,6 +600,24 @@
 	  align-items: center;
 	  flex-shrink: 0;
 	}
+	#instMenu {
+	  position: fixed;
+	  background: var(--bg-toolbar);
+	  border: 1px solid var(--border);
+	  border-radius: 4px;
+	  padding: 3px 0;
+	  min-width: 170px;
+	  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+	  z-index: 100;
+	  font-size: 12px;
+	}
+	#instMenu .mi {
+	  padding: 5px 12px;
+	  cursor: pointer;
+	  color: var(--text);
+	}
+	#instMenu .mi:hover { background: var(--btn-hover); }
+	#instMenu .mi-sep { height: 1px; background: var(--border); margin: 3px 0; }
 	#searchInput {
 	  flex: 1;
 	  padding: 3px 8px;
@@ -678,6 +696,9 @@
 	<button class="btn filter-STOP  "       data-filter="STOP" >STOP</button>
 	<div id="sep"></div>
 	<label class="chk"><input type="checkbox" id="autoScroll" checked><span class="chk-box"></span> Auto-scroll</label>
+	<select id="instSelect" title="Filter by server instance (right-click a row's #N column for more options)">
+	  <option value="__ALL__">All instances</option>
+	</select>
 	<button class="btn" id="clearBtn">Clear</button>
 	<button class="btn" id="loadMoreBtn" title="Reload with 2× per-file history (clears current view)">Load more</button>
 	<button class="btn" id="shutdownBtn">Shutdown</button>
@@ -815,18 +836,132 @@
 	}
 
 	// ── Filters ──────────────────────────────────────────────────────────
+	// Instance filter (composes with the level filter — AND semantics).
+	// Single-select dropdown: '__ALL__' or a specific uniquePidId like '#2'.
+	// Right-click menu on the col-inst column adds 'Hide this' (exclusion) — tracked as
+	// a separate exclusion set so the exclusion persists across dropdown changes to 'All'.
+	let   instSelected  = '__ALL__';           // dropdown state
+	const instExcluded  = new Set();           // right-click 'hide this' state
+	const instSelectEl  = document.getElementById('instSelect');
+
+	function entryMatchesLevel(el) {
+	  if(el.dataset.level === 'NEW')  return true;
+	  if(filter === 'ALL')            return true;
+	  if(filter === 'FAIL')           return el.dataset.fail === 'true';
+	  return el.dataset.level === filter;
+	}
+
+	function entryMatchesInstance(el) {
+	  const inst = el.dataset.inst;
+	  if(instExcluded.has(inst))                               return false;
+	  if(instSelected !== '__ALL__' && inst !== instSelected)  return false;
+	  return true;
+	}
+
+	function applyEntryFilters(el) {
+	  el.classList.toggle('hidden', !(entryMatchesLevel(el) && entryMatchesInstance(el)));
+	}
+
+	function applyAllFilters() {
+	  document.querySelectorAll('.entry-wrap').forEach(applyEntryFilters);
+	}
+
 	document.querySelectorAll('[data-filter]').forEach(btn => {
 	  btn.addEventListener('click', () => {
 		document.querySelectorAll('[data-filter]').forEach(b => b.classList.remove('active'));
 		btn.classList.add('active');
 		filter = btn.dataset.filter;
-		document.querySelectorAll('.entry-wrap').forEach(el => {
-		  if(filter === 'FAIL')
-			el.classList.toggle('hidden', el.dataset.level !== 'NEW' && el.dataset.fail !== 'true');
-		  else
-			el.classList.toggle('hidden', filter !== 'ALL' && el.dataset.level !== filter && el.dataset.level !== 'NEW');
-		});
+		applyAllFilters();
 	  });
+	});
+
+	// Rebuilds the dropdown options whenever a new PID appears. Preserves the current
+	// selection when possible; falls back to 'All' if the selected instance is no longer
+	// present (can't happen today — pids are never removed — but safe for future evolution).
+	function refreshInstanceDropdown() {
+	  const ids = [...pids.values()].sort((a, b) => {
+		const na = parseInt(a.slice(1), 10), nb = parseInt(b.slice(1), 10);
+		return na - nb;
+	  });
+	  const prev = instSelectEl.value;
+	  instSelectEl.innerHTML = '<option value="__ALL__">All instances</option>';
+	  for(const id of ids) {
+		const opt = document.createElement('option');
+		opt.value = id;
+		opt.textContent = id;
+		instSelectEl.appendChild(opt);
+	  }
+	  instSelectEl.value = ids.includes(prev) || prev === '__ALL__' ? prev : '__ALL__';
+	  instSelected       = instSelectEl.value;
+	}
+
+	instSelectEl.addEventListener('change', () => {
+	  instSelected = instSelectEl.value;
+	  applyAllFilters();
+	});
+
+	// ── Instance right-click menu ─────────────────────────────────────────
+	let instMenuEl = null;
+
+	function closeInstMenu() {
+	  instMenuEl?.remove();
+	  instMenuEl = null;
+	}
+
+	function openInstMenu(clientX, clientY, inst) {
+	  closeInstMenu();
+	  const menu = document.createElement('div');
+	  menu.id = 'instMenu';
+	  menu.style.left = clientX + 'px';
+	  menu.style.top  = clientY + 'px';
+
+	  const items = [
+		{ label: `Show only ${inst}`, action: () => {
+		  instSelectEl.value = inst;
+		  instSelected       = inst;
+		  instExcluded.delete(inst);
+		  applyAllFilters();
+		}},
+		{ label: `Hide ${inst}`, action: () => {
+		  instExcluded.add(inst);
+		  if(instSelected === inst) { instSelectEl.value = '__ALL__'; instSelected = '__ALL__'; }
+		  applyAllFilters();
+		}},
+		{ sep: true },
+		{ label: 'Show all instances', action: () => {
+		  instExcluded.clear();
+		  instSelectEl.value = '__ALL__';
+		  instSelected       = '__ALL__';
+		  applyAllFilters();
+		}},
+	  ];
+
+	  for(const it of items) {
+		if(it.sep) {
+		  const s = document.createElement('div');
+		  s.className = 'mi-sep';
+		  menu.appendChild(s);
+		  continue;
+		}
+		const mi = document.createElement('div');
+		mi.className   = 'mi';
+		mi.textContent = it.label;
+		mi.addEventListener('click', () => { it.action(); closeInstMenu(); });
+		menu.appendChild(mi);
+	  }
+
+	  document.body.appendChild(menu);
+	  instMenuEl = menu;
+
+	  // Clamp within viewport.
+	  const rect = menu.getBoundingClientRect();
+	  if(rect.right  > window.innerWidth)  menu.style.left = (window.innerWidth  - rect.width  - 4) + 'px';
+	  if(rect.bottom > window.innerHeight) menu.style.top  = (window.innerHeight - rect.height - 4) + 'px';
+	}
+
+	document.addEventListener('click',       closeInstMenu);
+	document.addEventListener('contextmenu', ev => {
+	  if(!ev.target.closest?.('.col-inst')) closeInstMenu();
 	});
 
 	// ── Shutdown ──────────────────────────────────────────────────────────
@@ -938,20 +1073,23 @@
 
 	// ── Append entry ──────────────────────────────────────────────────────
 	function addEntry(e) {
-		
-		var uniquePidId = pids.getOrInsertComputed(e.pid, () => `#${pids.size + 1}`);
-		
+
+		const isNewPid    = !pids.has(e.pid);
+		const uniquePidId = pids.getOrInsertComputed(e.pid, () => `#${pids.size + 1}`);
+
+		if(isNewPid) refreshInstanceDropdown();
+
 	  emptyEl.style.display = 'none';
 	  const level  = e.level || 'OTHER';
 	  const isFail = level === 'TOOL' && e.success === false;
 	  const wrap   = document.createElement('div');
 	  wrap.className     = 'entry-wrap';
 	  wrap.dataset.level = level;
+	  wrap.dataset.inst  = uniquePidId;
 	  wrap.dataset.json  = JSON.stringify(e);
 	  if(isFail) wrap.dataset.fail = 'true';
 
-	  if(level !== 'NEW' && (filter === 'FAIL' ? !isFail : (filter !== 'ALL' && level !== filter)))
-		wrap.classList.add('hidden');
+	  if(level !== 'NEW') applyEntryFilters(wrap);
 
 	  // ── Summary row ──────────────────────────────────────────────────────
 	  const row = document.createElement('div');
@@ -965,6 +1103,11 @@
 
 	  // #instance
 	  const inst = mk('span', 'col-inst', uniquePidId);
+	  inst.title = 'Right-click to filter by instance';
+	  inst.addEventListener('contextmenu', ev => {
+		ev.preventDefault();
+		openInstMenu(ev.clientX, ev.clientY, uniquePidId);
+	  });
 	  row.appendChild(inst);
 
 	  // time — local HH:mm:ss.fff
