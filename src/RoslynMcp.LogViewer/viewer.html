@@ -868,6 +868,38 @@
 
 	  detail.classList.toggle('hidden', !open);
 	  if(chev) chev.textContent = open ? '▼' : '▶';
+
+	  // When opening, make sure the newly visible content is actually on screen. Defer one
+	  // frame so layout reflects the unhidden detail before we measure. Skip when auto-scroll
+	  // is active and the viewport is pinned to the bottom — the tail follow already covers it.
+	  if(open && !(autoScroll.checked && !scrolledUp)) {
+		requestAnimationFrame(() => scrollDetailIntoView(wrap, detail));
+	  }
+	}
+
+	// Scrolls the log pane so the expanded detail is visible. If the detail is taller than
+	// the viewport, anchors on the row header so the start of the detail is on screen
+	// rather than its bottom.
+	function scrollDetailIntoView(wrap, detail) {
+	  const paneRect   = logEl.getBoundingClientRect();
+	  const wrapRect   = wrap.getBoundingClientRect();
+	  const detailRect = detail.getBoundingClientRect();
+
+	  const combinedHeight = wrapRect.height;
+	  const viewportHeight = paneRect.height;
+
+	  // Taller than viewport — scroll so the row header sits at the top of the pane.
+	  if(combinedHeight > viewportHeight) {
+		wrap.scrollIntoView({ block: 'start', behavior: 'smooth' });
+		return;
+	  }
+
+	  // Only scroll when part of the detail actually falls outside the pane.
+	  const clippedBottom = detailRect.bottom > paneRect.bottom;
+	  const clippedTop    = wrapRect.top     < paneRect.top;
+
+	  if(clippedBottom || clippedTop)
+		wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 	}
 
 	function isDetailOpen(wrap) {
