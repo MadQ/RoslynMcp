@@ -419,6 +419,15 @@
 	  cursor: pointer;
 	}
 
+	/* Native dropdown list items pick up the theme. Chromium honors these on Windows;
+	   other platforms fall back to native chrome, which is fine. */
+	#themeSelect option,
+	#instSelect option,
+	#windowSelect option {
+	  background: var(--bg-toolbar);
+	  color: var(--text);
+	}
+
 	[data-theme="parchment"] #themeSelect,
 	[data-theme="parchment"] #instSelect,
 	[data-theme="parchment"] #windowSelect {
@@ -846,6 +855,16 @@
 	  return autoScroll.checked && !scrolledUp && !hasSelection;
 	}
 
+	// Explicit user actions (filter change, Load more) should snap to bottom and
+	// re-engage tail-follow when auto-scroll is on — otherwise the viewport would
+	// stay anchored to whatever was on screen, which usually isn't what the user
+	// wants right after picking a filter.
+	function snapToBottomIfAutoScroll() {
+	  if(!autoScroll.checked) return;
+	  scrolledUp = false;
+	  logEl.scrollTop = logEl.scrollHeight;
+	}
+
 	// ── Filters ──────────────────────────────────────────────────────────
 	// Instance filter (composes with the level filter — AND semantics).
 	// Single-select dropdown: '__ALL__' or a specific uniquePidId like '#2'.
@@ -907,9 +926,11 @@
 	// selection when possible; falls back to 'All' if the selected instance is no longer
 	// present (can't happen today — pids are never removed — but safe for future evolution).
 	function refreshInstanceDropdown() {
+	  // Newest first under 'All instances' — most recent instance is usually what
+	  // the user wants to drill into, so keep it adjacent to the default option.
 	  const ids = [...pids.values()].sort((a, b) => {
 		const na = parseInt(a.slice(1), 10), nb = parseInt(b.slice(1), 10);
-		return na - nb;
+		return nb - na;
 	  });
 	  const prev = instSelectEl.value;
 	  instSelectEl.innerHTML = '<option value="__ALL__">All instances</option>';
@@ -926,11 +947,13 @@
 	instSelectEl.addEventListener('change', () => {
 	  instSelected = instSelectEl.value;
 	  applyAllFilters();
+	  snapToBottomIfAutoScroll();
 	});
 
 	windowSelectEl.addEventListener('change', () => {
 	  windowSeconds = Number(windowSelectEl.value) || 0;
 	  applyAllFilters();
+	  snapToBottomIfAutoScroll();
 	});
 
 	// Re-evaluate the time-window filter every 30s so rolling windows expire old
@@ -1519,6 +1542,9 @@
 	  if(activeEs) activeEs.close();
 	  currentTail = Math.min(currentTail * 2, 10000);
 	  document.getElementById('clearBtn').click();
+	  // Re-engage tail-follow so the replayed backlog streams to the bottom as
+	  // entries arrive, instead of staying anchored wherever the user was before.
+	  snapToBottomIfAutoScroll();
 	  statusEl.className = '';
 	  statusEl.textContent = `Reloading with ${currentTail} lines/file…`;
 	  connect();
