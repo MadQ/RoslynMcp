@@ -892,8 +892,19 @@
 	// Entries without a parseable timestamp pass only when the window is 'All' — a
 	// missing timestamp can't be placed on the rolling window, so we exclude rather
 	// than always-show (which would pollute 'Last 5m').
-	let   windowSeconds = 0;
+	const WINDOW_STORAGE_KEY = 'roslynmcp-window';
 	const windowSelectEl = document.getElementById('windowSelect');
+
+	// Restore saved time window (if any). Validated against the select's actual
+	// options so a stale or tampered value can't leave us with an unknown state.
+	let windowSeconds = 0;
+	try {
+	  const saved = localStorage.getItem(WINDOW_STORAGE_KEY);
+	  if(saved !== null && [...windowSelectEl.options].some(o => o.value === saved)) {
+		windowSelectEl.value = saved;
+		windowSeconds        = Number(saved) || 0;
+	  }
+	} catch {}
 
 	function entryMatchesWindow(el) {
 	  if(windowSeconds === 0) return true;
@@ -952,6 +963,7 @@
 
 	windowSelectEl.addEventListener('change', () => {
 	  windowSeconds = Number(windowSelectEl.value) || 0;
+	  try { localStorage.setItem(WINDOW_STORAGE_KEY, windowSelectEl.value); } catch {}
 	  applyAllFilters();
 	  snapToBottomIfAutoScroll();
 	});
