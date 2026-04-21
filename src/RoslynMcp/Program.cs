@@ -25,7 +25,7 @@ if(args.Length > 0)
 
         "setup"       => RoslynMcp.Cli.SetupCommand.Run(),
         "setup-project" => RoslynMcp.Cli.SetupProjectCommand.Run(),
-        "hook"        => RoslynMcp.Cli.HookCommand.Run(),
+        "hook"        => RoslynMcp.Cli.HookCommand.Run(args),
         "list"        => RoslynMcp.Cli.ListCommand.Run(),
         "verify"      => RoslynMcp.Cli.VerifyCommand.Run(),
         "update"      => RoslynMcp.Cli.UpdateCommand.Run(),

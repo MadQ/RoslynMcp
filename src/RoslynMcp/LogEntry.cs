@@ -30,9 +30,10 @@ record LogEntry
     public required int Pid { get; init; }
 
     /// <summary>
-    ///     Log level: START, STOP, TOOL, ERROR, INFO, or FATAL.
+    ///     Log level: START, STOP, TOOL, HOOK, ERROR, INFO, or FATAL.
     ///     FATAL is written by the <see cref="AppDomain.UnhandledException"/> handler
-    ///     for process-terminating crashes.
+    ///     for process-terminating crashes. HOOK is emitted by the opt-in
+    ///     <c>dotnet roslynmcp hook --log</c> flow for hook-invocation observability.
     /// </summary>
     [JsonPropertyName("level")]
     public required string Level { get; init; }
