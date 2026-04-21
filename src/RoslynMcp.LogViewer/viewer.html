@@ -1074,29 +1074,30 @@
 	  }
 	}
 
-	// Scrolls the log pane so the expanded detail is visible. If the detail is taller than
-	// the viewport, anchors on the row header so the start of the detail is on screen
-	// rather than its bottom.
+	// Scrolls the log pane so the bottom of an expanded entry is visible. Uses
+	// explicit scrollBy math rather than scrollIntoView — the latter's 'nearest'
+	// and 'start' modes don't reliably reveal the end of the detail when the
+	// wrap is taller than the viewport, which is the common case for long entries.
 	function scrollDetailIntoView(wrap, detail) {
-	  const paneRect   = logEl.getBoundingClientRect();
-	  const wrapRect   = wrap.getBoundingClientRect();
-	  const detailRect = detail.getBoundingClientRect();
+	  const paneRect = logEl.getBoundingClientRect();
+	  const wrapRect = wrap.getBoundingClientRect();
 
-	  const combinedHeight = wrapRect.height;
-	  const viewportHeight = paneRect.height;
-
-	  // Taller than viewport — scroll so the row header sits at the top of the pane.
-	  if(combinedHeight > viewportHeight) {
-		wrap.scrollIntoView({ block: 'start', behavior: 'smooth' });
+	  // Bottom clipped → scroll down just enough to align the wrap's bottom with
+	  // the pane's bottom. If the wrap is taller than the viewport, this shows
+	  // the end of the detail (the content the user just revealed) and pushes
+	  // the header off-screen, which is preferable to anchoring on the header
+	  // and leaving the expansion invisible.
+	  const overflowBottom = wrapRect.bottom - paneRect.bottom;
+	  if(overflowBottom > 0) {
+		logEl.scrollBy({ top: overflowBottom, behavior: 'smooth' });
 		return;
 	  }
 
-	  // Only scroll when part of the detail actually falls outside the pane.
-	  const clippedBottom = detailRect.bottom > paneRect.bottom;
-	  const clippedTop    = wrapRect.top     < paneRect.top;
-
-	  if(clippedBottom || clippedTop)
-		wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	  // Top clipped (usually only when expanding an off-screen selection via
+	  // keyboard) → scroll up so the header comes into view.
+	  const overflowTop = paneRect.top - wrapRect.top;
+	  if(overflowTop > 0)
+		logEl.scrollBy({ top: -overflowTop, behavior: 'smooth' });
 	}
 
 	function isDetailOpen(wrap) {
