@@ -4,8 +4,8 @@
     "preToolUse": [
       {
         "type": "command",
-        "powershell": "dotnet roslynmcp hook",
-        "bash": "dotnet roslynmcp hook",
+        "powershell": "dotnet roslynmcp hook --log",
+        "bash": "dotnet roslynmcp hook --log",
         "timeoutSec": 5
       }
     ]

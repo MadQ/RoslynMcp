@@ -318,13 +318,13 @@ internal sealed record DiagnosticsResult(
 	[property: JsonPropertyName("has_more")]      bool             HasMore,
 	[property: JsonPropertyName("page_token")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	string?                                       PageToken   = null,
+	string?                                       PageToken,
 	[property: JsonPropertyName("items")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	DiagnosticItem[]?                             Items       = null,
+	DiagnosticItem[]?                             Items,
 	[property: JsonPropertyName("possible_workspace_load_issue")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	bool?                                         PossibleWorkspaceLoadIssue = null
+	bool                                         PossibleWorkspaceLoadIssue
 ) : ToolResult;
 
 internal sealed record ListFilesResult(

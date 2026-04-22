@@ -13,7 +13,7 @@ namespace RoslynMcp.Cli;
 internal static class HookCommand
 {
 	// Tools that read or list files — worth redirecting to roslyn_* equivalents.
-	static readonly HashSet<string> FileTools = new(StringComparer.OrdinalIgnoreCase) {
+	static readonly HashSet<string> fileTools = new(StringComparer.OrdinalIgnoreCase) {
 
 		"view", "read", "grep", "rg", "glob", "findstr",
 		// Claude Code equivalents
@@ -21,7 +21,7 @@ internal static class HookCommand
 	};
 
 	// Tools that write or edit files.
-	static readonly HashSet<string> EditTools = new(StringComparer.OrdinalIgnoreCase) {
+	static readonly HashSet<string> editTools = new(StringComparer.OrdinalIgnoreCase) {
 
 		"edit", "write",
 		// Claude Code equivalents
@@ -37,8 +37,9 @@ internal static class HookCommand
 
 		// State captured across the hook flow so the final log entry describes what happened.
 		string? toolName  = null;
-		string  eventName = "";
-		string  outcome   = "no-op"; // default — empty input, parse failure, etc.
+		
+		var  eventName = "";
+		var  outcome   = "no-op"; // default — empty input, parse failure, etc.
 
 		try {
 
@@ -81,7 +82,7 @@ internal static class HookCommand
 			var toolArgs = node["toolArgs"] as JsonObject
 				?? node["tool_input"] as JsonObject;
 
-			bool isCopilotFormat = node["toolName"] is not null;
+			var isCopilotFormat = node["toolName"] is not null;
 
 			// Event name for the log entry. Claude Code surfaces it directly; Copilot
 			// doesn't, so we label by source.
@@ -156,7 +157,7 @@ internal static class HookCommand
 
 	static bool IsFileOperationOnCsFile(string toolName, JsonObject? toolArgs)
 	{
-		if(!FileTools.Contains(toolName) && !EditTools.Contains(toolName))
+		if(!fileTools.Contains(toolName) && !editTools.Contains(toolName))
 
 			return false;
 

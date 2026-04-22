@@ -3,21 +3,21 @@ using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
+#pragma warning disable IDE0130 // Namespace does not match folder structure
+
 namespace RoslynMcp.Tools;
 
+
 [McpServerToolType]
-internal sealed class DiagnosticsTool : RoslynMcpTool
+internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : RoslynMcpTool(workspace, logger, paginationCache)
 {
 	// Heuristic for detecting transient workspace-load noise — a flood of type-resolution errors
 	// across many files that usually clears once Roslyn finishes resolving dependencies.
-	const int    WorkspaceLoadMinErrors         = 20;
-	const double WorkspaceLoadNamespaceFraction = 0.60;
-	const int    WorkspaceLoadMinDistinctFiles  = 5;
-	static readonly HashSet<string> WorkspaceLoadCodes = ["CS0246", "CS0103", "CS0234", "CS0012"];
+	const int    workspaceLoadMinErrors         = 20;
+	const double workspaceLoadNamespaceFraction = 0.60;
+	const int    workspaceLoadMinDistinctFiles  = 5;
+	static readonly HashSet<string> workspaceLoadCodes = ["CS0246", "CS0103", "CS0234", "CS0012"];
 
-	public DiagnosticsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
-		: base(workspace, logger, paginationCache) { }
-	
 	[McpServerTool(Name = "roslyn_get_diagnostics", ReadOnly = true, Title = "Get Diagnostics", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Check your code for compiler errors and warnings — fast, in-process, no build needed. " +
@@ -102,17 +102,18 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 		// Detect transient workspace-load noise: flood of type-resolution failures across many files.
 		// Full-project queries only — a file-scoped query hitting the same pattern is plausibly real
 		// breakage in one file, not workspace load state.
-		bool    possibleLoadIssue = false;
+		var    possibleLoadIssue = false;
+		
 		string? hint              = null;
 
-		if(filePath is null && errorCount >= WorkspaceLoadMinErrors) {
+		if(filePath is null && errorCount >= workspaceLoadMinErrors) {
 
 			var errorsOnly    = Array.FindAll(filtered, d => d.Severity == DiagnosticSeverity.Error);
-			var loadCodeCount = Array.FindAll(errorsOnly, d => WorkspaceLoadCodes.Contains(d.Id)).Length;
+			var loadCodeCount = Array.FindAll(errorsOnly, d => workspaceLoadCodes.Contains(d.Id)).Length;
 			var distinctFiles = errorsOnly.Select(d => d.Location.SourceTree?.FilePath).Distinct().Count();
 
-			if((double) loadCodeCount / errorsOnly.Length >= WorkspaceLoadNamespaceFraction
-				&& distinctFiles >= WorkspaceLoadMinDistinctFiles) {
+			if((double) loadCodeCount / errorsOnly.Length >= workspaceLoadNamespaceFraction
+				&& distinctFiles >= workspaceLoadMinDistinctFiles) {
 
 				possibleLoadIssue = true;
 				hint = "High volume of CS0246/CS0103/CS0234/CS0012 across many files suggests the workspace "
@@ -123,8 +124,7 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 
 		// take: 0 fast path — return counts only. items is null (not []) to distinguish
 		// "not requested" from "requested but empty".
-		if(take == 0) {
-
+		if(take is 0)
 			return scope.Outcome(summary, new DiagnosticsResult(
 				summary,
 				"roslyn",
@@ -133,16 +133,18 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 				total,
 				0,
 				total > 0,
-				PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null) {
-				Hint = hint
-			});
-		}
+				PageToken: null,
+				Items: null,
+				possibleLoadIssue) {
+					Hint = hint
+				}
+			);
 		
 		var effectiveSkip  = Math.Clamp(skip, 0, total);
 		var effectiveCount = Math.Clamp(take, 0, total - effectiveSkip);
 		var hasMore        = effectiveSkip + effectiveCount < total;
 		
-		string? nextToken = hasMore
+		var nextToken = hasMore
 			? Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(
 				new PageTokenData(effectiveSkip + effectiveCount, severity)))
 			: null
@@ -163,9 +165,10 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 			hasMore,
 			nextToken,
 			items,
-			PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null) {
-			Hint = hint
-		});
+			possibleLoadIssue) {
+				Hint = hint
+			}
+		);
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.

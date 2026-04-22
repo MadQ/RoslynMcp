@@ -12,10 +12,10 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class FileLogger : IDisposable
 {
-	const int MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
-	const int MaxRotatedFiles  = 3;
+	const int maxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
+	const int maxRotatedFiles  = 3;
 	
-	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Log;
+	static readonly JsonSerializerOptions jsonOptions = RoslynMcpJson.Log;
 	
 	readonly string? logPath;
 
@@ -44,7 +44,7 @@ internal sealed class FileLogger : IDisposable
 			
 			var logDir = Path.GetDirectoryName(logPath)!;
 			
-			Directory.CreateDirectory(logDir);
+			_= Directory.CreateDirectory(logDir);
 			
 			// Prune old per-PID log files (including their rotation siblings) by age.
 			// Pattern: "roslynmcp.*.log*" matches roslynmcp.1234.log, roslynmcp.1234.log.1, etc.
@@ -189,7 +189,7 @@ internal sealed class FileLogger : IDisposable
 			
 			return;
 		
-		var line = JsonSerializer.Serialize(entry, JsonOptions) + Environment.NewLine;
+		var line = JsonSerializer.Serialize(entry, jsonOptions) + Environment.NewLine;
 		
 		lock(writeLock)
 			try {
@@ -210,12 +210,12 @@ internal sealed class FileLogger : IDisposable
 			
 			return;
 		
-		if(new FileInfo(logPath).Length < MaxFileSizeBytes)
+		if(new FileInfo(logPath).Length < maxFileSizeBytes)
 			
 			return;
 		
 		// Shift existing rotated files: .2 → .3, .1 → .2, (current) → .1
-		for(var i = MaxRotatedFiles - 1; i >= 1; i--) {
+		for(var i = maxRotatedFiles - 1; i >= 1; i--) {
 			
 			var older  = $"{logPath}.{i}";
 			var newer  = $"{logPath}.{i + 1}";

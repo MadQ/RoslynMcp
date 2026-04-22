@@ -9,11 +9,11 @@ namespace RoslynMcp.Tools;
 ///     Base class for RoslynMcp tools. Provides common functionality for project path resolution,
 ///     workspace access, structured error handling, and file logging.
 /// </summary>
-internal abstract partial class RoslynMcpTool
+internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
 {
-	protected readonly WorkspaceResolver workspace;
-	protected readonly FileLogger         logger;
-	protected readonly PaginationCache    paginationCache;
+	protected readonly WorkspaceResolver	workspace		= workspace;
+	protected readonly FileLogger			logger			= logger;
+	protected readonly PaginationCache		paginationCache	= paginationCache;
 	
 	// Tracks the in-flight scope so TryGetCompilation/TryGetProject can set workspace mode without
 	// requiring callers to thread the scope through as a parameter.
@@ -89,14 +89,7 @@ internal abstract partial class RoslynMcpTool
 			_                                      => false
 		};
 	}
-	
-	protected RoslynMcpTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
-	{
-		this.workspace       = workspace;
-		this.logger          = logger;
-		this.paginationCache = paginationCache;
-	}
-	
+
 	/// <summary>
 	///     Starts a timed tool scope. Dispose the returned handle to log the outcome.
 	///     Usage: <c>using var scope = BeginTool("roslyn_foo", subject);</c>
@@ -127,14 +120,18 @@ internal abstract partial class RoslynMcpTool
 	// Static cache for project path inference: maps relative/bare paths to resolved full paths.
 	// Enabled by default; disable via ROSLYNMCP_DISABLE_PATH_CACHE=true env var.
 	// Entries evicted above 500 to prevent unbounded growth in long-running server sessions.
-	const int PathCacheMaxSize = 500
-	;
+	const int pathCacheMaxSize = 500;
+	
 	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
-	static readonly object pathCacheLock = new();
+	
+#if NET9_0_OR_GREATER
+		private readonly Lock             pathCacheLock   = new();
+#else
+		private readonly object           pathCacheLock   = new();
+#endif
 	
 	// Computed on every access so the read is guaranteed to happen after ServerArgs.Initialize().
-	static bool pathCacheEnabled => !ServerArgs.Current.DisablePathCache
-	;
+	static bool PathCacheEnabled => !ServerArgs.Current.DisablePathCache;
 	
 	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
@@ -151,7 +148,7 @@ internal abstract partial class RoslynMcpTool
 		error		= null;
 		compilation	= null;
 		
-		if(pathCacheEnabled && !Path.IsPathRooted(projectPath))
+		if(PathCacheEnabled && !Path.IsPathRooted(projectPath))
 			lock(pathCacheLock)
 				if(pathCache.TryGetValue(projectPath, out var cached)) {
 					
@@ -180,7 +177,7 @@ internal abstract partial class RoslynMcpTool
 				_                                 => null!
 			});
 			
-			if(pathCacheEnabled && !Path.IsPathRooted(originalPath)) {
+			if(PathCacheEnabled && !Path.IsPathRooted(originalPath)) {
 				
 				// Cache the absolute .csproj path, not the workspace root directory.
 				// GetWorkspaceInfo().RootPath is the solution root (e.g. J:\Projects\RoslynMcp),
@@ -191,7 +188,7 @@ internal abstract partial class RoslynMcpTool
 				
 				lock(pathCacheLock) {
 					
-					if(pathCache.Count >= PathCacheMaxSize)
+					if(pathCache.Count >= pathCacheMaxSize)
 						pathCache.Clear();
 					
 					if(!pathCache.ContainsKey(originalPath)) {
@@ -336,14 +333,14 @@ internal abstract partial class RoslynMcpTool
 		}
 	}
 	
-	private static ToolResult ProjectNotFoundError(ProjectNotFoundException ex)
-		=> new PathErrorResult(ex.Message, SearchPath: ex.SearchPath)
+	private static PathErrorResult ProjectNotFoundError(ProjectNotFoundException ex)
+		=> new(ex.Message, SearchPath: ex.SearchPath)
 		{
 			Error = "project_not_found",
 			Hint  = "Provide a valid projectPath pointing to a directory containing a .csproj file, or the .csproj file itself."
 		};
 	
-	private static ToolResult MultipleProjectsError(MultipleProjectsFoundException ex)
+	private static PathErrorResult MultipleProjectsError(MultipleProjectsFoundException ex)
 	{
 		string[] foundProjects = [.. ex.ProjectFiles.Select(Path.GetFileName).Where(f => f is not null)!];
 		
@@ -354,22 +351,22 @@ internal abstract partial class RoslynMcpTool
 		};
 	}
 	
-	private static ToolResult AmbiguousFileError(AmbiguousFileException ex)
-		=> new PathErrorResult(ex.Message, FileName: ex.FileName, FoundIn: ex.CsprojPaths)
+	private static PathErrorResult AmbiguousFileError(AmbiguousFileException ex)
+		=> new(ex.Message, FileName: ex.FileName, FoundIn: ex.CsprojPaths)
 		{
 			Error = "ambiguous_file",
 			Hint  = "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
 		};
 	
-	private static ToolResult InvalidPathError(InvalidProjectPathException ex)
-		=> new PathErrorResult(ex.Message, ProvidedPath: ex.Path)
+	private static PathErrorResult InvalidPathError(InvalidProjectPathException ex)
+		=> new(ex.Message, ProvidedPath: ex.Path)
 		{
 			Error = "invalid_project_path",
 			Hint  = "Ensure the path exists and contains a valid .csproj file."
 		};
 	
-	private static ToolResult UnexpectedError(Exception ex)
-		=> new UnexpectedErrorResult(ex.Message, ex.GetType().Name)
+	private static UnexpectedErrorResult UnexpectedError(Exception ex)
+		=> new(ex.Message, ex.GetType().Name)
 		{
 			Error = "unexpected_error"
 		};
@@ -671,14 +668,13 @@ internal abstract partial class RoslynMcpTool
 	protected static string NormalizeLineEndings(string replacement, string fileContent)
 	{
 		var hasCrlf = fileContent.Contains("\r\n");
-		
-		if(hasCrlf && !replacement.Contains("\r\n"))
-			
-			return replacement.Replace("\n", "\r\n");
-		
-		return replacement;
+
+		return hasCrlf && !replacement.Contains("\r\n")
+			? replacement.Replace("\n", "\r\n")
+			: replacement
+		;
 	}
-	
+
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 	
@@ -765,14 +761,13 @@ internal abstract partial class RoslynMcpTool
 		
 		var typeSymbol = compilation.GetTypeByMetadataName(name)
 			?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(name));
-		
-		if(typeSymbol is not null)
-			
-			return typeSymbol;
-		
-		return compilation.GlobalNamespace.Accept(new AnySymbolFinder(name));
+
+		return typeSymbol is not null
+			? typeSymbol
+			: compilation.GlobalNamespace.Accept(new AnySymbolFinder(name))
+		;
 	}
-	
+
 	/// <summary>
 	///     Finds all symbols with <paramref name="symbolName"/> in the compilation. When
 	///     <paramref name="containingType"/> is provided, returns the single matching member (or empty
@@ -815,7 +810,7 @@ internal abstract partial class RoslynMcpTool
 		byte[] postBytes, bool skipPre = false, string fileState = "modified")
 	{
 		string? preToken = null;
-		bool    preSaved = false;
+		var    preSaved = false;
 		
 		try {
 			
