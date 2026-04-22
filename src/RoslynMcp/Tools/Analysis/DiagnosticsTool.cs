@@ -133,8 +133,9 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 				total,
 				0,
 				total > 0,
-				PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null,
-				Hint: hint));
+				PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null) {
+				Hint = hint
+			});
 		}
 		
 		var effectiveSkip  = Math.Clamp(skip, 0, total);
@@ -162,8 +163,9 @@ internal sealed class DiagnosticsTool : RoslynMcpTool
 			hasMore,
 			nextToken,
 			items,
-			PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null,
-			Hint: hint));
+			PossibleWorkspaceLoadIssue: possibleLoadIssue ? true : null) {
+			Hint = hint
+		});
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.
