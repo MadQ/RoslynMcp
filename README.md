@@ -185,7 +185,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Log Viewer
 
-RoslynMcp writes structured NDJSON logs to `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log`. `src/RoslynMcp.LogViewer/viewer.html` is a self-contained browser-based viewer for those logs — open it directly in any browser, point it at the log file, and watch tool calls stream in live.
+RoslynMcp writes structured NDJSON logs to `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log`. `src/RoslynMcp.LogViewer/` is a .NET console app that serves a browser-based log viewer on `http://localhost:5123` — run it, then open that URL in any browser to watch tool calls stream in live.
 
 **Features:** expandable rows with response peek data, JSON and C# syntax highlighting (with rainbow bracket coloring), four themes (Dark, Light, Parchment, Auto), local time display, and a Win95-inspired tree-view UI in Parchment mode.
 

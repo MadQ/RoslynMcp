@@ -1,4 +1,4 @@
-﻿# roslyn_get_trivia (EXPERIMENTAL)
+# roslyn_get_trivia (EXPERIMENTAL)
 
 **Status:** Experimental — may be removed or significantly changed in future releases.
 
@@ -86,7 +86,7 @@ Returns:
 }
 ```
 
-**Pro tip:** Use `commonKinds` for the most frequently used values. Use `allKinds` when you need something specific.
+**Pro tip:** Use `common_kinds` for the most frequently used values. Use `all_kinds` when you need something specific.
 
 ### Common Syntax Kinds
 

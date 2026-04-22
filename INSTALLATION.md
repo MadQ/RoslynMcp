@@ -444,7 +444,7 @@ RoslynMcp.exe [path...] [--workspace sdk|vs|adhoc|auto]
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ROSLYNMCP_WORKSPACE` | `auto` | Same as `--workspace` flag — `sdk`, `vs`, `adhoc`, or `auto` |
-| `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` | Log file path. Set to empty string to disable logging. |
+| `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` | Log file base path (PID is always injected before the extension, e.g. `roslynmcp.1234.log`). Set to empty string to disable logging. |
 | `ROSLYNMCP_BACKUP_PATH` | `%LOCALAPPDATA%\RoslynMcp\backups` | Backup store root for `roslyn_write_file` / `roslyn_local_history`. Set to empty to disable backups. |
 | `ROSLYNMCP_MAX_CACHED_WORKSPACES` | `5` | LRU workspace cache size. Increase for large multi-project workflows. |
 | `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Force a specific MSBuild installation path. |

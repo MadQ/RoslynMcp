@@ -105,7 +105,9 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
 | `BackupStore` | Crash-safe backup store for file write operations; stores pre- and post-write snapshots in `%LOCALAPPDATA%\RoslynMcp\backups\`; supports multi-level undo with token-based restore and conflict detection; async-safe via `SemaphoreSlim` |
 | `RoslynMcpJson` | Shared `JsonSerializerOptions` with a custom `JavaScriptEncoder` — passes through Unicode characters without `\uXXXX` escaping; used by all tools for consistent serialization |
-| `ToolErrorResult` | Abstract base record for all structured error responses; provides a non-nullable `Error` string property; enables the `where T : ToolErrorResult` generic constraint on `ToolScope.Error<T>()` |
+| `IToolError` | Marker interface for error-bearing result types; paired with `ToolResult` in the `where T : ToolResult, IToolError` constraint on `ToolScope.Error<T>()` |
+| `ToolResult` | Abstract base record for all tool results — success and error alike; nullable `Error`, `Hint`, and `Caution` properties are omitted from serialized JSON when null |
+| `ErrorResult` | Standard error response record (`ToolResult, IToolError`); used by all tools for consistent JSON error shape; serializes as `{ "error": "...", "hint": "..." }` |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 | `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
 | `PaginationCache` | Generic TTL-based token cache for paginated tool results; shared across all tools via DI |
@@ -520,9 +522,11 @@ Every `return` statement that carries a value must go through a scope terminal. 
 |--------|-------------|
 | `scope.Outcome(detail, returnValue)` | Normal success. `detail` is a short log annotation ("12 results", "3 files changed"). Serializes the return value for log peek and token estimate. **Use this for successful returns.** |
 | `scope.Outcome(detail)` | Success with no return value (rare — only for `void`-adjacent paths before final `return`). |
-| `scope.Error<T>(returnValue)` | Structured error. `T` must derive from `ToolErrorResult` (has a non-null `Error` string). Marks the invocation failed, logs the error message. **Prefer over `Failed` when the error type is a known `ToolErrorResult` subtype.** |
-| `scope.Failed(reason, returnValue)` | Unstructured failure. Use when the error is a raw string (e.g., caught exception message) and no `ToolErrorResult` type exists. |
+| `scope.Error<T>(returnValue)` | Structured error. `T` must satisfy `where T : ToolResult, IToolError`. Marks the invocation failed, logs the error message. **Prefer over `Failed` when returning a known `ErrorResult` or custom `IToolError` type.** |
+| `scope.Failed(reason, returnValue)` | Unstructured failure. Use when the error is a raw string (e.g., caught exception message) and no `IToolError` type is appropriate. |
 | `scope.Failed(reason)` | Failure with no return value — marks the call failed and sets the log detail. Used before a `return` that returns void or before an exception. |
+
+**RMCP006 (Warning)** — the `detail` argument to `scope.Outcome` and `scope.Failed` must not be a `"TODO"` placeholder string. Use a meaningful description of what happened.
 
 The ternary form `return cond ? scope.Outcome(x, a) : scope.Error(b)` is valid — both branches are terminals.
 
@@ -555,7 +559,7 @@ var rootPath = workspace.GetRootPath(projectPath);
 var solution = workspace.GetSolution(projectPath);
 ```
 
-`TryGetCompilation` and `TryGetProject` return a structured `ToolErrorResult` on failure — pass it directly as the return value. Never unwrap or re-wrap.
+`TryGetCompilation` and `TryGetProject` return a structured `ToolResult` on failure — pass it directly as the return value. Never unwrap or re-wrap.
 
 #### File Mutation — Invalidate After Write
 
@@ -575,7 +579,7 @@ Without this, subsequent Roslyn tools see the stale in-memory source tree, not t
 - `Name` in `[McpServerTool]` must match `BeginTool`'s first argument exactly
 - Every `return` with a value must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
 - Use `[Description(ProjectPathDescription)]` — never inline text for `projectPath`
-- Use `scope.Error<T>` when `T : ToolErrorResult`; use `scope.Failed` otherwise
+- Use `scope.Error<T>` when `T : ToolResult, IToolError`; use `scope.Failed` otherwise
 - Mutation tools: call `workspace.InvalidateFile` after every successful write
 
 ---

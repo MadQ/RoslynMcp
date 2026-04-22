@@ -32,14 +32,17 @@ Every mutation of a `.cs` file in the workspace flows through one of these paths
 | # | Path | Tool | Mechanism |
 |---|------|------|-----------|
 | 1 | Roslyn-managed write | `ApplyRenameTool`, `ApplySignatureChangeTool` | `workspace.ApplyChanges()` → in-memory first, then `WriteAndInvalidate` for disk sync |
-| 2 | Text replacement | `ReplaceInFileTool` | Direct `File.WriteAllText` + `InvalidateFile` |
-| 3 | Code node replacement | `ReplaceInCodeTool` | Roslyn tree edit → `File.WriteAllText` + `InvalidateFile` |
-| 4 | Line insertion | `InsertLinesTool` | Direct `File.WriteAllText` + `InvalidateFile` |
-| 5 | Full file write | `WriteFileTool` | `FileWriter.WriteWithRetryAsync` + `InvalidateFile` |
+| 2 | Text replacement | `ReplaceInFileTool` | `.cs`: `ApplyTextChange()` (FSW-suppressed Roslyn write, or `WriteAndInvalidate` fallback for AdhocWorkspace). Non-`.cs`: `FileWriter.WriteAllTextAsync` + `InvalidateFile` |
+| 3 | Code node replacement | `ReplaceInCodeTool` | Tracked `.cs`: `workspace.ApplyChanges()` (same as Path 1). Untracked `.cs`: `WriteAndInvalidate` + `FileWriter.WriteAllTextAsync` |
+| 4 | Line insertion | `InsertLinesTool` | `.cs`: `ApplyTextChange()` (same as Path 2). Non-`.cs`: `FileWriter.WriteAllText` + `InvalidateFile` |
+| 5 | Full file write | `WriteFileTool` | `.cs`: `WriteAndInvalidate` + atomic `FileWriter.WriteAllBytesAsync` + `Move`. Non-`.cs`: same atomic write + `InvalidateFile` |
 | 6 | External writes | User, git, IDE | FSW fires → `ScheduleDebounced` → reload |
 
-Paths 1–5 are **owned writes**: the tool knows it is writing, and suppresses spurious FSW
-events for that path using the `ignoredPaths` counter. Path 6 is an **external write**: the
+Paths 1–5 are **owned writes**: the tool knows it is writing. For `.cs` files, all paths
+suppress spurious FSW events using the `ignoredPaths` counter (directly via `WriteAndInvalidate`
+or `ApplyChangesWithFswSuppressed`). For non-`.cs` files (paths 2, 4, 5), the write goes
+directly to disk and `InvalidateFile` marks the cached workspace stale — no FSW suppression
+is needed since the FSW only triggers `.cs` reloads. Path 6 is an **external write**: the
 FSW fires normally and triggers a reload.
 
 ---

@@ -355,7 +355,7 @@ Or: **System Preferences → Security & Privacy → Allow**
 If none of the above solutions work:
 
 1. **Check logs:**
-   - Default location: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` (Windows) or `~/.local/share/RoslynMcp/logs/roslynmcp.log` (macOS/Linux)
+   - Default location: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` (Windows) or `~/.local/share/RoslynMcp/logs/roslynmcp.{pid}.log` (macOS/Linux)
    - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/ERROR/INFO)
 
 2. **Enable detailed logging:**

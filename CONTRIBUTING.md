@@ -159,7 +159,7 @@ Publish a Release build and configure your MCP client to use it:
        {
            using var scope = BeginTool("roslyn_my_tool", parameter);
 
-           if(!TryGetCompilation(projectPath, out var compilation, out ToolErrorResult? error))
+           if(!TryGetCompilation(projectPath, out var compilation, out var error))
                return scope.Error(error!);
 
            // Use Roslyn APIs here

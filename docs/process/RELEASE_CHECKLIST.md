@@ -50,7 +50,7 @@ Use this checklist when preparing a new release of RoslynMcp.
 ## Release Process
 
 ### 1. Version Bump
-- [ ] Update version in `Directory.build.props` (`<VersionPrefix>` and `<VersionSuffix>` tags)
+- [ ] Update version in `Directory.Build.props` (`<VersionPrefix>` and `<VersionSuffix>` tags)
 - [ ] Confirm the GitHub milestone `vX.Y.Z` exists (omit pre-release suffix — use `v0.7.4`, not `v0.7.4-alpha`)
 - [ ] Update CHANGELOG.md
   - [ ] Move `[Unreleased]` items to new version section
