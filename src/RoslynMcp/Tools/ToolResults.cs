@@ -323,7 +323,7 @@ internal sealed record DiagnosticsResult(
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	DiagnosticItem[]?                             Items,
 	[property: JsonPropertyName("possible_workspace_load_issue")]
-	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
 	bool                                         PossibleWorkspaceLoadIssue
 ) : ToolResult;
 
