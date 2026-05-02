@@ -1219,8 +1219,9 @@
 	  row.appendChild(mk('span', 'col-tool', e.tool_name || ''));
 
 	  // status badge (OK/ERR) — separate column to avoid overlap with elapsed
-	  row.appendChild(mk('span', `col-status ${e.elapsed_ms != null ? (e.success ? 'tool-ok' : 'tool-err') : ''}`,
-		e.elapsed_ms != null ? (e.success ? 'OK' : 'ERR') : ''));
+	  // Use strict equality so null success (HOOK entries) does not show ERR.
+	  row.appendChild(mk('span', `col-status ${e.success === true ? 'tool-ok' : e.success === false ? 'tool-err' : ''}`,
+		e.success === true ? 'OK' : e.success === false ? 'ERR' : ''));
 
 	  // elapsed ms
 	  row.appendChild(mk('span', 'col-elapsed', e.elapsed_ms != null ? e.elapsed_ms + 'ms' : ''));
@@ -1412,7 +1413,7 @@
 	  // Full log entry — raw NDJSON object
 	  detail.appendChild(mk('div', 'detail-section-label', 'Log entry'));
 	  const pre = document.createElement('pre');
-	  pre.innerHTML = highlightJSON(JSON.stringify(e, null, 2));
+	  pre.innerHTML = highlightJSON(JSON.stringify(e, (_, v) => v === null ? undefined : v, 2));
 	  detail.appendChild(pre);
 	}
 
