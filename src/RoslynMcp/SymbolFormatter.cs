@@ -8,6 +8,26 @@ namespace RoslynMcp;
 /// </summary>
 internal static class SymbolFormatter
 {
+private static readonly SymbolDisplayFormat FullMethodSignatureFormat = new(
+memberOptions:
+SymbolDisplayMemberOptions.IncludeAccessibility |
+SymbolDisplayMemberOptions.IncludeModifiers |
+SymbolDisplayMemberOptions.IncludeType |
+SymbolDisplayMemberOptions.IncludeParameters |
+SymbolDisplayMemberOptions.IncludeRef,
+parameterOptions:
+SymbolDisplayParameterOptions.IncludeType |
+SymbolDisplayParameterOptions.IncludeName |
+SymbolDisplayParameterOptions.IncludeParamsRefOut |
+SymbolDisplayParameterOptions.IncludeDefaultValue |
+SymbolDisplayParameterOptions.IncludeExtensionThis,
+genericsOptions:
+SymbolDisplayGenericsOptions.IncludeTypeParameters,
+miscellaneousOptions:
+SymbolDisplayMiscellaneousOptions.UseSpecialTypes |
+SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier
+);
+
 public static string FormatSignature(ISymbol symbol) => symbol switch {
 
 IMethodSymbol m    => FormatMethod(m),
@@ -33,6 +53,9 @@ var modifiers = FormatModifiers(method);
 
 return $"{modifiers}{returnType} {method.Name}({parameters})";
 }
+
+public static string FormatFullMethodSignature(IMethodSymbol method)
+	=> method.ToDisplayString(FullMethodSignatureFormat);
 
 public static string FormatProperty(IPropertySymbol property)
 {

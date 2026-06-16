@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text.Json.Serialization;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -35,7 +36,7 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 			.OfType<IMethodSymbol>()
 			.Where(m => !m.IsImplicitlyDeclared)
 			.Where(m => m.MethodKind == MethodKind.Ordinary)
-			.Select(SymbolFormatter.FormatMethod)
+			.Select(SymbolFormatter.FormatFullMethodSignature)
 			.ToArray()
 		;
 		
@@ -74,9 +75,13 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 	}
 	
 	private sealed record FindOverloadsResult(
+		[property: JsonPropertyName("containing_type")]
 		string ContainingType,
+		[property: JsonPropertyName("method_name")]
 		string MethodName,
+		[property: JsonPropertyName("total_overloads")]
 		int TotalOverloads,
+		[property: JsonPropertyName("overloads")]
 		string[] Overloads
 	) : ToolResult;
 }
