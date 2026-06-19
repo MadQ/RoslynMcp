@@ -55,6 +55,13 @@ static class TypeTests
 						&& data?["overloads"]?.AsArray().Any(o => o?.GetValue<string>().Contains("out Compilation? compilation") == true) == true
 						&& data?["overloads"]?.AsArray().Any(o => o?.GetValue<string>().Contains("out ToolResult? error") == true) == true)),
 			
+			new("roslyn_find_overloads: full signatures include ref parameters",
+				() => ctx.RunTestAsync(
+					"roslyn_find_overloads",
+					new { methodName = "Paginate", containingType = "RoslynMcpTool", projectPath = ctx.TargetPath },
+					data => data?["total_overloads"]?.GetValue<int>() == 2
+						&& data?["overloads"]?.AsArray().All(o => o?.GetValue<string>().Contains("ref int skip") == true) == true)),
+			
 			new("roslyn_find_overloads: missing method returns empty list",
 				() => ctx.RunTestAsync(
 					"roslyn_find_overloads",
