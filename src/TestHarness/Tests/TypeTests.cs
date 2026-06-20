@@ -62,6 +62,18 @@ static class TypeTests
 					data => data?["total_overloads"]?.GetValue<int>() == 2
 						&& data?["overloads"]?.AsArray().All(o => o?.GetValue<string>().Contains("ref int skip") == true) == true)),
 			
+			new("roslyn_get_type_dependencies: FindOverloadsTool direct dependencies",
+				() => ctx.RunTestAsync(
+					"roslyn_get_type_dependencies",
+					new { typeName = "FindOverloadsTool", projectPath = ctx.TargetPath },
+					data => data?["total_dependencies"]?.GetValue<int>() > 0
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("RoslynMcpTool") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "base_type") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("WorkspaceResolver") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "constructor_parameter") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("Compilation") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "method_parameter") == true)),
+			
 			new("roslyn_find_overloads: missing method returns empty list",
 				() => ctx.RunTestAsync(
 					"roslyn_find_overloads",
