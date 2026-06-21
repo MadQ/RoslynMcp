@@ -24,6 +24,24 @@ static class TypeTests
 			public static explicit operator string(_TypeDependenciesOperatorFixture_ value)
 				=> value.Value.ToString();
 		}
+		
+		internal interface _TypeDependenciesDirectInterface_
+		{
+		}
+		
+		internal sealed class _TypeDependenciesMemberFixture_<TItem> : _TypeDependenciesDirectInterface_
+			where TItem : RoslynMcp.Tools.ToolResult
+		{
+			private FileLogger? logger;
+			
+			public System.Collections.Generic.Dictionary<string, TItem[]> Items { get; } = [];
+			
+			public event System.Action<RoslynMcp.Tools.ErrorResult>? Changed;
+			
+			public Microsoft.CodeAnalysis.Project? Build<TResult>(Microsoft.CodeAnalysis.Compilation compilation)
+				where TResult : RoslynMcp.Tools.ToolResult
+				=> null;
+		}
 		""");
 		
 		var tests = new List<TestCase> {
@@ -94,6 +112,38 @@ static class TypeTests
 							&& d?["dependency_kind"]?.GetValue<string>() == "constructor_parameter") == true
 						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("Compilation") == true
 							&& d?["dependency_kind"]?.GetValue<string>() == "method_parameter") == true)),
+			
+			new("roslyn_get_type_dependencies: direct member dependency categories",
+				() => ctx.RunTestAsync(
+					"roslyn_get_type_dependencies",
+					new { typeName = "_TypeDependenciesMemberFixture_", projectPath = ctx.TargetPath },
+					data => data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("_TypeDependenciesDirectInterface_") == true
+						&& d?["dependency_kind"]?.GetValue<string>() == "interface") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("FileLogger") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "field"
+							&& d?["member"]?.GetValue<string>() == "logger") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>() == "RoslynMcp.Tools.ToolResult"
+							&& d?["dependency_kind"]?.GetValue<string>() == "generic_constraint"
+							&& d?["member"]?.GetValue<string>() == "TItem") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>() == "RoslynMcp.Tools.ToolResult"
+							&& d?["dependency_kind"]?.GetValue<string>() == "generic_constraint"
+							&& d?["member"]?.GetValue<string>() == "Build") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("Dictionary<string, TItem[]>") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "property"
+							&& d?["member"]?.GetValue<string>() == "Items") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>() == "string"
+							&& d?["dependency_kind"]?.GetValue<string>() == "property"
+							&& d?["member"]?.GetValue<string>() == "Items") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("ErrorResult") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "event"
+							&& d?["member"]?.GetValue<string>() == "Changed") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("Project") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "method_return"
+							&& d?["member"]?.GetValue<string>() == "Build") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("Compilation") == true
+							&& d?["dependency_kind"]?.GetValue<string>() == "method_parameter"
+							&& d?["member"]?.GetValue<string>() == "Build") == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>() == "TItem") == false)),
 			
 			new("roslyn_get_type_dependencies: operators and conversions are direct dependencies",
 				() => ctx.RunTestAsync(
