@@ -109,11 +109,15 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 			&& baseType.SpecialType is not SpecialType.System_Enum;
 	
 	private static bool IsDependencyBearingMethod(IMethodSymbol method)
-		=> method.MethodKind is MethodKind.Ordinary or MethodKind.Constructor;
+		=> method.MethodKind is
+			MethodKind.Ordinary or
+			MethodKind.Constructor or
+			MethodKind.UserDefinedOperator or
+			MethodKind.Conversion;
 	
 	private static void AddMethodDependencies(DependencyCollector collector, IMethodSymbol method)
 	{
-		if(method.MethodKind == MethodKind.Ordinary && !method.ReturnsVoid)
+		if(method.MethodKind != MethodKind.Constructor && !method.ReturnsVoid)
 			collector.Add(method.ReturnType, "method_return", method.Name);
 		
 		var dependencyKind = method.MethodKind == MethodKind.Constructor

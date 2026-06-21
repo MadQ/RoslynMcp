@@ -4,6 +4,27 @@ static class TypeTests
 {
 	internal static TestGroup Build(TestContext ctx)
 	{
+		var fixturePath = Path.Combine(ctx.TargetPath, "_TypeDependenciesOperatorFixture_.cs");
+		
+		File.WriteAllText(fixturePath, """
+		namespace RoslynMcp;
+		
+		internal sealed class _TypeDependenciesOperatorFixture_
+		{
+			public _TypeDependenciesOperatorFixture_(int value)
+			{
+				Value = value;
+			}
+			
+			public int Value { get; }
+			
+			public static _TypeDependenciesOperatorFixture_ operator +(_TypeDependenciesOperatorFixture_ left, _TypeDependenciesOperatorFixture_ right)
+				=> new(left.Value + right.Value);
+			
+			public static explicit operator string(_TypeDependenciesOperatorFixture_ value)
+				=> value.Value.ToString();
+		}
+		""");
 		
 		var tests = new List<TestCase> {
 			
@@ -74,6 +95,20 @@ static class TypeTests
 						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("Compilation") == true
 							&& d?["dependency_kind"]?.GetValue<string>() == "method_parameter") == true)),
 			
+			new("roslyn_get_type_dependencies: operators and conversions are direct dependencies",
+				() => ctx.RunTestAsync(
+					"roslyn_get_type_dependencies",
+					new { typeName = "_TypeDependenciesOperatorFixture_", projectPath = ctx.TargetPath },
+					data => data?["dependencies"]?.AsArray().Any(d => d?["member"]?.GetValue<string>() == "op_Addition"
+						&& d?["dependency_kind"]?.GetValue<string>() == "method_return"
+						&& d?["type_name"]?.GetValue<string>().Contains("_TypeDependenciesOperatorFixture_") == true) == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["member"]?.GetValue<string>() == "op_Addition"
+							&& d?["dependency_kind"]?.GetValue<string>() == "method_parameter"
+							&& d?["type_name"]?.GetValue<string>().Contains("_TypeDependenciesOperatorFixture_") == true) == true
+						&& data?["dependencies"]?.AsArray().Any(d => d?["member"]?.GetValue<string>() == "op_Explicit"
+							&& d?["dependency_kind"]?.GetValue<string>() == "method_return"
+							&& d?["type_name"]?.GetValue<string>() == "string") == true)),
+			
 			new("roslyn_find_overloads: missing method returns empty list",
 				() => ctx.RunTestAsync(
 					"roslyn_find_overloads",
@@ -82,6 +117,11 @@ static class TypeTests
 						&& data?["overloads"]?.AsArray().Count == 0)),
 		};
 		
-		return new TestGroup($"Type Understanding Tools ({tests.Count} tests)", tests);
+		return new TestGroup($"Type Understanding Tools ({tests.Count} tests)", tests, Teardown: () =>
+		{
+			try { File.Delete(fixturePath); } catch { }
+			
+			return Task.CompletedTask;
+		});
 	}
 }
