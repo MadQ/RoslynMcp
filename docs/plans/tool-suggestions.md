@@ -14,10 +14,10 @@ Given a method, list every method it calls (direct calls only, one level deep). 
 **`roslyn_find_unused`**
 Find `private` or `internal` symbols with zero references within the project. Dead code detection. `SymbolFinder.FindReferencesAsync` over all private/internal symbols, filter to those with empty `Locations`. High value for refactoring sessions. Token-efficient because the output is just a list of names.
 
-**`roslyn_get_type_dependencies`**
+**`roslyn_get_type_dependencies`** ✅ *Implemented in PR*
 Given a type, return all types it directly references: field types, parameter types, return types, base type, interfaces, generic constraints. Answers "what does this type couple to?" in one call. Useful before extracting or moving a type.
 
-**`roslyn_find_overloads`**
+**`roslyn_find_overloads`** ✅ *Implemented in PR*
 Given a method name and containing type, return all overloads with their full signatures. Currently `find_references` finds only the first symbol by that name. This fills the gap cleanly.
 
 **`roslyn_check_syntax`**
