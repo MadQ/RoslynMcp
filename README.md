@@ -107,7 +107,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-37 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
+39 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -138,6 +138,8 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_get_member_body` | Source of a single method/property/field -- the token saver |
 | `roslyn_get_type_members` | All members of a type with full signatures and doc summaries |
+| `roslyn_find_overloads` | All overloads for a method on a containing type, with full signatures |
+| `roslyn_get_type_dependencies` | Direct type dependencies from a type declaration and member signatures |
 | `roslyn_get_file_outline` | File structure (types + member signatures, no bodies) |
 | `roslyn_get_symbol_documentation` | XML doc comments for any symbol |
 | `roslyn_get_usings` | Using directives + implicit global usings |

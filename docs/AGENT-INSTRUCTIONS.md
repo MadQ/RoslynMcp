@@ -75,6 +75,12 @@ built-in tools only if a roslyn tool fails.
 
 - `roslyn_get_type_members` — List all members of a type with full signatures.
   Use INSTEAD OF reading the file and scanning for members.
+- `roslyn_find_overloads` — List all overloads for a method on a containing
+  type. Use before editing, calling, renaming, or changing a method that may
+  have overloads.
+- `roslyn_get_type_dependencies` — List direct type dependencies from a type
+  declaration and member signatures. Use before extracting, moving, or
+  refactoring a type.
 - `roslyn_get_type_hierarchy` — Show base types, interfaces, and derived types.
   Grep cannot reliably determine inheritance chains.
 - `roslyn_get_usings` — Extract using directives from a file.

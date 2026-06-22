@@ -121,6 +121,23 @@ internal sealed record ListTypesEmptyResult(
 	[property: JsonPropertyName("message")] string Message
 ) : ToolResult;
 
+internal sealed record TypeDependencyEntry(
+	[property: JsonPropertyName("type_name")]       string  TypeName,
+	[property: JsonPropertyName("dependency_kind")] string  DependencyKind,
+	[property: JsonPropertyName("member")]          string? Member
+);
+
+internal sealed record TypeDependenciesResult(
+	[property: JsonPropertyName("type_name")]          string                TypeName,
+	[property: JsonPropertyName("type_kind")]          string                TypeKind,
+	[property: JsonPropertyName("total_dependencies")] int                   TotalDependencies,
+	[property: JsonPropertyName("skip")]               int                   Skip,
+	[property: JsonPropertyName("take")]               int                   Take,
+	[property: JsonPropertyName("dependencies")]       TypeDependencyEntry[] Dependencies,
+	[property: JsonPropertyName("page_token")]         string?               PageToken,
+	[property: JsonPropertyName("has_more")]           bool                  HasMore
+) : ToolResult;
+
 internal sealed record TypeHierarchyResult(
 	[property: JsonPropertyName("type_name")]              string   TypeName,
 	[property: JsonPropertyName("type_kind")]              string   TypeKind,
