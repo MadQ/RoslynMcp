@@ -11,7 +11,7 @@ The inverse of `find_references` but more useful. Instead of "where is this symb
 **`roslyn_get_call_graph`** ✅ *Shipped (v0.7.6)*
 Given a method, list every method it calls (direct calls only, one level deep). Roslyn's `IOperation` tree makes this precise — you walk `IInvocationOperation` nodes in the method body. Essential for "what does this method depend on?" without reading it. Pair with `find_callers` for full dependency tracing.
 
-**`roslyn_find_unused`**
+**`roslyn_find_unused`** ✅ *Implemented in PR*
 Find `private` or `internal` symbols with zero references within the project. Dead code detection. `SymbolFinder.FindReferencesAsync` over all private/internal symbols, filter to those with empty `Locations`. High value for refactoring sessions. Token-efficient because the output is just a list of names.
 
 **`roslyn_get_type_dependencies`** ✅ *Implemented in PR*
