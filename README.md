@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 39 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 40 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -107,7 +107,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-39 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
+40 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -124,6 +124,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | Tool | What it does |
 |------|--------------|
 | `roslyn_find_references` | Every reference to a symbol across the solution |
+| `roslyn_find_unused` | Private/internal source symbols with zero direct static references |
 | `roslyn_find_callers` | All methods that call a named symbol (direct or via interface dispatch) |
 | `roslyn_get_call_graph` | All methods invoked within a method body (IOperation tree walk) |
 | `roslyn_find_implementations` | All types implementing an interface or overriding a member |

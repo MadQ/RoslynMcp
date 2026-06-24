@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`roslyn_find_overloads`** — new analysis tool that returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details
 - **`roslyn_get_type_dependencies`** — new analysis tool that returns direct type dependencies from a type declaration and member signatures, including base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions
+- **`roslyn_find_unused`** — new analysis tool that reports private, internal, and effectively internal source symbols with zero direct static references in the loaded solution, with conservative filtering plus `confidence` and `reason` metadata for refactoring guidance
 
 ---
 

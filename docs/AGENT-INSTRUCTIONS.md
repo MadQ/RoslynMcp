@@ -57,6 +57,9 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_find_callers` — Find all methods that call a named symbol. The inverse
   of `roslyn_find_references`. Semantically impossible with text search alone.
   Filter by `isDirect` to exclude interface dispatch or delegate calls.
+- `roslyn_find_unused` — Find private/internal source symbols with zero direct
+  static references. Use before dead-code cleanup; attributed symbols and
+  inheritance/interface-dispatched members are conservatively excluded.
 - `roslyn_get_call_graph` — Find all methods invoked within a named method body.
   Answers "what does this method depend on?" by walking the Roslyn IOperation
   tree — finds actual invocations, not text patterns. Pair with

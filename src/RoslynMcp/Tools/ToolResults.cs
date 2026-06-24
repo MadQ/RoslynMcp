@@ -54,6 +54,25 @@ internal sealed record FindReferencesResult(
 	[property: JsonPropertyName("has_more")]         bool     HasMore
 ) : ToolResult;
 
+internal sealed record UnusedSymbolEntry(
+	[property: JsonPropertyName("kind")]          string Kind,
+	[property: JsonPropertyName("name")]          string Name,
+	[property: JsonPropertyName("accessibility")] string Accessibility,
+	[property: JsonPropertyName("confidence")]    string Confidence,
+	[property: JsonPropertyName("reason")]        string Reason,
+	[property: JsonPropertyName("file")]          string File,
+	[property: JsonPropertyName("line")]          int    Line
+);
+
+internal sealed record FindUnusedResult(
+	[property: JsonPropertyName("total_unused")] int                 TotalUnused,
+	[property: JsonPropertyName("skip")]         int                 Skip,
+	[property: JsonPropertyName("take")]         int                 Take,
+	[property: JsonPropertyName("unused")]       UnusedSymbolEntry[] Unused,
+	[property: JsonPropertyName("page_token")]   string?             PageToken,
+	[property: JsonPropertyName("has_more")]     bool                HasMore
+) : ToolResult;
+
 internal sealed record FindImplementationsResult(
 	[property: JsonPropertyName("symbol_type")]           string   SymbolType,
 	[property: JsonPropertyName("symbol_name")]           string   SymbolName,
