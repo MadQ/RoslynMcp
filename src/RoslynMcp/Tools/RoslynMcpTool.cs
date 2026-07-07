@@ -598,7 +598,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				if(!IsPathUnderRoot(rootedFull, rootPath)) {
 					
-					error = $"Path '{filePath}' is outside the project root.";
+					error = "The specified path is not accessible.";
 					
 					return false;
 				}

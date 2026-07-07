@@ -43,20 +43,32 @@ internal sealed class SecurityBoundary
 		try {
 			normalized = Path.GetFullPath(requestedPath);
 		}
-		catch(ArgumentException) {
+		catch(Exception ex) when(ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException) {
 			
 			return false;
 		}
 		
-		// Deny symbolic links — a link could redirect access outside the trusted boundary.
+		// Deny symbolic links anywhere in the path chain — prevents escape via symlinked directories.
 		try {
 			
-			if((File.Exists(normalized) || Directory.Exists(normalized)) &&
-				File.GetAttributes(normalized).HasFlag(FileAttributes.ReparsePoint))
+			var current = normalized;
+			
+			while(!string.IsNullOrEmpty(current)) {
 				
-				return false;
+				if((File.Exists(current) || Directory.Exists(current)) &&
+					File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+					
+					return false;
+				
+				var parent = Path.GetDirectoryName(current);
+				
+				if(parent is null || string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+					break;
+				
+				current = parent;
+			}
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
 		
 		foreach(var root in allowedRoots.AsSpan())
 			if(IsUnderDirectory(normalized, root))
