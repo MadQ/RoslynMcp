@@ -89,7 +89,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			_                                      => false
 		};
 	}
-
+	
 	/// <summary>
 	///     Starts a timed tool scope. Dispose the returned handle to log the outcome.
 	///     Usage: <c>using var scope = BeginTool("roslyn_foo", subject);</c>
@@ -120,10 +120,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	// Static cache for project path inference: maps relative/bare paths to resolved full paths.
 	// Enabled by default; disable via ROSLYNMCP_DISABLE_PATH_CACHE=true env var.
 	// Entries evicted above 500 to prevent unbounded growth in long-running server sessions.
-	const int pathCacheMaxSize = 500;
+	const int pathCacheMaxSize = 500
+	;
 	
 	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
-	
+
 #if NET9_0_OR_GREATER
 		private readonly Lock             pathCacheLock   = new();
 #else
@@ -131,7 +132,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 #endif
 	
 	// Computed on every access so the read is guaranteed to happen after ServerArgs.Initialize().
-	static bool PathCacheEnabled => !ServerArgs.Current.DisablePathCache;
+	static bool PathCacheEnabled => !ServerArgs.Current.DisablePathCache
+	;
 	
 	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
@@ -184,7 +186,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				// which when passed back on the next call would load an AdhocWorkspace with no
 				// BCL references. Path.GetFullPath resolves relative to CWD — the same resolution
 				// that WorkspaceManager.ResolveProjectPath performs.
-				var resolvedFull = Path.GetFullPath(originalPath);
+				var resolvedFull = Path.GetFullPath(originalPath)
+				;
 				
 				lock(pathCacheLock) {
 					
@@ -437,9 +440,14 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	{
 		try {
 			
-			if(Path.IsPathRooted(filePath))
+			if(Path.IsPathRooted(filePath)) {
 				
-				return File.Exists(filePath) ? filePath : null;
+				// Normalize first — prevents traversal via ".." in rooted paths.
+				var full = Path.GetFullPath(filePath)
+				;
+				
+				return IsPathUnderRoot(full, rootPath) && File.Exists(full) ? full : null;
+			}
 			
 			var normalized = NormalizePath(filePath);
 			var direct     = Path.GetFullPath(Path.Combine(rootPath, normalized));
@@ -584,17 +592,18 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			if(Path.IsPathRooted(filePath)) {
 				
-				// Absolute path — verify it stays under root with separator guard
-				// to prevent prefix collisions (e.g. root "D:\Foo" matching "D:\FooBar\file.cs").
-				if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
-					(filePath.Length > rootPath.Length && filePath[rootPath.Length] is not '\\' and not '/')) {
+				// Normalize first — prevents traversal via ".." embedded in rooted paths.
+				var rootedFull = Path.GetFullPath(filePath)
+				;
+				
+				if(!IsPathUnderRoot(rootedFull, rootPath)) {
 					
 					error = $"Path '{filePath}' is outside the project root.";
 					
 					return false;
 				}
 				
-				fullPath = filePath;
+				fullPath = rootedFull;
 				
 				return true;
 			}
@@ -603,8 +612,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			var candidate  = Path.GetFullPath(Path.Combine(rootPath, normalized));
 			
 			// Under-root guard — prevent path traversal (e.g. ../../etc/passwd).
-			if(!candidate.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
-				(candidate.Length > rootPath.Length && candidate[rootPath.Length] is not '\\' and not '/')) {
+			if(!IsPathUnderRoot(candidate, rootPath)) {
 				
 				error = $"Path '{filePath}' resolves outside the project root.";
 				
@@ -625,6 +633,24 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	protected static string FormatModifiers(ISymbol symbol)
 		=> SymbolFormatter.FormatModifiers(symbol);
+	
+	/// <summary>
+	///     Returns true if <paramref name="path"/> is at or below <paramref name="root"/>.
+	///     Expects both arguments to already be normalized via <see cref="Path.GetFullPath"/>.
+	///     Uses a separator-aware comparison to prevent prefix collisions
+	///     (e.g. root <c>D:\Foo</c> must not match <c>D:\FooBar\file.cs</c>).
+	/// </summary>
+	protected static bool IsPathUnderRoot(string path, string root)
+	{
+		var rootNorm = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		
+		if(string.Equals(path, rootNorm, StringComparison.OrdinalIgnoreCase))
+			
+			return true;
+		
+		return path.StartsWith(rootNorm + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+			|| path.StartsWith(rootNorm + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+	}
 	
 	/// <summary>
 	///     Finds a SyntaxTree in the compilation by relative file path suffix match.
@@ -668,13 +694,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static string NormalizeLineEndings(string replacement, string fileContent)
 	{
 		var hasCrlf = fileContent.Contains("\r\n");
-
+		
 		return hasCrlf && !replacement.Contains("\r\n")
 			? replacement.Replace("\n", "\r\n")
 			: replacement
 		;
 	}
-
+	
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 	
@@ -761,13 +787,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		var typeSymbol = compilation.GetTypeByMetadataName(name)
 			?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(name));
-
+		
 		return typeSymbol is not null
 			? typeSymbol
 			: compilation.GlobalNamespace.Accept(new AnySymbolFinder(name))
 		;
 	}
-
+	
 	/// <summary>
 	///     Finds all symbols with <paramref name="symbolName"/> in the compilation. When
 	///     <paramref name="containingType"/> is provided, returns the single matching member (or empty

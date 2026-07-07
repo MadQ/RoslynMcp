@@ -100,6 +100,18 @@ internal sealed class WorkspaceResolver
 	}
 	
 	/// <summary>
+	///     Returns the <see cref="SecurityBoundary"/> for the workspace, creating it if the workspace
+	///     is not yet loaded. Use to validate file paths before accessing files outside the normal
+	///     tool flow.
+	/// </summary>
+	public SecurityBoundary GetSecurityBoundary(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.GetSecurityBoundary(resolved);
+	}
+	
+	/// <summary>
 	///     Invalidates the cached compilation for a file after edits.
 	///     Tools that modify files should call this to ensure fresh diagnostics on subsequent queries.
 	/// </summary>

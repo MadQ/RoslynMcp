@@ -26,7 +26,7 @@ enum ResolutionKind
 /// </summary>
 internal sealed partial class WorkspaceManager : IDisposable
 {
-	record CacheEntry(string Key, WorkspaceInstance Instance, DateTime LastAccess);
+	record CacheEntry(string Key, WorkspaceInstance Instance, SecurityBoundary Boundary, DateTime LastAccess);
 	
 	readonly Dictionary<string, CacheEntry> cache = new(StringComparer.OrdinalIgnoreCase);
 	
@@ -162,7 +162,9 @@ internal sealed partial class WorkspaceManager : IDisposable
 				SweepRetired();
 			}
 			
-			cache[cacheKey] = new CacheEntry(cacheKey, instance, DateTime.UtcNow);
+			var boundary = new SecurityBoundary(instance.RootPath);
+			
+			cache[cacheKey] = new CacheEntry(cacheKey, instance, boundary, DateTime.UtcNow);
 			
 			return instance;
 		}
@@ -198,6 +200,42 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		return (instance.RootPath, instance.IsMSBuild, csprojPath);
 	}
+	
+	public SecurityBoundary GetSecurityBoundary(string resolvedProjectPath)
+	{
+		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var mapped))
+				
+				return mapped.Boundary;
+			
+			if(cache.TryGetValue(normalizedPath, out var direct))
+				
+				return direct.Boundary;
+		}
+		
+		// Not cached yet — load the workspace (which creates and caches the boundary).
+		GetOrLoadInstance(resolvedProjectPath)
+		;
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey2)
+				&& cache.TryGetValue(mappedKey2, out var mapped2))
+				
+				return mapped2.Boundary;
+			
+			if(cache.TryGetValue(normalizedPath, out var direct2))
+				
+				return direct2.Boundary;
+		}
+		
+		throw new InvalidOperationException($"Workspace loaded but no boundary found for '{normalizedPath}'.");
+	}
+	
 	
 	public void InvalidateFile(string resolvedProjectPath, string fullPath)
 	{
