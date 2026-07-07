@@ -617,7 +617,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			// Under-root guard — prevent path traversal (e.g. ../../etc/passwd).
 			if(!boundary.IsPathAllowed(candidate)) {
 				
-				error = $"Path '{filePath}' resolves outside the project root.";
+				error = "The specified path is not accessible.";
 				
 				return false;
 			}
@@ -626,9 +626,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return true;
 		}
-		catch(Exception ex) when(ex is ArgumentException or IOException) {
+		catch(Exception ex) when(ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException) {
 			
-			error = $"Invalid path '{filePath}': {ex.Message}";
+			error = "The specified path is not accessible.";
 			
 			return false;
 		}
