@@ -66,7 +66,8 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		if(filePath is not null) {
 			
 			var rootPath = workspace.GetRootPath(projectPath);
-			absolutePath = ResolveFilePath(filePath, rootPath);
+			var boundary = workspace.GetSecurityBoundary(projectPath);
+			absolutePath = ResolveFilePath(filePath, rootPath, boundary);
 		}
 		
 		else if(token is not null) {

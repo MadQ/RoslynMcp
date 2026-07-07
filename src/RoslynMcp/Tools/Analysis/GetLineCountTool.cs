@@ -30,6 +30,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
+		var boundary = workspace.GetSecurityBoundary(projectPath);
 		var paths    = filePaths
 			.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
 		;
@@ -60,7 +61,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			
 			else {
 				
-				var fullPath = ResolveFilePath(filePath, rootPath);
+				var fullPath = ResolveFilePath(filePath, rootPath, boundary);
 				
 				if(fullPath is null) {
 					

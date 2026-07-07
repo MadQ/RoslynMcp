@@ -20,6 +20,9 @@ internal sealed partial class WorkspaceManager
 		
 		var fullPath = Path.GetFullPath(inputPath);
 		
+		if(SecurityBoundary.IsDangerousProjectPath(fullPath))
+			throw new InvalidProjectPathException(fullPath, "Path is not a valid project location");
+		
 		// Already a .csproj file — explicit, no inference needed.
 		if(fullPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
 			
