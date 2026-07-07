@@ -18,7 +18,7 @@ internal sealed class SecurityBoundary
 	/// <param name="workspaceRoot">The resolved root directory of the workspace (project or solution directory).</param>
 	/// <param name="solutionRoot">The solution directory, if any, which adds an additional trusted root.</param>
 	/// <param name="referencedProjectRoots">Roots of directly referenced projects; each becomes a trusted root.</param>
-	internal SecurityBoundary(string workspaceRoot, string? solutionRoot = null, IEnumerable<string>? referencedProjectRoots = null)
+	public SecurityBoundary(string workspaceRoot, string? solutionRoot = null, IEnumerable<string>? referencedProjectRoots = null)
 	{
 		var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { workspaceRoot };
 		
