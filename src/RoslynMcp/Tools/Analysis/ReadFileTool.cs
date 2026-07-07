@@ -29,6 +29,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
         using var scope = BeginTool("roslyn_read_file", filePath, new { startLine, endLine });
 
         var rootPath   = workspace.GetRootPath(projectPath);
+        var boundary   = workspace.GetSecurityBoundary(projectPath);
         var normalized = NormalizePath(filePath);
         var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
 
@@ -56,7 +57,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
         else {
 
             // Non-.cs: fall back to disk.
-            var fullPath = ResolveFilePath(filePath, rootPath)
+            var fullPath = ResolveFilePath(filePath, rootPath, boundary)
 ;
 
             if(fullPath is null)

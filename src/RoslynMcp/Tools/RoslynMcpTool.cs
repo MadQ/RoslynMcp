@@ -436,7 +436,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     if the file isn't found there, walks subdirectories looking for a suffix match.
 	///     Returns null if the file can't be found.
 	/// </summary>
-	protected static string? ResolveFilePath(string filePath, string rootPath)
+	protected static string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary)
 	{
 		try {
 			
@@ -446,13 +446,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				var full = Path.GetFullPath(filePath)
 				;
 				
-				return IsPathUnderRoot(full, rootPath) && File.Exists(full) ? full : null;
+				return boundary.IsPathAllowed(full) && File.Exists(full) ? full : null;
 			}
 			
 			var normalized = NormalizePath(filePath);
 			var direct     = Path.GetFullPath(Path.Combine(rootPath, normalized));
 			
-			if(File.Exists(direct))
+			if(File.Exists(direct) && boundary.IsPathAllowed(direct))
 				
 				return direct;
 			
@@ -470,6 +470,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
 				
 				try {
+					if(!boundary.IsPathAllowed(candidate))
+						continue;
 					
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
 						
@@ -582,6 +584,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static bool TryResolveTargetPath(
 		string filePath,
 		string rootPath,
+		SecurityBoundary boundary,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out string? fullPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
 	{
@@ -596,7 +599,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				var rootedFull = Path.GetFullPath(filePath)
 				;
 				
-				if(!IsPathUnderRoot(rootedFull, rootPath)) {
+				if(!boundary.IsPathAllowed(rootedFull)) {
 					
 					error = "The specified path is not accessible.";
 					
@@ -612,7 +615,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			var candidate  = Path.GetFullPath(Path.Combine(rootPath, normalized));
 			
 			// Under-root guard — prevent path traversal (e.g. ../../etc/passwd).
-			if(!IsPathUnderRoot(candidate, rootPath)) {
+			if(!boundary.IsPathAllowed(candidate)) {
 				
 				error = $"Path '{filePath}' resolves outside the project root.";
 				
