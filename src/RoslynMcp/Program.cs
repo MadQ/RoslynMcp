@@ -43,7 +43,7 @@ if(args.Length > 0)
 
 static int PrintVersion()
 {
-    Console.WriteLine($"roslynmcp v{Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
+    Console.WriteLine($"{RoslynMcp.Cli.ToolCommand.Name} v{Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
 
     return 0;
 }
@@ -58,11 +58,11 @@ static int PrintHelp()
 
     Console.OutputEncoding = System.Text.Encoding.UTF8;
     Console.WriteLine($"""
-        roslynmcp v{version} — Roslyn MCP server for AI coding agents
+        {RoslynMcp.Cli.ToolCommand.Name} v{version} — Roslyn MCP server for AI coding agents
 
         Usage:
-          roslynmcp [options]            Start MCP server (stdio transport)
-          roslynmcp <command> [options]
+          {RoslynMcp.Cli.ToolCommand.Name} [options]            Start MCP server (stdio transport)
+          {RoslynMcp.Cli.ToolCommand.Name} <command> [options]
 
         Commands:
           setup         Configure AI agent clients (Copilot, Claude, Cursor, ...)
@@ -195,7 +195,7 @@ lifetime.ApplicationStarted.Register(() => {
 		foreach(var r in RoslynMcp.Cli.AgentDetector.ProbeAll()
 			.Where(r => r.Entry?.CommandPath is not null
 				&& !string.Equals(r.Entry.CommandPath, currentExe, StringComparison.OrdinalIgnoreCase)))
-			logger.LogInfo("AgentConfig", $"WARN: {r.Client.Name} config points to '{r.Entry!.CommandPath}' — run 'roslynmcp update'");
+			logger.LogInfo("AgentConfig", $"WARN: {r.Client.Name} config points to '{r.Entry!.CommandPath}' — run '{RoslynMcp.Cli.ToolCommand.Name} update'");
 	}
 
 });

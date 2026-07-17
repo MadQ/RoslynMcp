@@ -147,7 +147,7 @@ class SetupCommand : CliCommand
             if(hookAnswer.Equals("y", StringComparison.OrdinalIgnoreCase) ||
                hookAnswer.Equals("yes", StringComparison.OrdinalIgnoreCase))
             {
-                const string hookCommand = "dotnet roslynmcp hook";
+                const string hookCommand = ToolCommand.HookCommand;
                 var ok = ((ClaudeCodeClient) claudeResult.Client).UpsertHook(hookCommand);
 
                 Console.WriteLine();
@@ -160,7 +160,7 @@ class SetupCommand : CliCommand
         }
 
         Console.WriteLine();
-        Console.WriteLine("  Tip: run 'dotnet roslynmcp setup-project' in each project/repo directory to");
+        Console.WriteLine("  Tip: run '" + ToolCommand.Name + " setup-project' in each project/repo directory to");
         Console.WriteLine("  enable per-project guidance for VS Code Copilot and Copilot CLI.");
         Console.WriteLine();
 

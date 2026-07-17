@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 namespace RoslynMcp.Cli;
 
 /// <summary>
-///     Implements the <c>dotnet roslynmcp hook</c> subcommand, used as the target for
+///     Implements the <c>madq-roslynmcp hook</c> subcommand, used as the target for
 ///     pre-tool-use hooks in Copilot CLI (<c>.github/hooks/roslynmcp.json</c>) and
 ///     Claude Code (<c>~/.claude/settings.json</c>). Reads hook event JSON from stdin
 ///     and writes an allow/additionalContext response to stdout.

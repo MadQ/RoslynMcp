@@ -107,9 +107,7 @@ abstract class McpServersDictClient : AgentClient
 
         var stem = Path.GetFileNameWithoutExtension(cmd);
 
-        return stem.Equals("roslynmcp", StringComparison.OrdinalIgnoreCase) ||
-               stem.Equals("dotnet-roslynmcp", StringComparison.OrdinalIgnoreCase)
-        ;
+        return ToolCommand.MatchesCommandStem(stem);
     }
 }
 
@@ -346,9 +344,7 @@ sealed class ZedClient : AgentClient
 
             var stem = Path.GetFileNameWithoutExtension(cmd);
 
-            if(stem.Equals("roslynmcp", StringComparison.OrdinalIgnoreCase) ||
-               stem.Equals("dotnet-roslynmcp", StringComparison.OrdinalIgnoreCase))
-
+            if(ToolCommand.MatchesCommandStem(stem))
                 return (key, entry);
         }
 
