@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- Base targets always available -->
-    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <!-- .NET 10 is the minimum runtime (GA LTS); net11.0 auto-added below when its SDK is present -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -39,15 +39,10 @@
     <PropertyGroup>
       <!-- Try to resolve if net11.0 is supported by checking NETCoreSdkVersion -->
       <_Net11Available Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '11.0'))">true</_Net11Available>
-      <TargetFrameworks Condition="'$(_Net11Available)' == 'true'">net8.0;net10.0;net11.0</TargetFrameworks>
+      <TargetFrameworks Condition="'$(_Net11Available)' == 'true'">net10.0;net11.0</TargetFrameworks>
     </PropertyGroup>
     <Message Importance="high" Text="Building for: $(TargetFrameworks)" />
   </Target>
-
-  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0|AnyCPU'">
-    <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
-  </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net10.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
@@ -56,11 +51,6 @@
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net11.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net8.0|AnyCPU'">
-    <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net10.0|AnyCPU'">

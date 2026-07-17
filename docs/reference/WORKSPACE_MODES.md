@@ -298,7 +298,7 @@ RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.c
 ```xml
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>preview</LangVersion>
   </PropertyGroup>
 </Project>

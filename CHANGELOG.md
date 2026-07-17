@@ -10,25 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`roslyn_find_overloads`** — new analysis tool that returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details
-- **`roslyn_get_type_dependencies`** — new analysis tool that returns direct type dependencies from a type declaration and member signatures, including base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions
-- **`roslyn_find_unused`** — new analysis tool that reports private, internal, and effectively internal source symbols with zero direct static references in the loaded solution, with conservative filtering plus `confidence` and `reason` metadata for refactoring guidance
-- **LogViewer usability upgrades** — added instance filtering, time-window filtering with persisted selection, configurable per-file tail caps with a **Load more** path, **Collapse all**, and Esc cascade behavior for faster log triage
-- **Opt-in hook logging** — `dotnet roslynmcp hook --log` now emits HOOK entries so LogViewer can surface pre-tool-use hook activity during debugging
+
+### Changed
+
+### Fixed
+
+### Security
+
+---
+
+## [0.8.0-beta] — 2026-07-16 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.8.0-beta)
+
+### Changed
+- **Minimum runtime is now .NET 10** — dropped the `net8.0` target framework; the MCP server targets `net10.0` (`net11.0` auto-added when a .NET 11 SDK is present). Release binaries and building from source now require a .NET 10 (or newer) runtime/SDK.
 
 ### Fixed
 - **LogViewer initial load ordering** — merged entries are now timestamp-ordered on first load instead of appearing grouped by file
 - **Expanded LogViewer entry visibility** — expanding an entry now reveals its bottom edge when the entry is taller than the viewport
 - **LogViewer HOOK badge state** — HOOK entries now render with the correct status badge styling
-
-### Security
-- **Filesystem access boundaries** — hardened path validation to enforce repository/file access limits for the MCP surface (VULN-001, VULN-004)
-
----
-
-## [0.8.0-beta] — 2026-04-15
-
-### Fixed
 - **`setup-hooks` and `hook` commands unreachable** — both subcommands were fully implemented but never wired into the `Program.cs` dispatch switch; also added both to the `--help` output (closes #185)
 - **`TryGetCompilation` relative path rejection**— removed the early `!Path.IsPathRooted` guard that incorrectly rejected valid relative paths (e.g. `src/RoslynMcp/RoslynMcp.csproj`) before `WorkspaceManager` could resolve them; `WorkspaceManager.ResolveProjectPath` already calls `Path.GetFullPath` to handle relative paths correctly, and all path-not-found cases are already covered by `InvalidProjectPathException`; also updated `ProjectPathDescription` to document that relative paths are supported
 - **`TryGetCompilation` path cache storing workspace root instead of `.csproj` path** — the path cache introduced alongside the relative-path fix stored `GetWorkspaceInfo().RootPath` (the solution root directory, e.g. `J:\Projects\RoslynMcp`) as the cached value; on the second call the root directory was passed to `GetCompilation`, which loaded an AdhocWorkspace with no BCL references, producing ~18,000 spurious CS0518/CS0246 errors; cache now stores `Path.GetFullPath(originalPath)` — the same resolution `ResolveProjectPath` performs
@@ -39,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LogViewer multi-file watch** — LogViewer now tails all matching log files simultaneously instead of switching between them (closes #180)
 
 ### Added
+- **`roslyn_find_overloads`** — new analysis tool that returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details
+- **`roslyn_get_type_dependencies`** — new analysis tool that returns direct type dependencies from a type declaration and member signatures, including base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions
+- **`roslyn_find_unused`** — new analysis tool that reports private, internal, and effectively internal source symbols with zero direct static references in the loaded solution, with conservative filtering plus `confidence` and `reason` metadata for refactoring guidance
+- **LogViewer usability upgrades** — added instance filtering, time-window filtering with persisted selection, configurable per-file tail caps with a **Load more** path, **Collapse all**, and Esc cascade behavior for faster log triage
+- **Opt-in hook logging** — `dotnet roslynmcp hook --log` now emits HOOK entries so LogViewer can surface pre-tool-use hook activity during debugging
 - **Claude Code support in `roslynmcp setup`** — `ClaudeCodeClient` added to agent detection; patches `~/.claude.json` under the `mcpServers` key (same schema as Claude Desktop) (closes #184)
 - **`setup-hooks` → `setup-project` command rename** — per-project hook file moves from `.github/hooks/roslynmcp.json` → `.github/roslynmcp.json`; dispatch key updated in `Program.cs`; help text updated (closes #186)
 - **`Copilot CLI` agent detection** — `CopilotCliClient` added to `AgentDetector.AllClients`; configures `~/.copilot/mcp-config.json` under the `mcpServers` key (global registration, same session for all projects) (closes #186)
@@ -53,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Invoke-Git` wrapper in FSW test script** — optional pause-before-git mode lets you review changes in VS's Git Changes window before each commit
 
 ### Security
+- **Filesystem access boundaries** — hardened path validation to enforce repository/file access limits for the MCP surface (VULN-001, VULN-004)
 - **LogViewer SSE + CSRF hardening** — `/logs/stream` now blocks requests where `Origin` is present but non-loopback (VULN-002); `/shutdown` now rejects requests where `Origin` is absent or non-loopback, closing the CSRF bypass when a tool omits the header entirely (VULN-003); shared `IsLoopbackOrigin` helper extracted (closes #182)
 
 ---

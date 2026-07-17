@@ -78,8 +78,7 @@ git push && git push origin vX.Y.Z-alpha
 > **Important:** Do NOT use `--self-contained` for the MCP server. Roslyn resolves external assemblies from the SDK installation at runtime; self-contained binaries break this. The log viewer has no such constraint but framework-dependent is fine since users already have .NET installed.
 
 ```powershell
-# MCP server — framework-dependent for both targets
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0  -o ./publish/net8.0
+# MCP server — framework-dependent, net10.0 (net11.0 auto-added when a .NET 11 SDK is present)
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 
 # Log viewer — framework-dependent, net10.0 only (no Roslyn deps, ASP.NET Core web app)
@@ -87,12 +86,11 @@ dotnet publish src/RoslynMcp.LogViewer/RoslynMcp.LogViewer.csproj -c Release -f 
 
 # Verify MCP server zip contents BEFORE creating the release — check for unexpected executables
 # RoslynMcpA.exe is a local dev copy created by pub.ps1 and must NOT be included in releases
-Get-ChildItem ./publish/net8.0/*.exe, ./publish/net10.0/*.exe | Select-Object Name
+Get-ChildItem ./publish/net10.0/*.exe | Select-Object Name
 # Expected: only RoslynMcp.exe. If RoslynMcpA.exe appears, exclude it explicitly.
 
-# Zip MCP server targets (excluding local dev copy)
+# Zip MCP server target (excluding local dev copy)
 $exc = @("RoslynMcpA.exe")
-Compress-Archive -Path (Get-ChildItem ./publish/net8.0  | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
 Compress-Archive -Path (Get-ChildItem ./publish/net10.0 | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip
 
 # Zip log viewer
@@ -110,7 +108,6 @@ Compress-Archive -Path ./publish/logviewer/* -DestinationPath ./artifacts/Roslyn
 gh release create vX.Y.Z-alpha --draft --prerelease `
   --title "RoslynMcp vX.Y.Z-alpha" `
   --notes-file "$env:TEMP\release-notes.md" `
-  ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip `
   ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip `
   ./artifacts/RoslynMcp-LogViewer-vX.Y.Z-alpha-net10.0.zip
 

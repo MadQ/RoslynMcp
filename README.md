@@ -31,9 +31,9 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 **Option A — Download and extract** (simplest, no SDK required):
 
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset (or `net8.0` if you prefer). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
 
-**Option B — Clone and build** (requires .NET 8, 10, or 11 SDK):
+**Option B — Clone and build** (requires .NET 10 or 11 SDK):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
@@ -291,7 +291,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.m
 
 ## Requirements
 
-- .NET 8 or .NET 10 SDK to build from source (`net11.0` is auto-added when a .NET 11 SDK is detected)
+- .NET 10 SDK to build from source (`net11.0` is auto-added when a .NET 11 SDK is detected)
 
 ---
 

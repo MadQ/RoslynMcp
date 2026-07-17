@@ -57,7 +57,7 @@ See the client sections below for exact config file locations and JSON structure
 
 **Option A — Download and extract** (simplest, no SDK required):
 
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset (or `net8.0`). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
 
 **Option B — dotnet tool** (recommended for .NET developers, requires .NET SDK):
 
@@ -67,7 +67,7 @@ dotnet tool install -g RoslynMcp
 
 This installs `roslynmcp` globally on PATH. Use `"roslynmcp"` as the command in your client config — no path needed.
 
-**Option C — Clone and build** (requires .NET 8, 10, or 11 SDK):
+**Option C — Clone and build** (requires .NET 10 or 11 SDK):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
@@ -76,7 +76,6 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 ```
 
 **Choose your framework:**
-- `net8.0` — .NET 8 (LTS)
 - `net10.0` — .NET 10 (recommended)
 - `net11.0` — .NET 11 (auto-added when .NET 11 SDK is detected)
 
@@ -134,7 +133,7 @@ Do not pass project paths as args — each `roslyn_*` tool call specifies `proje
 ## Requirements
 
 - Running the published binary or release zip does not require a .NET SDK on PATH
-- Building from source requires a .NET 8 or .NET 10 SDK (`net11.0` is auto-added when a .NET 11 SDK is present)
+- Building from source requires a .NET 10 SDK (`net11.0` is auto-added when a .NET 11 SDK is present)
 - MSBuild on PATH (installed with .NET SDK or Visual Studio) for full project resolution
 
 ---
