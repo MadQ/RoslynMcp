@@ -18,7 +18,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 1. **Get the binary:** Either download the latest `net10.0` release zip from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere, **or** install via dotnet tool:
 
    ```bash
-   dotnet tool install -g RoslynMcp
+   dotnet tool install -g MadQ.RoslynMcp
    ```
 
 2. **Add to your client config.** Most clients take a JSON block like this (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
@@ -27,7 +27,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
    {
      "roslyn": {
        "type": "stdio",
-       "command": "roslynmcp"
+       "command": "madq-roslynmcp"
      }
    }
    ```
@@ -62,10 +62,10 @@ Download the latest release from the [Releases page](https://github.com/MadQ/Ros
 **Option B — dotnet tool** (recommended for .NET developers, requires .NET SDK):
 
 ```bash
-dotnet tool install -g RoslynMcp
+dotnet tool install -g MadQ.RoslynMcp
 ```
 
-This installs `roslynmcp` globally on PATH. Use `"roslynmcp"` as the command in your client config — no path needed.
+This installs `madq-roslynmcp` globally on PATH. Use `"madq-roslynmcp"` as the command in your client config — no path needed.
 
 **Option C — Clone and build** (requires .NET 10 or 11 SDK):
 
@@ -108,7 +108,7 @@ Point your MCP client to the server using one of these approaches:
 **Local tool install (advanced — per-project version pinning):**
 
 ```bash
-dotnet tool install --create-manifest-if-needed RoslynMcp
+dotnet tool install --create-manifest-if-needed MadQ.RoslynMcp
 ```
 
 Local tools require `dotnet tool run` as the invocation, and your client config must set `cwd` to the project root so the tool manifest is found:
@@ -118,7 +118,7 @@ Local tools require `dotnet tool run` as the invocation, and your client config 
   "roslyn": {
     "type": "stdio",
     "command": "dotnet",
-    "args": ["tool", "run", "roslynmcp"],
+    "args": ["tool", "run", "madq-roslynmcp"],
     "cwd": "/absolute/path/to/your/project"
   }
 }

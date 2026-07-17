@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace RoslynMcp.Cli;
 
 /// <summary>
-///     Implements the <c>dotnet roslynmcp setup-project</c> subcommand. Writes a per-project
+///     Implements the <c>madq-roslynmcp setup-project</c> subcommand. Writes a per-project
 ///     hook file to the nearest git repository root, enabling per-agent tool guidance for
 ///     .cs file operations in VS Code Copilot and Copilot CLI.
 /// </summary>
@@ -18,7 +18,7 @@ internal class SetupProjectCommand : CliCommand
 			
 			Console.WriteLine();
 			Console.WriteLine("  ✗ Could not find a git repository root from the current directory.");
-			Console.WriteLine("    Run 'dotnet roslynmcp setup-project' from inside a git repository.")
+			Console.WriteLine("    Run '" + ToolCommand.Name + " setup-project' from inside a git repository.")
 			;
 			Console.WriteLine()
 			;
@@ -32,10 +32,10 @@ internal class SetupProjectCommand : CliCommand
 		
 		var hookFile = Path.Combine(githubDir, "roslynmcp.json");
 		
-		// dotnet roslynmcp hook reads tool event JSON from stdin and writes allow/additionalContext.
-		// Using the dotnet tool invocation (not a raw binary path) keeps it cross-platform and
-		// stable across tool reinstalls — no path updates needed after dotnet tool update.
-		const string hookCommand = "dotnet roslynmcp hook";
+		// The hook reads tool event JSON from stdin and writes allow/additionalContext.
+		// See ToolCommand.HookCommand for why this is the bare command name (not `dotnet …`
+		// and not an absolute path — this file is committed and shared across contributors).
+		const string hookCommand = ToolCommand.HookCommand;
 		
 		string? backupPath = null;
 		bool    isNew      = !File.Exists(hookFile);
@@ -73,8 +73,8 @@ internal class SetupProjectCommand : CliCommand
 		if(ExecutablePath is null) {
 			
 			Console.WriteLine();
-			Console.WriteLine("  ⚠ 'dotnet roslynmcp hook' must be available in PATH for the hook to work.");
-			Console.WriteLine("    Install globally: dotnet tool install -g RoslynMcp");
+			Console.WriteLine("  ⚠ '" + ToolCommand.HookCommand + "' must be available in PATH for the hook to work.");
+			Console.WriteLine("    Install globally: dotnet tool install -g " + ToolCommand.PackageId);
 		}
 		
 		Console.WriteLine();

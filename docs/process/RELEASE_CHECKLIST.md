@@ -123,8 +123,15 @@ gh release create vX.Y.Z-alpha --draft --prerelease `
 - [ ] Publish (un-draft) — ⚠️ requires TWO explicit user confirmations; never publish unilaterally
 
 ### 5. Publish to NuGet (Future)
+
+> **Package identity:** the package ships as **`MadQ.RoslynMcp`** with tool command
+> **`madq-roslynmcp`** — the plain `RoslynMcp` / `roslynmcp` names are taken by an unrelated
+> package on NuGet (chrismo80). Plan to reserve the `MadQ.*` ID prefix on nuget.org after the
+> first publish under that prefix.
+
 ```bash
-dotnet nuget push artifacts/RoslynMcp.0.X.Y.nupkg \
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -c Pack -o artifacts
+dotnet nuget push artifacts/MadQ.RoslynMcp.0.X.Y.nupkg \
     --api-key $NUGET_API_KEY \
     --source https://api.nuget.org/v3/index.json
 ```

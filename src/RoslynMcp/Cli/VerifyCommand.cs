@@ -19,7 +19,7 @@ class VerifyCommand : CliCommand
 
             if(!r.ConfigExists)
             {
-                Console.WriteLine("    Status:  ✗ config file not found — run 'dotnet roslynmcp setup' to configure");
+                Console.WriteLine("    Status:  ✗ config file not found — run '" + ToolCommand.Name + " setup' to configure");
                 Console.WriteLine();
                 continue;
             }
@@ -28,7 +28,7 @@ class VerifyCommand : CliCommand
 
             if(r.Entry is null)
             {
-                Console.WriteLine("    Entry:   ✗ no RoslynMcp entry found — run 'dotnet roslynmcp setup' to configure");
+                Console.WriteLine("    Entry:   ✗ no RoslynMcp entry found — run '" + ToolCommand.Name + " setup' to configure");
                 hasIssues = true;
                 Console.WriteLine();
                 continue;
@@ -48,7 +48,7 @@ class VerifyCommand : CliCommand
 
             if(!r.Entry.CommandExists)
             {
-                Console.WriteLine("    Path:    ✗ file not found — run 'dotnet roslynmcp update' to fix");
+                Console.WriteLine("    Path:    ✗ file not found — run '" + ToolCommand.Name + " update' to fix");
                 hasIssues = true;
                 Console.WriteLine();
                 continue;
@@ -65,7 +65,7 @@ class VerifyCommand : CliCommand
             else if(configuredVersion != current)
             {
                 Console.WriteLine($"    Version: ⚠ outdated — configured v{configuredVersion}, current v{current}");
-                Console.WriteLine("             Run 'roslynmcp update' to update all entries to the current binary.");
+                Console.WriteLine("             Run '" + ToolCommand.Name + " update' to update all entries to the current binary.");
                 hasIssues = true;
             }
             else
@@ -79,9 +79,9 @@ class VerifyCommand : CliCommand
         var anyConfigured = results.Any(r => r.ConfigExists);
 
         if(hasIssues)
-            Console.WriteLine("  One or more issues found. Run 'roslynmcp setup' or 'roslynmcp update' to fix.");
+            Console.WriteLine("  One or more issues found. Run '" + ToolCommand.Name + " setup' or '" + ToolCommand.Name + " update' to fix.");
         else if(!anyConfigured)
-            Console.WriteLine("  No agents configured. Run 'roslynmcp setup' to get started.");
+            Console.WriteLine("  No agents configured. Run '" + ToolCommand.Name + " setup' to get started.");
         else
             Console.WriteLine("  All configured agents look good.");
 
