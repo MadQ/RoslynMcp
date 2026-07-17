@@ -27,8 +27,10 @@
   <!-- dotnet tool packaging — only active when building with -c Pack -->
   <PropertyGroup Condition="'$(Configuration)' == 'Pack'">
     <PackAsTool>true</PackAsTool>
-    <ToolCommandName>roslynmcp</ToolCommandName>
-    <PackageId>RoslynMcp</PackageId>
+    <!-- PackageId and ToolCommandName are namespaced under MadQ to avoid a hard collision
+         with the unrelated `RoslynMcp` package (chrismo80) already published on NuGet. -->
+    <ToolCommandName>madq-roslynmcp</ToolCommandName>
+    <PackageId>MadQ.RoslynMcp</PackageId>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <!-- Tool assemblies must be loose on disk — BuildHost requires it -->
     <PublishSingleFile>false</PublishSingleFile>
