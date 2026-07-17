@@ -38,9 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LogViewer multi-file watch** — LogViewer now tails all matching log files simultaneously instead of switching between them (closes #180)
 
 ### Added
-- **`roslyn_find_overloads`** — new analysis tool that returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details
-- **`roslyn_get_type_dependencies`** — new analysis tool that returns direct type dependencies from a type declaration and member signatures, including base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions
-- **`roslyn_find_unused`** — new analysis tool that reports private, internal, and effectively internal source symbols with zero direct static references in the loaded solution, with conservative filtering plus `confidence` and `reason` metadata for refactoring guidance
+- **`roslyn_find_overloads`** — new analysis tool that returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details (#211, thanks @rubinashaik2022)
+- **`roslyn_get_type_dependencies`** — new analysis tool that returns direct type dependencies from a type declaration and member signatures, including base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions (#211, thanks @rubinashaik2022)
+- **`roslyn_find_unused`** — new analysis tool that reports private, internal, and effectively internal source symbols with zero direct static references in the loaded solution, with conservative filtering plus `confidence` and `reason` metadata for refactoring guidance (#212, thanks @rubinashaik2022)
 - **LogViewer usability upgrades** — added instance filtering, time-window filtering with persisted selection, configurable per-file tail caps with a **Load more** path, **Collapse all**, and Esc cascade behavior for faster log triage
 - **Opt-in hook logging** — `dotnet roslynmcp hook --log` now emits HOOK entries so LogViewer can surface pre-tool-use hook activity during debugging
 - **Claude Code support in `roslynmcp setup`** — `ClaudeCodeClient` added to agent detection; patches `~/.claude.json` under the `mcpServers` key (same schema as Claude Desktop) (closes #184)
