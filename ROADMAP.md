@@ -8,7 +8,7 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ## Shipped Releases
 
-All milestones through v0.8.0-beta are complete. Highlights per release:
+Highlights per shipped release. The latest tagged version is v0.8.0-beta; the current source also contains part of the planned v0.9.0 semantic-analysis work:
 
 | Release | Key additions |
 |---------|---------------|
@@ -97,7 +97,7 @@ Distribution infrastructure and pre-launch hardening. First beta release — the
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
 | ✅ | feature | Global BackupStore pruning + per-PID logs | Max-age eviction with run-count guard; PID-suffixed log files for multi-process safety | #172 |
-| — | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, NuGet CI/CD pipeline, INSTALLATION.md Option A update | #173 |
+| ✅ | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, `ToolCommandName`, `PackageId`, NuGet packaging support | #173 |
 | — | feature | MCP marketplace listings | smithery.yaml, listings on Smithery / mcp.so / glama.ai, README badges | #174 |
 
 **Theme:** Ship it. Anyone can install in 30 seconds; AI tool directories surface RoslynMcp to new users.
@@ -110,14 +110,14 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
-| — | feature | `roslyn_find_unused` | Find unused types, members, and variables via semantic analysis | #33 |
-| — | feature | `roslyn_get_type_dependencies` | Return type dependency graph (imports, references, coupling) | #36 |
-| — | feature | `roslyn_find_overloads` | List all overloads of a method | #37 |
+| ✅ | feature | `roslyn_find_unused` | Find unused private/internal/effectively-internal source symbols with conservative semantic filtering — implemented in current source after v0.8.0-beta | #33 |
+| ✅ | feature | `roslyn_get_type_dependencies` | Return direct type dependencies from a type declaration and member signatures — implemented in current source after v0.8.0-beta | #36 |
+| ✅ | feature | `roslyn_find_overloads` | List all ordinary overloads declared on a containing type — implemented in current source after v0.8.0-beta | #37 |
 | ✅ | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation — shipped in v0.8.0-beta | — |
 | — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
-| — | investigation | LogViewer rework | `RoslynMcp.LogViewer` currently a dev-only skeleton; evaluate scope for a proper rework | #118 |
+| — | investigation | LogViewer rework | `RoslynMcp.LogViewer` has active usability/correctness work; evaluate whether it should remain dev-only or become a broader supported surface | #118 |
 | — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
-| — | enhancement | Surface persistent prune/log failures | Sentinel file or `roslyn_info` field for silent prune failures | #176 |
+| ✅ | enhancement | Surface persistent prune/log failures | `roslyn_info` now exposes `prune_errors` for persistent backup/log pruning failures — shipped in v0.8.0-beta | #176 |
 
 **Theme:** The "wow" release. Capabilities that grep can't match and agents can't fake.
 

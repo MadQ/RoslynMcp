@@ -9,6 +9,7 @@ Use this checklist when preparing a new release of RoslynMcp.
 ### Code Quality
 - [ ] ~~All source files follow code style guidelines~~ — **style passes currently suspended; skip this step**
 - [ ] No compiler errors (`roslyn_get_diagnostics` — never use `dotnet build` for this)
+- [ ] Full build succeeds (`roslyn_build_project` preferred; `dotnet build src/RoslynMcp/RoslynMcp.csproj` also works)
 - [ ] No Roslyn analyzer warnings
 - [ ] All tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj`)
 - [ ] Code coverage is adequate for new features
@@ -51,7 +52,7 @@ Use this checklist when preparing a new release of RoslynMcp.
 
 ### 1. Version Bump
 - [ ] Update version in `Directory.Build.props` (`<VersionPrefix>` and `<VersionSuffix>` tags)
-- [ ] Confirm the GitHub milestone `vX.Y.Z` exists (omit pre-release suffix — use `v0.7.4`, not `v0.7.4-alpha`)
+- [ ] Confirm the GitHub milestone `vX.Y.Z` exists (omit pre-release suffix — use `vX.Y.Z`, not `vX.Y.Z-alpha`)
 - [ ] Update CHANGELOG.md
   - [ ] Move `[Unreleased]` items to new version section
   - [ ] Add release date
@@ -185,16 +186,16 @@ Guidelines for what gets which bump:
 - Description rewrites, attribute metadata, polish → PATCH
 - Bug fixes, correctness corrections → PATCH
 
-**Milestone naming:** Milestones omit the pre-release suffix (use `v0.7.2`, not `v0.7.2-alpha`) — the suffix is noise at the planning level.
+**Milestone naming:** Milestones omit the pre-release suffix (use `vX.Y.Z`, not `vX.Y.Z-alpha`) — the suffix is noise at the planning level.
 
-**Tags and releases:** Always include the suffix (e.g. `v0.7.2-alpha`). Mark GitHub releases as pre-release until v1.0.0-beta.
+**Tags and releases:** Always include the suffix (e.g. `vX.Y.Z-alpha`). Mark GitHub releases as pre-release until v1.0.0-beta.
 
 ---
 
 ## First Public Release (v1.0.0) Criteria
 
 Before declaring v1.0.0, ensure:
-- [ ] All 37 public tools stable and well-tested (39 total including 2 debug-only)
+- [ ] All 40 public tools stable and well-tested (42 total including 2 debug-only)
 - [ ] Comprehensive test coverage (>80%)
 - [ ] Documentation complete and polished
 - [ ] CI/CD pipeline operational

@@ -3,7 +3,7 @@
 > ⚠️ **DO NOT CHANGE THE CODE THIS DOCUMENT DESCRIBES WITHOUT READING IT FIRST.**
 >
 > The logic in `WorkspaceManager.Instance.cs` around FSW suppression, `InvalidateFile`,
-> and `WriteAndInvalidate` is the result of a 4-stage disciplined analysis (Stages 1–5 of
+> and `WriteAndInvalidate` is the result of a 5-stage disciplined analysis (Stages 1–5 of
 > the FSW sync investigation, issues #179). The code is subtle, counter-intuitive in places,
 > and was arrived at by carefully tracing every write path and every FSW trigger. Casual
 > edits have a high probability of re-introducing the race conditions described below.
@@ -76,8 +76,9 @@ The unsuppressed Deleted event caused an extra full workspace reload cycle after
 file rename.
 
 **Fix:** `WriteAndInvalidate(newPath, oldPath, write)` accepts an optional `movedFromPath`.
-When provided, it adds `movedFromPath` to `ignoredPaths` before the write, and removes it
-after. This suppresses the Deleted event for the old path during a rename.
+When provided, it adds `movedFromPath` to `ownedDeletePaths` before the write. The later
+FSW `Deleted(oldPath)` callback consumes that entry inside `ScheduleDebounced` and returns
+without scheduling a reload.
 
 See `WorkspaceManager.Instance.cs` — `WriteAndInvalidate` overloads and `ownedDeletePaths`.
 
@@ -118,8 +119,9 @@ This ensures `InvalidateFile` always executes while the path is still suppressed
 
 **Finding (Stage 4):** `workspace.ApplyChanges()` (MSBuildWorkspace) always updates
 `CurrentSolution` synchronously, even when the subsequent disk write truncates. The
-in-memory tree always reflects the intended edit. `TryRecoverTruncation` handles the rare
-truncation case by re-writing the full content.
+in-memory tree always reflects the intended edit. The truncation recovery path does **not**
+re-read `CurrentSolution`; it rewrites the caller-supplied intended bytes through
+`workspace.WriteAndInvalidate(...)`.
 
 **Conclusion:** No permanent `CurrentSolution` divergence exists. The workspace self-heals.
 
@@ -127,14 +129,14 @@ truncation case by re-writing the full content.
 
 ## `TryRecoverTruncation` — The Self-Healing Path
 
-After `ApplyChanges`, the tool writes each changed document to disk. If the write produces
-a file shorter than the original (`< originalLength * 0.9`), `TryRecoverTruncation` kicks in:
+After a write, tools call `TryRecoverTruncation(...)` when the resulting file is empty.
+That helper:
 
-1. Gets the current source text from `CurrentSolution` (always up-to-date — see Bug #1)
-2. Writes the full content back to disk
-3. Calls `InvalidateFile` to force a reload on next access
+1. Verifies the target file exists but has length `0`
+2. Rewrites the intended `contentBytes` through `workspace.WriteAndInvalidate(...)`
+3. Returns an error only if the recovery attempt also leaves the file empty or fails with I/O
 
-This corrects the rare truncation without requiring a full workspace rebuild.
+This corrects the zero-byte truncation case without requiring a full workspace rebuild.
 
 ---
 
@@ -144,9 +146,10 @@ This corrects the rare truncation without requiring a full workspace rebuild.
 for all rename/refactoring operations. It:
 
 1. Adds `fullPath` (and optionally `movedFromPath`) to `ignoredPaths`
-2. Calls `write()` (which writes to disk and calls `workspace.ApplyChanges`)
-3. Calls `InvalidateFile(fullPath)` inside `try` (Bug #3 fix)
-4. Decrements `ignoredPaths` for both paths in `finally`
+2. Adds `movedFromPath` to `ownedDeletePaths` when present
+3. Calls `write()` (which writes to disk and calls `workspace.ApplyChanges`)
+4. Calls `InvalidateFile(fullPath)` inside `try` (Bug #3 fix)
+5. Decrements `ignoredPaths[fullPath]` in `finally`
 
 All `ApplyRenameTool` and `ApplySignatureChangeTool` write calls go through this method.
 
@@ -186,12 +189,12 @@ reloads during a batch write operation.
 
 1. **`ignoredPaths[path]` is always decremented** — the decrement is always in a `finally` block, so it runs even if the write throws.
 2. **`InvalidateFile` runs before `ignoredPaths--`** — so the FSW can never see an unsuppressed event between the write completion and the invalidation.
-3. **`ownedDeletePaths` mirrors `ignoredPaths` for rename old-paths** — same counter semantics, same `finally` guarantee.
+3. **`ownedDeletePaths` is consumed by `ScheduleDebounced` for rename old-path deletes** — it is not cleared in `WriteAndInvalidate`'s `finally` block.
 4. **`CurrentSolution` is always consistent** — Roslyn's `ApplyChanges` is synchronous; the in-memory tree is never stale after a successful apply.
-5. **`TryRecoverTruncation` uses `CurrentSolution` as source of truth** — not disk, since disk may be partially written.
+5. **`TryRecoverTruncation` rewrites the intended bytes supplied by the caller** — not disk, and not by re-reading `CurrentSolution`.
 
 ---
 
-*Investigation notes: `files/stage1-findings.md` through `files/stage4-findings.md` in the
+*Investigation notes: `files/stage1-findings.md` through `files/stage5-findings.md` in the
 session state contain the full per-stage analysis. This document distills the architectural
 conclusions.*

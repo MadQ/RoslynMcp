@@ -15,7 +15,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 ## Quick Start
 
-1. **Get the binary:** Either download [RoslynMcp-vX.Y.Z-net10.0.zip](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere, **or** install via dotnet tool:
+1. **Get the binary:** Either download the latest `net10.0` release zip from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere, **or** install via dotnet tool:
 
    ```bash
    dotnet tool install -g RoslynMcp
@@ -38,7 +38,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
    {
      "roslyn": {
        "type": "stdio",
-       "command": "/absolute/path/to/RoslynMcp.exe"
+       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
      }
    }
    ```
@@ -57,7 +57,7 @@ See the client sections below for exact config file locations and JSON structure
 
 **Option A — Download and extract** (simplest, no SDK required):
 
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0`). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset (or `net8.0`). Extract it anywhere and note the full path to `RoslynMcp.exe`.
 
 **Option B — dotnet tool** (recommended for .NET developers, requires .NET SDK):
 
@@ -90,7 +90,7 @@ Point your MCP client to the server using one of these approaches:
 {
   "roslyn": {
     "type": "stdio",
-    "command": "/absolute/path/to/RoslynMcp.exe"
+    "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
   }
 }
 ```
@@ -133,7 +133,8 @@ Do not pass project paths as args — each `roslyn_*` tool call specifies `proje
 
 ## Requirements
 
-- .NET 8 or .NET 10 SDK (net11.0 target added automatically if .NET 11 SDK is present)
+- Running the published binary or release zip does not require a .NET SDK on PATH
+- Building from source requires a .NET 8 or .NET 10 SDK (`net11.0` is auto-added when a .NET 11 SDK is present)
 - MSBuild on PATH (installed with .NET SDK or Visual Studio) for full project resolution
 
 ---
@@ -168,7 +169,7 @@ Add to `.mcp.json` at your workspace root:
   "mcpServers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
@@ -375,13 +376,13 @@ Run RoslynMcp directly from the command line:
 
 ```bash
 # Minimal — no preloading
-/path/to/RoslynMcp.exe
+/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe
 
 # Preload a workspace for faster first tool call
-/path/to/RoslynMcp.exe /path/to/your/project
+/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe --preload /path/to/your/project
 
 # Force a specific workspace mode
-/path/to/RoslynMcp.exe --workspace adhoc /path/to/your/project
+/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe --workspace adhoc --preload /path/to/your/project
 ```
 
 This starts the MCP server on stdio — useful for testing or custom integrations. See [CLI flags](#cli-flags) for all options.
@@ -402,7 +403,7 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 
 **Cause:** MSBuildWorkspace requires MSBuild on PATH.
 
-**Fix:** Install .NET SDK or Visual Studio — both include MSBuild. Or set `MSBUILD_EXE_PATH`. RoslynMcp automatically falls back to AdhocWorkspace (source-only) if MSBuild isn't available.
+**Fix:** Install .NET SDK or Visual Studio — both include MSBuild. If the SDK is in a non-standard location, set `ROSLYNMCP_MSBUILD_PATH` (or `DOTNET_ROOT`). RoslynMcp automatically falls back to AdhocWorkspace (source-only) if MSBuild isn't available.
 
 ### No type resolution (AdhocWorkspace fallback)
 
@@ -431,21 +432,28 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 ### CLI flags
 
 ```bash
-RoslynMcp.exe [path...] [--workspace sdk|vs|adhoc|auto]
+RoslynMcp.exe [options]
 ```
 
 | Argument | Description |
 |----------|-------------|
-| `path...` | One or more paths to preload on startup (optional). Useful for reducing first-call latency. Each tool call still requires a `projectPath` parameter regardless. |
+| `-p`, `--preload <path>` | Pre-warm a workspace on startup. Repeat the flag to preload multiple projects. Each tool call still requires a `projectPath` parameter regardless. |
 | `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
+| `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
+| `--msbuild-path` | Override the MSBuild installation path used for workspace loading. |
+| `-v`, `--version` | Print the server version and exit. |
+| `-h`, `--help` | Show CLI help and exit. |
 
 ### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ROSLYNMCP_WORKSPACE` | `auto` | Same as `--workspace` flag — `sdk`, `vs`, `adhoc`, or `auto` |
-| `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` | Log file base path (PID is always injected before the extension, e.g. `roslynmcp.1234.log`). Set to empty string to disable logging. |
+| `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` | Log file base path. PID is always injected before the extension. Set to empty string to disable logging. |
 | `ROSLYNMCP_BACKUP_PATH` | `%LOCALAPPDATA%\RoslynMcp\backups` | Backup store root for `roslyn_write_file` / `roslyn_local_history`. Set to empty to disable backups. |
+| `ROSLYNMCP_LOG_MAX_AGE_DAYS` | `30` | Delete old per-PID log files after this many days. |
+| `ROSLYNMCP_BACKUP_MAX_AGE_DAYS` | `90` | Delete old backup snapshots after this many days. |
+| `ROSLYNMCP_PRUNE_MIN_RUNS` | `3` | Minimum server starts before log/backup pruning runs. |
 | `ROSLYNMCP_MAX_CACHED_WORKSPACES` | `5` | LRU workspace cache size. Increase for large multi-project workflows. |
 | `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Force a specific MSBuild installation path. |
 | `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
@@ -487,4 +495,3 @@ For large codebases (>100K LOC), consider:
 - **Documentation:** [README.md](README.md), [AGENTS.md](AGENTS.md)
 - **Issues:** [GitHub Issues](https://github.com/MadQ/RoslynMcp/issues)
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
-

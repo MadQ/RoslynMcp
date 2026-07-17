@@ -1,61 +1,106 @@
 # Roslyn MCP Tools: Honest Assessment
 
-> Originally written during v0.3.0 evaluation. Updated with fix status as of v0.7.8-alpha.
+> Updated against source as of v0.7.8-alpha.  
+> Public tool count: **40 shipped tools**. Debug-only tools excluded from the inventory below: `roslyn_respawn`, `roslyn_debug_attach`.
 
-## Tools That Work Well
+## Public tool inventory (complete)
 
-**`roslyn_get_type_members`** — genuinely excellent. One call gives full resolved signatures, doc summaries, member kinds. Replaces opening a file and skimming it.
+### Analysis / navigation (23)
 
-**`roslyn_get_symbol_definition`** — fast and precise. File, line, column, signature, doc. Better than grep because it's semantic — it won't mislead you if the name appears in comments or strings.
+- `roslyn_check_syntax`
+- `roslyn_find_callers`
+- `roslyn_find_implementations`
+- `roslyn_find_overloads`
+- `roslyn_find_references`
+- `roslyn_find_unused`
+- `roslyn_get_call_graph`
+- `roslyn_get_diagnostics`
+- `roslyn_get_file_outline`
+- `roslyn_get_line_count`
+- `roslyn_get_member_body`
+- `roslyn_get_project_info`
+- `roslyn_get_symbol_definition`
+- `roslyn_get_symbol_documentation`
+- `roslyn_get_symbol_info`
+- `roslyn_get_symbols_in_scope`
+- `roslyn_get_trivia` *(experimental)*
+- `roslyn_get_type_dependencies`
+- `roslyn_get_type_hierarchy`
+- `roslyn_get_type_members`
+- `roslyn_get_usings`
+- `roslyn_list_types`
+- `roslyn_read_file`
 
-**`roslyn_get_type_hierarchy`** — solid. Got all 26 subclasses of `RoslynMcpTool` instantly. ~~The `FindDerivedClassesAsync`/interfaces bug limits it for interfaces.~~ **Fixed in v0.5.0 (#21).**
+### Search (4)
 
-**`roslyn_get_symbol_info` (at position)** — very useful when you know the line/column. It resolved `GetCompilationAsync` at line 734 to `Task<Compilation?> Project.GetCompilationAsync(CancellationToken)` without reading anything. That's the real Roslyn value proposition.
+- `roslyn_find_string_literal`
+- `roslyn_list_files`
+- `roslyn_search_files`
+- `roslyn_semantic_search`
 
-**`roslyn_get_diagnostics`** — clean and fast. **v0.5.0: errors now sorted before warnings. v0.6.0: single-file queries use SemanticModel for better performance.**
+### Editing (5)
 
-**`roslyn_read_file`** — reads from the in-memory workspace (post-edit, always current), supports line ranges. The `source: "roslyn"` annotation is a nice touch. Direct substitute for `Read` for `.cs` files.
+- `roslyn_insert_lines`
+- `roslyn_local_history`
+- `roslyn_replace_in_code`
+- `roslyn_replace_in_file`
+- `roslyn_write_file`
 
-**`roslyn_get_line_count`** — returns line counts for one or more files without reading content. Useful for sizing a file before deciding whether to read it whole or use `roslyn_get_file_outline`.
+### Rename / refactoring (4)
 
-**`roslyn_get_trivia`** (**EXPERIMENTAL**) — extracts whitespace, comments, and formatting trivia from C# files. Supports filtering by syntax kind, trivia kind, or line range. The primary use case is understanding indentation context before inserting code so that `roslyn_insert_lines` can match the surrounding style.
+- `roslyn_apply_rename`
+- `roslyn_apply_signature_change`
+- `roslyn_change_signature`
+- `roslyn_preview_rename`
 
----
+### Build / maintenance (4)
 
-## Tools With Serious Problems
+- `roslyn_build_project`
+- `roslyn_clean_solution`
+- `roslyn_info`
+- `roslyn_restore_packages`
 
-~~**`roslyn_list_types` — broken by default.**~~ **Fixed in v0.7.0 (#29).** Without `namespaceFilter`, the default now returns only source-defined types — not the thousands of types from referenced assemblies. With `namespaceFilter` it scopes further to a namespace prefix. Both paths are safe.
+## Highlighted strengths
 
-~~**`roslyn_semantic_search` — every result is duplicated.**~~ **Fixed in v0.4.0 (#18).** Multi-TFM projects produced one `Project` per target framework with identical source files. Deduplicated by `FilePath`.
+**`roslyn_get_type_members`** — still one of the clearest wins. It gives resolved signatures, member kinds, and summaries without forcing a full-file read.
 
-~~**`roslyn_find_references` — misleading without `containingType`.**~~ **Fixed in v0.7.0 (#29).** Without `containingType`, the tool now searches ALL symbols matching the name via `AllSymbolsFinder` and returns the union of their references — no silent omissions.
+**`roslyn_get_symbol_definition`** — strong everyday navigation tool. Semantic lookup beats text search whenever a name is overloaded or appears in comments/strings.
 
-~~**`roslyn_get_project_info` — noisy.**~~ **Fixed in v0.7.0 (#30).** A `directOnly` parameter was added (defaults to `true`), which reads package references directly from the `.csproj` XML — only explicitly declared packages. Set `directOnly=false` to include transitive dependencies.
+**`roslyn_get_type_hierarchy`** — useful for understanding inheritance and interface relationships quickly. The earlier derived-type/interface limitation was fixed in v0.5.0.
 
-~~**`roslyn_get_symbol_info` — inconsistent output format.**~~ **Fixed in v0.7.0 (#30).** Now returns structured JSON with `kind`, `name`, `containing_type`, and `return_type` fields.
+**`roslyn_get_symbol_info`** — high-value when you already know the exact position and need the resolved symbol, not a guessed text match.
 
----
+**`roslyn_get_diagnostics`** — practical fast-path tool for checking compiler state without dropping to terminal output parsing.
 
-## Comparison to Normal Tools
+**`roslyn_read_file`** — essential glue tool. Reading `.cs` content from the Roslyn workspace instead of disk is exactly the right behavior for an MCP server.
 
-Where Roslyn tools genuinely beat `Read`/`Grep`:
-- Cross-file reference finding is a single call instead of grep-then-read-every-file
-- `get_type_members` replaces read-file-then-parse-mentally
-- `get_symbol_info` resolves an overloaded name at a position — text search can't do that at all
-- `get_symbol_definition` navigates to a definition without knowing which file it's in
+**`roslyn_get_line_count`** — simple but useful for deciding whether to read, outline, or page through a file.
 
-Where normal tools win:
-- Normal tools work on any file type, not just `.cs`
-- `Grep` finds all text matches regardless of which overload you meant, which is sometimes what you want
-- ~~`Grep` doesn't have the duplicate-result bug~~ (fixed)
-- ~~`Read` + `Glob` don't have context-window bombs~~ (fixed; default now returns only source-defined types)
+**`roslyn_get_trivia`** *(experimental)* — niche, but valid. Its value is trivia-in-context, especially when an agent needs indentation or comment placement instead of plain text.
 
----
+## Previously serious problems that are now fixed
 
-## Bottom Line
+- `roslyn_list_types` defaulted to an unusable wall of framework types. Fixed in v0.7.0.
+- `roslyn_semantic_search` returned duplicate results in multi-TFM projects. Fixed in v0.4.0.
+- `roslyn_find_references` was misleading without `containingType`. Fixed in v0.7.0.
+- `roslyn_get_project_info` was noisy about transitive packages. Fixed in v0.7.0 with `directOnly`.
+- `roslyn_get_symbol_info` had an inconsistent response shape. Fixed in v0.7.0.
 
-The design philosophy is right — Roslyn semantics are genuinely better than text search for C# navigation. `get_type_members`, `get_symbol_definition`, `get_symbol_info`, and `get_type_hierarchy` are all things worth reaching for first. ~~Three issues that would reliably break an AI agent:~~ Status as of v0.7.8-alpha:
+## Comparison to normal tools
 
-1. ~~`list_types` needs a namespace filter~~ — **fixed v0.7.0 (#29)**
-2. ~~`semantic_search` duplication~~ — **fixed v0.4.0 (#18)**
-3. ~~`find_references` ambiguity~~ — **fixed v0.7.0 (#29)**
+Where Roslyn tools genuinely beat plain read/grep workflows:
+- semantic definition lookup
+- cross-file reference finding
+- symbol-aware member/type inspection
+- in-workspace `.cs` reads after edits
+
+Where normal tools still win:
+- non-C# files
+- blunt text hunting when semantic disambiguation is unnecessary
+- ad hoc repository-wide searches outside the Roslyn workspace
+
+## Bottom line
+
+The core value proposition is still correct: Roslyn-backed semantics are genuinely better than text search for C# navigation and analysis. The tool surface is now broad enough to cover most C# exploration, search, editing, rename/refactoring, and build workflows without leaving the MCP layer.
+
+This file is now **inventory-complete** for the 40 public tools, but the qualitative commentary remains intentionally selective rather than giving every tool a score.

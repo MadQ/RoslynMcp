@@ -8,7 +8,7 @@ Allow AI agents to respect an author's formatting preferences when editing C# co
 
 ## Phase 1 — `roslyn_get_style_profile`
 
-A new analysis tool that reads a file (or type) and returns inferred style rules as structured, named properties. Uses `get_trivia` internally; never exposes raw trivia spans to the agent.
+A new analysis tool that reads a file (or type) and returns inferred style rules as structured, named properties. Uses `roslyn_get_trivia` internally; never exposes raw trivia spans to the agent.
 
 ### New file: `src/RoslynMcp/Tools/Analysis/GetStyleProfileTool.cs`
 
@@ -61,7 +61,7 @@ Each property is derived by majority vote across all matching nodes in the file.
 
 ---
 
-## Phase 2 — `preserveStyle` Flag on `replace_in_code`
+## Phase 2 — `preserveStyle` Flag on `roslyn_replace_in_code`
 
 A `preserveStyle: bool` (default `false`) parameter on `roslyn_replace_in_code`. When true, after the replacement is parsed and before it is written to disk, a trivia normalization pass runs that matches the replacement's trivia structure to the surrounding context.
 
@@ -123,14 +123,14 @@ This is the only case where nodes other than the replaced one need their trivia 
 
 ---
 
-## Phase 3 — Wire `get_trivia` into `get_style_profile`
+## Phase 3 — Wire `roslyn_get_trivia` into `roslyn_get_style_profile`
 
-Once `get_style_profile` exists, evaluate whether `get_trivia` should:
+Once `roslyn_get_style_profile` exists, evaluate whether `roslyn_get_trivia` should:
 - **Stay as-is** — remains a low-level diagnostic tool, useful for debugging style inference and for `Test-CodeStyle.ps1`
-- **Be deprecated** — if `get_style_profile` covers all agent-facing use cases, demote `get_trivia` further (or remove it in a future release)
+- **Be deprecated** — if `roslyn_get_style_profile` covers all agent-facing use cases, demote `roslyn_get_trivia` further (or remove it in a future release)
 - **Be kept as infrastructure** — `GetStyleProfileTool` calls the same internal trivia-walking code that `GetTriviaTool` exposes; keeping both makes the internals testable from the outside
 
-Recommendation: keep `get_trivia` as experimental infrastructure. Remove the `[McpServerTool]` attribute only if it is confirmed to add no value beyond what `get_style_profile` provides.
+Recommendation: keep `roslyn_get_trivia` as experimental infrastructure. Remove the `[McpServerTool]` attribute only if it is confirmed to add no value beyond what `roslyn_get_style_profile` provides.
 
 ---
 
@@ -141,9 +141,9 @@ Recommendation: keep `get_trivia` as experimental infrastructure. Remove the `[M
 | `StyleSampler` helper (inference engine) | Medium | None | Foundational |
 | `roslyn_get_style_profile` tool | Medium | StyleSampler | High — agent-facing style awareness |
 | `StyleNormalizer` helper (basic trivia copy) | Medium | None | Foundational |
-| `preserveStyle` flag on `replace_in_code` (basic) | Small | StyleNormalizer | High — immediate quality improvement |
+| `preserveStyle` flag on `roslyn_replace_in_code` (basic) | Small | StyleNormalizer | High — immediate quality improvement |
 | Column alignment rebalancing | Large | StyleNormalizer | Medium — covers the hardest case |
-| Evaluate / update `get_trivia` status | Trivial | get_style_profile | Low |
+| Evaluate / update `roslyn_get_trivia` status | Trivial | `roslyn_get_style_profile` | Low |
 
 ---
 

@@ -120,7 +120,7 @@ Create `AGENTS.md` at the repository root covering:
 
 **Edge cases to handle:**
 - Partial methods / partial classes (multiple `DeclaringSyntaxReferences`) → return all parts with a `part_index` field
-- Metadata-only symbols (no source) → return a clear message, same pattern as `get_symbol_definition`
+- Metadata-only symbols (no source) → return a clear message, same pattern as `roslyn_get_symbol_definition`
 - Overloaded methods without `containingType` → return all overloads with a `note` field suggesting disambiguation
 
 **README update:** Add `roslyn_get_member_body` to the tools table.
@@ -140,4 +140,4 @@ Create `AGENTS.md` at the repository root covering:
 | 2d — ApplyRename stale solution | Medium | Medium | Low |
 | 3 — Semantic search duplicates | Small | Low | High (broken tool) |
 | 4 — AGENTS.md | Small | None | Medium |
-| 5 — `get_member_body` | Medium | Low | High (token reduction) |
+| 5 — `roslyn_get_member_body` | Medium | Low | High (token reduction) |

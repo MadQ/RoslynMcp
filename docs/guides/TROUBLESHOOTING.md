@@ -78,7 +78,7 @@ Common issues and solutions when setting up and using RoslynMcp.
 **Checklist:**
 1. ✅ Server process started successfully (check client logs)
 2. ✅ MCP session initialized (`initialize` request succeeded)
-3. ✅ Target directory is correct (check server stderr for `Target: ...` message)
+3. ✅ `projectPath` values are explicit and correct — every Roslyn tool requires one
 4. ✅ RoslynMcp is built/published correctly
 
 **Verification:**
@@ -97,25 +97,35 @@ Common issues and solutions when setting up and using RoslynMcp.
 
 **Symptom:** Error message about MSBuild not being available.
 
-**Cause:** MSBuildWorkspace mode requires MSBuild on PATH.
+**Actual source messages:**
+- `MSBuild not found. Install .NET SDK or Visual Studio Build Tools. If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH.`
+- `Visual Studio MSBuild not found. Install Visual Studio or Build Tools.`
+
+**Cause:** RoslynMcp could not resolve an MSBuild instance for the selected workspace mode.
 
 **Solution:**
-1. **Install MSBuild** via one of:
+1. **Install MSBuild support** via one of:
    - .NET SDK (includes MSBuild) — recommended
-   - Visual Studio (includes MSBuild)
+   - Visual Studio or Build Tools
 
-2. **Or set environment variable** to point to your .NET SDK install location:
+2. **Or set environment variables** to point at your install:
    ```bash
    # Windows
    set DOTNET_ROOT=C:\Program Files\dotnet
+
+   # Optional direct override
+   set ROSLYNMCP_MSBUILD_PATH=C:\Program Files\dotnet\sdk\<sdk-version>
 
    # macOS/Linux
    export DOTNET_ROOT=/usr/local/share/dotnet
    ```
 
-3. **Fallback behavior:**
-   - RoslynMcp automatically falls back to AdhocWorkspace (source-only mode) if MSBuild isn't available
-   - You'll lose NuGet type resolution but basic analysis still works
+3. **Choose the right mode explicitly:**
+   - `--workspace sdk` for modern SDK-style projects
+   - `--workspace vs` for Windows + Visual Studio MSBuild
+   - `--workspace adhoc` only if you intentionally want reduced semantics
+
+> RoslynMcp does **not** auto-fallback from a failed MSBuild initialization into a full MSBuildWorkspace equivalent. If you want source-only behavior, force `adhoc`.
 
 ---
 
@@ -123,7 +133,7 @@ Common issues and solutions when setting up and using RoslynMcp.
 
 **Symptom:** NuGet types like `List<T>`, `HttpClient`, etc. don't resolve correctly.
 
-**Cause:** No `.csproj` file in target directory, so RoslynMcp uses AdhocWorkspace (source-only mode).
+**Cause:** Your `projectPath` resolved to a directory with no `.csproj`, or you explicitly selected `--workspace adhoc`, so RoslynMcp used AdhocWorkspace (source-only mode).
 
 **Solution:**
 1. **Ensure .csproj exists:**
@@ -150,14 +160,20 @@ Common issues and solutions when setting up and using RoslynMcp.
 
 ### "Could not find project file"
 
-**Symptom:** Error message about missing project file.
+**Symptom:** One of these path-resolution errors:
+- `missing_project_path`
+- `No .csproj file found in or above: ...`
+- `Multiple .csproj files found in ...`
+- `Invalid project path '...': ...`
 
-**Cause:** Path specified doesn't contain a `.csproj` or is incorrect.
+**Cause:** `projectPath` is missing, ambiguous, or points at the wrong place.
 
 **Solution:**
-1. **Use absolute paths** in global configs
-2. **Verify relative paths** in workspace configs are from workspace root
-3. **Check directory structure:**
+1. **Always pass `projectPath` explicitly** — Roslyn tools require it
+2. **Prefer the `.csproj` path directly** when you have one
+3. **If you pass a source file path,** RoslynMcp walks upward looking for exactly one `.csproj`
+4. **If you pass a directory,** RoslynMcp checks that directory for `.csproj`; no match means AdhocWorkspace
+5. **Check directory structure:**
    ```bash
    ls src/MyApp/MyApp.csproj  # Should exist
    ```
@@ -205,8 +221,8 @@ NETSDK1209: The current Visual Studio version does not support targeting .NET 11
 
 **Solution:**
 1. **Verify target directory:**
-   - Check RoslynMcp stderr for `Target: ...` message on startup
-   - Ensure it points to your source directory
+   - Check the `projectPath` you passed to the tool
+   - Prefer the `.csproj` path directly to avoid ambiguity
 
 2. **Manually invalidate:**
    - Make a trivial edit and save
@@ -249,27 +265,26 @@ NETSDK1209: The current Visual Studio version does not support targeting .NET 11
 
 **Solution:**
 1. **Target specific project** — don't load entire solution if unnecessary
-2. **Use `projectPath` parameter** — v0.3.0 allows per-tool project selection
+2. **Use `projectPath` parameter** — prefer the exact `.csproj` you want to inspect
 3. **Restart RoslynMcp** — clears workspace cache
 
-**Expected memory usage:**
-- Small project (<10K LOC): ~50-100 MB
-- Medium project (10-50K LOC): ~200-500 MB
-- Large solution (>50K LOC): ~500 MB - 1 GB
+**Expected memory usage:** highly project-dependent; multi-project MSBuild workspaces use
+more memory than small Adhoc workspaces.
 
 ---
 
 ## Tool-Specific Issues
 
-### `roslyn_build_project` fails with "forceBuild required"
+### `roslyn_build_project` stops after Roslyn errors
 
-**Symptom:** Build tool reports errors but suggests using `forceBuild=true`.
+**Symptom:** Build tool reports:
+`Roslyn reported errors — fix these first, then call roslyn_build_project again.`
 
 **Cause:** Roslyn diagnostics detected errors, so MSBuild was skipped (fast path).
 
 **Solution:**
 1. **Fix Roslyn errors first** — use `roslyn_get_diagnostics` to see what's wrong
-2. **Or force MSBuild** if you suspect MSBuild-specific issues:
+2. **Only use `forceBuild: true`** if you suspect an MSBuild-specific issue (restore, `.targets`, source generator crash):
    ```javascript
    roslyn_build_project({ forceBuild: true })
    ```
@@ -355,7 +370,7 @@ Or: **System Preferences → Security & Privacy → Allow**
 If none of the above solutions work:
 
 1. **Check logs:**
-   - Default location: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` (Windows) or `~/.local/share/RoslynMcp/logs/roslynmcp.{pid}.log` (macOS/Linux)
+   - Default location: your OS local-app-data folder under `RoslynMcp\logs\roslynmcp.{pid}.log`
    - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/ERROR/INFO)
 
 2. **Enable detailed logging:**
@@ -378,4 +393,4 @@ If none of the above solutions work:
 
 ---
 
-**Last Updated:** 2026-03-28 (v0.7.8-alpha)
+**Last Updated:** 2026-07-16 (v0.7.8-alpha)

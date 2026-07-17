@@ -6,11 +6,11 @@ RoslynMcp automatically detects the best workspace mode based on your project st
 
 ## Overview
 
-| Mode | Trigger / Override | Startup Time | Type Resolution | Multi-Project | Best For |
+| Mode | Trigger / Override | Typical Cost | Type Resolution | Multi-Project | Best For |
 |------|-------------------|--------------|-----------------|---------------|----------|
-| **MSBuildWorkspace (SDK)** | `.csproj` found + SDK MSBuild / `--workspace sdk` | 1-2 seconds | Full (NuGet + source) | ✅ Yes | Modern SDK-style projects (.NET 6+) |
-| **MSBuildWorkspace (VS)** | `.csproj` found + VS detected / `--workspace vs` | 2-4 seconds | Full (NuGet + source) | ✅ Yes | .NET Framework projects |
-| **AdhocWorkspace** | No `.csproj` found / `--workspace adhoc` | <100 ms | Source-only | ❌ No | Quick scripts, demos |
+| **MSBuildWorkspace (SDK)** | `.csproj` found + auto-detected SDK-style project, or `--workspace sdk` | Highest | Full (NuGet + source) | ✅ Yes | Modern SDK-style projects |
+| **MSBuildWorkspace (VS)** | Auto-detected legacy/Framework-style project, or `--workspace vs` | Higher | Full (NuGet + source) | ✅ Yes | .NET Framework / legacy Visual Studio projects |
+| **AdhocWorkspace** | No `.csproj` found, or `--workspace adhoc` | Lowest | Source-only | ❌ No | Quick scripts, demos |
 
 RoslynMcp **automatically selects** the appropriate mode—you don't need to configure anything for most projects. To override, pass `--workspace sdk|vs|adhoc|auto` on the command line, or set the `ROSLYNMCP_WORKSPACE` environment variable to the same values.
 
@@ -20,7 +20,11 @@ RoslynMcp **automatically selects** the appropriate mode—you don't need to con
 
 ### When Used
 
-Activated when RoslynMcp finds a `.csproj` file and the .NET SDK MSBuild is available. This is the default for modern SDK-style projects.
+Activated when RoslynMcp finds a `.csproj` file and either:
+- auto-detection (`WorkspaceMode.Auto`) classifies it as SDK-style via `MSBuildBootstrap.DetectProjectStyle()`, or
+- you explicitly force `--workspace sdk`.
+
+MSBuild discovery then runs through `MSBuildBootstrap.EnsureReady()`.
 
 ### Capabilities
 
@@ -34,12 +38,14 @@ Activated when RoslynMcp finds a `.csproj` file and the .NET SDK MSBuild is avai
 
 ### Requirements
 
-- **MSBuild on PATH** — installed with .NET SDK
+- **MSBuild discoverable** — most commonly because the .NET SDK is on PATH
+- **Or** `DOTNET_ROOT` points at a valid SDK install
+- **Or** `ROSLYNMCP_MSBUILD_PATH` points at a directory containing `MSBuild.dll`
 - **NuGet packages restored** — run `dotnet restore` before first use (or use `roslyn_restore_packages` tool)
 
 ### Startup Performance
 
-- **Initial load:** 1-2 seconds (depends on project size and NuGet package count)
+- **Initial load:** varies with project size, restore state, and SDK discovery path
 - **Subsequent calls:** Instant (workspace is cached in memory)
 - **File changes:** Automatically detected and incrementally updated
 
@@ -72,7 +78,7 @@ roslyn_restore_packages --projectPath src/YourProject
 
 ### When Used
 
-Activated via `--workspace vs` or `ROSLYNMCP_WORKSPACE=vs`. Uses the Visual Studio MSBuild instance located via `vswhere`. Required for .NET Framework projects that don't load correctly with the SDK MSBuild.
+Activated via `--workspace vs` / `ROSLYNMCP_WORKSPACE=vs`, or auto-detected when `DetectProjectStyle()` sees legacy project markers such as `ToolsVersion=` or `TargetFrameworkVersion`. Uses the Visual Studio MSBuild instance located via `vswhere`.
 
 ### Capabilities
 
@@ -82,12 +88,13 @@ Same as SDK mode, plus:
 
 ### Requirements
 
-- **Visual Studio installed** — any edition (Community, Professional, Enterprise)
+- **Windows** — VS mode is Windows-only
+- **Visual Studio installed** — any edition or Build Tools installation discoverable via `vswhere`
 - **`vswhere.exe`** — bundled with Visual Studio; used to locate the MSBuild instance
 
 ### Startup Performance
 
-- **Initial load:** 2-4 seconds (VS MSBuild discovery adds overhead)
+- **Initial load:** usually slower than SDK mode because Visual Studio MSBuild discovery adds overhead
 - **Subsequent calls:** Instant (workspace is cached in memory)
 
 ### When to Force This Mode
@@ -107,11 +114,11 @@ RoslynMcp.exe .
 
 ### When Used
 
-Activated when RoslynMcp doesn't find a `.csproj` file in the target directory. Scans for `.cs` files directly.
+Activated when RoslynMcp resolves your `projectPath` to a directory with no `.csproj`, or when you explicitly force `--workspace adhoc`. It creates an in-memory C# project rooted at that directory and scans for `.cs` files directly.
 
 ### Capabilities
 
-- ✅ **Fast startup** — <100 ms, no MSBuild overhead
+- ✅ **Fast startup** — no MSBuild overhead
 - ✅ **Source-defined type resolution** — all types in loaded `.cs` files resolve
 - ✅ **Syntax analysis** — full syntax tree parsing
 - ✅ **Semantic analysis** — symbol resolution for source-defined types
@@ -126,7 +133,7 @@ Activated when RoslynMcp doesn't find a `.csproj` file in the target directory. 
 
 ### Startup Performance
 
-- **Initial load:** <100 ms (just scans for `.cs` files)
+- **Initial load:** usually much faster than MSBuild modes because no MSBuild discovery or project evaluation runs
 - **Subsequent calls:** Instant
 - **File changes:** Automatically detected via `FileSystemWatcher`
 
@@ -148,6 +155,8 @@ AdhocWorkspace includes protection against accidental misuse:
   - `node_modules/`
   - `bin/`, `obj/`
   - `.git/`
+  - `.vs/`
+  - `packages/`
   - Hidden directories
   - System directories
 
@@ -224,9 +233,9 @@ roslyn_get_diagnostics({ projectPath: "scripts" })
 
 | Operation | MSBuildWorkspace (SDK) | MSBuildWorkspace (VS) | AdhocWorkspace |
 |-----------|------------------------|----------------------|----------------|
-| **Initial load** | 1-2 seconds | 2-4 seconds | <100 ms |
+| **Initial load** | Variable | Variable (usually slower than SDK) | Usually fastest |
 | **Type resolution** | Full (NuGet + source) | Full (NuGet + source) | Source-only |
-| **Memory usage** | ~200-500 MB (depends on project size) | ~200-500 MB | ~50-100 MB |
+| **Memory usage** | Project-dependent | Project-dependent | Lower, but still project-dependent |
 | **File change detection** | Roslyn internal + FileSystemWatcher | Roslyn internal + FileSystemWatcher | FileSystemWatcher |
 | **Multi-project** | ✅ Yes | ✅ Yes | ❌ No |
 | **.NET Framework** | ⚠️ Limited | ✅ Yes | ❌ No |
@@ -269,10 +278,11 @@ var project = workspace.AddProject("MyProject", LanguageNames.CSharp);
 
 ### WorkspaceManager
 
-RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.cs`, `.Instance.cs`) loads the full solution when a `.sln`/`.slnx` is found, and caches workspace instances with LRU eviction:
+RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.cs`, `.Instance.cs`) loads the full solution when a single `.slnx` or `.sln` is found while walking upward from a resolved `.csproj` path, and caches workspace instances with LRU eviction:
 
 - **Cache key:** Solution path (or .csproj/directory if no solution found)
 - **Cache size:** Configurable via `ROSLYNMCP_MAX_CACHED_WORKSPACES` (default 5)
+- **Path inference cache:** Relative-path inference can be disabled via `ROSLYNMCP_DISABLE_PATH_CACHE=true`
 - **Thread-safety:** Lock-protected cache lookups with short critical section; loading outside lock to avoid contention
 - **Invalidation:** FileSystemWatcher (both MSBuild and Adhoc) + manual via `InvalidateFile()`
 - **Per-project compilation cache** — each project in a solution has its own cached compilation
@@ -326,4 +336,4 @@ Subsequent calls are instant because the workspace is cached.
 
 ---
 
-**Last Updated:** 2026-04-03 (v0.7.8-alpha)
+**Last Updated:** 2026-07-16 (v0.7.8-alpha)

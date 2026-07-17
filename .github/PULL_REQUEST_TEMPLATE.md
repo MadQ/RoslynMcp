@@ -27,14 +27,14 @@
 ## Testing
 
 <!-- Describe testing you've done -->
-- [ ] All existing tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj`)
+- [ ] All existing relevant tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0`)
 - [ ] Added new tests for this change
 - [ ] Tested manually with MCP client (describe setup)
 
 ## Checklist
 
-- [ ] Code follows project style guidelines (see `.github/copilot-instructions.md`)
-- [ ] Documentation updated (README, AGENTS, copilot-instructions if needed)
+- [ ] Code follows project style guidelines (see [AGENTS.md](../AGENTS.md), [CONTRIBUTING.md](../CONTRIBUTING.md), and [.github/copilot-instructions.md](copilot-instructions.md))
+- [ ] Documentation updated ([README.md](../README.md), [AGENTS.md](../AGENTS.md), [.github/copilot-instructions.md](copilot-instructions.md), etc. if needed)
 - [ ] CHANGELOG.md updated (if applicable)
 - [ ] Commit messages are clear and descriptive
 - [ ] No sensitive data (API keys, local paths, personal info) included

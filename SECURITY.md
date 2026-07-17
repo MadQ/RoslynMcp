@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-RoslynMcp is in beta (v0.8.0-beta). Security fixes are applied to the latest release on the `dev` branch.
+RoslynMcp is pre-1.0. Security fixes are applied to the latest release on the `dev` branch.
 
 ## Important: Execution Model
 
@@ -15,7 +15,7 @@ See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9) for the filesystem ac
 If you discover a security vulnerability, please report it responsibly:
 
 1. **Do not** open a public GitHub issue.
-2. Email the maintainer directly or use [GitHub's private vulnerability reporting](https://github.com/MadQ/RoslynMcp/security/advisories/new).
+2. Use [GitHub's private vulnerability reporting](https://github.com/MadQ/RoslynMcp/security/advisories/new). If that is unavailable, contact the maintainer privately via [github.com/MadQ](https://github.com/MadQ).
 3. Include steps to reproduce and any relevant details.
 
 You should receive an acknowledgment within 48 hours. We will work with you to understand the scope and coordinate a fix before any public disclosure.

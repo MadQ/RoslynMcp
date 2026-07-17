@@ -37,8 +37,9 @@ By contributing, you're helping AI agents work better with C# code. That's worth
 4. **Update documentation** (README.md, AGENTS.md, CHANGELOG.md, etc.)
 5. **Run the test suite** and ensure all tests pass:
    ```bash
-   dotnet build src/RoslynMcp/RoslynMcp.csproj
-   dotnet run --project src/TestHarness/TestHarness.csproj
+   # AI agents should use roslyn_build_project / roslyn_get_diagnostics.
+   dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
+   dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
    ```
 6. **Commit with clear messages** — describe *what* and *why*, not *how*
 7. **Submit PR against `dev` branch** (not `main`)
@@ -74,18 +75,16 @@ The `.githooks/pre-commit` script is committed to the repo — `core.hooksPath` 
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
 
-# Build all targets
-dotnet build RoslynMcp.slnx
-
-# Or build a specific target
+# AI agents should use roslyn_build_project.
+# CLI alternative for human contributors:
 dotnet build src/RoslynMcp/RoslynMcp.csproj -f net10.0
 ```
 
 ### Running Tests
 
 ```bash
-# Run the comprehensive test suite (48 tests covering all tools)
-dotnet run --project src/TestHarness/TestHarness.csproj
+# Run the comprehensive integration test suite
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
 ```
 
 Tests run RoslynMcp against itself (dogfooding). All tests should pass before submitting a PR.
@@ -120,20 +119,13 @@ Publish a Release build and configure your MCP client to use it:
 
 ## Code Style Guidelines
 
-**See [AGENTS.md § Code Style](AGENTS.md#code-style) for the complete style guide.**
+**See [AGENTS.md § Code Style](AGENTS.md#code-style) for the canonical style rules.**
 
-**Quick checklist:**
-- Modern C# (pattern matching, target-typed `new`, collection expressions)
-- Braces on same line for control flow, new line for methods/classes
-- Comments explain *why*, not *what* — no personal pronouns
-- `async` for Roslyn APIs (`GetCompilationAsync`, `FindReferencesAsync`)
-- Return structured objects from tools, not strings
-
-**Philosophy:** These are guidelines, not laws. Thoughtful departures that improve clarity are welcome — explain why in a comment or commit message.
+This document intentionally does **not** duplicate those rules. AGENTS.md is the source of truth for formatting, naming, blank-line rules, the "Right Code" principle, and RoslynMcp-specific tool conventions.
 
 ### Code Quality Tools
 
-**No linting or automated style enforcement.** The project's style guidelines are deliberate and don't align with standard linter rulesets.
+**Code style enforcement is custom, not generic.** RoslynMcp uses `scripts/Test-CodeStyle.ps1` for style auditing and `RoslynMcp.Analyzers` for compile-time rules instead of a repository-wide `.editorconfig` linter setup.
 
 **PRs that add `.editorconfig` files will not be approved.** These create the same conflicts with the project's intentional style choices.
 
@@ -143,7 +135,13 @@ Publish a Release build and configure your MCP client to use it:
 
 ## Adding a New Tool
 
-1. **Create tool class** in `src/RoslynMcp/Tools/`:
+1. **Create the tool class** in the appropriate folder under `src/RoslynMcp/Tools/`:
+   - `Analysis/` for read-only semantic queries
+   - `Search/` for file/content discovery
+   - `Editing/` for file mutation tools
+   - `Rename/` and `Refactoring/` for preview/apply workflows
+   - `Build/` for build / restore / clean tooling
+
    ```csharp
    [McpServerToolType]
    internal sealed class MyNewTool : RoslynMcpTool
@@ -175,9 +173,9 @@ Publish a Release build and configure your MCP client to use it:
    - `[Description("...")]` is required on the tool method and every parameter (RMCP007/RMCP008)
    - `string projectPath` must use `[Description(ProjectPathDescription)]`, not an inline string (RMCP009)
 
-2. **No manual DI registration needed** — `WithToolsFromAssembly()` in `Program.cs` auto-discovers all `[McpServerToolType]` classes
+2. **No manual DI registration needed** — `WithToolsFromAssembly()` in `src/RoslynMcp/Program.cs` auto-discovers all `[McpServerToolType]` classes
 
-3. **Add tests** in `src/TestHarness/TestHarnessProgram.cs`
+3. **Add tests** under `src/TestHarness/Tests/` and wire them into `src/TestHarness/TestHarnessProgram.cs` if the new coverage needs a new test section
 
 4. **Update documentation**:
    - README.md (tool catalog table)
@@ -193,11 +191,10 @@ Tools are the user-facing API surface. Exception handling must be explicit, info
 
 **✅ Do:**
 - Catch **specific exception types** (`ArgumentException`, `IOException`, `UnauthorizedAccessException`, etc.)
-- Return structured error objects:
+- Return tool errors through the scope terminal with structured error objects:
   ```csharp
-  return new ErrorResult("Short description", Hint: "...");
+  return scope.Error(new ErrorResult("Short description", Hint: "..."));
   ```
-- Document expected exceptions in code comments
 
 **❌ Don't:**
 - Bare `catch { }` without explanation — always catch specific types or add a comment explaining why broad catch is needed
@@ -212,7 +209,7 @@ try {
     var regex = new Regex(pattern);
 }
 catch(ArgumentException ex) {
-    return new ErrorResult($"Invalid regex pattern: {ex.Message}");
+    return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 }
 ```
 
@@ -257,10 +254,7 @@ Exception filters (`when` clauses) have a reputation for being obscure or "too c
 ```csharp
 // Consolidate multiple file system exceptions
 catch(Exception ex) when(ex is FileNotFoundException or DirectoryNotFoundException or UnauthorizedAccessException) {
-    return new {
-        error = "File system error",
-        details = ex.Message
-    };
+    return scope.Error(new ErrorResult("File system error", Hint: ex.Message));
 }
 
 // Conditional catch based on exception state
@@ -302,9 +296,9 @@ RoslynMcp/
 ├── .meta/                  # Project metadata
 ├── docs/                   # Project documentation
 │   ├── process/            # Checklists and process guides
-│   ├── sessions/           # Session handoff notes (gitignored, local only)
+│   ├── sessions/           # Session handoff notes and archived session docs
 │   ├── MSBUILD_API_ANALYSIS.md  # MSBuild vs Roslyn architecture rationale
-│   └── ScratchPad.md       # Owner scratchpad (gitignored, local only)
+│   └── ScratchPad.md       # Owner scratchpad
 ├── README.md               # Main documentation
 ├── INSTALLATION.md         # Setup instructions
 └── CHANGELOG.md            # Version history

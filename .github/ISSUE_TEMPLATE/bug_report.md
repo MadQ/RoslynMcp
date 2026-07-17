@@ -14,9 +14,9 @@ A clear and concise description of the bug.
 
 ## Steps to Reproduce
 
-1. Configure RoslynMcp with...
-2. Call tool `xyz` with parameters...
-3. Observe error/unexpected behavior...
+1. Configure RoslynMcp for the target project.
+2. Call the affected tool or reproduce the affected workflow with the parameters that trigger the bug.
+3. Observe the error or unexpected behavior.
 
 ## Expected Behavior
 
@@ -28,7 +28,8 @@ What actually happened.
 
 ## Environment
 
-- **RoslynMcp version:** (e.g., 0.8.0-beta, commit hash if dev)
+- **Affected tool(s):** (for example: `roslyn_get_diagnostics`, `roslyn_build_project`, `roslyn_debug_attach`)
+- **RoslynMcp version:** (e.g., 0.7.8-alpha, commit hash if dev)
 - **.NET SDK version:** (`dotnet --version`)
 - **OS:** (e.g., Windows 11, macOS 14, Ubuntu 22.04)
 - **MCP Client:** (e.g., GitHub Copilot, Claude Desktop)

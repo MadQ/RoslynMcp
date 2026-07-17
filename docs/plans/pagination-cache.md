@@ -62,16 +62,16 @@ Cached arrays are returned as `ReadOnlyMemory<T>` — callers can slice but not 
 
 | Tool | Status |
 |------|--------|
-| `find_references` | ✅ `page_token` parameter + cache |
-| `find_implementations` | ✅ `page_token` parameter + cache |
-| `type_hierarchy` | ✅ `page_token` parameter + cache |
-| `type_members` | ✅ `page_token` parameter + cache |
-| `file_outline` | ✅ `page_token` parameter + cache |
-| `search_files` | ✅ `page_token` parameter + cache |
-| `semantic_search` | ✅ `page_token` parameter + cache |
-| `list_files` | ✅ `page_token` parameter + cache |
-| `get_trivia` | ✅ `page_token` parameter + cache |
-| `list_types` | ✅ `page_token` parameter + cache |
+| `roslyn_find_references` | ✅ `page_token` parameter + cache |
+| `roslyn_find_implementations` | ✅ `page_token` parameter + cache |
+| `roslyn_get_type_hierarchy` | ✅ `page_token` parameter + cache |
+| `roslyn_get_type_members` | ✅ `page_token` parameter + cache |
+| `roslyn_get_file_outline` | ✅ `page_token` parameter + cache |
+| `roslyn_search_files` | ✅ `page_token` parameter + cache |
+| `roslyn_semantic_search` | ✅ `page_token` parameter + cache |
+| `roslyn_list_files` | ✅ `page_token` parameter + cache |
+| `roslyn_get_trivia` | ✅ `page_token` parameter + cache |
+| `roslyn_list_types` | ✅ `page_token` parameter + cache |
 
 ### Token Lifecycle
 

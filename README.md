@@ -3,12 +3,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![.NET](https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4)](https://dotnet.microsoft.com/)
 [![MCP](https://img.shields.io/badge/MCP-1.2.0-blue)](https://modelcontextprotocol.io/)
-[![Alpha](https://img.shields.io/badge/status-alpha-orange)]()
+[![Beta](https://img.shields.io/badge/status-beta-blue)]()
 
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 40 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 42 MCP tools (40 public + 2 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -25,15 +25,15 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 ## Quick Start
 
-> **TL;DR:** Download the [latest release zip](https://github.com/MadQ/RoslynMcp/releases/latest), extract it, and add `"command": "/absolute/path/to/RoslynMcp.exe"` to your client's MCP config. Tell your agent to pass `projectPath` with every `roslyn_*` call. Done. Details below.
+> **TL;DR:** Download the [latest release zip](https://github.com/MadQ/RoslynMcp/releases/latest), extract it, and add `"command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"` to your client's MCP config. Tell your agent to pass `projectPath` with every `roslyn_*` call. Done. Details below.
 
 **1. Get RoslynMcp**
 
 **Option A — Download and extract** (simplest, no SDK required):
 
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0` if you prefer). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset (or `net8.0` if you prefer). Extract it anywhere and note the full path to `RoslynMcp.exe`.
 
-**Option B — Clone and build** (requires .NET 8 or 10 SDK):
+**Option B — Clone and build** (requires .NET 8, 10, or 11 SDK):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
@@ -52,7 +52,7 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
   "mcpServers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
@@ -67,7 +67,7 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
   "servers": {
     "roslyn": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
@@ -107,7 +107,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-40 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
+42 total MCP tools: 40 public tools organized by what you need to do below, plus 2 debug-only tools: `roslyn_respawn` and `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -282,7 +282,7 @@ Contributions are welcome at every level. See [CONTRIBUTING.md](CONTRIBUTING.md)
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 
 # Run the test suite (tests RoslynMcp against itself)
-dotnet run --project src/TestHarness/TestHarness.csproj
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.
@@ -291,7 +291,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.m
 
 ## Requirements
 
-- .NET 8 or .NET 10 SDK (multi-targeted -- use whichever you have installed)
+- .NET 8 or .NET 10 SDK to build from source (`net11.0` is auto-added when a .NET 11 SDK is detected)
 
 ---
 

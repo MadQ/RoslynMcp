@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`roslyn_find_overloads`** — new analysis tool that returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details
 - **`roslyn_get_type_dependencies`** — new analysis tool that returns direct type dependencies from a type declaration and member signatures, including base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions
 - **`roslyn_find_unused`** — new analysis tool that reports private, internal, and effectively internal source symbols with zero direct static references in the loaded solution, with conservative filtering plus `confidence` and `reason` metadata for refactoring guidance
+- **LogViewer usability upgrades** — added instance filtering, time-window filtering with persisted selection, configurable per-file tail caps with a **Load more** path, **Collapse all**, and Esc cascade behavior for faster log triage
+- **Opt-in hook logging** — `dotnet roslynmcp hook --log` now emits HOOK entries so LogViewer can surface pre-tool-use hook activity during debugging
+
+### Fixed
+- **LogViewer initial load ordering** — merged entries are now timestamp-ordered on first load instead of appearing grouped by file
+- **Expanded LogViewer entry visibility** — expanding an entry now reveals its bottom edge when the entry is taller than the viewport
+- **LogViewer HOOK badge state** — HOOK entries now render with the correct status badge styling
+
+### Security
+- **Filesystem access boundaries** — hardened path validation to enforce repository/file access limits for the MCP surface (VULN-001, VULN-004)
 
 ---
 

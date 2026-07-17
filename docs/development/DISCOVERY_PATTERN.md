@@ -101,7 +101,7 @@ Returns error for invalid type kind with valid options.
 
 ## Common Syntax Kinds (Curated List)
 
-The base class provides `GetCommonSyntaxKinds()` returning ~20 most useful kinds:
+The base class exposes a `CommonSyntaxKinds` array containing ~20 especially useful kinds:
 - Control flow: `IfStatement`, `ForEachStatement`, `WhileStatement`, etc.
 - Error handling: `TryStatement`, `CatchClause`, `FinallyClause`
 - Declarations: `MethodDeclaration`, `ClassDeclaration`, `PropertyDeclaration`, etc.
@@ -109,7 +109,7 @@ The base class provides `GetCommonSyntaxKinds()` returning ~20 most useful kinds
 
 ## Common Trivia Kinds (Curated List)
 
-The base class provides `GetCommonTriviaKinds()` returning ~8 most useful kinds:
+The base class exposes a `CommonTriviaKinds` array containing ~8 especially useful kinds:
 - `WhitespaceTrivia`, `EndOfLineTrivia`
 - `SingleLineCommentTrivia`, `MultiLineCommentTrivia`
 - `SingleLineDocumentationCommentTrivia`, etc.

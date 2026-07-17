@@ -21,8 +21,8 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_get_member_body` — Read a single method, property, or type body.
   Use this INSTEAD OF reading the entire file. Returns only the code you need.
 - `roslyn_read_file` — Read a file from the Roslyn workspace (in-memory, always
-  up-to-date). Use INSTEAD OF Read for .cs files. Also works for non-.cs files
-  (falls back to disk).
+  up-to-date for `.cs` files). Use INSTEAD OF Read for .cs files. For non-.cs
+  files, it reads from disk.
 - `roslyn_get_file_outline` — Get the structure of a file (types, members,
   signatures). Use INSTEAD OF reading a file to understand its layout.
 - `roslyn_get_line_count` — Get line counts for one or more files. Use INSTEAD
@@ -107,10 +107,10 @@ built-in tools only if a roslyn tool fails.
   or anchor pattern). Use when ADDING new lines rather than replacing existing
   content -- no need to construct surrounding-context patterns.
 - `roslyn_write_file` — Write or create files atomically with automatic
-  pre-write backup. Use for wholesale file rewrites or creating new files.
+  crash-safe backup snapshots. Use for wholesale file rewrites or creating new files.
   Returns a backup token usable with `roslyn_local_history` to undo.
 - `roslyn_local_history` — List, preview, and apply crash-safe file backup
-  snapshots created by `roslyn_write_file`. Use to undo destructive writes.
+  snapshots created automatically before destructive writes. Use to undo destructive writes.
 
 ### Refactoring
 
