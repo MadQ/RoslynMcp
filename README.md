@@ -77,6 +77,9 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 
 See [INSTALLATION.md](INSTALLATION.md) for Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
 
+> [!NOTE]
+> **Renaming the server key?** If you change the MCP server key (for example, migrating from the legacy `roslyn` key to `MadQ.RoslynMcp`), your client's cached tool approvals are keyed to the old name, so previously-trusted write/build/rename tools will prompt again. Just re-approve on the next prompt, or ask your agent to migrate the approvals — see [Troubleshooting → Tools re-prompt for approval after renaming the MCP server key](docs/guides/TROUBLESHOOTING.md#tools-re-prompt-for-approval-after-renaming-the-mcp-server-key).
+
 **3. Start using it.** Every tool accepts a `projectPath` parameter pointing at your `.csproj`, `.sln`, or project directory. Your agent handles this automatically.
 
 ```
