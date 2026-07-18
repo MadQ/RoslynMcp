@@ -9,11 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+> Several improvements in this cycle were informed by studying other Roslyn MCP servers — in particular
+> [JoshuaRamirez/RoslynMcpServer](https://github.com/JoshuaRamirez/RoslynMcpServer) (load timeout, position-first resolution),
+> [MarcelRoozekrans/roslyn-codelens-mcp](https://github.com/MarcelRoozekrans/roslyn-codelens-mcp) (dropped-reference detection),
+> and [darylmcd/Roslyn-Backed-MCP](https://github.com/darylmcd/Roslyn-Backed-MCP). Techniques only; no code was reused.
+
 ### Added
+- **Position-based symbol resolution** — `roslyn_find_references`, `roslyn_find_callers`, and `roslyn_preview_rename` accept optional `filePath`+`line`(+`column`) to pinpoint one specific overload, local, or parameter instead of resolving by name.
+- **Opt-in analyzer diagnostics** — `roslyn_get_diagnostics` gains `includeAnalyzers` to also run the project's analyzer references and include their findings; analyzer failures degrade to compiler-only output with an explanatory hint.
+- **Configurable workspace load timeout** — MSBuild loads are bounded by `ROSLYNMCP_LOAD_TIMEOUT_SECONDS` (default 300; `0` disables) instead of hanging indefinitely when MSBuild wedges.
+- **Post-load reference validation** — loads detect projects whose metadata references were silently dropped by a contended design-time build, retry once on a fresh workspace, and surface anything persistent via `load_warnings` on `roslyn_get_project_info`.
 
 ### Changed
 
 ### Fixed
+- **Metadata type lookup tolerates cross-assembly ambiguity** — `GetTypeByMetadataName` returns null when multiple referenced assemblies define the same name; lookups now fall back to `GetTypesByMetadataName`, preferring the source assembly.
 
 ### Security
 

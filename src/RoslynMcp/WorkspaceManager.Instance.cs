@@ -548,8 +548,10 @@ internal sealed partial class WorkspaceManager
 		/// <summary>
 		///     Projects whose design-time build produced zero metadata references. A successfully
 		///     built project always references at least the core library, so an empty set means the
-		///     build silently dropped them (BuildHost contention) and symbol queries over that
-		///     project would return wrong-but-plausible results.
+		///     build silently dropped them and symbol queries over that project would return
+		///     wrong-but-plausible results. The BuildHost-contention cause and the retry-on-fresh-
+		///     workspace mitigation are undocumented MSBuild behavior, documented empirically by
+		///     MarcelRoozekrans/roslyn-codelens-mcp (no code reused).
 		/// </summary>
 		static string[] ProjectsWithoutReferences(Workspace ws) =>
 			[..ws.CurrentSolution.Projects
