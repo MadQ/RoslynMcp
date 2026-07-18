@@ -18,6 +18,14 @@ static class NavigationTests
 					new { filePath = "Program.cs", line = 10, column = 10, projectPath = ctx.TargetPath },
 					data => data?["kind"] is not null && data?["name"] is not null)),
 			
+			// Same anchor position as the symbol-info test above — proves the position path
+			// resolves a symbol and runs the reference search end-to-end.
+			new("roslyn_find_references: position-based resolution",
+				() => ctx.RunTestAsync(
+					"roslyn_find_references",
+					new { symbolName = "ignored-when-line-given", filePath = "Program.cs", line = 10, column = 10, projectPath = ctx.TargetPath },
+					data => data?["total_references"] is not null)),
+			
 			new("roslyn_find_references: locate WorkspaceManager usages",
 				() => ctx.RunTestAsync(
 					"roslyn_find_references",

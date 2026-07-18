@@ -22,6 +22,8 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		"By default returns only direct callers (isDirect=true); set isDirect=false to also include indirect " +
 		"calls via interface dispatch or delegates. " +
 		"Results are paged; pass page_token from a previous response to get subsequent pages. " +
+		"Pass filePath+line (and optional column) to resolve the callee at an exact source position instead of " +
+		"by name — the precise way to target one specific overload. " +
 		"Pair with roslyn_get_call_graph to also trace what the callee itself depends on.")]
 	public async Task<object> FindCallers(
 		[Description("Symbol name to find callers of, e.g. 'GetCompilation', 'ProcessOrder'.")] string symbolName,
@@ -31,9 +33,12 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		[Description("When true (default), returns only direct callers. Set false to include indirect calls via interface dispatch or delegates.")] bool isDirect = true,
 		[Description("Number of callers to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of callers to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
+		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null,
+		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
+		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
+		[Description("1-based column for position-based resolution. Default: 1.")] int column = 1)
 	{
-		using var scope = BeginTool("roslyn_find_callers", symbolName, new { containingType, isDirect, skip, take });
+		using var scope = BeginTool("roslyn_find_callers", symbolName, new { containingType, isDirect, skip, take, line });
 		
 		if(scope.TryServeCachedPage<CallerEntry>(page_token, ref skip, ref take, 200, out var cached))
 			
@@ -46,7 +51,21 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		var solution = workspace.GetSolution(projectPath);
 		var rootPath = workspace.GetRootPath(projectPath);
 		
-		var symbols = FindSymbols(compilation, symbolName, containingType);
+		// Position (line > 0) pinpoints one symbol — the precise way to target one overload.
+		ISymbol[] symbols;
+		
+		if(line > 0) {
+			
+			if(filePath is null)
+				
+				return scope.Error(new ErrorResult("filePath is required when line is specified."));
+			
+			symbols = await FindSymbolAtPosition(compilation, filePath, line, column, cancellationToken) is { } positional
+				? [positional]
+				: [];
+		}
+		else
+			symbols = FindSymbols(compilation, symbolName, containingType);
 		
 		if(symbols.Length == 0)
 			
