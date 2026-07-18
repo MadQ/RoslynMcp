@@ -135,6 +135,41 @@ static class ValidationTests
 							&& tfms.Any(t => t?.GetValue<string>()?.StartsWith("net") == true)
 						);
 					})),
+			
+			// Drift probe: bump an existing file's mtime WITHOUT changing content (no source
+			// mutation risk). The probe must report drift before the FSW debounce flush lands,
+			// and self-heal after it. The probe reads a non-reloading snapshot, so it can
+			// observe the pre-flush staleness window.
+			new("roslyn_check_drift: detects out-of-band mtime change, then self-heals",
+				async () => {
+					
+					var touchPath = Path.Combine(ctx.RepoRoot, "src", "RoslynMcp", "Program.cs");
+					
+					// Let any recent sync age past the 2s drift tolerance, then touch.
+					await Task.Delay(2500);
+					File.SetLastWriteTimeUtc(touchPath, DateTime.UtcNow);
+					
+					var (driftSeen, msg1) = await ctx.RunTestAsync(
+						"roslyn_check_drift",
+						new { projectPath = ctx.TargetPath },
+						data => data?["drifted"]?.GetValue<bool>() == true
+							&& data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Program.cs") == true) == true);
+					
+					if(!driftSeen)
+						return (false, $"FAIL  (mtime touch not reported as drift) {msg1}");
+					
+					// The FSW flush lands ~300ms after the touch; give it a second, then expect healed.
+					await Task.Delay(1200);
+					
+					var (healed, msg2) = await ctx.RunTestAsync(
+						"roslyn_check_drift",
+						new { projectPath = ctx.TargetPath },
+						data => data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Program.cs") == true) is not true);
+					
+					return healed
+						? (true, "PASS  (drift detected, then healed)")
+						: (false, $"FAIL  (drift did not heal after flush) {msg2}");
+				}),
 		};
 		
 		return new TestGroup($"Validation Tools ({tests.Count} tests)", tests, Teardown: () =>

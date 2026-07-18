@@ -302,6 +302,15 @@ internal sealed record ProjectInfoResult(
 	[property: JsonPropertyName("load_warnings")]        string[]? LoadWarnings
 ) : ToolResult;
 
+internal sealed record CheckDriftResult(
+	[property: JsonPropertyName("drifted")]              bool     Drifted,
+	[property: JsonPropertyName("drifted_count")]        int      DriftedCount,
+	[property: JsonPropertyName("drifted_files")]        string[] DriftedFiles,
+	[property: JsonPropertyName("checked_count")]        int      CheckedCount,
+	[property: JsonPropertyName("last_synced_utc")]      string   LastSyncedUtc,
+	[property: JsonPropertyName("is_msbuild_workspace")] bool     IsMsbuildWorkspace
+) : ToolResult;
+
 internal sealed record GetTriviaNoMatchResult(
 	[property: JsonPropertyName("message")]       string   Message,
 	[property: JsonPropertyName("provided_kind")] string   ProvidedKind,
