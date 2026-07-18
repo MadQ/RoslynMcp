@@ -91,6 +91,36 @@ Common issues and solutions when setting up and using RoslynMcp.
 
 ---
 
+### Tools re-prompt for approval after renaming the MCP server key
+
+**Symptom:** Roslyn tools that were previously "always allowed" (write/build/rename tools such as `roslyn_write_file`, `roslyn_replace_in_code`, `roslyn_build_project`, `roslyn_apply_rename`) suddenly ask for permission again. This commonly happens after **renaming your MCP server key** — for example, upgrading from the legacy `roslyn` / `RoslynMcp` identity to `MadQ.RoslynMcp`, or otherwise changing the key in your `.mcp.json` / `mcp-config.json`.
+
+**Cause:** MCP clients cache tool approvals **keyed to the server name**. When the key changes, the old approvals no longer match the new server, so every previously-trusted tool prompts again. Read-only Roslyn tools (`roslyn_search_files`, `roslyn_read_file`, `roslyn_get_member_body`, …) auto-approve and are unaffected — only mutating tools (write / build / rename / restore) are re-gated.
+
+For **GitHub Copilot CLI**, approvals live in `~/.copilot/permissions-config.json` (`%USERPROFILE%\.copilot\permissions-config.json` on Windows), under `locations.<repo-path>.tool_approvals` as entries shaped like:
+
+```json
+{ "kind": "mcp", "serverName": "roslyn", "toolName": "roslyn_write_file" }
+```
+
+After the rename, `"serverName": "roslyn"` no longer matches the live server (`MadQ.RoslynMcp`).
+
+**Fix — pick one:**
+
+1. **Re-approve on next prompt (simplest).** The first time each tool prompts, choose "always allow". The client persists the new approval under the new server name automatically. A handful of prompts and you're done.
+
+2. **Ask your agent to migrate the approvals for you.** Because this is a mechanical find-and-mirror, you can just tell your coding agent:
+
+   > "Update my GitHub Copilot CLI permissions file (`~/.copilot/permissions-config.json`) for this repo: for every MCP tool approval keyed to the old server name (`roslyn`), add a matching approval with the new server name (`MadQ.RoslynMcp`) and the same `toolName`. Back the file up first, keep the JSON valid, then have me restart the CLI so the changes lock in."
+
+   Only the write/build/rename/restore tools need mirroring; the read-only tools don't appear in the file at all.
+
+> ⚠️ **Restart after manual edits.** The running CLI holds the permissions file in memory and may overwrite it when you approve something new. After editing `permissions-config.json` by hand (or via your agent), restart the CLI (`/restart`) so it reloads the file — otherwise your additions can be clobbered.
+
+Other MCP clients (Claude Desktop, Cursor, etc.) keep their own approval stores keyed by server name; the same principle applies — either re-approve, or update that client's approval cache to the new key.
+
+---
+
 ## Workspace & Type Resolution Issues
 
 ### "MSBuild not found"
