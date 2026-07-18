@@ -5,7 +5,7 @@
 **`roslyn_get_member_body`** ✅ *Shipped (v0.4.0)*
 The single highest-value addition for token reduction. Given a method/property name and optionally a containing type, return just that member's source — the declaration line through the closing brace. Right now getting one method from a 600-line file means reading the whole file. This collapses that to 20-30 lines. Roslyn makes it trivial: find the symbol, get its `DeclaringSyntaxReferences`, slice the span.
 
-**`roslyn_find_callers`**
+**`roslyn_find_callers`** ✅ *Shipped*
 The inverse of `roslyn_find_references` but more useful. Instead of "where is this symbol mentioned", return "which methods contain a call to this method" — caller name, file, line, and optionally one line of call context. `SymbolFinder.FindCallersAsync` exists exactly for this. Grep can find text references; it can't tell you the containing method name without extra work.
 
 **`roslyn_get_call_graph`** ✅ *Shipped (v0.7.6)*
@@ -20,7 +20,7 @@ Given a type, return all types it directly references: field types, parameter ty
 **`roslyn_find_overloads`** ✅ *Implemented in PR*
 Given a method name and containing type, return all overloads with their full signatures. Currently `roslyn_find_references` finds only the first symbol by that name. This fills the gap cleanly.
 
-**`roslyn_check_syntax`**
+**`roslyn_check_syntax`** ✅ *Shipped*
 Given a string of C#, parse it and return syntax/semantic errors. The "validate before you write" tool. Pairs naturally with `roslyn_replace_in_code` — compose the replacement, validate it, then apply. Roslyn can do this in-memory with no file I/O.
 
 ---

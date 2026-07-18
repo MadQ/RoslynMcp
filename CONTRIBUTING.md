@@ -50,7 +50,7 @@ By contributing, you're helping AI agents work better with C# code. That's worth
 
 ### Prerequisites
 
-- .NET 8, 10, or 11 SDK
+- .NET 10 or 11 SDK
 - Git
 - Your preferred code editor (Visual Studio, VS Code, Rider, etc.)
 

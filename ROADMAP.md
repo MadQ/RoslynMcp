@@ -23,7 +23,7 @@ Highlights per shipped release. The latest tagged version is v0.8.0-beta; the cu
 | v0.7.6 | `roslyn_find_callers`, `roslyn_get_call_graph`; write-retry telemetry (#136); FSW reload suppression + let Roslyn save (#140); `roslyn_local_history` double-write fix (#141); `roslyn_find_callers` dedup fix (#143); `roslyn_build_project` false-failure fix; `FileWriter` centralised write entry point (#139); RMCP007/008/009 diagnostics; BOM fixes; tool description improvements (#99) |
 | v0.7.8 | Thread-safety hardening, DotnetRunner deadlock fix, BackupStore async, SemanticSearch correctness, self-healing truncation, pre/post backups, TFM context in build diagnostics, rename stale-file fix, MSBuildBootstrap hardening (#145, #151, #153–#159, #161–#163, #165–#166) |
 | v0.7.9 | TestHarness split (#167), shutdown fix (#170), TFM context fix in project-level diagnostics (#169); folded into v0.8.0-beta — no separate tag |
-| v0.8.0-beta | `roslyn_find_string_literal`, `roslyn_check_syntax`; `--help`/`-h` flag + TTY auto-help (#181); LogViewer port auto-increment + multi-file watch (#180); BackupStore pruning + per-PID logs (#172); `setup-hooks` → `setup-project` command rename; BOM fixes |
+| v0.8.0-beta | `roslyn_find_string_literal`, `roslyn_check_syntax`, `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`; `--help`/`-h` flag + TTY auto-help (#181); LogViewer port auto-increment + multi-file watch (#180); BackupStore pruning + per-PID logs (#172); `setup-hooks` → `setup-project` command rename; BOM fixes |
 
 ---
 
@@ -110,9 +110,9 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
-| ✅ | feature | `roslyn_find_unused` | Find unused private/internal/effectively-internal source symbols with conservative semantic filtering — implemented in current source after v0.8.0-beta | #33 |
-| ✅ | feature | `roslyn_get_type_dependencies` | Return direct type dependencies from a type declaration and member signatures — implemented in current source after v0.8.0-beta | #36 |
-| ✅ | feature | `roslyn_find_overloads` | List all ordinary overloads declared on a containing type — implemented in current source after v0.8.0-beta | #37 |
+| ✅ | feature | `roslyn_find_unused` | Find unused private/internal/effectively-internal source symbols with conservative semantic filtering — shipped in v0.8.0-beta | #33 |
+| ✅ | feature | `roslyn_get_type_dependencies` | Return direct type dependencies from a type declaration and member signatures — shipped in v0.8.0-beta | #36 |
+| ✅ | feature | `roslyn_find_overloads` | List all ordinary overloads declared on a containing type — shipped in v0.8.0-beta | #37 |
 | ✅ | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation — shipped in v0.8.0-beta | — |
 | — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
 | — | investigation | LogViewer rework | `RoslynMcp.LogViewer` has active usability/correctness work; evaluate whether it should remain dev-only or become a broader supported surface | #118 |

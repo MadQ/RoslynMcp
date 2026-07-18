@@ -202,7 +202,7 @@ Priority: CLI flag → env var → auto-detect.
 
 RoslynMcp auto-detects the mode per `projectPath`. To force a specific mode for a session, use the `--workspace` flag or `ROSLYNMCP_WORKSPACE` env var (see [Overriding the Mode](#overriding-the-mode) above).
 
-### Multi-Project Workflows (v0.3.0+)
+### Multi-Project Workflows
 
 All tools require a `projectPath` parameter, so you can work with **multiple modes in a single session**:
 
@@ -336,4 +336,4 @@ Subsequent calls are instant because the workspace is cached.
 
 ---
 
-**Last Updated:** 2026-07-16 (v0.7.8-alpha)
+**Last Updated:** 2026-07-18 (v0.8.1-beta)
