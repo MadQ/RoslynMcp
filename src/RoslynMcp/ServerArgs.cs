@@ -97,6 +97,12 @@ internal sealed class ServerArgs
     /// <summary>Maximum number of simultaneously cached workspaces. Env: <c>ROSLYNMCP_MAX_CACHED_WORKSPACES</c>. Minimum 1.</summary>
     public int MaxCachedWorkspaces { get; }
 
+    /// <summary>
+    ///     Timeout for MSBuild workspace loads, in seconds. Env: <c>ROSLYNMCP_LOAD_TIMEOUT_SECONDS</c>.
+    ///     Default: 300. Values 1–9 clamp to 10; 0 or negative disables the timeout.
+    /// </summary>
+    public int LoadTimeoutSeconds { get; }
+
     /// <summary>Disables the project-path inference cache. Env: <c>ROSLYNMCP_DISABLE_PATH_CACHE</c> = <c>true</c>.</summary>
     public bool DisablePathCache { get; }
 
@@ -202,6 +208,11 @@ internal sealed class ServerArgs
             Environment.GetEnvironmentVariable("ROSLYNMCP_MAX_CACHED_WORKSPACES"),
             out var max
         ) ? Math.Max(1, max) : 5;
+
+        LoadTimeoutSeconds = int.TryParse(
+            Environment.GetEnvironmentVariable("ROSLYNMCP_LOAD_TIMEOUT_SECONDS"),
+            out var loadTimeout
+        ) ? (loadTimeout <= 0 ? 0 : Math.Max(10, loadTimeout)) : 300;
     }
 
     static WorkspaceMode ParseWorkspaceMode(string? value) => value?.ToLowerInvariant() switch {
