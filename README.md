@@ -54,6 +54,18 @@ dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish
 
 The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 
+**Option C — Install from NuGet as a .NET tool** (requires .NET 10 or 11 SDK; easiest to keep updated):
+
+```bash
+dotnet tool install --global MadQ.RoslynMcp --prerelease
+```
+
+This puts the `madq-roslynmcp` command on your PATH. In the MCP config below, use
+`"command": "madq-roslynmcp"` instead of a full `.exe` path. Update later with
+`dotnet tool update --global MadQ.RoslynMcp --prerelease`.
+
+> `--prerelease` is required while RoslynMcp is in beta — a prerelease-only package won't resolve without it.
+
 **2. Add to your MCP client config.**
 
 **Claude Code** — create `.mcp.json` in your project root:
