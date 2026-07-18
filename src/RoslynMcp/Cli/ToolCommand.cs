@@ -32,4 +32,31 @@ static class ToolCommand
 		stem.Equals(Name, StringComparison.OrdinalIgnoreCase)
 		|| LegacyNames.Any(n => stem.Equals(n, StringComparison.OrdinalIgnoreCase))
 	;
+
+	// True when a full invocation string belongs to this tool — current or any legacy form.
+	// Handles the direct command form ("madq-roslynmcp hook", "roslynmcp hook --log") and the
+	// legacy dotnet-driver form ("dotnet roslynmcp hook"). Used by setup/setup-project to
+	// upsert our hook entry in place rather than appending a duplicate when the command name
+	// changed across versions — otherwise a rename leaves the stale entry behind.
+	public static bool IsOurCommandInvocation(string? command)
+	{
+		if(string.IsNullOrWhiteSpace(command))
+			return false;
+
+		var tokens = command.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries);
+
+		if(tokens.Length == 0)
+			return false;
+
+		var first = Path.GetFileNameWithoutExtension(tokens[0]);
+
+		if(MatchesCommandStem(first))
+			return true;
+
+		// Legacy dotnet-driver form: `dotnet <name> ...`.
+		if(first.Equals("dotnet", StringComparison.OrdinalIgnoreCase) && tokens.Length > 1)
+			return MatchesCommandStem(Path.GetFileNameWithoutExtension(tokens[1]));
+
+		return false;
+	}
 }

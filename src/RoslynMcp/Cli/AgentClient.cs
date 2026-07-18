@@ -185,21 +185,23 @@ sealed class ClaudeCodeClient : McpServersDictClient
             hooks["PreToolUse"] = preToolUse;
         }
 
-        // Check if our entry is already present — avoid duplicates.
-        foreach(var item in preToolUse)
+        // Remove any existing RoslynMcp hook entries (current or legacy command forms) so a
+        // renamed command doesn't leave a stale duplicate, then append a single fresh entry.
+        for(var i = preToolUse.Count - 1; i >= 0; i--)
         {
-            if(item is not JsonObject itemObj)
+            if(preToolUse[i] is not JsonObject itemObj || itemObj["hooks"] is not JsonArray innerHooks)
                 continue;
 
-            if(itemObj["hooks"] is not JsonArray innerHooks)
-                continue;
-
-            foreach(var h in innerHooks)
+            for(var j = innerHooks.Count - 1; j >= 0; j--)
             {
-                if(h is JsonObject hObj &&
-                   hObj["command"]?.GetValue<string>() == hookCommand)
-                    return true;
+                if(innerHooks[j] is JsonObject hObj &&
+                   ToolCommand.IsOurCommandInvocation(hObj["command"]?.GetValue<string>()))
+                    innerHooks.RemoveAt(j);
             }
+
+            // Drop the wrapper only if removing our hook left it empty — preserve unrelated hooks.
+            if(innerHooks.Count == 0)
+                preToolUse.RemoveAt(i);
         }
 
         preToolUse.Add(new JsonObject {

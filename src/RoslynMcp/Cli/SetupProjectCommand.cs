@@ -143,22 +143,20 @@ internal class SetupProjectCommand : CliCommand
 				["timeoutSec"] = 5
 			};
 			
-			// Upsert: find existing RoslynMcp entry by matching the hook command value.
-			for(var i = 0; i < preToolUse.Count; i++) {
+			// Remove any existing RoslynMcp entries (current or legacy command forms), then add
+			// one fresh. Matching by the whole invocation — not exact string equality — so a
+			// renamed command doesn't leave a stale duplicate behind.
+			for(var i = preToolUse.Count - 1; i >= 0; i--) {
 				
 				if(preToolUse[i] is not JsonObject entry)
 					continue;
 				
-				if(entry["powershell"]?.GetValue<string>() == hookCommand ||
-				   entry["bash"]?.GetValue<string>() == hookCommand) {
+				if(ToolCommand.IsOurCommandInvocation(entry["powershell"]?.GetValue<string>()) ||
+				   ToolCommand.IsOurCommandInvocation(entry["bash"]?.GetValue<string>()))
 					
-					preToolUse[i] = ourEntry;
-					
-					return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-				}
+					preToolUse.RemoveAt(i);
 			}
 			
-			// Not found — append.
 			preToolUse.Add(ourEntry);
 			
 			return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
