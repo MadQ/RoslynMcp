@@ -25,7 +25,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
    ```json
    {
-     "roslyn": {
+     "MadQ.RoslynMcp": {
        "type": "stdio",
        "command": "madq-roslynmcp"
      }
@@ -36,7 +36,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
    ```json
    {
-     "roslyn": {
+     "MadQ.RoslynMcp": {
        "type": "stdio",
        "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
      }
@@ -87,7 +87,7 @@ Point your MCP client to the server using one of these approaches:
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "type": "stdio",
     "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
   }
@@ -98,7 +98,7 @@ Point your MCP client to the server using one of these approaches:
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "type": "stdio",
     "command": "roslynmcp"
   }
@@ -115,7 +115,7 @@ Local tools require `dotnet tool run` as the invocation, and your client config 
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "type": "stdio",
     "command": "dotnet",
     "args": ["tool", "run", "madq-roslynmcp"],
@@ -145,7 +145,7 @@ Add to `.mcp.json` at your workspace root:
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
@@ -166,7 +166,7 @@ Add to `.mcp.json` at your workspace root:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
@@ -195,7 +195,7 @@ Add to your Claude Desktop MCP settings file:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -215,7 +215,7 @@ Add to `.cursor/mcp.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -244,7 +244,7 @@ Add to `.windsurf/mcp_config.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -276,7 +276,7 @@ Add to `.windsurf/mcp_config.json` in your project root:
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
   }
 }
@@ -289,7 +289,7 @@ Add to `.vscode/mcp.json` or `.cline/mcp_settings.json` in your project root (ex
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -309,7 +309,7 @@ Add to `.continue/config.json` in your project root:
   "experimental": {
     "modelContextProtocolServers": [
       {
-        "name": "roslyn",
+        "name": "MadQ.RoslynMcp",
         "transport": {
           "type": "stdio",
           "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
@@ -333,7 +333,7 @@ Add to `.vscode/mcp.json` in your project root:
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
@@ -352,7 +352,7 @@ Add to `~/.config/zed/settings.json`:
 ```json
 {
   "context_servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "settings": {
         "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
       }
