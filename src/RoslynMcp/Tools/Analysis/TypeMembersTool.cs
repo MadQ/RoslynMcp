@@ -93,7 +93,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
 		// Try global namespace lookup first (handles simple names).
-		var direct = compilation.GetTypeByMetadataName(typeName)
+		var direct = GetTypeByMetadataNameOrBest(compilation, typeName)
 		;
 		
 		if(direct is not null)
