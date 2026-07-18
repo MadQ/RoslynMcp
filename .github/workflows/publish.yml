@@ -61,9 +61,18 @@ jobs:
           path: artifacts/*.nupkg
           if-no-files-found: error
 
+      # PowerShell (the default shell on windows-latest) does not expand the
+      # artifacts/*.nupkg wildcard for native commands, and dotnet nuget push treats the
+      # literal pattern as a filename ("File does not exist"). Resolve the real path
+      # first — the upload-artifact step above already proved a .nupkg exists.
       - name: Push to NuGet
         if: ${{ !inputs.dry_run }}
-        run: dotnet nuget push artifacts/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+        shell: pwsh
+        run: |
+          $pkg = Get-ChildItem artifacts/*.nupkg | Select-Object -First 1
+          if(-not $pkg) { throw "No .nupkg found in artifacts/" }
+          Write-Host "Pushing $($pkg.Name)"
+          dotnet nuget push $pkg.FullName --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
 
       - name: Dry run — push skipped
         if: ${{ inputs.dry_run }}
