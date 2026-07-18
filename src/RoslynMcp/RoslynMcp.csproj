@@ -17,7 +17,7 @@
     <RepositoryUrl>https://github.com/MadQ/RoslynMcp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageTags>roslyn;mcp;model-context-protocol;ai;code-intelligence</PackageTags>
+    <PackageTags>roslyn;mcp;model-context-protocol;csharp;dotnet;ai;llm;ai-agents;code-intelligence;code-analysis;static-analysis;refactoring;developer-tools;copilot;claude</PackageTags>
     <PackageIcon>icon.png</PackageIcon>
     <PackageReleaseNotes>v0.8.1-beta — Establishes the permanent MadQ.RoslynMcp identity (package id, madq-roslynmcp command, and MadQ.RoslynMcp MCP server key) to avoid collision with the unrelated RoslynMcp package. Adds identity-safe agent-config detection and hook-entry dedupe. Published via NuGet Trusted Publishing (OIDC). Full notes: https://github.com/MadQ/RoslynMcp/releases/tag/v0.8.1-beta</PackageReleaseNotes>
 
