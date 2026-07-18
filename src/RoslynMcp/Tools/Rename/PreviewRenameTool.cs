@@ -25,16 +25,21 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		"This is step 1 of a two-step rename workflow; no files are written until roslyn_apply_rename is called. " +
 		"Renames can affect dozens or hundreds of files — always preview before applying. " +
 		"If the symbol was previously approved for the session, the token is pre-confirmed and the response message will say so. " +
-		"Provide containingType when multiple symbols share the same name to avoid ambiguous matches. " +
+		"Provide containingType when multiple symbols share the same name to avoid ambiguous matches, " +
+		"or pass filePath+line (and optional column) to resolve the symbol at an exact source position — " +
+		"the precise way to rename one specific overload, local, or parameter. " +
 		"For direct text replacement without a review step, use roslyn_replace_in_code instead.")]
 	public async Task<PreviewRenameResult> PreviewRename(
 		[Description("Current symbol name to rename, e.g. 'WindowKey'. Use roslyn_get_type_members or roslyn_find_references to verify the exact name before renaming.")] string symbolName,
 		[Description("New name for the symbol, e.g. 'WindowIdentity'. Must be a valid C# identifier.")] string newName,
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
-		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null)
+		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null,
+		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
+		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
+		[Description("1-based column for position-based resolution. Default: 1.")] int column = 1)
 	{
-		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}", new { containingType });
+		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}", new { containingType, line });
 		
 		// Use TryGetProject so symbol and solution both derive from the same workspace
 		// snapshot — Renamer.RenameSymbolAsync requires the symbol to belong to the
@@ -50,7 +55,16 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			return scope.Failed("compilation unavailable", new PreviewRenameResult(
 				null, null, "Compilation unavailable — the project may have unresolved references or errors.", false));
 		
-		var symbol = FindSymbol(compilation, symbolName, containingType);
+		if(line > 0 && filePath is null)
+			
+			return scope.Failed("filePath required", new PreviewRenameResult(
+				null, null, "filePath is required when line is specified.", false));
+		
+		// Position (line > 0) pinpoints one symbol — the precise way to rename one overload,
+		// local, or parameter. The compilation-based lookup keeps the symbol in this snapshot.
+		var symbol = line > 0
+			? await FindSymbolAtPosition(compilation, filePath!, line, column, cancellationToken)
+			: FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
 			

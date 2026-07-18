@@ -845,6 +845,46 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     Resolves the symbol at a 1-based line/column in a file of this compilation — the
+	///     declared symbol at the position, or the referenced one. Position resolution pinpoints
+	///     overloads, locals, and parameters that name-based lookup cannot distinguish. Works from
+	///     the compilation (not a Document), so the result belongs to the same snapshot — required
+	///     by Renamer — and Adhoc workspaces are covered. Returns null when the file, position, or
+	///     symbol cannot be resolved.
+	/// </summary>
+	protected static async Task<ISymbol?> FindSymbolAtPosition(Compilation compilation, string filePath, int line, int column, CancellationToken cancellationToken)
+	{
+		if(FindSyntaxTree(compilation, filePath) is not { } tree)
+			
+			return null;
+		
+		var text     = await tree.GetTextAsync(cancellationToken);
+		var position = GetPosition(text, line, column);
+		
+		if(position < 0)
+			
+			return null;
+		
+		var model = compilation.GetSemanticModel(tree);
+		var token = (await tree.GetRootAsync(cancellationToken)).FindToken(position);
+		
+		for(var node = token.Parent; node is not null; node = node.Parent) {
+			
+			if(model.GetDeclaredSymbol(node, cancellationToken) is { } declared)
+				
+				return declared;
+			
+			var info = model.GetSymbolInfo(node, cancellationToken);
+			
+			if((info.Symbol ?? info.CandidateSymbols.FirstOrDefault()) is { } referenced)
+				
+				return referenced;
+		}
+		
+		return null;
+	}
+	
+	/// <summary>
 	///     Returns a canonical "symbol not found" <see cref="ErrorResult"/> with standardized hint text.
 	///     Callers must pass this to <c>scope.Failed("symbol not found", ...)</c> — the analyzer
 	///     requires the scope terminal to appear directly at the return site.
