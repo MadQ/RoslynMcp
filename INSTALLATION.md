@@ -18,7 +18,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 1. **Get the binary:** Either download the latest `net10.0` release zip from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere, **or** install via dotnet tool:
 
    ```bash
-   dotnet tool install -g MadQ.RoslynMcp
+   dotnet tool install -g MadQ.RoslynMcp --prerelease
    ```
 
 2. **Add to your client config.** Most clients take a JSON block like this (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
@@ -62,7 +62,7 @@ Download the latest release from the [Releases page](https://github.com/MadQ/Ros
 **Option B — dotnet tool** (recommended for .NET developers, requires .NET SDK):
 
 ```bash
-dotnet tool install -g MadQ.RoslynMcp
+dotnet tool install -g MadQ.RoslynMcp --prerelease
 ```
 
 This installs `madq-roslynmcp` globally on PATH. Use `"madq-roslynmcp"` as the command in your client config — no path needed.
@@ -108,7 +108,7 @@ Point your MCP client to the server using one of these approaches:
 **Local tool install (advanced — per-project version pinning):**
 
 ```bash
-dotnet tool install --create-manifest-if-needed MadQ.RoslynMcp
+dotnet tool install --create-manifest-if-needed MadQ.RoslynMcp --prerelease
 ```
 
 Local tools require `dotnet tool run` as the invocation, and your client config must set `cwd` to the project root so the tool manifest is found:
