@@ -48,6 +48,14 @@ internal sealed partial class WorkspaceManager
 		private readonly LoadMode   loadMode;
 		private readonly FileLogger logger;
 		
+		// Load-health warnings: WorkspaceFailed failures captured during the MSBuild load, plus
+		// post-load findings (projects whose metadata references were silently dropped by a
+		// contended design-time build). Repopulated on every full load/reload.
+		private readonly ConcurrentQueue<string> loadWarnings = new();
+		
+		/// <summary>Snapshot of load-health warnings, for surfacing in info tools.</summary>
+		public string[] LoadWarnings => [..loadWarnings];
+		
 		// Debounce: accumulate FSW events for 300ms before processing.
 #if NET9_0_OR_GREATER
 		private readonly Lock             debounceLock   = new();
@@ -103,7 +111,19 @@ internal sealed partial class WorkspaceManager
 					
 					logger.LogInfo("Load", $"Loading solution: {path}");
 					var slnSw = System.Diagnostics.Stopwatch.StartNew();
-					workspace = LoadSolution(path, logger);
+					workspace = LoadSolution(path, logger, loadWarnings);
+					
+					// Contended design-time builds can silently drop a project's references —
+					// results would be wrong, not failed. One fresh reload usually clears it.
+					if(ProjectsWithoutReferences(workspace) is { Length: > 0 } droppedSln) {
+						
+						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedSln)} — reloading once");
+						workspace.Dispose();
+						loadWarnings.Clear();
+						workspace = LoadSolution(path, logger, loadWarnings);
+					}
+					
+					WarnIfReferencesDropped(workspace);
 					isMSBuild = true;
 					
 					foreach(var kvp in BuildProjectMapFor(workspace))
@@ -125,7 +145,17 @@ internal sealed partial class WorkspaceManager
 					logger.LogInfo("Load", $"Loading project: {path}");
 					var projSw = System.Diagnostics.Stopwatch.StartNew();
 					
-					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger);
+					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings);
+					
+					if(ProjectsWithoutReferences(msbuildWs) is { Length: > 0 } droppedProj) {
+						
+						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedProj)} — reloading once");
+						msbuildWs.Dispose();
+						loadWarnings.Clear();
+						(msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings);
+					}
+					
+					WarnIfReferencesDropped(msbuildWs);
 					workspace        = msbuildWs;
 					defaultProjectId = projectId;
 					isMSBuild        = true;
@@ -515,10 +545,25 @@ internal sealed partial class WorkspaceManager
 				"The workspace may be too large or MSBuild may be stuck. Try loading a single .csproj " +
 				"instead of the full solution, or raise ROSLYNMCP_LOAD_TIMEOUT_SECONDS.");
 		
-		static Workspace LoadSolution(string solutionPath)
-			=> LoadSolution(solutionPath, null);
+		/// <summary>
+		///     Projects whose design-time build produced zero metadata references. A successfully
+		///     built project always references at least the core library, so an empty set means the
+		///     build silently dropped them (BuildHost contention) and symbol queries over that
+		///     project would return wrong-but-plausible results.
+		/// </summary>
+		static string[] ProjectsWithoutReferences(Workspace ws) =>
+			[..ws.CurrentSolution.Projects
+				.Where(p => p.MetadataReferences.Count == 0)
+				.Select(p => p.Name)
+				.Distinct()];
 		
-		static Workspace LoadSolution(string solutionPath, FileLogger? log)
+		void WarnIfReferencesDropped(Workspace ws)
+		{
+			if(ProjectsWithoutReferences(ws) is { Length: > 0 } dropped)
+				loadWarnings.Enqueue($"Projects loaded without metadata references — symbol results may be incomplete: {string.Join(", ", dropped)}");
+		}
+		
+		static Workspace LoadSolution(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings)
 		{
 			using var loadCts = CreateLoadTimeoutCts();
 			
@@ -527,6 +572,9 @@ internal sealed partial class WorkspaceManager
 			{
 				var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
 				log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
+				
+				if(e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
+					warnings.Enqueue(e.Diagnostic.Message);
 			}, options: null);
 			
 			
@@ -580,7 +628,7 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
-		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log)
+		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings)
 		{
 			using var loadCts = CreateLoadTimeoutCts();
 			
@@ -590,6 +638,9 @@ internal sealed partial class WorkspaceManager
 			{
 				var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
 				log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
+				
+				if(e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
+					warnings.Enqueue(e.Diagnostic.Message);
 			}, options: null);
 			
 			try {
@@ -1175,13 +1226,17 @@ internal sealed partial class WorkspaceManager
 			switch(loadMode) {
 				
 				case LoadMode.Solution:
-					newWorkspace  = LoadSolution(loadPath);
+					loadWarnings.Clear();
+					newWorkspace  = LoadSolution(loadPath, logger, loadWarnings);
+					WarnIfReferencesDropped(newWorkspace);
 					newProjectMap = BuildProjectMapFor(newWorkspace);
 					newProjectId  = newWorkspace.CurrentSolution.Projects.FirstOrDefault()?.Id ?? defaultProjectId;
 					break;
 				
 				case LoadMode.Project:
-					var (ws, projectId) = LoadMSBuildWorkspace(loadPath, logger);
+					loadWarnings.Clear();
+					var (ws, projectId) = LoadMSBuildWorkspace(loadPath, logger, loadWarnings);
+					WarnIfReferencesDropped(ws);
 					newWorkspace  = ws;
 					newProjectId  = projectId;
 					newProjectMap = BuildProjectMapFor(newWorkspace);

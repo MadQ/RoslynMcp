@@ -33,6 +33,9 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			"references — useful when no .csproj is available, but may include transitive dependencies. " +
 			"Note: the target framework is inferred from the output path or metadata reference paths and may be null " +
 			"if the project has not been built. " +
+			"load_warnings (null when healthy) reports load-health issues: MSBuild workspace load failures and " +
+			"projects whose metadata references were silently dropped by the design-time build — symbol results " +
+			"over those projects may be incomplete; a server restart (fresh load) usually clears it. " +
 			"For build errors or NuGet restore issues, use roslyn_build_project instead.")
 	]
 	public object GetProjectInfo(
@@ -93,7 +96,8 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			props.RootNamespace,
 			props.TargetFrameworks,
 			props.AllowUnsafeBlocks,
-			props.WarningsAsErrors)
+			props.WarningsAsErrors,
+			workspace.GetLoadWarnings(projectPath) is { Length: > 0 } loadWarnings ? loadWarnings : null)
 		{
 			Caution = caution
 		});
