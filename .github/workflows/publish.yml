@@ -1,5 +1,6 @@
 name: Publish NuGet Package
 permissions:
+  id-token: write   # required for NuGet.org Trusted Publishing (OIDC token exchange)
   contents: read
 
 on:
@@ -7,6 +8,11 @@ on:
 
 jobs:
   publish:
+    # Gated on the `release` GitHub environment — this name must match exactly the
+    # environment registered in the NuGet.org Trusted Publishing policy. Add a
+    # required-reviewer protection rule to this environment (repo Settings →
+    # Environments → release) for a manual approval gate before any OIDC token is minted.
+    environment: release
     # Windows runner for MSBuild/Roslyn compatibility — BuildHost discovery
     # requires loose files on disk, which is handled by ExcludeBuildHostFromSingleFile
     # and the Pack configuration's PublishSingleFile=false.
@@ -14,11 +20,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
@@ -28,11 +29,21 @@ jobs:
       - name: Restore
         run: dotnet restore src/RoslynMcp/RoslynMcp.csproj
 
-      # -c Pack activates PackAsTool=true + ToolCommandName=roslynmcp in the csproj.
-      # PublishSingleFile is suppressed in Pack configuration so tool assemblies
-      # remain as loose files — required by BuildHost process resolution at runtime.
+      # -c Pack activates PackAsTool=true + ToolCommandName=madq-roslynmcp
+      # (PackageId MadQ.RoslynMcp) in the csproj. PublishSingleFile is suppressed in
+      # Pack configuration so tool assemblies remain as loose files — required by
+      # BuildHost process resolution at runtime.
       - name: Pack
         run: dotnet pack src/RoslynMcp/RoslynMcp.csproj -c Pack --no-restore -o artifacts/
 
+      # Trusted Publishing: exchange the GitHub OIDC token for a short-lived NuGet API
+      # key — no long-lived NUGET_API_KEY secret required. `user` must be the NuGet.org
+      # account username tied to the Trusted Publishing policy.
+      - name: NuGet login (Trusted Publishing)
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          user: MadQ   # <-- NuGet.org account username; update if it differs
+
       - name: Push to NuGet
-        run: dotnet nuget push artifacts/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        run: dotnet nuget push artifacts/*.nupkg --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
