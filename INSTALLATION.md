@@ -424,6 +424,14 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 
 **Fix:** RoslynMcp auto-detects file changes via `FileSystemWatcher`. If diagnostics aren't updating, verify `projectPath` points to your source directory.
 
+### Tools re-prompt for approval after renaming the server key
+
+**Symptom:** Previously "always allowed" write/build/rename tools ask for permission again after you change the MCP server key (e.g. upgrading from the legacy `roslyn` key to `MadQ.RoslynMcp`).
+
+**Cause:** MCP clients cache tool approvals keyed to the server name, so the old approvals no longer match.
+
+**Fix:** Either re-approve ("always allow") on the next prompt, or tell your agent to migrate the stale approvals to the new server name. See [Troubleshooting Guide → Tools re-prompt for approval after renaming the MCP server key](docs/guides/TROUBLESHOOTING.md#tools-re-prompt-for-approval-after-renaming-the-mcp-server-key) for the full procedure (including a copy-paste instruction for your agent).
+
 ---
 
 ## Advanced Configuration
