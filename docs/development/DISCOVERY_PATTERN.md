@@ -184,3 +184,7 @@ When adding discovery to a tool:
 **See also:**
 - [docs/tools/roslyn_get_trivia.md](../../docs/tools/roslyn_get_trivia.md) — Complete example with discovery
 - [docs/tools/roslyn_get_trivia_quickref.md](../../docs/tools/roslyn_get_trivia_quickref.md) — Quick reference
+
+---
+
+**Last Updated:** 2026-07-18 (v0.8.1-beta)

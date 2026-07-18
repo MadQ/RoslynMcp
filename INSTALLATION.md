@@ -100,7 +100,7 @@ Point your MCP client to the server using one of these approaches:
 {
   "MadQ.RoslynMcp": {
     "type": "stdio",
-    "command": "roslynmcp"
+    "command": "madq-roslynmcp"
   }
 }
 ```

@@ -393,4 +393,4 @@ If none of the above solutions work:
 
 ---
 
-**Last Updated:** 2026-07-16 (v0.7.8-alpha)
+**Last Updated:** 2026-07-18 (v0.8.1-beta)

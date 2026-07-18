@@ -1,6 +1,6 @@
 # Roslyn MCP Tools: Honest Assessment
 
-> Updated against source as of v0.7.8-alpha.  
+> Updated against source as of v0.8.1-beta.  
 > Public tool count: **40 shipped tools**. Debug-only tools excluded from the inventory below: `roslyn_respawn`, `roslyn_debug_attach`.
 
 ## Public tool inventory (complete)
