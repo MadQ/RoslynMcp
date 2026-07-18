@@ -494,11 +494,34 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		
+		/// <summary>
+		///     Cancellation source bounding a single MSBuild workspace load. Fires after
+		///     <see cref="ServerArgs.LoadTimeoutSeconds"/>; never fires when the timeout is disabled.
+		/// </summary>
+		static CancellationTokenSource CreateLoadTimeoutCts()
+		{
+			var cts     = new CancellationTokenSource();
+			var seconds = ServerArgs.Current.LoadTimeoutSeconds;
+			
+			if(seconds > 0)
+				cts.CancelAfter(TimeSpan.FromSeconds(seconds));
+			
+			return cts;
+		}
+		
+		static InvalidOperationException LoadTimeout(string path) =>
+			new(
+				$"Loading '{path}' timed out after {ServerArgs.Current.LoadTimeoutSeconds}s. " +
+				"The workspace may be too large or MSBuild may be stuck. Try loading a single .csproj " +
+				"instead of the full solution, or raise ROSLYNMCP_LOAD_TIMEOUT_SECONDS.");
+		
 		static Workspace LoadSolution(string solutionPath)
 			=> LoadSolution(solutionPath, null);
 		
 		static Workspace LoadSolution(string solutionPath, FileLogger? log)
 		{
+			using var loadCts = CreateLoadTimeoutCts();
+			
 			var msbuildWorkspace = MSBuildWorkspace.Create();
 			msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
 			{
@@ -527,7 +550,7 @@ internal sealed partial class WorkspaceManager
 					foreach(var projectPath in projectPaths) {
 						
 						try {
-							msbuildWorkspace.OpenProjectAsync(projectPath).GetAwaiter().GetResult();
+							msbuildWorkspace.OpenProjectAsync(projectPath, cancellationToken: loadCts.Token).GetAwaiter().GetResult();
 						}
 						catch(Exception ex) when(ex is not OperationCanceledException) {
 							// Multi-TFM projects or transitive references may already be loaded
@@ -539,9 +562,15 @@ internal sealed partial class WorkspaceManager
 				}
 				
 				else
-					msbuildWorkspace.OpenSolutionAsync(solutionPath).GetAwaiter().GetResult();
+					msbuildWorkspace.OpenSolutionAsync(solutionPath, cancellationToken: loadCts.Token).GetAwaiter().GetResult();
 				
 				return msbuildWorkspace;
+			}
+			catch(OperationCanceledException) when(loadCts.IsCancellationRequested) {
+				
+				log?.LogError("LoadSolution", $"Load timed out after {ServerArgs.Current.LoadTimeoutSeconds}s: {solutionPath}");
+				msbuildWorkspace.Dispose();
+				throw LoadTimeout(solutionPath);
 			}
 			catch(Exception ex) when(ex is not OperationCanceledException) {
 				
@@ -553,21 +582,28 @@ internal sealed partial class WorkspaceManager
 		
 		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log)
 		{
+			using var loadCts = CreateLoadTimeoutCts();
+			
+			var msbuildWorkspace = MSBuildWorkspace.Create();
+			
+			msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
+			{
+				var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
+				log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
+			}, options: null);
+			
 			try {
 				
-				var msbuildWorkspace = MSBuildWorkspace.Create();
-				
-				msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
-				{
-					var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
-					log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
-				}, options: null);
-				
-				var project = msbuildWorkspace.OpenProjectAsync(csprojPath).GetAwaiter().GetResult();
+				var project = msbuildWorkspace.OpenProjectAsync(csprojPath, cancellationToken: loadCts.Token).GetAwaiter().GetResult();
 				
 				return (msbuildWorkspace, project.Id);
 			}
+			catch(OperationCanceledException) when(loadCts.IsCancellationRequested) {
+				msbuildWorkspace.Dispose();
+				throw LoadTimeout(csprojPath);
+			}
 			catch(Exception ex) when(ex is not OperationCanceledException) {
+				msbuildWorkspace.Dispose();
 				throw new InvalidOperationException($"Failed to load MSBuildWorkspace for '{csprojPath}': {ex.Message}", ex);
 			}
 		}
