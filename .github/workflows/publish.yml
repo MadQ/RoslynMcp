@@ -67,4 +67,5 @@ jobs:
 
       - name: Dry run — push skipped
         if: ${{ inputs.dry_run }}
-        run: Write-Host "DRY RUN: package built and OIDC login succeeded — push skipped. Download the 'nupkg' artifact to inspect. Re-run with dry_run=false to publish."
+        run: |
+          Write-Host "DRY RUN: package built and OIDC login succeeded — push skipped. Download the 'nupkg' artifact to inspect. Re-run with dry_run=false to publish."
