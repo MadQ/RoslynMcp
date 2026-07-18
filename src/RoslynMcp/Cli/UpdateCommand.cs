@@ -35,9 +35,18 @@ class UpdateCommand : CliCommand
 
         var updatedCount = 0;
         var failedCount = 0;
+        var skippedCount = 0;
 
         foreach(var r in results)
         {
+            if(!ConfirmOverwriteForeignEntry(r))
+            {
+                Console.WriteLine($"  ↷ {r.Client.Name}  — skipped (left existing entry untouched)");
+                Console.WriteLine();
+                skippedCount++;
+                continue;
+            }
+
             var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath);
 
             switch(outcome.Result)
@@ -73,7 +82,7 @@ class UpdateCommand : CliCommand
             Console.WriteLine();
         }
 
-        Console.WriteLine($"  {updatedCount} updated, {failedCount} failed.");
+        Console.WriteLine($"  {updatedCount} updated, {failedCount} failed{(skippedCount > 0 ? $", {skippedCount} skipped" : "")}.");
 
         if(updatedCount > 0)
         {

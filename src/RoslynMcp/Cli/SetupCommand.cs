@@ -80,9 +80,18 @@ class SetupCommand : CliCommand
         var addedCount = 0;
         var updatedCount = 0;
         var failedCount = 0;
+        var skippedCount = 0;
 
         foreach(var r in selected)
         {
+            if(!ConfirmOverwriteForeignEntry(r))
+            {
+                Console.WriteLine($"  ↷ {r.Client.Name}  — skipped (left existing entry untouched)");
+                Console.WriteLine();
+                skippedCount++;
+                continue;
+            }
+
             var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath);
 
             switch(outcome.Result)
@@ -121,7 +130,7 @@ class SetupCommand : CliCommand
             Console.WriteLine();
         }
 
-        Console.WriteLine($"  Done: {addedCount} added, {updatedCount} updated, {failedCount} failed.");
+        Console.WriteLine($"  Done: {addedCount} added, {updatedCount} updated, {failedCount} failed{(skippedCount > 0 ? $", {skippedCount} skipped" : "")}.");
 
         if(failedCount == 0)
         {

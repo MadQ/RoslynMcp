@@ -11,18 +11,16 @@ abstract partial class AgentClient
     public abstract string Name { get; }
     public abstract string Id { get; }
 
-    // Checked in order when searching for an existing entry — catches hand-edited names.
-    public virtual string[] KnownServerNames => ["RoslynMcp", "roslyn", "roslynmcp"]
-;
-
     // Ordered candidate paths to probe (first existing one wins).
     // Global/profile-level only for v0.8.0 — workspace-local configs are out of scope.
     public abstract string[] GetConfigPaths()
 ;
 
     // Find an existing RoslynMcp entry by known name or by matching the command path.
-    // Returns the key used in the config and the entry node, or null if not present.
-    public abstract (string Key, JsonObject Entry)? FindEntry(JsonObject root)
+    // Returns the key used in the config, the entry node, and whether the match is ambiguous
+    // (i.e. only matched a legacy/shared name that chrismo80/RoslynMcp also uses, so callers
+    // must confirm before overwriting). Returns null if not present.
+    public abstract (string Key, JsonObject Entry, bool Ambiguous)? FindEntry(JsonObject root)
 ;
 
     // Add or update the RoslynMcp entry in root.
@@ -46,25 +44,35 @@ abstract class McpServersDictClient : AgentClient
 {
     protected abstract string SectionKey { get; }
 
-    public override (string Key, JsonObject Entry)? FindEntry(JsonObject root)
+    public override (string Key, JsonObject Entry, bool Ambiguous)? FindEntry(JsonObject root)
     {
         if(root[SectionKey] is not JsonObject servers)
 
             return null;
 
-        foreach(var name in KnownServerNames)
-        {
-            if(servers[name] is JsonObject entry)
-
-                return (name, entry);
-        }
-
-        // Fall back to matching by command path in case the user named it something else.
+        // Pass 1 — unambiguous: our namespaced key, or a command that is unmistakably ours.
         foreach(var (key, value) in servers)
         {
-            if(value is JsonObject entry && IsRoslynMcpCommand(entry))
+            if(value is not JsonObject entry)
+                continue;
 
-                return (key, entry);
+            if(key.Equals(ToolCommand.ServerKey, StringComparison.OrdinalIgnoreCase) ||
+               ToolCommand.IsUnambiguousCommand(GetCommandPath(entry)))
+
+                return (key, entry, false);
+        }
+
+        // Pass 2 — ambiguous: a legacy key or bare command that chrismo80/RoslynMcp also uses.
+        // Report it so callers can confirm before overwriting a possibly-foreign entry.
+        foreach(var (key, value) in servers)
+        {
+            if(value is not JsonObject entry)
+                continue;
+
+            if(ToolCommand.AmbiguousServerKeys.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               ToolCommand.IsAmbiguousCommand(GetCommandPath(entry)))
+
+                return (key, entry, true);
         }
 
         return null;
@@ -79,16 +87,21 @@ abstract class McpServersDictClient : AgentClient
         }
 
         var existing = FindEntry(root);
-        var key = existing?.Key ?? "RoslynMcp";
         var isUpdate = existing is not null;
 
-        servers[key] = BuildEntry(commandPath);
+        // Land on our namespaced key; drop any legacy/foreign key we are replacing so
+        // subsequent runs match unambiguously (pass 1) and don't re-prompt. Callers gate
+        // ambiguous matches with a confirmation before reaching this point.
+        if(existing is { } e && !e.Key.Equals(ToolCommand.ServerKey, StringComparison.OrdinalIgnoreCase))
+            servers.Remove(e.Key);
+
+        servers[ToolCommand.ServerKey] = BuildEntry(commandPath);
 
         return isUpdate;
     }
 
     public override string? GetCommandPath(JsonObject entry) =>
-        entry["command"]?.GetValue<string>()
+        entry["command"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null
 ;
 
     protected virtual JsonObject BuildEntry(string commandPath) =>
@@ -97,18 +110,6 @@ abstract class McpServersDictClient : AgentClient
             ["command"] = commandPath,
             ["args"] = new JsonArray()
         };
-
-    static bool IsRoslynMcpCommand(JsonObject entry)
-    {
-        var cmd = entry["command"]?.GetValue<string>();
-
-        if(cmd is null)
-            return false;
-
-        var stem = Path.GetFileNameWithoutExtension(cmd);
-
-        return ToolCommand.MatchesCommandStem(stem);
-    }
 }
 
 // Claude Desktop: %APPDATA%\Claude\claude_desktop_config.json (Windows)
@@ -326,28 +327,34 @@ sealed class ZedClient : AgentClient
         return [Path.Combine(XdgConfig, "zed", "settings.json")];
     }
 
-    public override (string Key, JsonObject Entry)? FindEntry(JsonObject root)
+    public override (string Key, JsonObject Entry, bool Ambiguous)? FindEntry(JsonObject root)
     {
         if(root["context_servers"] is not JsonObject servers)
 
             return null;
 
-        foreach(var name in KnownServerNames)
-        {
-            if(servers[name] is JsonObject entry)
-
-                return (name, entry);
-        }
-
+        // Pass 1 — unambiguous: our namespaced key, or a command that is unmistakably ours.
         foreach(var (key, value) in servers)
         {
-            if(value is not JsonObject entry || GetCommandPath(entry) is not string cmd)
+            if(value is not JsonObject entry)
                 continue;
 
-            var stem = Path.GetFileNameWithoutExtension(cmd);
+            if(key.Equals(ToolCommand.ServerKey, StringComparison.OrdinalIgnoreCase) ||
+               ToolCommand.IsUnambiguousCommand(GetCommandPath(entry)))
 
-            if(ToolCommand.MatchesCommandStem(stem))
-                return (key, entry);
+                return (key, entry, false);
+        }
+
+        // Pass 2 — ambiguous: a legacy key or bare command shared with chrismo80/RoslynMcp.
+        foreach(var (key, value) in servers)
+        {
+            if(value is not JsonObject entry)
+                continue;
+
+            if(ToolCommand.AmbiguousServerKeys.Contains(key, StringComparer.OrdinalIgnoreCase) ||
+               ToolCommand.IsAmbiguousCommand(GetCommandPath(entry)))
+
+                return (key, entry, true);
         }
 
         return null;
@@ -362,10 +369,13 @@ sealed class ZedClient : AgentClient
         }
 
         var existing = FindEntry(root);
-        var key = existing?.Key ?? "RoslynMcp";
         var isUpdate = existing is not null;
 
-        servers[key] = new JsonObject {
+        // Land on our namespaced key; drop any legacy/foreign key we are replacing.
+        if(existing is { } e && !e.Key.Equals(ToolCommand.ServerKey, StringComparison.OrdinalIgnoreCase))
+            servers.Remove(e.Key);
+
+        servers[ToolCommand.ServerKey] = new JsonObject {
 
             ["command"] = new JsonObject {
 
@@ -378,7 +388,7 @@ sealed class ZedClient : AgentClient
     }
 
     public override string? GetCommandPath(JsonObject entry) =>
-        (entry["command"] as JsonObject)?["path"]?.GetValue<string>()
+        (entry["command"] as JsonObject)?["path"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null
 ;
 }
 

@@ -36,6 +36,9 @@ class VerifyCommand : CliCommand
 
             Console.WriteLine($"    Entry:   ✓ {r.Entry.ServerName}");
 
+            if(r.Entry.Ambiguous)
+                Console.WriteLine("             ⚠ name/command shared with an unrelated tool (chrismo80/RoslynMcp) — 'setup'/'update' will ask before changing it");
+
             if(r.Entry.CommandPath is null)
             {
                 Console.WriteLine("    Command: ✗ missing command path in entry");

@@ -193,7 +193,7 @@ lifetime.ApplicationStarted.Register(() => {
 	if(currentExe is not null)
 	{
 		foreach(var r in RoslynMcp.Cli.AgentDetector.ProbeAll()
-			.Where(r => r.Entry?.CommandPath is not null
+			.Where(r => r.Entry is { Ambiguous: false, CommandPath: not null }
 				&& !string.Equals(r.Entry.CommandPath, currentExe, StringComparison.OrdinalIgnoreCase)))
 			logger.LogInfo("AgentConfig", $"WARN: {r.Client.Name} config points to '{r.Entry!.CommandPath}' — run '{RoslynMcp.Cli.ToolCommand.Name} update'");
 	}
