@@ -773,7 +773,7 @@ Example `.mcp.json`:
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
       "args": ["."]

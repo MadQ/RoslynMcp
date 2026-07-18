@@ -1,4 +1,4 @@
-﻿# Workspace Modes Reference
+# Workspace Modes Reference
 
 RoslynMcp automatically detects the best workspace mode based on your project structure. This document explains the three workspace modes (SDK, VS, and Adhoc), when each is used, and their tradeoffs. The mode can be overridden with the `--workspace` CLI flag or the `ROSLYNMCP_WORKSPACE` environment variable.
 
@@ -210,7 +210,7 @@ All tools require a `projectPath` parameter, so you can work with **multiple mod
 // Example: workspace with both project types
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/path/to/RoslynMcp.exe",
       "args": ["."]
     }

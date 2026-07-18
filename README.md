@@ -50,7 +50,7 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
@@ -65,7 +65,7 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
