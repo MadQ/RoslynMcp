@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.1-beta] — 2026-07-18 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.8.1-beta)
+
+### Changed
+- **Breaking (pre-1.0): the tool identity is now namespaced under `MadQ`.** To avoid a hard clash with the unrelated [`RoslynMcp`](https://www.nuget.org/packages/RoslynMcp) package already published on NuGet, three identifiers changed: the NuGet package id `RoslynMcp` → `MadQ.RoslynMcp`, the `dotnet tool` command `roslynmcp` → `madq-roslynmcp`, and the MCP server config key `roslyn` → `MadQ.RoslynMcp`. Update your MCP client config to the new server key and command. Your client's cached tool approvals are keyed to the old server name and will prompt again — see the [migration note in the Troubleshooting guide](docs/guides/TROUBLESHOOTING.md#tools-re-prompt-for-approval-after-renaming-the-mcp-server-key). (#215)
+
+### Added
+- **Now published on NuGet as [`MadQ.RoslynMcp`](https://www.nuget.org/packages/MadQ.RoslynMcp).** Install the CLI as a global .NET tool with `dotnet tool install -g MadQ.RoslynMcp` (invoked as `madq-roslynmcp`).
+
+### Fixed
+- **Duplicate pre-tool-use hook entries when migrating from the legacy identity** — the `setup` command no longer appends a second hook entry when it finds an existing one written under an older `roslynmcp`/`dotnet-roslynmcp` command name; the existing entry is updated in place instead. (#215)
+- **Third-party MCP entries could be silently overwritten** — `setup`, `verify`, and `update` no longer assume that an existing `RoslynMcp` / `roslyn` / `roslynmcp` config entry belongs to this tool. Because those keys are shared with the unrelated chrismo80/RoslynMcp package, an ambiguous match now requires explicit confirmation before it is overwritten. (#216)
+
+### Security
+- **Package is published via NuGet Trusted Publishing (OIDC).** Releases are pushed from GitHub Actions using short-lived OIDC tokens instead of a long-lived API key, giving the published package verifiable build provenance.
+
+---
+
 ## [0.8.0-beta] — 2026-07-16 — [Release](https://github.com/MadQ/RoslynMcp/releases/tag/v0.8.0-beta)
 
 ### Changed
