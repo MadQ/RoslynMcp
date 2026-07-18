@@ -21,6 +21,17 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 > **Security Note:** RoslynMcp runs with your user permissions and has unrestricted filesystem access. Only use with trusted agents and on projects you control. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
 
+> [!IMPORTANT]
+> **Breaking change (pre-1.0): the tool identity was namespaced under `MadQ`.** To avoid a hard clash with the unrelated [`RoslynMcp`](https://www.nuget.org/packages/RoslynMcp) package already on NuGet, the package id, its `dotnet tool` command, and the MCP server key all changed:
+>
+> | | Old | New |
+> |---|-----|-----|
+> | NuGet package | `RoslynMcp` | `MadQ.RoslynMcp` |
+> | `dotnet tool` command | `roslynmcp` | `madq-roslynmcp` |
+> | MCP server key | `roslyn` | `MadQ.RoslynMcp` |
+>
+> If you configured an earlier build, update your MCP config to the new server key and command. Your client's cached tool approvals are keyed to the old name and will re-prompt — see [Troubleshooting](docs/guides/TROUBLESHOOTING.md#tools-re-prompt-for-approval-after-renaming-the-mcp-server-key).
+
 ---
 
 ## Quick Start
@@ -76,9 +87,6 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 > Global alternative: add the same `"servers"` block to `~/.copilot/mcp-config.json` (`%USERPROFILE%\.copilot\mcp-config.json` on Windows).
 
 See [INSTALLATION.md](INSTALLATION.md) for Claude Desktop, Cursor, Windsurf, Cline, Continue, Roo Code, Zed, and direct CLI usage.
-
-> [!NOTE]
-> **Renaming the server key?** If you change the MCP server key (for example, migrating from the legacy `roslyn` key to `MadQ.RoslynMcp`), your client's cached tool approvals are keyed to the old name, so previously-trusted write/build/rename tools will prompt again. Just re-approve on the next prompt, or ask your agent to migrate the approvals — see [Troubleshooting → Tools re-prompt for approval after renaming the MCP server key](docs/guides/TROUBLESHOOTING.md#tools-re-prompt-for-approval-after-renaming-the-mcp-server-key).
 
 **3. Start using it.** Every tool accepts a `projectPath` parameter pointing at your `.csproj`, `.sln`, or project directory. Your agent handles this automatically.
 
