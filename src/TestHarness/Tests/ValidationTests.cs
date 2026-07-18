@@ -30,6 +30,32 @@ static class ValidationTests
 							&& hint?.Contains("no analyzer references") is not true;
 					})),
 			
+			// Must run AFTER the includeAnalyzers test above: proves shadow-copy loading left
+			// the original analyzer DLL writable (the server never locks analyzed outputs).
+			new("roslyn_get_diagnostics: includeAnalyzers does not lock analyzer DLLs",
+				() => {
+					
+					var analyzerDll = Directory
+						.EnumerateFiles(
+							Path.Combine(ctx.RepoRoot, "src", "RoslynMcp.Analyzers", "bin"),
+							"RoslynMcp.Analyzers.dll",
+							SearchOption.AllDirectories)
+						.FirstOrDefault();
+					
+					if(analyzerDll is null)
+						return Task.FromResult((true, "PASS  (no analyzer output found — nothing to lock)"));
+					
+					try {
+						
+						using var fs = File.Open(analyzerDll, FileMode.Open, FileAccess.Write, FileShare.None);
+						
+						return Task.FromResult((true, "PASS  (original DLL writable)"));
+					}
+					catch(IOException) {
+						return Task.FromResult((false, $"FAIL  (analyzer DLL locked: {analyzerDll})"));
+					}
+				}),
+			
 			new("roslyn_build_project: smart Roslyn-first build",
 				() => ctx.RunTestAsync(
 					"roslyn_build_project",

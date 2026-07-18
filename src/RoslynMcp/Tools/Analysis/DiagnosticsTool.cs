@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Text.Json;
@@ -29,8 +30,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		"with no items returned. When take: 0, the response includes full counts but items is null — " +
 		"not an empty array. An empty array means items were requested but none matched; null means items were not requested. " +
 		"Covers C# type/symbol errors by default; set includeAnalyzers: true to also run the project's " +
-		"analyzer references and include their diagnostics — slower, and analyzer assemblies stay loaded " +
-		"(files locked) until the server exits. " +
+		"analyzer references and include their diagnostics — slower; analyzer assemblies are shadow-copied " +
+		"before loading, so the originals are never locked. " +
 		"For NuGet restore failures, MSBuild target errors, or " +
 		"source generator issues, use roslyn_build_project instead.")]
 	public async Task<object> GetDiagnostics(
@@ -41,7 +42,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items. When take: 0, items in the response is null (not an empty array).")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null,
-		[Description("When true, also runs the project's analyzer references (NuGet + project analyzers) via CompilationWithAnalyzers and includes their diagnostics. Slower than compiler-only; analyzer assemblies stay loaded until the server exits. Default: false.")] bool includeAnalyzers = false)
+		[Description("When true, also runs the project's analyzer references (NuGet + project analyzers) via CompilationWithAnalyzers and includes their diagnostics. Slower than compiler-only; assemblies are shadow-copied so the originals are never locked. Default: false.")] bool includeAnalyzers = false)
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { severity, skip, take, includeAnalyzers });
 		
@@ -200,12 +201,32 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		);
 	}
 	
+	// Analyzer sets keyed by (path, mtime): rebuilt analyzers reload fresh, unchanged ones are
+	// reused across calls without touching the original file again.
+	private static readonly ConcurrentDictionary<(string Path, long MtimeTicks), ImmutableArray<DiagnosticAnalyzer>> shadowedAnalyzers = new();
+	
+	/// <summary>
+	///     Materializes an analyzer reference through <see cref="ShadowCopyAnalyzerLoader"/> so the
+	///     original assembly is never locked by this server. Pathless (in-memory) references load as-is.
+	/// </summary>
+	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference)
+	{
+		if(reference.FullPath is not { } path || !File.Exists(path))
+			
+			return reference.GetAnalyzers(LanguageNames.CSharp);
+		
+		return shadowedAnalyzers.GetOrAdd(
+			(path, File.GetLastWriteTimeUtc(path).Ticks),
+			key => new AnalyzerFileReference(key.Path, ShadowCopyAnalyzerLoader.Instance).GetAnalyzers(LanguageNames.CSharp));
+	}
+	
 	/// <summary>
 	///     Runs the project's analyzer references over the compilation via
 	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.
 	///     Analyzer failures must never break compiler diagnostics: any error (misbehaving
 	///     analyzer, unresolved analyzer reference) degrades to compiler-only output with an
-	///     explanatory note.
+	///     explanatory note. Assemblies load through <see cref="ShadowCopyAnalyzerLoader"/> so the
+	///     analyzed project's outputs are never locked.
 	/// </summary>
 	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(string projectPath, Compilation compilation, CancellationToken cancellationToken)
 	{
@@ -213,7 +234,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			
 			var project   = workspace.GetProject(projectPath);
 			var analyzers = project.AnalyzerReferences
-				.SelectMany(r => r.GetAnalyzers(LanguageNames.CSharp))
+				.SelectMany(r => GetShadowedAnalyzers(r))
 				.ToImmutableArray()
 			;
 			
