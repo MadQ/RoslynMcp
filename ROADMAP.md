@@ -111,8 +111,8 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
 | ✅ | feature | `roslyn_find_unused` | Find unused private/internal/effectively-internal source symbols with conservative semantic filtering — shipped in v0.8.0-beta | #33 |
-| ✅ | feature | `roslyn_get_type_dependencies` | Return direct type dependencies from a type declaration and member signatures — shipped in v0.8.0-beta | #36 |
-| ✅ | feature | `roslyn_find_overloads` | List all ordinary overloads declared on a containing type — shipped in v0.8.0-beta | #37 |
+| ✅ | feature | `roslyn_get_type_dependencies` | Return direct type dependencies from a type declaration and member signatures — shipped in v0.8.0-beta | #33 |
+| ✅ | feature | `roslyn_find_overloads` | List all ordinary overloads declared on a containing type — shipped in v0.8.0-beta | #33 |
 | ✅ | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation — shipped in v0.8.0-beta | — |
 | — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
 | — | investigation | LogViewer rework | `RoslynMcp.LogViewer` has active usability/correctness work; evaluate whether it should remain dev-only or become a broader supported surface | #118 |
@@ -131,8 +131,8 @@ Agents that use RoslynMcp don't just understand code — they respect the author
 |---|------|-------|-------|------------|
 | — | feature | Implement `roslyn_get_style_profile` | StyleSampler helper; trivia-based style inference; returns named style properties | #34 |
 | — | feature | Add `preserveStyle` flag to `replace_in_code` | StyleNormalizer helper; contextual trivia normalization during targeted edits | #35 |
-| — | feature | Implement `roslyn_preview_style` / `roslyn_apply_style` | Two-phase style normalization; column alignment scoped to per-type bodies | — |
-| — | feature | Full file-wide column alignment rebalancing | Cross-type trivia rewriting; the hardest case | — |
+| — | feature | Implement `roslyn_preview_style` / `roslyn_apply_style` | Two-phase style normalization; column alignment scoped to per-type bodies | #36 |
+| — | feature | Full file-wide column alignment rebalancing | Cross-type trivia rewriting; the hardest case | #37 |
 
 **Theme:** Respect. The author's column alignment, blank line patterns, and comment placement survive AI-assisted editing.
 
