@@ -18,6 +18,8 @@
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>roslyn;mcp;model-context-protocol;ai;code-intelligence</PackageTags>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>v0.8.1-beta — Establishes the permanent MadQ.RoslynMcp identity (package id, madq-roslynmcp command, and MadQ.RoslynMcp MCP server key) to avoid collision with the unrelated RoslynMcp package. Adds identity-safe agent-config detection and hook-entry dedupe. Published via NuGet Trusted Publishing (OIDC). Full notes: https://github.com/MadQ/RoslynMcp/releases/tag/v0.8.1-beta</PackageReleaseNotes>
 
     <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
     <PublishSingleFile>true</PublishSingleFile>
@@ -31,7 +33,7 @@
          with the unrelated `RoslynMcp` package (chrismo80) already published on NuGet. -->
     <ToolCommandName>madq-roslynmcp</ToolCommandName>
     <PackageId>MadQ.RoslynMcp</PackageId>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReadmeFile>NUGET.md</PackageReadmeFile>
     <!-- Tool assemblies must be loose on disk — BuildHost requires it -->
     <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
@@ -65,7 +67,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\NUGET.md" Pack="true" PackagePath="\" />
+    <None Include="icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
