@@ -89,7 +89,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
 		// Try metadata name lookup first (handles fully-qualified names).
-		var direct = compilation.GetTypeByMetadataName(typeName)
+		var direct = GetTypeByMetadataNameOrBest(compilation, typeName)
 		;
 		
 		if(direct is not null)

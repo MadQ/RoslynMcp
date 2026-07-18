@@ -774,6 +774,32 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     Resolves a type by CLR metadata name, tolerating cross-assembly ambiguity.
+	///     <see cref="Compilation.GetTypeByMetadataName"/> returns null when several referenced
+	///     assemblies define the same metadata name — even if all but one are inaccessible — so
+	///     this falls back to <see cref="Compilation.GetTypesByMetadataName"/>, preferring the
+	///     source assembly, then public metadata types.
+	/// </summary>
+	protected static INamedTypeSymbol? GetTypeByMetadataNameOrBest(Compilation compilation, string metadataName)
+	{
+		var direct = compilation.GetTypeByMetadataName(metadataName);
+		
+		if(direct is not null)
+			
+			return direct;
+		
+		var candidates = compilation.GetTypesByMetadataName(metadataName);
+		
+		if(candidates.IsEmpty)
+			
+			return null;
+		
+		return candidates.FirstOrDefault(t => SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, compilation.Assembly))
+			?? candidates.FirstOrDefault(t => t.DeclaredAccessibility == Accessibility.Public)
+			?? candidates[0];
+	}
+	
+	/// <summary>
 	///     Resolves a symbol by name from a compilation. When <paramref name="containingType"/> is
 	///     provided, searches that type's members. Otherwise tries type-first lookup (metadata name →
 	///     SimpleNameFinder) before falling back to AnySymbolFinder for members.
@@ -782,13 +808,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	{
 		if(containingType is not null) {
 			
-			var type = compilation.GetTypeByMetadataName(containingType)
+			var type = GetTypeByMetadataNameOrBest(compilation, containingType)
 				?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(containingType));
 			
 			return type?.GetMembers(name).FirstOrDefault();
 		}
 		
-		var typeSymbol = compilation.GetTypeByMetadataName(name)
+		var typeSymbol = GetTypeByMetadataNameOrBest(compilation, name)
 			?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(name));
 		
 		return typeSymbol is not null

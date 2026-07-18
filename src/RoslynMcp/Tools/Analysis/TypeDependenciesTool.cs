@@ -91,7 +91,7 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 	
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
-		var direct = compilation.GetTypeByMetadataName(typeName);
+		var direct = GetTypeByMetadataNameOrBest(compilation, typeName);
 		
 		if(direct is not null)
 			
