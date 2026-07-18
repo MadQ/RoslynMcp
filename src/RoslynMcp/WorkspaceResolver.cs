@@ -64,6 +64,20 @@ internal sealed class WorkspaceResolver
 		return manager.GetLoadWarnings(resolved);
 	}
 	
+	public DateTime GetLastSyncedUtc(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.GetLastSyncedUtc(resolved);
+	}
+	
+	public Solution PeekSolution(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.PeekSolution(resolved);
+	}
+	
 	/// <summary>
 	///     Gets the root path for a resolved project.
 	///     Used for computing relative paths in tool responses.

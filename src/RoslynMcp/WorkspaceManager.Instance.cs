@@ -56,6 +56,31 @@ internal sealed partial class WorkspaceManager
 		/// <summary>Snapshot of load-health warnings, for surfacing in info tools.</summary>
 		public string[] LoadWarnings => [..loadWarnings];
 		
+		// UTC ticks of the last event that synchronized this workspace with disk: initial load,
+		// FSW debounce flush, workspace reload, or an RM-owned write. roslyn_check_drift compares
+		// on-disk mtimes against this to detect FileSystemWatcher misses.
+		private long lastSyncedUtcTicks = DateTime.UtcNow.Ticks;
+		
+		public DateTime LastSyncedUtc => new(Interlocked.Read(ref lastSyncedUtcTicks), DateTimeKind.Utc);
+		
+		private void MarkSynced() => Interlocked.Exchange(ref lastSyncedUtcTicks, DateTime.UtcNow.Ticks);
+		
+		/// <summary>
+		///     Current solution snapshot WITHOUT running a pending reload. The drift probe must
+		///     observe the workspace as-is — syncing first would hide exactly what it measures.
+		/// </summary>
+		public Solution PeekSolution()
+		{
+			@lock.EnterReadLock();
+			
+			try {
+				return workspace.CurrentSolution;
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
+		}
+		
 		// Debounce: accumulate FSW events for 300ms before processing.
 #if NET9_0_OR_GREATER
 		private readonly Lock             debounceLock   = new();
@@ -190,6 +215,8 @@ internal sealed partial class WorkspaceManager
 				default:
 					throw new ArgumentOutOfRangeException(nameof(mode));
 			}
+			
+			MarkSynced();
 		}
 		
 		static Dictionary<string, ProjectId> BuildProjectMapFor(Workspace ws)
@@ -980,6 +1007,7 @@ internal sealed partial class WorkspaceManager
 				// event fired unsuppressed between the decrement and the workspace invalidation.
 				InvalidateFile(fullPath)
 				;
+				MarkSynced();
 			}
 			finally {
 				ignoredPaths.AddOrUpdate(fullPath, 0, (_, count) => count - 1);
@@ -1090,6 +1118,8 @@ internal sealed partial class WorkspaceManager
 					if(ws is AdhocWorkspace adhoc)
 						FlushAdhoc(adhoc, defId, changed, deleted);
 				}
+				
+				MarkSynced();
 			}
 			catch(Exception) {
 				// Swallow — best effort. Next FSW event or explicit InvalidateFile will retry.
@@ -1295,6 +1325,7 @@ internal sealed partial class WorkspaceManager
 			
 			oldWorkspace?.Dispose();
 			
+			MarkSynced();
 			logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({projectCount} projects)");
 		}
 	

@@ -193,6 +193,14 @@ internal sealed partial class WorkspaceManager : IDisposable
 	public string[] GetLoadWarnings(string resolvedProjectPath)
 		=> GetOrLoadInstance(resolvedProjectPath).LoadWarnings;
 	
+	/// <summary>UTC time of the last disk-sync event for the workspace serving this path.</summary>
+	public DateTime GetLastSyncedUtc(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).LastSyncedUtc;
+	
+	/// <summary>Solution snapshot without triggering a pending reload — see WorkspaceInstance.PeekSolution.</summary>
+	public Solution PeekSolution(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).PeekSolution();
+	
 	public Project GetProject(string resolvedProjectPath)
 	{
 		var instance = GetOrLoadInstance(resolvedProjectPath);
