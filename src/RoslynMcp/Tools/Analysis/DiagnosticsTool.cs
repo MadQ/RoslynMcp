@@ -1,6 +1,8 @@
+using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
 using ModelContextProtocol.Server;
 
 #pragma warning disable IDE0130 // Namespace does not match folder structure
@@ -26,17 +28,22 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		"with code, file, line, and message. Pass take: 0 for a lightweight error-count-only check " +
 		"with no items returned. When take: 0, the response includes full counts but items is null — " +
 		"not an empty array. An empty array means items were requested but none matched; null means items were not requested. " +
-		"Covers C# type/symbol errors only. For NuGet restore failures, MSBuild target errors, or " +
+		"Covers C# type/symbol errors by default; set includeAnalyzers: true to also run the project's " +
+		"analyzer references and include their diagnostics — slower, and analyzer assemblies stay loaded " +
+		"(files locked) until the server exits. " +
+		"For NuGet restore failures, MSBuild target errors, or " +
 		"source generator issues, use roslyn_build_project instead.")]
-	public object GetDiagnostics(
+	public async Task<object> GetDiagnostics(
 		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken,
 		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project.")] string? filePath = null,
 		[Description("Filter by severity: 'errors', 'warnings', or 'all'. Omit to return all (errors and warnings).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items. When take: 0, items in the response is null (not an empty array).")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null)
+		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null,
+		[Description("When true, also runs the project's analyzer references (NuGet + project analyzers) via CompilationWithAnalyzers and includes their diagnostics. Slower than compiler-only; analyzer assemblies stay loaded until the server exits. Default: false.")] bool includeAnalyzers = false)
 	{
-		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { severity, skip, take });
+		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { severity, skip, take, includeAnalyzers });
 		
 		// Stateless page token overrides skip/severity — agents don't need to track offsets manually.
 		if(page_token is not null)
@@ -73,6 +80,25 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			diagnostics = compilation.GetDiagnostics()
 				.Where(d => IsUnderRoot(d, rootPath))
 			;
+		
+		string? analyzerNote = null;
+		
+		if(includeAnalyzers) {
+			
+			var (analyzerDiags, note) = await RunAnalyzersAsync(projectPath, compilation, cancellationToken);
+			
+			analyzerNote = note;
+			
+			var inRoot = analyzerDiags.Where(d => IsUnderRoot(d, rootPath));
+			
+			// Keep file-scoped queries file-scoped for analyzer output too; a missing
+			// file already produced an empty compiler set — add nothing.
+			diagnostics = filePath is null
+				? diagnostics.Concat(inRoot)
+				: FindSyntaxTree(compilation, filePath) is { } scopeTree
+					? diagnostics.Concat(inRoot.Where(d => d.Location.SourceTree == scopeTree))
+					: diagnostics;
+		}
 		
 		// Deduplicate by identity tuple — multi-TFM workspaces can surface the same
 		// diagnostic from duplicate document entries across target frameworks.
@@ -122,6 +148,9 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			}
 		}
 
+		if(analyzerNote is not null)
+			hint = hint is null ? analyzerNote : $"{analyzerNote} {hint}";
+		
 		// take: 0 fast path — return counts only. items is null (not []) to distinguish
 		// "not requested" from "requested but empty".
 		if(take is 0)
@@ -169,6 +198,47 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 				Hint = hint
 			}
 		);
+	}
+	
+	/// <summary>
+	///     Runs the project's analyzer references over the compilation via
+	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.
+	///     Analyzer failures must never break compiler diagnostics: any error (misbehaving
+	///     analyzer, unresolved analyzer reference) degrades to compiler-only output with an
+	///     explanatory note.
+	/// </summary>
+	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(string projectPath, Compilation compilation, CancellationToken cancellationToken)
+	{
+		try {
+			
+			var project   = workspace.GetProject(projectPath);
+			var analyzers = project.AnalyzerReferences
+				.SelectMany(r => r.GetAnalyzers(LanguageNames.CSharp))
+				.ToImmutableArray()
+			;
+			
+			if(analyzers.IsEmpty)
+				
+				return ([], "includeAnalyzers was requested, but the project has no analyzer references.");
+			
+			var options = new CompilationWithAnalyzersOptions(
+				project.AnalyzerOptions,
+				onAnalyzerException: null,
+				concurrentAnalysis: true,
+				logAnalyzerExecutionTime: false);
+			
+			var result = await new CompilationWithAnalyzers(compilation, analyzers, options)
+				.GetAnalysisResultAsync(cancellationToken)
+			;
+			
+			return ([..result.GetAllDiagnostics()], null);
+		}
+		catch(Exception ex) when(ex is not OperationCanceledException) {
+			
+			logger.LogError("Diagnostics", $"Analyzer run failed: {ex.GetType().Name}: {ex.Message}");
+			
+			return ([], $"Analyzer execution failed ({ex.GetType().Name}) — showing compiler diagnostics only.");
+		}
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.

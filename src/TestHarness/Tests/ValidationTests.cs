@@ -15,6 +15,21 @@ static class ValidationTests
 					new { projectPath = ctx.TargetPath },
 					data => data is not null)),
 			
+			// The target project consumes RoslynMcp.Analyzers, so a healthy analyzer run
+			// produces a summary WITHOUT the degraded-mode notes in hint.
+			new("roslyn_get_diagnostics: includeAnalyzers runs project analyzers",
+				() => ctx.RunTestAsync(
+					"roslyn_get_diagnostics",
+					new { projectPath = ctx.TargetPath, includeAnalyzers = true, take = 0 },
+					data => {
+						
+						var hint = data?["hint"]?.GetValue<string>();
+						
+						return data?["summary"] is not null
+							&& hint?.Contains("Analyzer execution failed") is not true
+							&& hint?.Contains("no analyzer references") is not true;
+					})),
+			
 			new("roslyn_build_project: smart Roslyn-first build",
 				() => ctx.RunTestAsync(
 					"roslyn_build_project",
