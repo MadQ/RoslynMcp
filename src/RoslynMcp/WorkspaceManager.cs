@@ -186,6 +186,13 @@ internal sealed partial class WorkspaceManager : IDisposable
 		return instance.GetSolution();
 	}
 	
+	/// <summary>
+	///     Load-health warnings for the workspace serving this path: MSBuild load failures and
+	///     projects whose metadata references were silently dropped by the design-time build.
+	/// </summary>
+	public string[] GetLoadWarnings(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).LoadWarnings;
+	
 	public Project GetProject(string resolvedProjectPath)
 	{
 		var instance = GetOrLoadInstance(resolvedProjectPath);

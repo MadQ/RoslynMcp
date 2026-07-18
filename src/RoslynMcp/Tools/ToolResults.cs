@@ -298,7 +298,8 @@ internal sealed record ProjectInfoResult(
 	[property: JsonPropertyName("root_namespace")]       string?   RootNamespace,
 	[property: JsonPropertyName("target_frameworks")]    string[]? TargetFrameworks,
 	[property: JsonPropertyName("allow_unsafe_blocks")]  bool?     AllowUnsafeBlocks,
-	[property: JsonPropertyName("warnings_as_errors")]   bool?     WarningsAsErrors
+	[property: JsonPropertyName("warnings_as_errors")]   bool?     WarningsAsErrors,
+	[property: JsonPropertyName("load_warnings")]        string[]? LoadWarnings
 ) : ToolResult;
 
 internal sealed record GetTriviaNoMatchResult(

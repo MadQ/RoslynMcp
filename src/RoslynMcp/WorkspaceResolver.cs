@@ -57,6 +57,13 @@ internal sealed class WorkspaceResolver
 		return manager.GetSolution(resolved);
 	}
 	
+	public string[] GetLoadWarnings(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.GetLoadWarnings(resolved);
+	}
+	
 	/// <summary>
 	///     Gets the root path for a resolved project.
 	///     Used for computing relative paths in tool responses.
