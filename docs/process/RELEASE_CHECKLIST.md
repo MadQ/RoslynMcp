@@ -122,19 +122,52 @@ gh release create vX.Y.Z-alpha --draft --prerelease `
 - [ ] Verify zip contents and release page look correct
 - [ ] Publish (un-draft) — ⚠️ requires TWO explicit user confirmations; never publish unilaterally
 
-### 5. Publish to NuGet (Future)
+### 5. Publish to NuGet (Trusted Publishing / OIDC)
 
 > **Package identity:** the package ships as **`MadQ.RoslynMcp`** with tool command
 > **`madq-roslynmcp`** — the plain `RoslynMcp` / `roslynmcp` names are taken by an unrelated
-> package on NuGet (chrismo80). Plan to reserve the `MadQ.*` ID prefix on nuget.org after the
-> first publish under that prefix.
+> package on NuGet (chrismo80).
+>
+> **Trusted Publishing (OIDC) — no API key.** Publishing runs through the `publish.yml`
+> workflow, which uses NuGet Trusted Publishing: the `NuGet/login@v1` step exchanges the
+> GitHub OIDC token for a short-lived key. There is **no `NUGET_API_KEY` secret** to store or
+> rotate. The workflow is gated on the `release` GitHub environment — add a required-reviewer
+> protection rule there for a manual approval gate before any token is minted.
+>
+> **`--prerelease` is required to install a prerelease-only version** (e.g. `0.8.1-beta`) —
+> `dotnet tool install --global MadQ.RoslynMcp --prerelease`.
+>
+> **Optional dress rehearsal:** before publishing to prod, push the package to
+> <https://int.nugettest.org> — a throwaway test gallery (uploads may not be preserved) that
+> renders the real nuget.org gallery page and README (Markdig) exactly. Best way to preview the
+> icon, tags, and README before the irreversible prod push. See
+> <https://learn.microsoft.com/nuget/nuget-org/publish-a-package>.
 
-```bash
+```powershell
+# 1. (optional) build the package locally to inspect the nuspec/icon/readme
 dotnet pack src/RoslynMcp/RoslynMcp.csproj -c Pack -o artifacts
-dotnet nuget push artifacts/MadQ.RoslynMcp.0.X.Y.nupkg \
-    --api-key $NUGET_API_KEY \
-    --source https://api.nuget.org/v3/index.json
+
+# 2. Dry run — build + OIDC login + pack, but skip the push. Proves the Trusted
+#    Publishing policy (repo + workflow + environment) is configured correctly.
+gh workflow run publish.yml --ref vX.Y.Z-beta -f dry_run=true
+
+# 3. Real publish — pushes to nuget.org. The dispatched ref must be the release tag,
+#    and the tag must point at the exact commit the package is built from.
+gh workflow run publish.yml --ref vX.Y.Z-beta -f dry_run=false
 ```
+
+> ⚠️ **Order matters:** publish to NuGet **before** un-drafting the GitHub release — the
+> release notes tell users to `dotnet tool install`, which 404s until NuGet has the package.
+>
+> ⚠️ **Point of no return:** once NuGet accepts a version it is **permanent** — it can never be
+> re-pushed (even after unlisting), so the tag can no longer be force-moved. Do all csproj-level
+> polish (icon, README, tags, release notes) and move the tag *before* the real push, while the
+> GitHub release is still a draft.
+
+- [ ] (optional) Dress-rehearse the gallery page + README render on int.nugettest.org
+- [ ] Dry run green (OIDC login + pack succeed)
+- [ ] Real publish — version accepted; tag now frozen
+- [ ] Verify install from prod: `dotnet tool install --global MadQ.RoslynMcp --prerelease`
 
 ### 6. Announce Release
 - [ ] Update README.md with new installation instructions (if NuGet published)
