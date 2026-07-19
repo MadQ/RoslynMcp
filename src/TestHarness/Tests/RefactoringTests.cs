@@ -267,7 +267,12 @@ internal static class RefactoringTests
 					data => data?["token"] is not null
 						&& data?["diff"]?.GetValue<string>().Contains("Obsolete") == true
 						&& data?["parameters_added"]?.AsArray().Count == 1
-						&& data?["deprecation_message"]?.GetValue<string>().Contains("NormalizePath") == true)),
+						&& data?["deprecation_message"]?.GetValue<string>().Contains("NormalizePath") == true
+						// Well-formedness of the synthesized code — regression guard for the
+						// unformatted-SyntaxFactory bugs (returnFoo, comma/equals spacing) and
+						// for the diff builder swallowing inserted lines as context.
+						&& data?["diff"]?.GetValue<string>().Contains("bool toLower = false") == true
+						&& data?["diff"]?.GetValue<string>().Contains("(string filePath) => NormalizePath(filePath, false);") == true)),
 			
 			new("roslyn_change_signature: reject non-method symbol",
 				() => ctx.RunTestAsync(

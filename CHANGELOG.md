@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Ambiguous symbol names never mutate a silent first match** — when a name-based lookup in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the server now asks the user to pick the intended one via MCP elicitation (when the client supports it) and otherwise fails with the candidate list (`kind display — file:line`) so the caller can disambiguate with `containingType` or `filePath`+`line`.
+- **`roslyn_change_signature` generates well-formed code** — the forwarding overload is now a compact expression-bodied stub (`old(...) => new(..., default);`) with correct comma/equals spacing; previously the synthesized nodes were rendered unformatted (`{returnFoo(...);}` with no space after `return`, `,bool x=false`) and the `[Obsolete]` attribute could detach from the stub. The XML doc comment stays on the updated method; the stub carries only the attribute.
+- **Unified diffs no longer misalign around insertions** — the diff builder emitted context lines positionally without verifying they still matched, so lines inserted right after a change (e.g. the signature-change stub) could be swallowed as "context" and the rest of the file rendered as spurious delete/re-add churn. Hunks are now built strictly from the matched-line alignment, so context lines are matched lines by construction.
 - **Metadata type lookup tolerates cross-assembly ambiguity** — `GetTypeByMetadataName` returns null when multiple referenced assemblies define the same name; lookups now fall back to `GetTypesByMetadataName`, preferring the source assembly.
 
 ### Security
