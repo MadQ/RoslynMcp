@@ -897,6 +897,34 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     Builds the structured ambiguous-name failure: candidate list with the exact
+	///     containingType / filePath+line values the agent needs for a self-recovering retry.
+	///     This is the default ambiguity response — elicitation only runs when the server was
+	///     started with --elicit (see <see cref="ServerArgs.Elicit"/>).
+	/// </summary>
+	protected static AmbiguousSymbolResult AmbiguousSymbolError(ISymbol[] candidates, string symbolName, string rootPath)
+	{
+		var items = candidates.Select(s => {
+			
+			var span = s.Locations.FirstOrDefault(l => l.IsInSource)?.GetLineSpan();
+			var file = span?.Path is { Length: > 0 } p ? TryMakeRelative(p, rootPath) ?? p : null;
+			
+			return new SymbolCandidate(
+				s.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+				s.Kind.ToString().ToLowerInvariant(),
+				s.ContainingType?.Name,
+				file,
+				span is { } sp ? sp.StartLinePosition.Line + 1 : 0);
+		}).ToArray();
+		
+		return new AmbiguousSymbolResult(
+			$"{candidates.Length} symbols match '{symbolName}'.",
+			items,
+			"Pick the intended symbol and re-call with its containingType (or filePath + line to pinpoint an overload, local, or parameter). " +
+			"If the user's intent is not clear from the conversation, ask them which candidate they meant.");
+	}
+	
+	/// <summary>
 	///     Resolves an ambiguous name to one symbol by asking the user through MCP elicitation
 	///     (single-select form). Returns null when the client lacks elicitation support, the user
 	///     declined, or the answer did not resolve — callers then fail with the candidate list so

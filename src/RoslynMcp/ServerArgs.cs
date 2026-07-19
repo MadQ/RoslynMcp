@@ -86,6 +86,14 @@ internal sealed class ServerArgs
     /// </summary>
     public string? MsBuildPath { get; }
 
+    /// <summary>
+    ///     Enables live MCP elicitation on ambiguous symbol matches (interactive picker) instead
+    ///     of the default structured candidate-list failure that agents recover from on their own.
+    ///     CLI: <c>--elicit</c> (bare flag, or explicit <c>true</c>/<c>false</c> value).
+    ///     Env: <c>ROSLYNMCP_ELICIT</c> = <c>true</c>. Default: <c>false</c>.
+    /// </summary>
+    public bool Elicit { get; }
+
     // ── Env var only ─────────────────────────────────────────────────────────
 
     /// <summary>
@@ -115,6 +123,7 @@ internal sealed class ServerArgs
 ;
         string? logPathFlag   = null;
         string? msBuildFlag   = null;
+        string? elicitFlag    = null; // "true"/"false" from CLI; null = flag absent
         var     preload       = new List<string>();
 		
 		var length = args.Length;
@@ -150,6 +159,11 @@ internal sealed class ServerArgs
                 case "--msbuild-path":
                     msBuildFlag = value;
                     break;
+
+                case "--elicit":
+                    // Bare flag means enabled; an explicit true/false value is also accepted.
+                    elicitFlag = value ?? "true";
+                    break;
             }
         }
 
@@ -160,6 +174,11 @@ internal sealed class ServerArgs
 
         LogPath     = logPathFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH");
         MsBuildPath = msBuildFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_MSBUILD_PATH");
+
+        Elicit = bool.TryParse(
+            elicitFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_ELICIT"),
+            out var elicit
+        ) && elicit;
 
         BackupPath = Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH");
 
