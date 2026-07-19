@@ -12,9 +12,10 @@
         <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
         
         <!-- In CI, fail on a stale/incomplete lock file instead of silently regenerating it.
-             Off for local dev so restore keeps auto-updating the lock. CI sets
-             ContinuousIntegrationBuild=true (see .github/workflows/build.yml). -->
-        <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+             Off for local dev so restore keeps auto-updating the lock. GITHUB_ACTIONS is
+             auto-set by every Actions workflow (build + publish), so locked mode can't be
+             forgotten there; ContinuousIntegrationBuild covers any non-Actions CI that sets it. -->
+        <RestoreLockedMode Condition="'$(GITHUB_ACTIONS)' == 'true' or '$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
         
 	</PropertyGroup>
 </Project>
