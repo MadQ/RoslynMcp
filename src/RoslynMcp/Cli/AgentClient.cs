@@ -25,8 +25,47 @@ abstract partial class AgentClient
 
     // Add or update the RoslynMcp entry in root.
     // Returns true when an existing entry was updated, false when one was added.
-    public abstract bool UpsertEntry(JsonObject root, string commandPath)
+    public abstract bool UpsertEntry(JsonObject root, string commandPath, ElicitMode elicitMode)
 ;
+
+    // The single server flag setup manages. Kept as a named constant so the token and the
+    // detection/removal logic never drift apart.
+    protected const string ElicitFlag = "--elicit";
+
+    // Builds the args array to write: preserves every existing arg except --elicit, then
+    // re-adds --elicit when the resolved state is on. Enable/Disable set it; Preserve keeps
+    // whatever the existing entry had. This means re-running setup/update never clobbers
+    // other user-added args.
+    protected static JsonArray ComposeArgs(IEnumerable<string> existingArgs, ElicitMode mode)
+    {
+        var kept       = existingArgs.Where(a => !a.Equals(ElicitFlag, StringComparison.OrdinalIgnoreCase)).ToList();
+        var hadElicit  = existingArgs.Any(a => a.Equals(ElicitFlag, StringComparison.OrdinalIgnoreCase));
+
+        var elicitOn = mode switch {
+
+            ElicitMode.Enable  => true,
+            ElicitMode.Disable => false,
+            _                  => hadElicit,   // Preserve
+        };
+
+        if(elicitOn)
+            kept.Add(ElicitFlag);
+
+        var array = new JsonArray();
+
+        foreach(var a in kept)
+            array.Add(a);
+
+        return array;
+    }
+
+    // Reads a JSON args array into plain strings, skipping non-string elements defensively.
+    protected static IEnumerable<string> ReadArgs(JsonArray? args) =>
+        args is null
+            ? []
+            : args.OfType<JsonValue>()
+                  .Select(v => v.TryGetValue<string>(out var s) ? s : null)
+                  .OfType<string>();
 
     // Extract the configured command path from an entry (schema varies per client).
     public abstract string? GetCommandPath(JsonObject entry)
@@ -78,7 +117,7 @@ abstract class McpServersDictClient : AgentClient
         return null;
     }
 
-    public override bool UpsertEntry(JsonObject root, string commandPath)
+    public override bool UpsertEntry(JsonObject root, string commandPath, ElicitMode elicitMode)
     {
         if(root[SectionKey] is not JsonObject servers)
         {
@@ -89,13 +128,16 @@ abstract class McpServersDictClient : AgentClient
         var existing = FindEntry(root);
         var isUpdate = existing is not null;
 
+        var existingArgs = existing is { } ex ? ReadArgs(ex.Entry["args"] as JsonArray) : [];
+        var args         = ComposeArgs(existingArgs, elicitMode);
+
         // Land on our namespaced key; drop any legacy/foreign key we are replacing so
         // subsequent runs match unambiguously (pass 1) and don't re-prompt. Callers gate
         // ambiguous matches with a confirmation before reaching this point.
         if(existing is { } e && !e.Key.Equals(ToolCommand.ServerKey, StringComparison.OrdinalIgnoreCase))
             servers.Remove(e.Key);
 
-        servers[ToolCommand.ServerKey] = BuildEntry(commandPath);
+        servers[ToolCommand.ServerKey] = BuildEntry(commandPath, args);
 
         return isUpdate;
     }
@@ -104,11 +146,11 @@ abstract class McpServersDictClient : AgentClient
         entry["command"] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null
 ;
 
-    protected virtual JsonObject BuildEntry(string commandPath) =>
+    protected virtual JsonObject BuildEntry(string commandPath, JsonArray args) =>
         new() {
 
             ["command"] = commandPath,
-            ["args"] = new JsonArray()
+            ["args"] = args
         };
 }
 
@@ -279,12 +321,12 @@ sealed class VsCodeCopilotClient : McpServersDictClient
         return [Path.Combine(XdgConfig, "Code", "User", "mcp.json")];
     }
 
-    protected override JsonObject BuildEntry(string commandPath) =>
+    protected override JsonObject BuildEntry(string commandPath, JsonArray args) =>
         new() {
 
             ["type"] = "stdio",
             ["command"] = commandPath,
-            ["args"] = new JsonArray()
+            ["args"] = args
         };
 }
 
@@ -300,12 +342,12 @@ sealed class CopilotCliClient : McpServersDictClient
         [Path.Combine(Home, ".copilot", "mcp-config.json")]
     ;
 
-    protected override JsonObject BuildEntry(string commandPath) =>
+    protected override JsonObject BuildEntry(string commandPath, JsonArray args) =>
         new() {
 
             ["type"]    = "stdio",
             ["command"] = commandPath,
-            ["args"]    = new JsonArray()
+            ["args"]    = args
         }
     ;
 }
@@ -360,7 +402,7 @@ sealed class ZedClient : AgentClient
         return null;
     }
 
-    public override bool UpsertEntry(JsonObject root, string commandPath)
+    public override bool UpsertEntry(JsonObject root, string commandPath, ElicitMode elicitMode)
     {
         if(root["context_servers"] is not JsonObject servers)
         {
@@ -371,6 +413,9 @@ sealed class ZedClient : AgentClient
         var existing = FindEntry(root);
         var isUpdate = existing is not null;
 
+        var existingArgs = existing is { } ex ? ReadArgs((ex.Entry["command"] as JsonObject)?["args"] as JsonArray) : [];
+        var args         = ComposeArgs(existingArgs, elicitMode);
+
         // Land on our namespaced key; drop any legacy/foreign key we are replacing.
         if(existing is { } e && !e.Key.Equals(ToolCommand.ServerKey, StringComparison.OrdinalIgnoreCase))
             servers.Remove(e.Key);
@@ -380,7 +425,7 @@ sealed class ZedClient : AgentClient
             ["command"] = new JsonObject {
 
                 ["path"] = commandPath,
-                ["args"] = new JsonArray()
+                ["args"] = args
             }
         };
 

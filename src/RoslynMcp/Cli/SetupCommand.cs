@@ -74,6 +74,23 @@ class SetupCommand : CliCommand
 
         WarnIfProcessesRunning();
 
+        // Opt-in: interactive elicitation on ambiguous symbol matches (writes --elicit into args).
+        // Default is No — the agent-first structured candidate list is the intended default.
+        Console.WriteLine("  On an ambiguous symbol match, roslyn_preview_rename / roslyn_change_signature");
+        Console.WriteLine("  return a structured candidate list the agent resolves on its own (default).");
+        Console.WriteLine("  With --elicit they instead ask you to pick — but only in MCP clients that");
+        Console.WriteLine("  support elicitation (Claude Code/Desktop do; many others don't and silently");
+        Console.WriteLine("  fall back to the candidate list).");
+        Console.Write("  Enable interactive elicitation (--elicit)? [y/N]: ");
+
+        var elicitAnswer = Console.ReadLine()?.Trim() ?? "";
+        var elicitMode   = elicitAnswer.Equals("y",   StringComparison.OrdinalIgnoreCase) ||
+                           elicitAnswer.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            ? ElicitMode.Enable
+            : ElicitMode.Disable;
+
+        Console.WriteLine();
+
         Console.WriteLine($"  Configuring {selected.Count} agent(s)...");
         Console.WriteLine();
 
@@ -92,7 +109,7 @@ class SetupCommand : CliCommand
                 continue;
             }
 
-            var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath);
+            var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath, elicitMode);
 
             switch(outcome.Result)
             {

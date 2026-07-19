@@ -147,6 +147,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - See [docs/reference/WORKSPACE_MODES.md](docs/reference/WORKSPACE_MODES.md) for detailed comparison and FAQ
 - **CLI flag:** `--workspace sdk|vs|adhoc|auto` (default: `auto`) — or set `ROSLYNMCP_WORKSPACE` env var to override
 
+**Ambiguity handling:** ambiguous symbol names in `roslyn_preview_rename` / `roslyn_change_signature` return a structured candidate list by default, so the agent self-recovers via `containingType` (or `filePath`+`line`). Start the server with `--elicit` (or `ROSLYNMCP_ELICIT=true`) to instead prompt the user interactively — requires an MCP client that supports elicitation; unsupported clients fall back to the candidate list.
+
 **Tool Selection Guidance:**
 
 > **⚠️ USE THE ROSLYN TOOLS. Every time. No exceptions unless the server is confirmed down.**
