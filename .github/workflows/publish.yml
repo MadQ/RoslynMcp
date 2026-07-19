@@ -32,7 +32,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore src/RoslynMcp/RoslynMcp.csproj
+        run: dotnet restore src/RoslynMcp/RoslynMcp.csproj --force-evaluate
 
       # -c Pack activates PackAsTool=true + ToolCommandName=madq-roslynmcp
       # (PackageId MadQ.RoslynMcp) in the csproj. PublishSingleFile is suppressed in

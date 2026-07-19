@@ -11,9 +11,14 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    # RestoreLockedMode and ContinuousIntegrationBuild are enabled in CI via Directory.Build.props
+    # ContinuousIntegrationBuild is enabled in CI via Directory.Build.props
     # (gated on GITHUB_ACTIONS, which the runner sets) — no per-workflow env needed here.
+    # RestoreLockedMode is intentionally NOT used here: SDK 10.0.302+ includes a machine
+    # RID and an SDK-versioned ILLink.Tasks entry in the restore graph, making the lock file
+    # inherently platform-specific. --force-evaluate regenerates the lock file per platform
+    # so restore always succeeds, which is NuGet's own recommended workaround (NU1004).
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         dotnet-version: ['10.0.x']
@@ -27,7 +32,7 @@ jobs:
         dotnet-version: ${{ matrix.dotnet-version }}
 
     - name: Restore dependencies
-      run: dotnet restore src/RoslynMcp/RoslynMcp.csproj
+      run: dotnet restore src/RoslynMcp/RoslynMcp.csproj --force-evaluate
 
     - name: Build
       run: dotnet build src/RoslynMcp/RoslynMcp.csproj --no-restore --configuration Release
