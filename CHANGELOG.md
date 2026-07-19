@@ -19,8 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Opt-in analyzer diagnostics** — `roslyn_get_diagnostics` gains `includeAnalyzers` to also run the project's analyzer references and include their findings; analyzer failures degrade to compiler-only output with an explanatory hint.
 - **Configurable workspace load timeout** — MSBuild loads are bounded by `ROSLYNMCP_LOAD_TIMEOUT_SECONDS` (default 300; `0` disables) instead of hanging indefinitely when MSBuild wedges.
 - **Post-load reference validation** — loads detect projects whose metadata references were silently dropped by a contended design-time build, retry once on a fresh workspace, and surface anything persistent via `load_warnings` on `roslyn_get_project_info`.
+- **`roslyn_check_drift`** — new read-only tool that detects FileSystemWatcher misses (network drives, buffer overflow) by comparing on-disk timestamps against the workspace's last sync, reporting drifted or deleted files with a hint to resync via `roslyn_respawn`.
+- **Load benchmarks** — `benchmarks/RoslynMcp.Benchmarks` BenchmarkDotNet suite measuring cold solution load, warm compilation cache hits, incremental text-change recompiles, and solution-wide reference search, with a recorded baseline in `benchmarks/BASELINE.md`.
 
 ### Changed
+- **Analyzer assemblies are shadow-copied** — `includeAnalyzers` diagnostics runs load analyzer DLLs from a per-content shadow copy under `%LOCALAPPDATA%\RoslynMcp\analyzer-shadow`, so the analyzed project's `bin\` output is never locked by the server; stale shadow copies are pruned by the server heartbeat.
 
 ### Fixed
 - **Ambiguous symbol names never mutate a silent first match** — when a name-based lookup in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the server now asks the user to pick the intended one via MCP elicitation (when the client supports it) and otherwise fails with the candidate list (`kind display — file:line`) so the caller can disambiguate with `containingType` or `filePath`+`line`.
