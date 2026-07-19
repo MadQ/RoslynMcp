@@ -1,4 +1,4 @@
-﻿name: Build and Test
+name: Build and Test
 permissions:
   contents: read
 
@@ -11,6 +11,10 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    # Enables RestoreLockedMode (see Directory.Build.props): CI fails on a stale/incomplete
+    # packages.lock.json instead of regenerating it. Also makes the Release build deterministic.
+    env:
+      ContinuousIntegrationBuild: true
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
