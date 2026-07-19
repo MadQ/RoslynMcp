@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Load benchmarks** — `benchmarks/RoslynMcp.Benchmarks` BenchmarkDotNet suite measuring cold solution load, warm compilation cache hits, incremental text-change recompiles, and solution-wide reference search, with a recorded baseline in `benchmarks/BASELINE.md`.
 
 ### Changed
+- **Cancelling a rename or signature change is reported as success, not failure** — calling `roslyn_apply_rename` or `roslyn_apply_signature_change` with approval `n` now returns a successful, non-error result (`error: null`, log `success: true`) instead of an `error: "rejected"` failure. Declining a preview is a deliberate outcome, not a broken call, so it no longer shows red in the log viewer or surfaces an error to the agent; the token is still consumed. Genuine failures (invalid approval, expired token, backup/write errors) are unchanged.
 - **Analyzer assemblies are shadow-copied** — `includeAnalyzers` diagnostics runs load analyzer DLLs from a per-content shadow copy under `%LOCALAPPDATA%\RoslynMcp\analyzer-shadow`, so the analyzed project's `bin\` output is never locked by the server; stale shadow copies are pruned by the server heartbeat.
 
 ### Fixed
