@@ -24,6 +24,16 @@
     <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
     <PublishSingleFile>true</PublishSingleFile>
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+
+    <!-- Source Link (built into the .NET SDK for github.com) + embedded PDBs: a
+         source-debuggable published tool with symbols inside the assemblies (no separate
+         snupkg). PublishRepositoryUrl writes the repo + commit into the package metadata;
+         deterministic source paths come from ContinuousIntegrationBuild (Directory.Build.props).
+         DebugType lives here (not per-config) so it also applies to the Pack configuration,
+         which otherwise defaulted to portable PDBs that pack omitted — shipping a symbol-less package. -->
+    <DebugType>embedded</DebugType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
 
   <!-- dotnet tool packaging — only active when building with -c Pack -->
@@ -50,7 +60,6 @@
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net10.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net11.0|AnyCPU'">
@@ -59,7 +68,6 @@
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net10.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net11.0|AnyCPU'">
