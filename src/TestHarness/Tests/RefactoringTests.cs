@@ -154,15 +154,20 @@ internal static class RefactoringTests
 					new { symbolName = "NormalizePath", newName = "NormalizePath2", containingType = "RoslynMcpTool", projectPath = ctx.TargetPath },
 					data => data?["token"] is not null)),
 			
-			// The harness client declares no elicitation capability, so the server must take the
-			// fail-with-candidates path — never a silent first match. GetSolution is naturally
-			// ambiguous in the target (WorkspaceManager, WorkspaceManager.Instance, WorkspaceResolver).
+			// The harness starts the server without --elicit, so ambiguity must take the default
+			// agent-first path: a structured candidates failure with the machine-usable retry
+			// fields — never a silent first match, never an interactive prompt. GetSolution is
+			// naturally ambiguous in the target (WorkspaceManager, WorkspaceInstance, WorkspaceResolver).
 			new("roslyn_preview_rename: ambiguous name fails with candidate list",
 				() => ctx.RunTestAsync(
 					"roslyn_preview_rename",
 					new { symbolName = "GetSolution", newName = "GetSolution2", projectPath = ctx.TargetPath },
 					data => data?["token"] is null
-						&& data?["message"]?.GetValue<string>()?.Contains("Multiple symbols match 'GetSolution'") == true)),
+						&& data?["error"]?.GetValue<string>()?.Contains("match 'GetSolution'") == true
+						&& data?["candidates"]?.AsArray().Count >= 2
+						&& data?["candidates"]?[0]?["containingType"]?.GetValue<string>() is not null
+						&& data?["candidates"]?[0]?["filePath"]?.GetValue<string>() is not null
+						&& data?["candidates"]?[0]?["line"]?.GetValue<int>() > 0)),
 			
 			// ── apply_rename ────────────────────────────────────────────────────────
 			

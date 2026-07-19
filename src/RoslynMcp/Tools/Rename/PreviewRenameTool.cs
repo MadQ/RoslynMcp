@@ -28,10 +28,11 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		"Provide containingType when multiple symbols share the same name to avoid ambiguous matches, " +
 		"or pass filePath+line (and optional column) to resolve the symbol at an exact source position — " +
 		"the precise way to rename one specific overload, local, or parameter. " +
-		"Ambiguous names never rename a first match: when the client supports MCP elicitation the user is asked " +
-		"to pick the intended symbol; otherwise the call fails with the candidate list. " +
+		"Ambiguous names never rename a first match: the call fails with a structured candidates list — " +
+		"re-call with a candidate's containingType, or filePath + line. (If the server was started with " +
+		"--elicit and the client supports MCP elicitation, the user is asked to pick instead.) " +
 		"For direct text replacement without a review step, use roslyn_replace_in_code instead.")]
-	public async Task<PreviewRenameResult> PreviewRename(
+	public async Task<object> PreviewRename(
 		[Description("Current symbol name to rename, e.g. 'WindowKey'. Use roslyn_get_type_members or roslyn_find_references to verify the exact name before renaming.")] string symbolName,
 		[Description("New name for the symbol, e.g. 'WindowIdentity'. Must be a valid C# identifier.")] string newName,
 		[Description(ProjectPathDescription)] string projectPath,
@@ -73,8 +74,9 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		else {
 			
 			// Renaming the wrong symbol mutates code silently — never fall back to a first match.
-			// On ambiguity, ask the user via MCP elicitation when the client supports it; otherwise
-			// fail with the candidate list so the agent retries with containingType or filePath+line.
+			// On ambiguity, fail with a structured candidate list so the agent retries with
+			// containingType or filePath+line on its own; interrupting the user with an
+			// interactive picker is a server-level opt-in (--elicit / ROSLYNMCP_ELICIT).
 			var candidates = FindSymbols(compilation, symbolName, containingType);
 			
 			symbol = candidates.Length == 1 ? candidates[0] : null;
@@ -83,15 +85,12 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 				
 				var rootPath = workspace.GetRootPath(projectPath);
 				
-				symbol = await TryElicitSymbolChoice(server, candidates, symbolName, rootPath, cancellationToken);
+				if(ServerArgs.Current.Elicit)
+					symbol = await TryElicitSymbolChoice(server, candidates, symbolName, rootPath, cancellationToken);
 				
 				if(symbol is null)
 					
-					return scope.Failed("ambiguous symbol", new PreviewRenameResult(
-						null, null,
-						$"Multiple symbols match '{symbolName}' — disambiguate with containingType or filePath+line: "
-							+ string.Join("; ", candidates.Select(c => FormatSymbolCandidate(c, rootPath))),
-						false));
+					return scope.Failed("ambiguous symbol", AmbiguousSymbolError(candidates, symbolName, rootPath));
 			}
 		}
 		
