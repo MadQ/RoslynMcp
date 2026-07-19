@@ -29,11 +29,14 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		"Returns a unified diff and a confirmation token — review the diff, then pass the token to roslyn_apply_signature_change to commit or cancel. " +
 		"Provide addParameters as a JSON array with name, type, and defaultValue for each new parameter. " +
 		"Provide containingType when multiple methods share the same name to avoid ambiguous matches. " +
+		"Ambiguous names never modify a first match: when the client supports MCP elicitation the user is asked " +
+		"to pick the intended method; otherwise the call fails with the candidate list. " +
 		"For direct file edits without a review step, use roslyn_replace_in_code instead.")]
 	public async Task<object> ChangeSignature(
 		[Description("Method name to change, e.g. 'ProcessOrder'. Use roslyn_get_type_members to verify the exact name before proceeding.")] string methodName,
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		McpServer server,
 		[Description("Optional containing type to disambiguate when multiple methods share the same name, e.g. 'OrderService'.")] string? containingType = null,
 		[Description("Parameters to add as a JSON array: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]. Each entry requires name, type, and defaultValue. Omit or pass null to preview the overload structure without adding parameters.")] string? addParameters = null)
 	{
@@ -43,7 +46,24 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var symbol = FindSymbol(compilation, methodName, containingType);
+		// Same ambiguity policy as roslyn_preview_rename: never modify a first match — elicit a
+		// choice when the client supports it, otherwise fail with the candidate list.
+		var candidates = FindSymbols(compilation, methodName, containingType);
+		
+		var symbol = candidates.Length == 1 ? candidates[0] : null;
+		
+		if(candidates.Length > 1) {
+			
+			var rootPath = workspace.GetRootPath(projectPath);
+			
+			symbol = await TryElicitSymbolChoice(server, candidates, methodName, rootPath, cancellationToken);
+			
+			if(symbol is null)
+				
+				return scope.Failed("ambiguous symbol", new ErrorResult(
+					$"Multiple symbols match '{methodName}'.",
+					"Disambiguate with containingType: " + string.Join("; ", candidates.Select(c => FormatSymbolCandidate(c, rootPath)))));
+		}
 		
 		if(symbol is not IMethodSymbol method)
 			

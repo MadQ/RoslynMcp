@@ -28,12 +28,15 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		"Provide containingType when multiple symbols share the same name to avoid ambiguous matches, " +
 		"or pass filePath+line (and optional column) to resolve the symbol at an exact source position — " +
 		"the precise way to rename one specific overload, local, or parameter. " +
+		"Ambiguous names never rename a first match: when the client supports MCP elicitation the user is asked " +
+		"to pick the intended symbol; otherwise the call fails with the candidate list. " +
 		"For direct text replacement without a review step, use roslyn_replace_in_code instead.")]
 	public async Task<PreviewRenameResult> PreviewRename(
 		[Description("Current symbol name to rename, e.g. 'WindowKey'. Use roslyn_get_type_members or roslyn_find_references to verify the exact name before renaming.")] string symbolName,
 		[Description("New name for the symbol, e.g. 'WindowIdentity'. Must be a valid C# identifier.")] string newName,
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		McpServer server,
 		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null,
 		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
 		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
@@ -62,9 +65,35 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		
 		// Position (line > 0) pinpoints one symbol — the precise way to rename one overload,
 		// local, or parameter. The compilation-based lookup keeps the symbol in this snapshot.
-		var symbol = line > 0
-			? await FindSymbolAtPosition(compilation, filePath!, line, column, cancellationToken)
-			: FindSymbol(compilation, symbolName, containingType);
+		ISymbol? symbol;
+		
+		if(line > 0)
+			symbol = await FindSymbolAtPosition(compilation, filePath!, line, column, cancellationToken);
+		
+		else {
+			
+			// Renaming the wrong symbol mutates code silently — never fall back to a first match.
+			// On ambiguity, ask the user via MCP elicitation when the client supports it; otherwise
+			// fail with the candidate list so the agent retries with containingType or filePath+line.
+			var candidates = FindSymbols(compilation, symbolName, containingType);
+			
+			symbol = candidates.Length == 1 ? candidates[0] : null;
+			
+			if(candidates.Length > 1) {
+				
+				var rootPath = workspace.GetRootPath(projectPath);
+				
+				symbol = await TryElicitSymbolChoice(server, candidates, symbolName, rootPath, cancellationToken);
+				
+				if(symbol is null)
+					
+					return scope.Failed("ambiguous symbol", new PreviewRenameResult(
+						null, null,
+						$"Multiple symbols match '{symbolName}' — disambiguate with containingType or filePath+line: "
+							+ string.Join("; ", candidates.Select(c => FormatSymbolCandidate(c, rootPath))),
+						false));
+			}
+		}
 		
 		if(symbol is null)
 			
