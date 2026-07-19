@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+- **Ambiguous symbol names never mutate a silent first match** — when a name-based lookup in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the server now asks the user to pick the intended one via MCP elicitation (when the client supports it) and otherwise fails with the candidate list (`kind display — file:line`) so the caller can disambiguate with `containingType` or `filePath`+`line`.
 - **Metadata type lookup tolerates cross-assembly ambiguity** — `GetTypeByMetadataName` returns null when multiple referenced assemblies define the same name; lookups now fall back to `GetTypesByMetadataName`, preferring the source assembly.
 
 ### Security

@@ -154,6 +154,16 @@ internal static class RefactoringTests
 					new { symbolName = "NormalizePath", newName = "NormalizePath2", containingType = "RoslynMcpTool", projectPath = ctx.TargetPath },
 					data => data?["token"] is not null)),
 			
+			// The harness client declares no elicitation capability, so the server must take the
+			// fail-with-candidates path — never a silent first match. GetSolution is naturally
+			// ambiguous in the target (WorkspaceManager, WorkspaceManager.Instance, WorkspaceResolver).
+			new("roslyn_preview_rename: ambiguous name fails with candidate list",
+				() => ctx.RunTestAsync(
+					"roslyn_preview_rename",
+					new { symbolName = "GetSolution", newName = "GetSolution2", projectPath = ctx.TargetPath },
+					data => data?["token"] is null
+						&& data?["message"]?.GetValue<string>()?.Contains("Multiple symbols match 'GetSolution'") == true)),
+			
 			// ── apply_rename ────────────────────────────────────────────────────────
 			
 			new("roslyn_apply_rename: rename class, verify file updated",

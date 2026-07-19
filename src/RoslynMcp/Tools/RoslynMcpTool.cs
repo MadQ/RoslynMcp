@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
 
@@ -882,6 +884,66 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		}
 		
 		return null;
+	}
+	
+	/// <summary>Formats one ambiguous-symbol candidate as "kind Display — file:line".</summary>
+	protected static string FormatSymbolCandidate(ISymbol symbol, string rootPath)
+	{
+		var span = symbol.Locations.FirstOrDefault(l => l.IsInSource)?.GetLineSpan();
+		var file = span?.Path is { Length: > 0 } p ? TryMakeRelative(p, rootPath) ?? p : "?";
+		var line = span is { } s ? s.StartLinePosition.Line + 1 : 0;
+		
+		return $"{symbol.Kind.ToString().ToLowerInvariant()} {symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} — {file}:{line}";
+	}
+	
+	/// <summary>
+	///     Resolves an ambiguous name to one symbol by asking the user through MCP elicitation
+	///     (single-select form). Returns null when the client lacks elicitation support, the user
+	///     declined, or the answer did not resolve — callers then fail with the candidate list so
+	///     the agent can retry with containingType or filePath+line. Elicitation-based
+	///     disambiguation follows darylmcd/Roslyn-Backed-MCP's UX (no code reused).
+	/// </summary>
+	protected static async Task<ISymbol?> TryElicitSymbolChoice(McpServer server, ISymbol[] candidates, string symbolName, string rootPath, CancellationToken cancellationToken)
+	{
+		if(server.ClientCapabilities?.Elicitation is null)
+			
+			return null;
+		
+		// Const values must be unique — display strings can collide (e.g. partial types), so the
+		// 1-based index is the round-tripped value and the display string is only the title.
+		var options = candidates
+			.Select((s, i) => new ElicitRequestParams.EnumSchemaOption {
+				Const = $"{i + 1}",
+				Title = FormatSymbolCandidate(s, rootPath),
+			})
+			.ToList();
+		
+		ElicitResult result;
+		
+		try {
+			result = await server.ElicitAsync(
+				new ElicitRequestParams {
+					Message         = $"Multiple symbols match '{symbolName}'. Which one should be used?",
+					RequestedSchema = new ElicitRequestParams.RequestSchema {
+						Properties = { ["symbol"] = new ElicitRequestParams.TitledSingleSelectEnumSchema { OneOf = options } },
+						Required   = ["symbol"],
+					},
+				},
+				cancellationToken);
+		}
+		catch(Exception ex) when(ex is not OperationCanceledException) {
+			// A client that advertises elicitation but fails the request must not break the tool —
+			// fall through to the candidate-list failure path.
+			return null;
+		}
+		
+		if(!result.IsAccepted || result.Content is not { } content || !content.TryGetValue("symbol", out var chosen))
+			
+			return null;
+		
+		return int.TryParse(chosen.GetString(), out var index) && index >= 1 && index <= candidates.Length
+			? candidates[index - 1]
+			: null;
 	}
 	
 	/// <summary>

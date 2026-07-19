@@ -16,7 +16,8 @@ namespace RoslynMcp.Analyzers;
 /// <remarks>
 ///     RMCP007 — The tool method itself is missing a <c>[Description]</c> attribute.
 ///     RMCP008 — A parameter on the tool method is missing a <c>[Description]</c> attribute
-///               (<c>CancellationToken</c> parameters are exempt — infrastructure, not agent-facing).
+///               (<c>CancellationToken</c> and <c>McpServer</c> parameters are exempt — SDK-injected
+///               infrastructure, never surfaced in the agent-facing tool schema).
 ///     RMCP009 — The <c>string projectPath</c> parameter uses an inline description string instead of the
 ///               <c>ProjectPathDescription</c> constant; inline text drifts and diverges.
 /// </remarks>
@@ -47,8 +48,8 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 		isEnabledByDefault: true,
 		description:
 			"Every parameter on a [McpServerTool] method must have a [Description] attribute. " +
-			"CancellationToken parameters are exempt — they are infrastructure and are not surfaced " +
-			"in the agent's tool schema. All other parameters require a description."
+			"CancellationToken and McpServer parameters are exempt — they are SDK-injected infrastructure " +
+			"and are not surfaced in the agent's tool schema. All other parameters require a description."
 	);
 	
 	private static readonly DiagnosticDescriptor Rule009 = new(
@@ -90,10 +91,10 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 		
 		foreach(var param in method.ParameterList.Parameters) {
 			
-			if(IsCancellationToken(param, context.SemanticModel))
+			if(IsSdkInjectedParam(param, context.SemanticModel))
 				continue;
 			
-			// RMCP008 — every non-CancellationToken parameter must have [Description]
+			// RMCP008 — every non-injected parameter must have [Description]
 			if(!HasDescriptionAttribute(param.AttributeLists)) {
 				
 				context.ReportDiagnostic(Diagnostic.Create(Rule008, param.Identifier.GetLocation(), methodName, param.Identifier.Text));
@@ -159,7 +160,9 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 		return false;
 	}
 	
-	private static bool IsCancellationToken(ParameterSyntax param, SemanticModel semanticModel)
+	// The MCP SDK binds these parameter types itself and excludes them from the generated tool
+	// schema, so a [Description] on them would never reach an agent.
+	private static bool IsSdkInjectedParam(ParameterSyntax param, SemanticModel semanticModel)
 	{
 		if(param.Type is null)
 			
@@ -167,6 +170,8 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 		
 		var typeInfo = semanticModel.GetTypeInfo(param.Type);
 		
-		return typeInfo.Type?.ToDisplayString() == "System.Threading.CancellationToken";
+		return typeInfo.Type?.ToDisplayString()
+			is "System.Threading.CancellationToken"
+			or "ModelContextProtocol.Server.McpServer";
 	}
 }
