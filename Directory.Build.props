@@ -17,15 +17,14 @@
              pathmapping sources. Guarded on '' so an explicit -p:/env value still wins. -->
         <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
         
-        <!-- In CI, RestoreLockedMode is effectively a no-op because the restore steps in
-             build.yml/publish.yml pass the force-evaluate flag, which overrides locked mode.
-             SDK 10.0.302+ includes the machine RID and an SDK-versioned ILLink.Tasks entry
-             in the restore graph, making the lock file inherently platform-specific and
-             incompatible with a single committed cross-platform lock file. The NuGet team's
-             recommended workaround for NU1004 is force-evaluate. The lock file is still
-             generated and committed so local developers and audit tools can track packages.
-             This property is kept so it can be re-enabled if per-platform lock files or
-             global.json SDK pinning is adopted later. -->
+        <!-- In CI, this property is set to true but is overridden by the force-evaluate
+             flag passed on the restore step in build.yml/publish.yml. SDK 10.0.302+ includes
+             the machine RID and an SDK-versioned ILLink.Tasks entry in the restore graph,
+             making the lock file inherently platform-specific and incompatible with a single
+             committed cross-platform lock file. The NuGet team's recommended workaround for
+             NU1004 is force-evaluate. The lock file is still generated and committed so local
+             developers and audit tools can track packages. This property is kept so it can be
+             re-enabled if per-platform lock files or global.json SDK pinning is adopted later. -->
         <RestoreLockedMode Condition="'$(GITHUB_ACTIONS)' == 'true' or '$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
         
 	</PropertyGroup>

@@ -13,10 +13,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     # ContinuousIntegrationBuild is enabled in CI via Directory.Build.props
     # (gated on GITHUB_ACTIONS, which the runner sets) — no per-workflow env needed here.
-    # RestoreLockedMode is intentionally NOT used here: SDK 10.0.302+ includes a machine
-    # RID and an SDK-versioned ILLink.Tasks entry in the restore graph, making the lock file
-    # inherently platform-specific. --force-evaluate regenerates the lock file per platform
-    # so restore always succeeds, which is NuGet's own recommended workaround (NU1004).
+    # RestoreLockedMode is set to true in Directory.Build.props but is overridden by
+    # --force-evaluate below: SDK 10.0.302+ adds the machine RID and an SDK-versioned
+    # ILLink.Tasks to the restore graph, making a single cross-platform lock file
+    # incompatible with RestoreLockedMode. --force-evaluate is NuGet's recommended fix (NU1004).
     strategy:
       fail-fast: false
       matrix:
