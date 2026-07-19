@@ -448,6 +448,7 @@ RoslynMcp.exe [options]
 | `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
 | `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
 | `--msbuild-path` | Override the MSBuild installation path used for workspace loading. |
+| `--elicit` | On an ambiguous symbol match, ask the user to pick interactively (MCP elicitation) instead of returning a structured candidate list. Opt-in; requires client elicitation support. Default: off. |
 | `-v`, `--version` | Print the server version and exit. |
 | `-h`, `--help` | Show CLI help and exit. |
 
@@ -464,6 +465,9 @@ RoslynMcp.exe [options]
 | `ROSLYNMCP_MAX_CACHED_WORKSPACES` | `5` | LRU workspace cache size. Increase for large multi-project workflows. |
 | `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Force a specific MSBuild installation path. |
 | `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
+| `ROSLYNMCP_ELICIT` | `false` | Set to `true` to enable interactive elicitation on ambiguous symbol matches (same as `--elicit`). Not all MCP clients support elicitation; unsupported clients fall back to the structured candidate list. |
+
+**Ambiguous symbol handling.** By default, when a name in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the tool returns a structured `candidates` list and the agent retries with a `containingType` (or `filePath`+`line`) on its own — no interruption. Enabling `--elicit` (or `ROSLYNMCP_ELICIT=true`) instead prompts you to pick interactively via MCP elicitation, in clients that support it (Claude Code/Desktop do; many others don't and fall back to the candidate list). The `madq-roslynmcp setup` wizard offers this as an opt-in prompt; you can also add it by hand to the server entry's args: `"args": ["--elicit"]`.
 
 ### Multi-project workspaces
 

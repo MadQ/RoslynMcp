@@ -5,6 +5,10 @@ namespace RoslynMcp.Cli;
 
 enum PatchResult { Added, Updated, Failed }
 
+// How setup/update should treat the --elicit server flag when writing an entry.
+// Preserve: keep whatever the existing entry had (used by `update`); Enable/Disable: set it (used by `setup`).
+enum ElicitMode { Preserve, Enable, Disable }
+
 record PatchOutcome(
     PatchResult Result,
     string? BackupPath = null,
@@ -26,7 +30,7 @@ static class AgentConfigPatcher
         CommentHandling = JsonCommentHandling.Skip
     };
 
-    public static PatchOutcome Patch(string configPath, AgentClient client, string commandPath)
+    public static PatchOutcome Patch(string configPath, AgentClient client, string commandPath, ElicitMode elicitMode)
     {
         string? backupPath = null;
         string? tempPath = null;
@@ -65,7 +69,7 @@ static class AgentConfigPatcher
                 root = obj;
             }
 
-            var isUpdate = client.UpsertEntry(root, commandPath);
+            var isUpdate = client.UpsertEntry(root, commandPath, elicitMode);
 
             // Atomic write: temp → final so a crash mid-write can't corrupt the config.
             tempPath = configPath + ".roslynmcp.tmp"

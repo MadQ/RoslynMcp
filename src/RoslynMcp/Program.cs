@@ -77,6 +77,10 @@ static int PrintHelp()
           -p, --preload      <path>   Pre-warm workspace on startup (repeatable)
               --log-path     <path>   Log file base path (empty string = disable logging)
               --msbuild-path <path>   Override MSBuild installation path
+              --elicit                On an ambiguous symbol match, ask the user to pick
+                                      interactively (MCP elicitation) instead of returning a
+                                      structured candidate list. Opt-in; needs client
+                                      elicitation support. Default: off.
           -v, --version               Print version and exit
           -h, --help                  Show this help and exit
 
@@ -86,6 +90,7 @@ static int PrintHelp()
           ROSLYNMCP_BACKUP_PATH          Backup storage path
           ROSLYNMCP_LOG_MAX_AGE_DAYS     Log retention in days (default: 30)
           ROSLYNMCP_BACKUP_MAX_AGE_DAYS  Backup retention in days (default: 90)
+          ROSLYNMCP_ELICIT               Set to true to enable --elicit (see Options)
 
         Documentation: https://github.com/MadQ/RoslynMcp
         """);

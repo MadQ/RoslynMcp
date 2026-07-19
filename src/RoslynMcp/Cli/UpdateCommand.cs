@@ -47,7 +47,7 @@ class UpdateCommand : CliCommand
                 continue;
             }
 
-            var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath);
+            var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath, ElicitMode.Preserve);
 
             switch(outcome.Result)
             {
