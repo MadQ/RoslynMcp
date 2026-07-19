@@ -118,6 +118,7 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 | — | investigation | LogViewer rework | `RoslynMcp.LogViewer` has active usability/correctness work; evaluate whether it should remain dev-only or become a broader supported surface | #118 |
 | — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
 | ✅ | enhancement | Surface persistent prune/log failures | `roslyn_info` now exposes `prune_errors` for persistent backup/log pruning failures — shipped in v0.8.0-beta | #176 |
+| — | enhancement | Per-project server args in `setup-project` | Let `setup-project` write applicable server startup args (`--elicit`, `--workspace`, …) to project-local MCP server config (e.g. `.vscode/mcp.json`, `.cursor/mcp.json`); follow-up to the #219 `setup` opt-in | #220 |
 
 **Theme:** The "wow" release. Capabilities that grep can't match and agents can't fake.
 
