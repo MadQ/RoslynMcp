@@ -147,11 +147,10 @@ internal static class SolutionDiff
 		var newLines = newText.Split(LineSeparators, StringSplitOptions.None);
 		var sb       = new System.Text.StringBuilder();
 		
-		// Simple greedy diff: find changed regions with 3-line context.
-		// Not a full Myers diff — sufficient for readable output on typical refactoring changes.
-		var lcs    = LongestCommonSubsequence(oldLines, newLines)
-		;
-		var hunks  = BuildHunkList(oldLines, newLines, lcs, context: 3);
+		// Simple greedy diff: pair up identical lines in order, then emit the gaps between
+		// pairs as hunks with 3-line context. Not a full Myers diff — sufficient for readable
+		// output on typical refactoring changes.
+		var hunks = BuildHunkList(oldLines, newLines, MatchLines(oldLines, newLines), context: 3);
 		
 		foreach(var hunk in hunks) {
 			
@@ -165,14 +164,14 @@ internal static class SolutionDiff
 	}
 	
 	/// <summary>
-	///     Greedy forward-matching of old lines into new lines. Returns a bool[] where
-	///     true = old line was matched (unchanged). O(n+m) space vs O(n*m) for full LCS DP.
+	///     Greedy forward matching of identical lines: pairs each new line with the earliest
+	///     unused old position past the previous match. O(n+m) space vs O(n*m) for full LCS DP.
 	///     Produces identical results for the common case (few scattered changes).
 	///     Slightly noisier hunks when many identical lines exist in different positions.
 	/// </summary>
-	private static bool[] LongestCommonSubsequence(string[] oldLines, string[] newLines)
+	private static List<(int OldIdx, int NewIdx)> MatchLines(string[] oldLines, string[] newLines)
 	{
-		var inLcs = new bool[oldLines.Length];
+		var pairs = new List<(int OldIdx, int NewIdx)>();
 		
 		// Map each line to its positions in the old file.
 		var oldPositions = new Dictionary<string, List<int>>()
@@ -191,9 +190,9 @@ internal static class SolutionDiff
 		var lastMatchedOld = -1
 		;
 		
-		foreach(var line in newLines) {
+		for(var ni = 0; ni < newLines.Length; ni++) {
 			
-			if(!oldPositions.TryGetValue(line, out var positions))
+			if(!oldPositions.TryGetValue(newLines[ni], out var positions))
 				continue;
 			
 			// Binary search for first position > lastMatchedOld.
@@ -220,76 +219,82 @@ internal static class SolutionDiff
 			
 			var oldPos = positions[best];
 			
-			inLcs[oldPos]  = true;
+			pairs.Add((oldPos, ni));
 			lastMatchedOld = oldPos;
 		}
 		
-		return inLcs;
+		return pairs;
 	}
 	
 	private sealed record Hunk(int OldStart, int OldLines, int NewStart, int NewLines, List<string> Lines);
 	
-	private static List<Hunk> BuildHunkList(string[] oldLines, string[] newLines, bool[] inLcs, int context)
+	/// <summary>
+	///     Builds hunks from the matched-pair alignment. Changed regions are the gaps between
+	///     consecutive pairs; regions separated by at most 2×context matched lines merge into
+	///     one hunk. Emitting strictly from the alignment keeps context lines truthful — they
+	///     are matched lines by construction, never positions assumed to still be in sync.
+	/// </summary>
+	private static List<Hunk> BuildHunkList(string[] oldLines, string[] newLines, List<(int OldIdx, int NewIdx)> matches, int context)
 	{
-		// Map LCS positions to new-file positions.
-		var hunks   = new List<Hunk>()
+		// Changed regions between consecutive pairs (ends exclusive). The sentinel pair closes
+		// the final region when either file has trailing unmatched lines.
+		var regions = new List<(int OldStart, int OldEnd, int NewStart, int NewEnd)>()
 		;
-		var oi      = 0; // old index
-		var ni      = 0; // new index
-		var lcsIdx  = 0;
-		var oldLen  = oldLines.Length;
-		var newLen  = newLines.Length;
-		var lcsLen  = inLcs.Length;
+		var oi = 0;
+		var ni = 0;
 		
-		while(oi < oldLen || ni < newLen) {
+		foreach(var (mo, mn) in matches.Append((oldLines.Length, newLines.Length))) {
 			
-			if(lcsIdx < lcsLen && inLcs[lcsIdx] && oi < oldLen && ni < newLen && oldLines[oi] == newLines[ni]) {
-				
-				oi++;
-				ni++;
-				lcsIdx++;
-				continue;
-			}
+			if(oi < mo || ni < mn)
+				regions.Add((oi, mo, ni, mn));
 			
-			// Start of a changed region.
-			var hunkOldStart = Math.Max(0, oi - context)
+			oi = mo + 1;
+			ni = mn + 1;
+		}
+		
+		var hunks = new List<Hunk>();
+		
+		for(var r = 0; r < regions.Count; ) {
+			
+			// Merge regions whose surrounding context would touch or overlap.
+			var group = r + 1
 			;
-			var hunkNewStart = Math.Max(0, ni - context);
+			
+			while(group < regions.Count && regions[group].OldStart - regions[group - 1].OldEnd <= context * 2)
+				group++;
+			
+			var first        = regions[r];
+			var last         = regions[group - 1];
+			var hunkOldStart = Math.Max(0, first.OldStart - context);
+			var hunkOldEnd   = Math.Min(oldLines.Length, last.OldEnd + context);
+			var hunkNewStart = first.NewStart - (first.OldStart - hunkOldStart);
 			var lines        = new List<string>();
+			var newCount     = 0;
 			
-			// Leading context.
-			for(var c = hunkOldStart; c < oi; c++)
-				lines.Add(" " + oldLines[c]);
-			
-			// Changed lines.
-			var hunkOi = oi
-			;
-			var hunkNi = ni;
-			
-			while(oi < oldLen || ni < newLen) {
+			for(var i = r; i < group; i++) {
 				
-				var atLcs = lcsIdx < lcsLen && inLcs[lcsIdx]
-					&& oi < oldLen && ni < newLen
-					&& oldLines[oi] == newLines[ni];
+				var (regOldStart, regOldEnd, regNewStart, regNewEnd) = regions[i]
+				;
+				var contextFrom = i == r ? hunkOldStart : regions[i - 1].OldEnd;
 				
-				if(atLcs)
-					break;
+				// Context between the previous region (or hunk start) and this region —
+				// matched lines, identical in both files.
+				for(var c = contextFrom; c < regOldStart; c++, newCount++)
+					lines.Add(" " + oldLines[c]);
 				
-				// If ni is exhausted, the LCS match can never be reached — treat as deletion.
-				if(oi < oldLen && (lcsIdx >= lcsLen || !inLcs[lcsIdx] || ni >= newLen)) {
-					
-					lines.Add("-" + oldLines[oi++]);
-					lcsIdx++;
-				}
-				else if(ni < newLen)
-					lines.Add("+" + newLines[ni++]);
+				for(var c = regOldStart; c < regOldEnd; c++)
+					lines.Add("-" + oldLines[c]);
+				
+				for(var c = regNewStart; c < regNewEnd; c++, newCount++)
+					lines.Add("+" + newLines[c]);
 			}
 			
 			// Trailing context.
-			for(var c = 0; c < context && oi < oldLen && ni < newLen; c++, oi++, ni++, lcsIdx++)
-				lines.Add(" " + oldLines[oi]);
+			for(var c = last.OldEnd; c < hunkOldEnd; c++, newCount++)
+				lines.Add(" " + oldLines[c]);
 			
-			hunks.Add(new Hunk(hunkOldStart, oi - hunkOldStart, hunkNewStart, ni - hunkNewStart, lines));
+			hunks.Add(new Hunk(hunkOldStart, hunkOldEnd - hunkOldStart, hunkNewStart, newCount, lines));
+			r = group;
 		}
 		
 		return hunks;
