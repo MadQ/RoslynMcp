@@ -8,5 +8,8 @@
         
         <Copyright>Copyright (c) 2026 Quinten Martens &lt;madq42@gmail.com&gt;</Copyright>
         
+        <!-- Pin transitive package versions in a committed packages.lock.json per project. -->
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+        
 	</PropertyGroup>
 </Project>
