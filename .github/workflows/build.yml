@@ -11,10 +11,8 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
-    # Enables RestoreLockedMode (see Directory.Build.props): CI fails on a stale/incomplete
-    # packages.lock.json instead of regenerating it. Also makes the Release build deterministic.
-    env:
-      ContinuousIntegrationBuild: true
+    # RestoreLockedMode and ContinuousIntegrationBuild are enabled in CI via Directory.Build.props
+    # (gated on GITHUB_ACTIONS, which the runner sets) — no per-workflow env needed here.
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
