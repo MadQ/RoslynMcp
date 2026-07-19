@@ -11,5 +11,10 @@
         <!-- Pin transitive package versions in a committed packages.lock.json per project. -->
         <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
         
+        <!-- In CI, fail on a stale/incomplete lock file instead of silently regenerating it.
+             Off for local dev so restore keeps auto-updating the lock. CI sets
+             ContinuousIntegrationBuild=true (see .github/workflows/build.yml). -->
+        <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+        
 	</PropertyGroup>
 </Project>
