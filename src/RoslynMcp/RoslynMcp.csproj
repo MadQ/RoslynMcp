@@ -4,6 +4,12 @@
     <OutputType>Exe</OutputType>
     <!-- .NET 10 is the minimum runtime (GA LTS); net11.0 auto-added below when its SDK is present -->
     <TargetFrameworks>net10.0</TargetFrameworks>
+    <!-- Declares the CI matrix RIDs so every restore resolves all of them and packages.lock.json
+         stays multi-RID on any host — a plain local restore can't trim it to the host RID, and
+         locked-mode CI passes on every platform. Excluded from the Pack config, where it would
+         otherwise make dotnet pack emit RID-specific tool packages. A plain build stays
+         framework-dependent (a RID build needs an explicit -r). -->
+    <RuntimeIdentifiers Condition="'$(Configuration)' != 'Pack'">win-x64;linux-x64;osx-arm64</RuntimeIdentifiers>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>

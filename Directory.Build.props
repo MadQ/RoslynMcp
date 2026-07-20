@@ -17,14 +17,13 @@
              pathmapping sources. Guarded on '' so an explicit -p:/env value still wins. -->
         <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
         
-        <!-- In CI, this property is set to true but is overridden by the force-evaluate
-             flag passed on the restore step in build.yml/publish.yml. SDK 10.0.302+ includes
-             the machine RID and an SDK-versioned ILLink.Tasks entry in the restore graph,
-             making the lock file inherently platform-specific and incompatible with a single
-             committed cross-platform lock file. The NuGet team's recommended workaround for
-             NU1004 is force-evaluate. The lock file is still generated and committed so local
-             developers and audit tools can track packages. This property is kept so it can be
-             re-enabled if per-platform lock files or global.json SDK pinning is adopted later. -->
+        <!-- In CI, fail on a stale/incomplete lock file instead of silently regenerating it —
+             genuinely enforced (force-evaluate removed). This is durable because the restore graph
+             is stable: global.json pins the SDK (10.0.302), so SDK-versioned packages like
+             ILLink.Tasks don't drift, and RuntimeIdentifiers in RoslynMcp.csproj makes the graph
+             platform-independent (win-x64;linux-x64;osx-arm64), so one committed multi-RID
+             packages.lock.json satisfies every matrix platform. GITHUB_ACTIONS auto-fires in
+             every Actions workflow; ContinuousIntegrationBuild covers any non-Actions CI. -->
         <RestoreLockedMode Condition="'$(GITHUB_ACTIONS)' == 'true' or '$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
         
 	</PropertyGroup>
