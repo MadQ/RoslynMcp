@@ -32,6 +32,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_find_implementations", symbolName, new { containingType, skip, take });
 		
+		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);

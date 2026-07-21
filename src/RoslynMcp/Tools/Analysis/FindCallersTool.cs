@@ -40,6 +40,10 @@ internal sealed class FindCallersTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_find_callers", symbolName, new { containingType, isDirect, skip, take, line });
 		
+		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		if(scope.TryServeCachedPage<CallerEntry>(page_token, ref skip, ref take, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);

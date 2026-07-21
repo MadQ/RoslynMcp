@@ -45,6 +45,12 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}", new { containingType, line });
 		
+		if(!TryStripChatSymbolRef(ref symbolName, out var refError)             ||
+		   !TryStripChatSymbolRef(ref newName,    out refError)                 ||
+		   !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		// Use TryGetProject so symbol and solution both derive from the same workspace
 		// snapshot — Renamer.RenameSymbolAsync requires the symbol to belong to the
 		// solution it receives.
