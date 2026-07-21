@@ -36,8 +36,6 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 ## Quick Start
 
-> **TL;DR:** Download the [latest release zip](https://github.com/MadQ/RoslynMcp/releases/latest), extract it, and add `"command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"` to your client's MCP config. Tell your agent to pass `projectPath` with every `roslyn_*` call. Done. Details below.
-
 **1. Get RoslynMcp**
 
 **Option A — Install from NuGet as a .NET tool** (requires .NET 10 or 11 SDK; easiest to keep updated):
@@ -71,15 +69,16 @@ manual JSON in step 2 below.
 
 Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
 
-**Option C — Clone and build** (requires .NET 10 or 11 SDK):
+**Option C — Clone and build** (requires .NET 10 or 11 SDK; for contributing or testing local changes):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg --include-symbols -c Debug
+dotnet tool install --global MadQ.RoslynMcp --add-source ./nupkg --version 0.8.1-beta
 ```
 
-The executable will be at `./publish/net10.0/RoslynMcp.exe`.
+This installs your local build as the `madq-roslynmcp` command, exactly like Option A — run `madq-roslynmcp setup` from there. (Made more code changes? Re-pack, then `dotnet tool uninstall --global MadQ.RoslynMcp` before reinstalling — a stale global install otherwise keeps serving the old build.)
 
 **2. Add to your MCP client config.**
 

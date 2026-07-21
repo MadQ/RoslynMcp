@@ -15,13 +15,21 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 ## Quick Start
 
-1. **Get the binary:** Either download the latest `net10.0` release zip from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere, **or** install via dotnet tool:
+1. **Get the binary:** Install as a global .NET tool:
 
    ```bash
    dotnet tool install -g MadQ.RoslynMcp --prerelease
    ```
 
-2. **Add to your client config.** Most clients take a JSON block like this (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
+   Or download the latest `net10.0` release zip from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere.
+
+2. **Configure your client.** If you installed via `dotnet tool`, run:
+
+   ```bash
+   madq-roslynmcp setup
+   ```
+
+   `setup` detects your installed MCP-compatible clients and writes the server config for you. Otherwise, add a JSON block like this to your client's config (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
 
    ```json
    {
@@ -55,35 +63,34 @@ See the client sections below for exact config file locations and JSON structure
 
 ### Step 1: Get RoslynMcp
 
-**Option A — Download and extract** (simplest, no SDK required):
-
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
-
-**Option B — dotnet tool** (recommended for .NET developers, requires .NET SDK):
+**Option A — dotnet tool** (recommended for .NET developers, requires .NET SDK):
 
 ```bash
 dotnet tool install -g MadQ.RoslynMcp --prerelease
 ```
 
-This installs `madq-roslynmcp` globally on PATH. Use `"madq-roslynmcp"` as the command in your client config — no path needed.
+This installs `madq-roslynmcp` globally on PATH. Use `"madq-roslynmcp"` as the command in your client config — no path needed. Then run `madq-roslynmcp setup` to auto-detect your installed clients and write the config for you (see Step 2 for the manual alternative).
 
-**Option C — Clone and build** (requires .NET 10 or 11 SDK):
+**Option B — Download and extract** (simplest, no SDK required):
+
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
+
+**Option C — Clone and build** (requires .NET 10 or 11 SDK; for contributing or testing local changes):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg --include-symbols -c Debug
+dotnet tool install --global MadQ.RoslynMcp --add-source ./nupkg --version 0.8.1-beta
 ```
 
-**Choose your framework:**
-- `net10.0` — .NET 10 (recommended)
-- `net11.0` — .NET 11 (auto-added when .NET 11 SDK is detected)
+This installs your local build as `madq-roslynmcp` on PATH — exactly like Option A, so use the **Option A / C** config below. After making code changes and re-packing, run `dotnet tool uninstall --global MadQ.RoslynMcp` before reinstalling — a stale global install otherwise keeps serving the old build.
 
 ### Step 2: Configure Your MCP Client
 
 Point your MCP client to the server using one of these approaches:
 
-**Option A / C — absolute path** (download or clone/build):
+**Option B — absolute path** (download and extract):
 
 ```json
 {
@@ -94,7 +101,7 @@ Point your MCP client to the server using one of these approaches:
 }
 ```
 
-**Option B — dotnet tool (global install):**
+**Option A / C — dotnet tool (global install):**
 
 ```json
 {
