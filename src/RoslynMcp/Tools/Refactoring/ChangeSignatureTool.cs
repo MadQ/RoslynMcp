@@ -43,6 +43,10 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_change_signature", containingType is not null ? $"{containingType}.{methodName}" : methodName, new { containingType, addParameters });
 		
+		if(!TryStripChatSymbolRef(ref methodName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);

@@ -31,6 +31,10 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName, new { skip, take });
 		
+		if(!TryStripChatSymbolRef(ref typeName, out var refError))
+			
+			return scope.Error(refError!);
+		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);

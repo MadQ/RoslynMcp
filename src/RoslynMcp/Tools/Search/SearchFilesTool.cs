@@ -41,57 +41,54 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
+		var options = RegexOptions.Compiled;
+		
+		if(!caseSensitive)
+			options |= RegexOptions.IgnoreCase;
+		
 		Regex regex;
 		
 		try {
-			
-			var options = RegexOptions.Compiled;
-			
-			if(!caseSensitive)
-				options |= RegexOptions.IgnoreCase;
-			
 			regex = new Regex(pattern, options);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
 		
-		var solution   = workspace.GetSolution(projectPath);
-		var rootPath   = workspace.GetRootPath(projectPath);
-		var allMatches = new List<MatchResult>();
-		// seenPaths prevents searching the same physical file twice in multi-targeted projects.
-		var seenPaths  = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-		;
+		var solution = workspace.GetSolution(projectPath);
+		var rootPath = workspace.GetRootPath(projectPath);
 		
-		foreach(var project in solution.Projects)
-			foreach(var document in project.Documents) {
+		var allMatches = await CollectAsync(regex);
+		
+		// Chat-reference fallback (#228): a 'sym:'-prefixed pattern that matched nothing verbatim
+		// is retried with the prefix stripped — literal 'sym:' searches stay verbatim-first.
+		string? fallbackCaution = null;
+		string? fallbackHint    = null;
+		
+		if(allMatches.Count == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
+			
+			if(stripped.Length == 0)
+				fallbackHint = ChatRefTruncatedHint;
+			else {
 				
-				if(document.FilePath is null || !seenPaths.Add(document.FilePath))
-					continue;
+				Regex? strippedRegex = null;
 				
-				var fileName = Path.GetFileName(document.FilePath);
-				
-				if(!GlobMatcher.Matches(fileName, filePattern))
-					continue;
-				
-				var text  = await document.GetTextAsync(cancellationToken);
-				var lines = text.Lines;
-				
-				for(int i = 0; i < lines.Count; i++) {
-					
-					var lineText = lines[i].ToString();
-					
-					if(regex.IsMatch(lineText)) {
-						
-						allMatches.Add(new MatchResult {
-							
-							File = Path.GetRelativePath(rootPath, document.FilePath),
-							Line = i + 1,
-							Text = lineText.Trim()
-						});
-					}
+				try {
+					strippedRegex = new Regex(stripped, options);
 				}
+				catch(ArgumentException) { }
+				
+				var retry = strippedRegex is null ? null : await CollectAsync(strippedRegex);
+				
+				if(retry is { Count: > 0 }) {
+					
+					allMatches      = retry;
+					fallbackCaution = ChatRefFallbackCaution(pattern, stripped);
+				}
+				else
+					fallbackHint = ChatRefBothTriedHint(pattern, stripped);
 			}
+		}
 		
 		var allResults = allMatches.ToArray();
 		var result     = PaginateAndStore(allResults, ref skip, take);
@@ -103,8 +100,49 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			result.PageToken,
 			result.HasMore)
 		{
-			Caution = AdhocCaution(projectPath)
+			Caution = ComposeCautions(fallbackCaution, AdhocCaution(projectPath)),
+			Hint    = fallbackHint
 		});
+		
+		async Task<List<MatchResult>> CollectAsync(Regex rx)
+		{
+			var matches = new List<MatchResult>();
+			// seenPaths prevents searching the same physical file twice in multi-targeted projects.
+			var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+			;
+			
+			foreach(var project in solution.Projects)
+				foreach(var document in project.Documents) {
+					
+					if(document.FilePath is null || !seenPaths.Add(document.FilePath))
+						continue;
+					
+					var fileName = Path.GetFileName(document.FilePath);
+					
+					if(!GlobMatcher.Matches(fileName, filePattern))
+						continue;
+					
+					var text  = await document.GetTextAsync(cancellationToken);
+					var lines = text.Lines;
+					
+					for(int i = 0; i < lines.Count; i++) {
+						
+						var lineText = lines[i].ToString();
+						
+						if(rx.IsMatch(lineText)) {
+							
+							matches.Add(new MatchResult {
+								
+								File = Path.GetRelativePath(rootPath, document.FilePath),
+								Line = i + 1,
+								Text = lineText.Trim()
+							});
+						}
+					}
+				}
+			
+			return matches;
+		}
 	}
 	
 	private sealed class MatchResult

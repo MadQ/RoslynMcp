@@ -170,6 +170,51 @@ static class ValidationTests
 						? (true, "PASS  (drift detected, then healed)")
 						: (false, $"FAIL  (drift did not heal after flush) {msg2}");
 				}),
+			
+			// #228: VS Code Copilot chat serializes backticked terms as 'sym:'-prefixed references.
+			// Tier 1 (name params): the prefix is stripped eagerly — identifiers cannot contain ':'.
+			new("roslyn_find_references: strips sym: chat-reference prefix from symbolName",
+				() => ctx.RunTestAsync(
+					"roslyn_find_references",
+					new { symbolName = "sym:GetCompilation", projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["total_references"]?.GetValue<int>() > 0)),
+			
+			// Tier 1, bare prefix: the name was truncated upstream — structured error + recovery hint.
+			new("roslyn_find_references: bare sym: prefix errors with recovery hint",
+				() => ctx.RunTestAsync(
+					"roslyn_find_references",
+					new { symbolName = "sym:", projectPath = ctx.TargetPath },
+					data => data?["error"] is not null
+						&& data?["hint"]?.GetValue<string>()?.Contains("Re-send the plain symbol name") == true)),
+			
+			// Tier 2 fallback: the probe pattern is concatenated so this file (which IS part of the
+			// searched corpus — the workspace loads the full solution) never contains it verbatim.
+			// The verbatim search finds nothing, the stripped retry fires — 'BeginTool' results + caution.
+			new("roslyn_semantic_search: sym:-prefixed pattern falls back with caution",
+				() => ctx.RunTestAsync(
+					"roslyn_semantic_search",
+					new { pattern = "sym:" + "Begin" + "Tool", projectPath = ctx.TargetPath },
+					data => data?["total_matches"]?.GetValue<int>() > 0
+						&& data?["_caution"]?.GetValue<string>()?.Contains("chat symbol reference") == true)),
+			
+			// Tier 2 verbatim-first: the server source contains literal 'sym:' text (this feature's
+			// own strings and comments), so a bare 'sym:' pattern matches verbatim — no fallback caution.
+			new("roslyn_semantic_search: literal sym: text still matches verbatim",
+				() => ctx.RunTestAsync(
+					"roslyn_semantic_search",
+					new { pattern = "sym:", projectPath = ctx.TargetPath },
+					data => data?["total_matches"]?.GetValue<int>() > 0
+						&& data?["_caution"]?.GetValue<string>()?.Contains("chat symbol reference") is not true)),
+			
+			// Tier 2, both readings empty: verbatim and stripped both miss — hint says both were tried.
+			// Concatenated for the same reason as above: neither the prefixed nor the stripped form
+			// may appear verbatim anywhere in the searched corpus (which includes this file).
+			new("roslyn_semantic_search: sym:-prefixed miss hints both readings tried",
+				() => ctx.RunTestAsync(
+					"roslyn_semantic_search",
+					new { pattern = "sym:" + "NoSuchName" + "Xyzzy", projectPath = ctx.TargetPath },
+					data => data?["total_matches"]?.GetValue<int>() == 0
+						&& data?["hint"]?.GetValue<string>()?.Contains("also tried") == true)),
 		};
 		
 		return new TestGroup($"Validation Tools ({tests.Count} tests)", tests, Teardown: () =>

@@ -63,15 +63,14 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 
 			return scope.Outcome("cached page", cached);
 
+		var opts = RegexOptions.Compiled;
+
+		if(!caseSensitive)
+			opts |= RegexOptions.IgnoreCase;
+
 		Regex regex;
 
 		try {
-
-			var opts = RegexOptions.Compiled;
-
-			if(!caseSensitive)
-				opts |= RegexOptions.IgnoreCase;
-
 			regex = useGlob
 				? new Regex(BuildGlobRegex(pattern), opts)
 				: new Regex(pattern, opts)
@@ -81,58 +80,43 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Invalid pattern: {ex.Message}"));
 		}
 
-		var solution   = workspace.GetSolution(projectPath);
-		var rootPath   = workspace.GetRootPath(projectPath);
-		var allMatches = new List<StringLiteralMatch>();
-		// seenPaths prevents searching the same physical file twice in multi-targeted projects.
-		var seenPaths  = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var solution = workspace.GetSolution(projectPath);
+		var rootPath = workspace.GetRootPath(projectPath);
 
-		foreach(var project in solution.Projects)
-			foreach(var document in project.Documents) {
+		var allMatches = await CollectAsync(regex);
 
-				if(document.FilePath is null || !seenPaths.Add(document.FilePath))
-					continue;
+		// Chat-reference fallback (#228): a 'sym:'-prefixed pattern that matched nothing verbatim
+		// is retried with the prefix stripped — literal 'sym:' searches stay verbatim-first.
+		string? fallbackCaution = null;
+		string? fallbackHint    = null;
 
-				var fileName = Path.GetFileName(document.FilePath);
+		if(allMatches.Count == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
 
-				if(!GlobMatcher.Matches(fileName, filePattern))
-					continue;
+			if(stripped.Length == 0)
+				fallbackHint = ChatRefTruncatedHint;
+			else {
 
-				if(!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-					continue;
+				Regex? strippedRegex = null;
 
-				var tree = await document.GetSyntaxTreeAsync(cancellationToken);
-
-				if(tree is null)
-					continue;
-
-				var root         = tree.GetRoot(cancellationToken);
-				var sourceText   = tree.GetText(cancellationToken);
-				var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
-
-				foreach(var token in root.DescendantTokens()) {
-
-					var tk = token.Kind();
-
-					if(tk is not (SyntaxKind.StringLiteralToken or
-					              SyntaxKind.InterpolatedStringTextToken or
-					              SyntaxKind.SingleLineRawStringLiteralToken or
-					              SyntaxKind.MultiLineRawStringLiteralToken or
-					              SyntaxKind.Utf8StringLiteralToken or
-					              SyntaxKind.Utf8SingleLineRawStringLiteralToken or
-					              SyntaxKind.Utf8MultiLineRawStringLiteralToken))
-						continue;
-
-					var candidate = matchRaw ? token.Text : token.ValueText;
-
-					if(!regex.IsMatch(candidate))
-						continue;
-
-					var pos = sourceText.Lines.GetLinePosition(token.SpanStart);
-
-					allMatches.Add(new StringLiteralMatch(relativePath, pos.Line + 1, pos.Character + 1, token.Text, token.ValueText));
+				try {
+					strippedRegex = useGlob
+						? new Regex(BuildGlobRegex(stripped), opts)
+						: new Regex(stripped, opts)
+					;
 				}
+				catch(ArgumentException) { }
+
+				var retry = strippedRegex is null ? null : await CollectAsync(strippedRegex);
+
+				if(retry is { Count: > 0 }) {
+
+					allMatches      = retry;
+					fallbackCaution = ChatRefFallbackCaution(pattern, stripped);
+				}
+				else
+					fallbackHint = ChatRefBothTriedHint(pattern, stripped);
 			}
+		}
 
 		var allResults = allMatches.ToArray();
 		var result     = PaginateAndStore(allResults, ref skip, take);
@@ -144,8 +128,65 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			result.PageToken,
 			result.HasMore)
 		{
-			Caution = AdhocCaution(projectPath)
+			Caution = ComposeCautions(fallbackCaution, AdhocCaution(projectPath)),
+			Hint    = fallbackHint
 		});
+
+		async Task<List<StringLiteralMatch>> CollectAsync(Regex rx)
+		{
+			var matches = new List<StringLiteralMatch>();
+			// seenPaths prevents searching the same physical file twice in multi-targeted projects.
+			var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+			foreach(var project in solution.Projects)
+				foreach(var document in project.Documents) {
+
+					if(document.FilePath is null || !seenPaths.Add(document.FilePath))
+						continue;
+
+					var fileName = Path.GetFileName(document.FilePath);
+
+					if(!GlobMatcher.Matches(fileName, filePattern))
+						continue;
+
+					if(!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+						continue;
+
+					var tree = await document.GetSyntaxTreeAsync(cancellationToken);
+
+					if(tree is null)
+						continue;
+
+					var root         = tree.GetRoot(cancellationToken);
+					var sourceText   = tree.GetText(cancellationToken);
+					var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
+
+					foreach(var token in root.DescendantTokens()) {
+
+						var tk = token.Kind();
+
+						if(tk is not (SyntaxKind.StringLiteralToken or
+						              SyntaxKind.InterpolatedStringTextToken or
+						              SyntaxKind.SingleLineRawStringLiteralToken or
+						              SyntaxKind.MultiLineRawStringLiteralToken or
+						              SyntaxKind.Utf8StringLiteralToken or
+						              SyntaxKind.Utf8SingleLineRawStringLiteralToken or
+						              SyntaxKind.Utf8MultiLineRawStringLiteralToken))
+							continue;
+
+						var candidate = matchRaw ? token.Text : token.ValueText;
+
+						if(!rx.IsMatch(candidate))
+							continue;
+
+						var pos = sourceText.Lines.GetLinePosition(token.SpanStart);
+
+						matches.Add(new StringLiteralMatch(relativePath, pos.Line + 1, pos.Character + 1, token.Text, token.ValueText));
+					}
+				}
+
+			return matches;
+		}
 	}
 
 	// ** is not supported here — this is value-content matching, not path matching.

@@ -987,6 +987,96 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			"Use roslyn_get_type_members or roslyn_find_references to verify the name.");
 	
 	/// <summary>
+	///     Detects a VS Code Copilot chat symbol-reference prefix ("sym:" or "#sym:") that chat
+	///     serialization prepends to backtick-quoted terms. Returns true when the prefix is
+	///     present; <paramref name="stripped"/> is the trimmed remainder — possibly empty when
+	///     the chat pipeline truncated the reference to the bare prefix.
+	/// </summary>
+	protected static bool HasChatSymbolRefPrefix(string value, out string stripped)
+	{
+		var trimmed = value.TrimStart();
+		
+		var rest =
+			  trimmed.StartsWith("#sym:", StringComparison.Ordinal) ? trimmed["#sym:".Length..]
+			: trimmed.StartsWith("sym:",  StringComparison.Ordinal) ? trimmed["sym:".Length..]
+			: null
+		;
+		
+		if(rest is null) {
+			
+			stripped = value;
+			return false;
+		}
+		
+		stripped = rest.Trim();
+		return true;
+	}
+	
+	/// <summary>
+	///     Guard for symbol/type/method name arguments: strips a chat symbol-reference prefix in
+	///     place — identifiers can never contain ':', so the prefix is unambiguous chat noise.
+	///     Returns false with a populated <paramref name="error"/> when only the bare prefix
+	///     arrived (the name was truncated upstream), so the agent re-sends the plain name.
+	///     Call after BeginTool so the log keeps the original value.
+	/// </summary>
+	protected static bool TryStripChatSymbolRef(ref string value, out ErrorResult? error)
+	{
+		error = null;
+		
+		if(!HasChatSymbolRefPrefix(value, out var stripped))
+			
+			return true;
+		
+		if(stripped.Length == 0) {
+			
+			error = new ErrorResult(
+				"The argument was a VS Code chat symbol reference whose name was lost ('sym:').",
+				"Re-send the plain symbol name without the 'sym:' prefix.");
+			
+			return false;
+		}
+		
+		value = stripped;
+		return true;
+	}
+	
+	/// <summary>
+	///     Null-tolerant companion for optional name arguments (e.g. containingType). A separate
+	///     name, not an overload — nullable annotations are erased from CLR signatures, so
+	///     'ref string' and 'ref string?' overloads would collide (CS0111).
+	/// </summary>
+	protected static bool TryStripChatSymbolRefOptional(ref string? value, out ErrorResult? error)
+	{
+		error = null;
+		
+		if(value is null)
+			
+			return true;
+		
+		var name = value;
+		var ok   = TryStripChatSymbolRef(ref name, out error);
+		
+		value = name;
+		return ok;
+	}
+	
+	/// <summary>Caution for a search that only matched after stripping a chat symbol-reference prefix.</summary>
+	protected static string ChatRefFallbackCaution(string original, string stripped) =>
+		$"No matches for '{original}'; interpreted it as a VS Code chat symbol reference and searched '{stripped}' instead.";
+	
+	/// <summary>Hint for a zero-match search whose pattern was a bare chat-reference prefix (name truncated upstream).</summary>
+	protected const string ChatRefTruncatedHint =
+		"0 matches. If this was a VS Code chat symbol reference whose name was truncated to 'sym:', re-send the plain symbol name.";
+	
+	/// <summary>Hint for a zero-match search where the verbatim pattern and its chat-reference-stripped form both found nothing.</summary>
+	protected static string ChatRefBothTriedHint(string original, string stripped) =>
+		$"0 matches for '{original}' (also tried '{stripped}' in case the pattern was a VS Code chat symbol reference).";
+	
+	/// <summary>Joins two optional caution strings, or null when both are null.</summary>
+	protected static string? ComposeCautions(string? first, string? second) =>
+		first is null ? second : second is null ? first : $"{first} {second}";
+	
+	/// <summary>
 	///     Saves pre- and post-change backup snapshots, returning the pre-change token on success
 	///     or a populated <see cref="ErrorResult"/> on failure. Pass <paramref name="skipPre"/>=true
 	///     for new files (no existing content to snapshot). Pass <paramref name="fileState"/> to

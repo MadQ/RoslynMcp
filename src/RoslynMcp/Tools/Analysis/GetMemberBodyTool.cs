@@ -27,6 +27,10 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_member_body", symbolName, new { containingType });
 		
+		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);

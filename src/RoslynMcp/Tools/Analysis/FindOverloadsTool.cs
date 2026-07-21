@@ -22,6 +22,10 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_find_overloads", methodName, new { containingType });
 		
+		if(!TryStripChatSymbolRef(ref methodName, out var refError) || !TryStripChatSymbolRef(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);
