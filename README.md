@@ -40,21 +40,7 @@ Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Deskto
 
 **1. Get RoslynMcp**
 
-**Option A — Download and extract** (simplest, no SDK required):
-
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
-
-**Option B — Clone and build** (requires .NET 10 or 11 SDK):
-
-```bash
-git clone https://github.com/MadQ/RoslynMcp.git
-cd RoslynMcp
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
-```
-
-The executable will be at `./publish/net10.0/RoslynMcp.exe`.
-
-**Option C — Install from NuGet as a .NET tool** (requires .NET 10 or 11 SDK; easiest to keep updated):
+**Option A — Install from NuGet as a .NET tool** (requires .NET 10 or 11 SDK; easiest to keep updated):
 
 ```bash
 dotnet tool install --global MadQ.RoslynMcp --prerelease
@@ -65,6 +51,35 @@ This puts the `madq-roslynmcp` command on your PATH. In the MCP config below, us
 `dotnet tool update --global MadQ.RoslynMcp --prerelease`.
 
 > `--prerelease` is required while RoslynMcp is in beta — a prerelease-only package won't resolve without it.
+
+Then run:
+
+```bash
+madq-roslynmcp setup
+```
+
+`setup` detects your installed MCP-compatible clients and writes the server config for you —
+no manual JSON editing needed. It's interactive, so it'll also ask about optional flags like
+`--elicit`. If you'd rather configure a client by hand (or `setup` doesn't detect it), use the
+manual JSON in step 2 below.
+
+> [!IMPORTANT]
+> **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
+> Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
+
+**Option B — Download and extract** (simplest, no SDK required):
+
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
+
+**Option C — Clone and build** (requires .NET 10 or 11 SDK):
+
+```bash
+git clone https://github.com/MadQ/RoslynMcp.git
+cd RoslynMcp
+dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+```
+
+The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 
 **2. Add to your MCP client config.**
 
@@ -107,10 +122,6 @@ See [INSTALLATION.md](INSTALLATION.md) for Claude Desktop, Cursor, Windsurf, Cli
 -> Agent calls roslyn_get_member_body("ProcessOrder", projectPath: "src/MyApp")
 -> Returns just that method's source. 20 lines, not a 600-line file dump.
 ```
-
-> [!IMPORTANT]
-> **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
-> Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
 
 ---
 
