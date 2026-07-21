@@ -127,10 +127,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
 
+	// Static — must guard the static pathCache across ALL tool instances. A per-instance lock
+	// would let different tool types write the shared Dictionary concurrently and corrupt it.
 #if NET9_0_OR_GREATER
-		private readonly Lock             pathCacheLock   = new();
+	static readonly Lock              pathCacheLock   = new();
 #else
-		private readonly object           pathCacheLock   = new();
+	static readonly object            pathCacheLock   = new();
 #endif
 	
 	// Computed on every access so the read is guaranteed to happen after ServerArgs.Initialize().
