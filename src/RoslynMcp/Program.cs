@@ -150,6 +150,7 @@ builder.Services
 	.AddSingleton<ApprovalStore>()
 	.AddSingleton<BackupStore>()
 	.AddSingleton<PaginationCache>()
+	.AddSingleton<CodeFixHost>()
 	.AddSingleton<FileLogger>()
 	.AddMcpServer()
 	.WithStdioServerTransport()

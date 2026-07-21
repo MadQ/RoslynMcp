@@ -21,6 +21,15 @@ internal sealed class ApprovalStore
 		=> Register(baseSolution, newSolution, diff, symbolKey, null);
 	
 	public string Register(Solution baseSolution, Solution newSolution, string diff, string symbolKey, (string OldPath, string NewPath)? fileRename)
+		=> Register(baseSolution, newSolution, diff, symbolKey, fileRename, null);
+	
+	public string Register(
+		Solution baseSolution,
+		Solution newSolution,
+		string diff,
+		string symbolKey,
+		(string OldPath, string NewPath)? fileRename,
+		IReadOnlyDictionary<string, string>? fileHashes)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
 		
@@ -35,7 +44,7 @@ internal sealed class ApprovalStore
 			}
 			
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename);
+			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename, fileHashes);
 			insertionOrder.AddLast(token);
 		}
 		
@@ -98,5 +107,6 @@ internal sealed record PendingOperation(
 	string                            Diff,
 	string                            SymbolKey,
 	bool                              PreConfirmed,
-	(string OldPath, string NewPath)? FileRename
+	(string OldPath, string NewPath)? FileRename,
+	IReadOnlyDictionary<string, string>? FileHashes
 );

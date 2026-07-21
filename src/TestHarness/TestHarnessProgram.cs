@@ -118,6 +118,7 @@ class Program
 			groups.Add(CallGraphTests.Build(ctx));
 			groups.Add(CodeGenerationTests.Build(ctx));
 			groups.Add(FileContentTests.Build(ctx));
+			groups.Add(CodeFixTests.Build(ctx));
 		}
 		
 		groups.Add(ValidationTests.Build(ctx));
