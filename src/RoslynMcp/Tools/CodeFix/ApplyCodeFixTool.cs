@@ -24,6 +24,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		"Always call preview first to obtain a token. Pass approval 'y' to apply once, " +
 		"'session' to apply and approve similar code-fix actions for this session, or 'n' to cancel. " +
 		"Phase 1 applies targeted single-diagnostic fixes only, not FixAll.")]
+
 	public async Task<ApplyCodeFixResult> ApplyCodeFix(
 		[Description("The confirmation token returned by roslyn_preview_code_fix.")] string token,
 		[Description("'y' to apply this code fix once; 'session' to apply and approve similar fixes this session; 'n' to cancel without writing files.")] string approval,
@@ -49,9 +50,12 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			
 			return scope.Failed("token not found", new ApplyCodeFixResult($"Token '{token}' not found or already consumed. Run preview_code_fix again.", null, "token not found"));
 		
-		var rootPath    = workspace.GetRootPath(projectPath);
-		var changedDocs = operation.NewSolution.GetChanges(operation.BaseSolution)
+		var rootPath       = workspace.GetRootPath(projectPath);
+		var projectChanges = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()
+			.ToArray()
+		;
+		var changedDocs = projectChanges
 			.SelectMany(p => p.GetChangedDocuments().Concat(p.GetAddedDocuments())
 				.Select(id => operation.NewSolution.GetDocument(id))
 				.OfType<Document>())
@@ -60,11 +64,22 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			.Select(g => g.First())
 			.ToArray()
 		;
+		var removedDocs = projectChanges
+			.SelectMany(p => p.GetRemovedDocuments()
+				.Select(id => operation.BaseSolution.GetDocument(id))
+				.OfType<Document>())
+			.Where(d => d.FilePath is not null)
+			.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
+			.Select(g => g.First())
+			.Where(d => operation.NewSolution.GetDocumentIdsWithFilePath(d.FilePath!).IsEmpty)
+			.ToArray()
+		;
+		var affectedDocs = changedDocs.Concat(removedDocs).ToArray();
 		
-		if(changedDocs.Length == 0)
+		if(affectedDocs.Length == 0)
 			return scope.Failed("no files changed", new ApplyCodeFixResult("Previewed code fix has no changed files. Re-run preview_code_fix.", null, "no files changed"));
 		
-		if(CheckForStalePreview(operation.FileHashes) is { } staleError)
+		if(CheckForStalePreview(operation.FileStates) is { } staleError)
 			return scope.Failed("stale preview", new ApplyCodeFixResult(staleError, null, "stale preview"));
 		
 		bool preSaved = false
@@ -79,6 +94,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 				await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
 				preSaved = true;
 				await backups.SavePostAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix", bytes);
+			}
+			
+			foreach(var doc in removedDocs) {
+				
+				preSaved = false;
+				await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
+				preSaved = true;
 			}
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -101,7 +123,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			if(!workspace.ApplyChanges(projectPath, operation.NewSolution))
 				return scope.Failed("apply failed", new ApplyCodeFixResult(
 					"Workspace refused to apply the previewed code fix after backups were saved. " +
-					RecoveryHint(changedDocs, rootPath),
+					RecoveryHint(affectedDocs, rootPath),
 					null,
 					"apply failed"));
 			
@@ -135,33 +157,67 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 				
 				return scope.Failed("apply failed", new ApplyCodeFixResult(
 					$"Code fix write failed after backups were saved: {ex.Message}. " +
-					RecoveryHint(changedDocs, rootPath),
+					RecoveryHint(affectedDocs, rootPath),
 					null,
 					"apply failed"));
 			}
 		}
 		
-		var sessionNote = forSession ? " Code fix approved for the remainder of this session." : string.Empty;
+		var filesDeleted = 0
+		;
 		
-		return scope.Outcome($"{changedDocs.Length} file(s) written", new ApplyCodeFixResult(
-			$"Code fix applied.{sessionNote} Files written to disk.",
+		foreach(var doc in removedDocs) {
+			
+			try {
+				
+				if(File.Exists(doc.FilePath!))
+					File.Delete(doc.FilePath!);
+				
+				workspace.InvalidateFile(projectPath, doc.FilePath!);
+				filesDeleted++;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				
+				return scope.Failed("delete failed", new ApplyCodeFixResult(
+					$"Code fix content changes were applied, but '{doc.FilePath}' could not be deleted: {ex.Message}. " +
+					RecoveryHint(affectedDocs, rootPath),
+					changedDocs.Length,
+					"delete failed",
+					filesDeleted));
+			}
+		}
+		
+		var sessionNote = forSession ? " Code fix approved for the remainder of this session." : string.Empty;
+		var deletionNote = filesDeleted > 0 ? $" {filesDeleted} file(s) deleted." : string.Empty;
+		
+		return scope.Outcome($"{changedDocs.Length} file(s) written, {filesDeleted} deleted", new ApplyCodeFixResult(
+			$"Code fix applied.{sessionNote} Files written to disk.{deletionNote}",
 			changedDocs.Length,
-			null));
+			null,
+			filesDeleted));
 	}
 	
-	private static string? CheckForStalePreview(IReadOnlyDictionary<string, string>? fileHashes)
+	private static string? CheckForStalePreview(IReadOnlyDictionary<string, PreviewFileState>? fileStates)
 	{
-		if(fileHashes is null || fileHashes.Count == 0)
+		if(fileStates is null || fileStates.Count == 0)
 			return null;
 		
-		foreach(var (path, expectedHash) in fileHashes) {
+		foreach(var (path, state) in fileStates) {
+			
+			if(state.ExpectedState == ExpectedFileState.Absent) {
+				
+				if(File.Exists(path))
+					return $"Apply aborted — '{path}' was created after preview. Re-run roslyn_preview_code_fix before applying.";
+				
+				continue;
+			}
 			
 			if(!File.Exists(path))
 				return $"Apply aborted — '{path}' changed since preview: file no longer exists. Re-run roslyn_preview_code_fix.";
 			
 			var currentHash = ComputeFileHash(path);
 			
-			if(!string.Equals(currentHash, expectedHash, StringComparison.OrdinalIgnoreCase))
+			if(!string.Equals(currentHash, state.ContentHash, StringComparison.OrdinalIgnoreCase))
 				return $"Apply aborted — '{path}' changed since preview. Re-run roslyn_preview_code_fix before applying.";
 		}
 		
@@ -198,13 +254,15 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 
 internal sealed record ApplyCodeFixResult : ToolResult, IToolError
 {
-	public ApplyCodeFixResult(string message, int? filesWritten, string? error)
+	public ApplyCodeFixResult(string message, int? filesWritten, string? error, int? filesDeleted = null)
 	{
 		Message      = message;
 		FilesWritten = filesWritten;
+		FilesDeleted = filesDeleted;
 		Error        = error;
 	}
 	
 	public string Message      { get; }
 	public int?   FilesWritten { get; }
+	public int?   FilesDeleted { get; }
 }

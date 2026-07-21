@@ -29,7 +29,7 @@ internal sealed class ApprovalStore
 		string diff,
 		string symbolKey,
 		(string OldPath, string NewPath)? fileRename,
-		IReadOnlyDictionary<string, string>? fileHashes)
+		IReadOnlyDictionary<string, PreviewFileState>? fileStates)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
 		
@@ -44,7 +44,7 @@ internal sealed class ApprovalStore
 			}
 			
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename, fileHashes);
+			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename, fileStates);
 			insertionOrder.AddLast(token);
 		}
 		
@@ -108,5 +108,13 @@ internal sealed record PendingOperation(
 	string                            SymbolKey,
 	bool                              PreConfirmed,
 	(string OldPath, string NewPath)? FileRename,
-	IReadOnlyDictionary<string, string>? FileHashes
+	IReadOnlyDictionary<string, PreviewFileState>? FileStates
 );
+
+internal enum ExpectedFileState
+{
+	Exists,
+	Absent
+}
+
+internal sealed record PreviewFileState(ExpectedFileState ExpectedState, string? ContentHash);

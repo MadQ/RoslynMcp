@@ -148,8 +148,21 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"no changes"));
 		
 		var operationKey = $"codefix:{diagnostic.Id}:{selected.ProviderName}:{selected.EquivalenceKey ?? selected.Title}";
-		var fileHashes = BuildPreviewFileHashes(document.Project.Solution, newSolution);
-		var token = approvals.Register(document.Project.Solution, newSolution, diff, operationKey, null, fileHashes);
+		IReadOnlyDictionary<string, PreviewFileState> fileStates;
+		
+		try {
+			
+			fileStates = BuildPreviewFileStates(document.Project.Solution, newSolution);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
+			return scope.Failed("preview file state changed", new PreviewCodeFixResult(
+				null, diagnostic.Id, diff, [choices[selectedIndex]],
+				$"Could not capture a safe file state for this preview: {ex.Message} Re-run roslyn_preview_code_fix.",
+				"preview file state changed"));
+		}
+		
+		var token = approvals.Register(document.Project.Solution, newSolution, diff, operationKey, null, fileStates);
 		var selectedAction = choices[selectedIndex];
 		
 		return scope.Outcome("preview ready", new PreviewCodeFixResult(
@@ -173,9 +186,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			?.ChangedSolution;
 	}
 	
-	private static IReadOnlyDictionary<string, string> BuildPreviewFileHashes(Solution baseSolution, Solution newSolution)
+	private static IReadOnlyDictionary<string, PreviewFileState> BuildPreviewFileStates(Solution baseSolution, Solution newSolution)
 	{
-		var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		var states = new Dictionary<string, PreviewFileState>(StringComparer.OrdinalIgnoreCase);
 		
 		foreach(var projectChange in newSolution.GetChanges(baseSolution).GetProjectChanges()) {
 			
@@ -183,14 +196,53 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				
 				var doc = baseSolution.GetDocument(docId);
 				
-				if(doc?.FilePath is null || !File.Exists(doc.FilePath))
+				if(doc?.FilePath is null)
 					continue;
 				
-				hashes[doc.FilePath] = ComputeFileHash(doc.FilePath);
+				if(!File.Exists(doc.FilePath))
+					throw new IOException($"Affected file '{doc.FilePath}' no longer exists while creating the preview.");
+				
+				states[doc.FilePath] = new PreviewFileState(ExpectedFileState.Exists, ComputeFileHash(doc.FilePath));
+			}
+			
+			foreach(var docId in projectChange.GetAddedDocuments()) {
+				
+				var doc = newSolution.GetDocument(docId);
+				
+				if(doc?.FilePath is null)
+					continue;
+				
+				if(!baseSolution.GetDocumentIdsWithFilePath(doc.FilePath).IsEmpty) {
+					
+					if(!File.Exists(doc.FilePath))
+						throw new IOException($"Affected linked file '{doc.FilePath}' no longer exists while creating the preview.");
+					
+					states[doc.FilePath] = new PreviewFileState(ExpectedFileState.Exists, ComputeFileHash(doc.FilePath));
+					
+					continue;
+				}
+				
+				if(File.Exists(doc.FilePath))
+					throw new IOException($"New file '{doc.FilePath}' already exists while creating the preview.");
+				
+				states[doc.FilePath] = new PreviewFileState(ExpectedFileState.Absent, null);
+			}
+			
+			foreach(var docId in projectChange.GetRemovedDocuments()) {
+				
+				var doc = baseSolution.GetDocument(docId);
+				
+				if(doc?.FilePath is null || !newSolution.GetDocumentIdsWithFilePath(doc.FilePath).IsEmpty)
+					continue;
+				
+				if(!File.Exists(doc.FilePath))
+					throw new IOException($"Affected file '{doc.FilePath}' no longer exists while creating the preview.");
+				
+				states[doc.FilePath] = new PreviewFileState(ExpectedFileState.Exists, ComputeFileHash(doc.FilePath));
 			}
 		}
 		
-		return hashes;
+		return states;
 	}
 	
 	private static string ComputeFileHash(string path)
