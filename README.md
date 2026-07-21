@@ -19,7 +19,7 @@ With RoslynMcp:     roslyn_preview_rename -> reviews diff across 3 projects -> r
 
 Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Desktop, Cline, Cursor, Windsurf, Roo Code, Continue, and more.
 
-> **Security Note:** RoslynMcp runs with your user permissions and has unrestricted filesystem access. Only use with trusted agents and on projects you control. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
+> **Security Note:** RoslynMcp runs with your user permissions. File access is bounded to the resolved workspace tree — project/solution root plus referenced projects ([#9](https://github.com/MadQ/RoslynMcp/issues/9)) — but `projectPath` can still target any project you can read, so only use with trusted agents and on projects you control.
 
 > [!IMPORTANT]
 > **Breaking change (pre-1.0): the tool identity was namespaced under `MadQ`.** To avoid a hard clash with the unrelated [`RoslynMcp`](https://www.nuget.org/packages/RoslynMcp) package already on NuGet, the package id, its `dotnet tool` command, and the MCP server key all changed:
