@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.8.1-beta (pre-1.0) |
-| **Tool Count** | 42 MCP tools (40 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
+| **Tool Count** | 43 MCP tools (41 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -76,6 +76,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `FindOverloadsTool` | `roslyn_find_overloads` — returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details |
 | `TypeDependenciesTool` | `roslyn_get_type_dependencies` — returns direct type dependencies from a type declaration and direct member signatures; includes base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions |
 | `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path — returns `items: null` (not `[]`) to distinguish "not requested" from "no results" |
+| `CheckDriftTool` | `roslyn_check_drift` — diagnostic probe: reports files whose on-disk state changed without the workspace noticing (FileSystemWatcher miss); use when symbol results look inexplicably stale |
 | `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |
 | `FindUnusedTool` | `roslyn_find_unused` — private, internal, and effectively internal source symbols with zero direct static references; conservative refactoring guidance with confidence and reason metadata |
 | `FindCallersTool` | `roslyn_find_callers` — all methods that call a named symbol; filter by `isDirect` to exclude interface/delegate dispatch |
@@ -123,7 +124,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging), `LogEntry.cs` (shared NDJSON log schema — linked into both `RoslynMcp` and `RoslynMcp.LogViewer`).
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
-- `Tools/Analysis/` — 23 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
+- `Tools/Analysis/` — 24 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, drift, …)
 - `Tools/Search/` — 4 file/content search tools (list files, text search, semantic search, string literal search)
 - `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)

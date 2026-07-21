@@ -8,7 +8,7 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ## Shipped Releases
 
-Highlights per shipped release. The latest tagged version is v0.8.0-beta; the current source also contains part of the planned v0.9.0 semantic-analysis work:
+Highlights per shipped release. The latest tagged version is v0.8.1-beta; the current source also contains part of the planned v0.9.0 semantic-analysis work:
 
 | Release | Key additions |
 |---------|---------------|
@@ -24,6 +24,7 @@ Highlights per shipped release. The latest tagged version is v0.8.0-beta; the cu
 | v0.7.8 | Thread-safety hardening, DotnetRunner deadlock fix, BackupStore async, SemanticSearch correctness, self-healing truncation, pre/post backups, TFM context in build diagnostics, rename stale-file fix, MSBuildBootstrap hardening (#145, #151, #153–#159, #161–#163, #165–#166) |
 | v0.7.9 | TestHarness split (#167), shutdown fix (#170), TFM context fix in project-level diagnostics (#169); folded into v0.8.0-beta — no separate tag |
 | v0.8.0-beta | `roslyn_find_string_literal`, `roslyn_check_syntax`, `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`; `--help`/`-h` flag + TTY auto-help (#181); LogViewer port auto-increment + multi-file watch (#180); BackupStore pruning + per-PID logs (#172); `setup-hooks` → `setup-project` command rename; BOM fixes |
+| v0.8.1-beta | Breaking (pre-1.0): tool identity namespaced under `MadQ` — NuGet package id `MadQ.RoslynMcp`, command `madq-roslynmcp`, MCP server key `MadQ.RoslynMcp` (#215); now published on NuGet via Trusted Publishing (OIDC); duplicate hook-entry fix and third-party MCP entry collision guard (#215, #216) |
 
 ---
 

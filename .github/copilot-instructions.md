@@ -60,7 +60,7 @@ Backup naming: `{originalFileName}_{unixMs}_{nonce}.pre.bak` (pre-write) or `{or
 
 **All details in [`AGENTS.md`](../AGENTS.md):**
 - Project overview and architecture
-- All 42 tool descriptions (40 public + 2 debug-only)
+- All 43 tool descriptions (41 public + 2 debug-only)
 - Code style rules (braces, naming, blank lines, etc.)
 - MCP protocol patterns
 - Roslyn API patterns
