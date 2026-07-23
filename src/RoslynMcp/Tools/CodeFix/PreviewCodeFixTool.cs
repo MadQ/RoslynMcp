@@ -162,7 +162,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"preview file state changed"));
 		}
 		
-		var token = approvals.Register(document.Project.Solution, newSolution, diff, operationKey, null, fileStates);
+		var (workspaceRoot, isMSBuild, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
+		var workspaceBinding = WorkspaceBinding.Create(workspaceRoot, isMSBuild, csprojPath);
+		var token = approvals.Register(document.Project.Solution, newSolution, diff, operationKey, null, fileStates, workspaceBinding);
 		var selectedAction = choices[selectedIndex];
 		
 		return scope.Outcome("preview ready", new PreviewCodeFixResult(

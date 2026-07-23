@@ -55,7 +55,24 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		
 		try {
 		
-			var rootPath       = workspace.GetRootPath(projectPath);
+			if(operation.WorkspaceBinding is null)
+				return scope.Failed("workspace binding missing", new ApplyCodeFixResult(
+					"The preview token does not contain an originating workspace. Re-run roslyn_preview_code_fix.",
+					null,
+					"workspace binding missing"));
+			
+			var (requestedRoot, requestedIsMSBuild, requestedCsproj) = workspace.GetWorkspaceInfo(projectPath);
+			var requestedBinding = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
+			
+			if(!operation.WorkspaceBinding.Matches(requestedBinding))
+				return scope.Failed("workspace mismatch", new ApplyCodeFixResult(
+					$"Apply aborted — this token belongs to '{operation.WorkspaceBinding.CanonicalPath}', " +
+					$"but projectPath resolved to '{requestedBinding.CanonicalPath}'. Re-run roslyn_preview_code_fix for the intended workspace.",
+					null,
+					"workspace mismatch"));
+			
+			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;
+			var rootPath        = workspace.GetRootPath(boundProjectPath);
 			var projectChanges = operation.NewSolution.GetChanges(operation.BaseSolution)
 				.GetProjectChanges()
 				.ToArray()
@@ -96,15 +113,15 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					
 					var bytes = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
 					preSaved = false;
-					await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
+					await backups.SavePreAsync(doc.FilePath!, boundProjectPath, "roslyn_apply_code_fix");
 					preSaved = true;
-					await backups.SavePostAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix", bytes);
+					await backups.SavePostAsync(doc.FilePath!, boundProjectPath, "roslyn_apply_code_fix", bytes);
 				}
 				
 				foreach(var doc in removedDocs) {
 					
 					preSaved = false;
-					await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
+					await backups.SavePreAsync(doc.FilePath!, boundProjectPath, "roslyn_apply_code_fix");
 					preSaved = true;
 				}
 			}
@@ -121,11 +138,11 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"backup failed"));
 			}
 			
-			if(!workspace.IsAdhoc(projectPath)) {
+			if(!workspace.IsAdhoc(boundProjectPath)) {
 				
 				physicalApplyStarted = true;
 				
-				if(!workspace.ApplyChanges(projectPath, operation.NewSolution))
+				if(!workspace.ApplyChanges(boundProjectPath, operation.NewSolution))
 					return scope.Failed("apply failed", new ApplyCodeFixResult(
 						"Workspace refused to apply the previewed code fix after backups were saved. " +
 						RecoveryHint(affectedDocs, rootPath),
@@ -138,7 +155,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					var relPath = TryMakeRelative(path, rootPath) ?? path;
 					var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
 					
-					if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
+					if(await TryRecoverTruncation(relPath, path, boundProjectPath, bytes) is { } truncErr)
 						return scope.Failed("truncation detected", new ApplyCodeFixResult(truncErr.Error ?? "File truncation detected.", null, "truncation detected"));
 				}
 			}
@@ -151,7 +168,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
 						async (path, content) => {
 							
-							await workspace.WriteAndInvalidate(projectPath, path,
+							await workspace.WriteAndInvalidate(boundProjectPath, path,
 								() => FileWriter.WriteAllTextAsync(path, content));
 							
 							var relPath = TryMakeRelative(path, rootPath) ?? path;
@@ -180,7 +197,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					if(File.Exists(doc.FilePath!))
 						File.Delete(doc.FilePath!);
 					
-					workspace.InvalidateFile(projectPath, doc.FilePath!);
+					workspace.InvalidateFile(boundProjectPath, doc.FilePath!);
 					filesDeleted++;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {

@@ -30,7 +30,8 @@ internal sealed class ApprovalStore
 		string diff,
 		string symbolKey,
 		(string OldPath, string NewPath)? fileRename,
-		IReadOnlyDictionary<string, PreviewFileState>? fileStates)
+		IReadOnlyDictionary<string, PreviewFileState>? fileStates,
+		WorkspaceBinding? workspaceBinding = null)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
 		
@@ -45,7 +46,7 @@ internal sealed class ApprovalStore
 			}
 			
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename, fileStates);
+			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename, fileStates, workspaceBinding);
 			insertionOrder.AddLast(token);
 		}
 		
@@ -171,8 +172,24 @@ internal sealed record PendingOperation(
 	string                            SymbolKey,
 	bool                              PreConfirmed,
 	(string OldPath, string NewPath)? FileRename,
-	IReadOnlyDictionary<string, PreviewFileState>? FileStates
+	IReadOnlyDictionary<string, PreviewFileState>? FileStates,
+	WorkspaceBinding?                 WorkspaceBinding
 );
+
+internal sealed record WorkspaceBinding(string CanonicalPath, bool IsMSBuild)
+{
+	public static WorkspaceBinding Create(string rootPath, bool isMSBuild, string? csprojPath)
+	{
+		var identityPath = isMSBuild && csprojPath is not null ? csprojPath : rootPath;
+		var canonicalPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(identityPath));
+		
+		return new WorkspaceBinding(canonicalPath, isMSBuild);
+	}
+	
+	public bool Matches(WorkspaceBinding other) =>
+		IsMSBuild == other.IsMSBuild
+		&& string.Equals(CanonicalPath, other.CanonicalPath, StringComparison.OrdinalIgnoreCase);
+}
 
 internal enum ExpectedFileState
 {
