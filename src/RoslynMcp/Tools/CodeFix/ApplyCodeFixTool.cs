@@ -21,13 +21,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_apply_code_fix", Destructive = true, Title = "Apply Code Fix", OpenWorld = false)]
 	[Description(
 		"Commits or cancels a code fix previewed by roslyn_preview_code_fix. " +
-		"Always call preview first to obtain a token. Pass approval 'y' to apply once, " +
-		"'session' to apply and approve similar code-fix actions for this session, or 'n' to cancel. " +
+		"Always call preview first to obtain a token. Pass approval 'y' to apply " +
+		"or 'n' to cancel without changing files. " +
 		"Phase 1 applies targeted single-diagnostic fixes only, not FixAll.")]
 
 	public async Task<ApplyCodeFixResult> ApplyCodeFix(
 		[Description("The confirmation token returned by roslyn_preview_code_fix.")] string token,
-		[Description("'y' to apply this code fix once; 'session' to apply and approve similar fixes this session; 'n' to cancel without writing files.")] string approval,
+		[Description("'y' to apply this code fix; 'n' to cancel without writing files.")] string approval,
 		[Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_apply_code_fix", $"{token} ({approval})");
@@ -39,19 +39,17 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			return scope.Failed("rejected", new ApplyCodeFixResult("Code fix rejected. No files were changed.", null, "rejected"));
 		}
 		
-		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase) && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))
+		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase))
 			
-			return scope.Failed("invalid approval", new ApplyCodeFixResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, "invalid approval"));
+			return scope.Failed("invalid approval", new ApplyCodeFixResult("Invalid approval value. Use 'y' or 'n'.", null, "invalid approval"));
 		
-		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-		var operation  = approvals.TryBeginApply(token);
+		var operation = approvals.TryBeginApply(token);
 		
 		if(operation is null)
 			
 			return scope.Failed("token unavailable", new ApplyCodeFixResult($"Token '{token}' was not found, was consumed, or is already being applied. Run roslyn_preview_code_fix again if the operation is not currently in progress.", null, "token unavailable"));
 		
 		var physicalApplyStarted = false;
-		var applySucceeded       = false;
 		
 		try {
 		
@@ -211,12 +209,10 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 				}
 			}
 			
-			var sessionNote = forSession ? " Code fix approved for the remainder of this session." : string.Empty;
 			var deletionNote = filesDeleted > 0 ? $" {filesDeleted} file(s) deleted." : string.Empty;
-			applySucceeded = true;
 			
 			return scope.Outcome($"{changedDocs.Length} file(s) written, {filesDeleted} deleted", new ApplyCodeFixResult(
-				$"Code fix applied.{sessionNote} Files written to disk.{deletionNote}",
+				$"Code fix applied. Files written to disk.{deletionNote}",
 				changedDocs.Length,
 				null,
 				filesDeleted));
@@ -224,7 +220,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		finally {
 			
 			if(physicalApplyStarted)
-				approvals.CompleteApply(token, forSession && applySucceeded);
+				approvals.CompleteApply(token, approveForSession: false);
 			else
 				approvals.ReturnToPending(token);
 		}

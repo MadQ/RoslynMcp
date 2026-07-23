@@ -131,13 +131,26 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"invalid action index"));
 		
 		var selected = fixes[selectedIndex];
-		var newSolution = await GetChangedSolutionAsync(selected.Action, cancellationToken);
+		Solution newSolution;
 		
-		if(newSolution is null)
-			return scope.Failed("no solution changes", new PreviewCodeFixResult(
-				null, diagnostic.Id, null, choices,
-				"Selected fix did not produce solution changes.",
-				"no solution changes"));
+		try {
+			
+			newSolution = await GetChangedSolutionAsync(selected.Action, cancellationToken);
+		}
+		catch(UnsupportedCodeActionOperationException ex) {
+			
+			return scope.Failed("unsupported operation shape", new PreviewCodeFixResult(
+				null, diagnostic.Id, null, [choices[selectedIndex]],
+				ex.Message,
+				"unsupported operation shape"));
+		}
+		catch(Exception ex) when(ex is not OperationCanceledException) {
+			
+			return scope.Failed("code action calculation failed", new PreviewCodeFixResult(
+				null, diagnostic.Id, null, [choices[selectedIndex]],
+				$"Selected code fix failed while calculating its operations: {ex.Message}",
+				"code action calculation failed"));
+		}
 		
 		var diff = await SolutionDiff.BuildAsync(document.Project.Solution, newSolution, cancellationToken);
 		
@@ -172,20 +185,29 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			diagnostic.Id,
 			diff,
 			[selectedAction],
-			$"Review the diff, then call roslyn_apply_code_fix with token '{token}' and approval 'y', 'session', or 'n'.",
+			$"Review the diff, then call roslyn_apply_code_fix with token '{token}' and approval 'y' or 'n'.",
 			null));
 	}
 	
-	private static async Task<Solution?> GetChangedSolutionAsync(CodeAction action, CancellationToken cancellationToken)
+	private static async Task<Solution> GetChangedSolutionAsync(CodeAction action, CancellationToken cancellationToken)
 	{
 		var operations = await action.GetOperationsAsync(cancellationToken)
 			.ConfigureAwait(false)
 		;
 		
-		return operations
-			.OfType<ApplyChangesOperation>()
-			.SingleOrDefault()
-			?.ChangedSolution;
+		if(operations.Length != 1 || operations[0] is not ApplyChangesOperation applyChanges) {
+			
+			var returnedShape = operations.Length == 0
+				? "no operations"
+				: string.Join(", ", operations.Select(operation => operation.GetType().Name))
+			;
+			
+			throw new UnsupportedCodeActionOperationException(
+				$"Selected code fix returned an unsupported operation shape: {returnedShape}. " +
+				"Exactly one ApplyChangesOperation is required.");
+		}
+		
+		return applyChanges.ChangedSolution;
 	}
 	
 	private static IReadOnlyDictionary<string, PreviewFileState> BuildPreviewFileStates(Solution baseSolution, Solution newSolution)
@@ -364,3 +386,10 @@ internal sealed record CodeFixActionChoice(
 	string? Provider,
 	string? EquivalenceKey
 );
+
+internal sealed class UnsupportedCodeActionOperationException : Exception
+{
+	public UnsupportedCodeActionOperationException(string message)
+		: base(message)
+	{ }
+}
