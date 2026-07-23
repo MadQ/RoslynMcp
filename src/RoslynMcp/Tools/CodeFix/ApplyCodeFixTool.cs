@@ -44,157 +44,173 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			return scope.Failed("invalid approval", new ApplyCodeFixResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, "invalid approval"));
 		
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-		var operation  = approvals.Peek(token);
+		var operation  = approvals.TryBeginApply(token);
 		
 		if(operation is null)
 			
-			return scope.Failed("token not found", new ApplyCodeFixResult($"Token '{token}' not found or already consumed. Run preview_code_fix again.", null, "token not found"));
+			return scope.Failed("token unavailable", new ApplyCodeFixResult($"Token '{token}' was not found, was consumed, or is already being applied. Run roslyn_preview_code_fix again if the operation is not currently in progress.", null, "token unavailable"));
 		
-		var rootPath       = workspace.GetRootPath(projectPath);
-		var projectChanges = operation.NewSolution.GetChanges(operation.BaseSolution)
-			.GetProjectChanges()
-			.ToArray()
-		;
-		var changedDocs = projectChanges
-			.SelectMany(p => p.GetChangedDocuments().Concat(p.GetAddedDocuments())
-				.Select(id => operation.NewSolution.GetDocument(id))
-				.OfType<Document>())
-			.Where(d => d.FilePath is not null)
-			.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
-			.Select(g => g.First())
-			.ToArray()
-		;
-		var removedDocs = projectChanges
-			.SelectMany(p => p.GetRemovedDocuments()
-				.Select(id => operation.BaseSolution.GetDocument(id))
-				.OfType<Document>())
-			.Where(d => d.FilePath is not null)
-			.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
-			.Select(g => g.First())
-			.Where(d => operation.NewSolution.GetDocumentIdsWithFilePath(d.FilePath!).IsEmpty)
-			.ToArray()
-		;
-		var affectedDocs = changedDocs.Concat(removedDocs).ToArray();
-		
-		if(affectedDocs.Length == 0)
-			return scope.Failed("no files changed", new ApplyCodeFixResult("Previewed code fix has no changed files. Re-run preview_code_fix.", null, "no files changed"));
-		
-		if(CheckForStalePreview(operation.FileStates) is { } staleError)
-			return scope.Failed("stale preview", new ApplyCodeFixResult(staleError, null, "stale preview"));
-		
-		bool preSaved = false
-		;
+		var physicalApplyStarted = false;
+		var applySucceeded       = false;
 		
 		try {
-			
-			foreach(var doc in changedDocs) {
-				
-				var bytes = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
-				preSaved = false;
-				await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
-				preSaved = true;
-				await backups.SavePostAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix", bytes);
-			}
-			
-			foreach(var doc in removedDocs) {
-				
-				preSaved = false;
-				await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
-				preSaved = true;
-			}
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			
-			var phaseWord = preSaved ? "post" : "pre";
-			var snapNote  = preSaved ? " Any pre-change snapshots already saved are not needed." : string.Empty;
-			
-			return scope.Failed("backup failed", new ApplyCodeFixResult(
-				$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
-				$"No files were modified.{snapNote} " +
-				"The approval token is still valid — retry after resolving the issue.",
-				null,
-				"backup failed"));
-		}
 		
-		approvals.Consume(token, forSession);
-		
-		if(!workspace.IsAdhoc(projectPath)) {
+			var rootPath       = workspace.GetRootPath(projectPath);
+			var projectChanges = operation.NewSolution.GetChanges(operation.BaseSolution)
+				.GetProjectChanges()
+				.ToArray()
+			;
+			var changedDocs = projectChanges
+				.SelectMany(p => p.GetChangedDocuments().Concat(p.GetAddedDocuments())
+					.Select(id => operation.NewSolution.GetDocument(id))
+					.OfType<Document>())
+				.Where(d => d.FilePath is not null)
+				.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
+				.Select(g => g.First())
+				.ToArray()
+			;
+			var removedDocs = projectChanges
+				.SelectMany(p => p.GetRemovedDocuments()
+					.Select(id => operation.BaseSolution.GetDocument(id))
+					.OfType<Document>())
+				.Where(d => d.FilePath is not null)
+				.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
+				.Select(g => g.First())
+				.Where(d => operation.NewSolution.GetDocumentIdsWithFilePath(d.FilePath!).IsEmpty)
+				.ToArray()
+			;
+			var affectedDocs = changedDocs.Concat(removedDocs).ToArray();
 			
-			if(!workspace.ApplyChanges(projectPath, operation.NewSolution))
-				return scope.Failed("apply failed", new ApplyCodeFixResult(
-					"Workspace refused to apply the previewed code fix after backups were saved. " +
-					RecoveryHint(affectedDocs, rootPath),
-					null,
-					"apply failed"));
+			if(affectedDocs.Length == 0)
+				return scope.Failed("no files changed", new ApplyCodeFixResult("Previewed code fix has no changed files. Re-run preview_code_fix.", null, "no files changed"));
 			
-			foreach(var doc in changedDocs) {
-				
-				var path    = doc.FilePath!;
-				var relPath = TryMakeRelative(path, rootPath) ?? path;
-				var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
-				
-				if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
-					return scope.Failed("truncation detected", new ApplyCodeFixResult(truncErr.Error ?? "File truncation detected.", null, "truncation detected"));
-			}
-		}
-		else {
+			if(CheckForStalePreview(operation.FileStates) is { } staleError)
+				return scope.Failed("stale preview", new ApplyCodeFixResult(staleError, null, "stale preview"));
+			
+			bool preSaved = false
+			;
 			
 			try {
 				
-				await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
-					async (path, content) => {
-						
-						await workspace.WriteAndInvalidate(projectPath, path,
-							() => FileWriter.WriteAllTextAsync(path, content));
-						
-						var relPath = TryMakeRelative(path, rootPath) ?? path;
-						
-						if(CheckForTruncation(relPath, path, content.Length) is { } truncErr)
-							throw new IOException(truncErr.Error);
-					});
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or InvalidOperationException) {
+				foreach(var doc in changedDocs) {
+					
+					var bytes = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
+					preSaved = false;
+					await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
+					preSaved = true;
+					await backups.SavePostAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix", bytes);
+				}
 				
-				return scope.Failed("apply failed", new ApplyCodeFixResult(
-					$"Code fix write failed after backups were saved: {ex.Message}. " +
-					RecoveryHint(affectedDocs, rootPath),
-					null,
-					"apply failed"));
-			}
-		}
-		
-		var filesDeleted = 0
-		;
-		
-		foreach(var doc in removedDocs) {
-			
-			try {
-				
-				if(File.Exists(doc.FilePath!))
-					File.Delete(doc.FilePath!);
-				
-				workspace.InvalidateFile(projectPath, doc.FilePath!);
-				filesDeleted++;
+				foreach(var doc in removedDocs) {
+					
+					preSaved = false;
+					await backups.SavePreAsync(doc.FilePath!, projectPath, "roslyn_apply_code_fix");
+					preSaved = true;
+				}
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				
-				return scope.Failed("delete failed", new ApplyCodeFixResult(
-					$"Code fix content changes were applied, but '{doc.FilePath}' could not be deleted: {ex.Message}. " +
-					RecoveryHint(affectedDocs, rootPath),
-					changedDocs.Length,
-					"delete failed",
-					filesDeleted));
+				var phaseWord = preSaved ? "post" : "pre";
+				var snapNote  = preSaved ? " Any pre-change snapshots already saved are not needed." : string.Empty;
+				
+				return scope.Failed("backup failed", new ApplyCodeFixResult(
+					$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
+					$"No files were modified.{snapNote} " +
+					"The approval token is still valid — retry after resolving the issue.",
+					null,
+					"backup failed"));
 			}
+			
+			if(!workspace.IsAdhoc(projectPath)) {
+				
+				physicalApplyStarted = true;
+				
+				if(!workspace.ApplyChanges(projectPath, operation.NewSolution))
+					return scope.Failed("apply failed", new ApplyCodeFixResult(
+						"Workspace refused to apply the previewed code fix after backups were saved. " +
+						RecoveryHint(affectedDocs, rootPath),
+						null,
+						"apply failed"));
+				
+				foreach(var doc in changedDocs) {
+					
+					var path    = doc.FilePath!;
+					var relPath = TryMakeRelative(path, rootPath) ?? path;
+					var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
+					
+					if(await TryRecoverTruncation(relPath, path, projectPath, bytes) is { } truncErr)
+						return scope.Failed("truncation detected", new ApplyCodeFixResult(truncErr.Error ?? "File truncation detected.", null, "truncation detected"));
+				}
+			}
+			else {
+				
+				physicalApplyStarted = true;
+				
+				try {
+					
+					await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
+						async (path, content) => {
+							
+							await workspace.WriteAndInvalidate(projectPath, path,
+								() => FileWriter.WriteAllTextAsync(path, content));
+							
+							var relPath = TryMakeRelative(path, rootPath) ?? path;
+							
+							if(CheckForTruncation(relPath, path, content.Length) is { } truncErr)
+								throw new IOException(truncErr.Error);
+						});
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or InvalidOperationException) {
+					
+					return scope.Failed("apply failed", new ApplyCodeFixResult(
+						$"Code fix write failed after backups were saved: {ex.Message}. " +
+						RecoveryHint(affectedDocs, rootPath),
+						null,
+						"apply failed"));
+				}
+			}
+			
+			var filesDeleted = 0
+			;
+			
+			foreach(var doc in removedDocs) {
+				
+				try {
+					
+					if(File.Exists(doc.FilePath!))
+						File.Delete(doc.FilePath!);
+					
+					workspace.InvalidateFile(projectPath, doc.FilePath!);
+					filesDeleted++;
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					
+					return scope.Failed("delete failed", new ApplyCodeFixResult(
+						$"Code fix content changes were applied, but '{doc.FilePath}' could not be deleted: {ex.Message}. " +
+						RecoveryHint(affectedDocs, rootPath),
+						changedDocs.Length,
+						"delete failed",
+						filesDeleted));
+				}
+			}
+			
+			var sessionNote = forSession ? " Code fix approved for the remainder of this session." : string.Empty;
+			var deletionNote = filesDeleted > 0 ? $" {filesDeleted} file(s) deleted." : string.Empty;
+			applySucceeded = true;
+			
+			return scope.Outcome($"{changedDocs.Length} file(s) written, {filesDeleted} deleted", new ApplyCodeFixResult(
+				$"Code fix applied.{sessionNote} Files written to disk.{deletionNote}",
+				changedDocs.Length,
+				null,
+				filesDeleted));
 		}
-		
-		var sessionNote = forSession ? " Code fix approved for the remainder of this session." : string.Empty;
-		var deletionNote = filesDeleted > 0 ? $" {filesDeleted} file(s) deleted." : string.Empty;
-		
-		return scope.Outcome($"{changedDocs.Length} file(s) written, {filesDeleted} deleted", new ApplyCodeFixResult(
-			$"Code fix applied.{sessionNote} Files written to disk.{deletionNote}",
-			changedDocs.Length,
-			null,
-			filesDeleted));
+		finally {
+			
+			if(physicalApplyStarted)
+				approvals.CompleteApply(token, forSession && applySucceeded);
+			else
+				approvals.ReturnToPending(token);
+		}
 	}
 	
 	private static string? CheckForStalePreview(IReadOnlyDictionary<string, PreviewFileState>? fileStates)

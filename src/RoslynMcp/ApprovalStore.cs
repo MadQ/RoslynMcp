@@ -9,6 +9,7 @@ namespace RoslynMcp;
 internal sealed class ApprovalStore
 {
 	private readonly Dictionary<string, PendingOperation> pending        = new();
+	private readonly Dictionary<string, PendingOperation> applying       = new();
 	private readonly LinkedList<string>                   insertionOrder  = new();
 	private readonly HashSet<string>                      sessionApproved = new(StringComparer.Ordinal);
 	private readonly object                               syncRoot        = new();
@@ -60,6 +61,68 @@ internal sealed class ApprovalStore
 		lock(syncRoot)
 			
 			return pending.GetValueOrDefault(token);
+	}
+	
+	/// <summary>
+	///     Atomically moves a pending operation into the applying state and returns it.
+	///     Returns null when the token is unknown, consumed, or already being applied.
+	/// </summary>
+	public PendingOperation? TryBeginApply(string token)
+	{
+		lock(syncRoot) {
+			
+			if(!pending.Remove(token, out var operation))
+				
+				return null;
+			
+			insertionOrder.Remove(token);
+			applying.Add(token, operation);
+			
+			return operation;
+		}
+	}
+	
+	/// <summary>
+	///     Completes an applying operation and permanently consumes its token.
+	/// </summary>
+	public bool CompleteApply(string token, bool approveForSession)
+	{
+		lock(syncRoot) {
+			
+			if(!applying.Remove(token, out var operation))
+				
+				return false;
+			
+			if(approveForSession)
+				sessionApproved.Add(operation.SymbolKey);
+			
+			return true;
+		}
+	}
+	
+	/// <summary>
+	///     Returns an applying operation to pending when physical mutation never began.
+	/// </summary>
+	public bool ReturnToPending(string token)
+	{
+		lock(syncRoot) {
+			
+			if(!applying.Remove(token, out var operation))
+				
+				return false;
+			
+			while(pending.Count >= MaxPending && insertionOrder.First is not null) {
+				
+				var oldest = insertionOrder.First.Value;
+				insertionOrder.RemoveFirst();
+				pending.Remove(oldest);
+			}
+			
+			pending.Add(token, operation);
+			insertionOrder.AddLast(token);
+			
+			return true;
+		}
 	}
 	
 	/// <summary>
