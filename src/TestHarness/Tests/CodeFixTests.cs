@@ -64,8 +64,12 @@ internal static class CodeFixTests
 				
 				var error = apData?["error"]?.GetValue<string>();
 				var filesWritten = apData?["filesWritten"]?.GetValue<int>();
+				var fileState = apData?["files"]?[0]?["state"]?.GetValue<string>();
 				var updated = await File.ReadAllTextAsync(fixturePath);
-				var pass = error is null && filesWritten >= 1 && updated.Contains("nint handle", StringComparison.Ordinal);
+				var pass = error is null
+					&& filesWritten >= 1
+					&& fileState == "written"
+					&& updated.Contains("nint handle", StringComparison.Ordinal);
 				
 				return (pass,
 					pass

@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Security.Cryptography;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
 
@@ -8,14 +7,16 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class ApplyCodeFixTool : RoslynMcpTool
 {
-	readonly ApprovalStore approvals;
-	readonly BackupStore    backups;
+	readonly ApprovalStore            approvals;
+	readonly BackupStore              backups;
+	readonly PhysicalSolutionApplier physicalApplier;
 	
 	public ApplyCodeFixTool(WorkspaceResolver workspace, ApprovalStore approvals, BackupStore backups, FileLogger logger, PaginationCache paginationCache)
 		: base(workspace, logger, paginationCache)
 	{
-		this.approvals = approvals;
-		this.backups   = backups;
+		this.approvals  = approvals;
+		this.backups    = backups;
+		physicalApplier = new PhysicalSolutionApplier(workspace, backups);
 	}
 	
 	[McpServerTool(Name = "roslyn_apply_code_fix", Destructive = true, Title = "Apply Code Fix", OpenWorld = false)]
@@ -24,11 +25,11 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		"Always call preview first to obtain a token. Pass approval 'y' to apply " +
 		"or 'n' to cancel without changing files. " +
 		"Phase 1 applies targeted single-diagnostic fixes only, not FixAll.")]
-
 	public async Task<ApplyCodeFixResult> ApplyCodeFix(
 		[Description("The confirmation token returned by roslyn_preview_code_fix.")] string token,
 		[Description("'y' to apply this code fix; 'n' to cancel without writing files.")] string approval,
-		[Description(ProjectPathDescription)] string projectPath)
+		[Description(ProjectPathDescription)] string projectPath,
+		CancellationToken cancellationToken)
 	{
 		using var scope = BeginTool("roslyn_apply_code_fix", $"{token} ({approval})");
 		
@@ -52,7 +53,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		var physicalApplyStarted = false;
 		
 		try {
-		
+			
 			if(operation.WorkspaceBinding is null)
 				return scope.Failed("workspace binding missing", new ApplyCodeFixResult(
 					"The preview token does not contain an originating workspace. Re-run roslyn_preview_code_fix.",
@@ -70,152 +71,83 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"workspace mismatch"));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;
-			var rootPath        = workspace.GetRootPath(boundProjectPath);
-			var projectChanges = operation.NewSolution.GetChanges(operation.BaseSolution)
-				.GetProjectChanges()
-				.ToArray()
-			;
-			var changedDocs = projectChanges
-				.SelectMany(p => p.GetChangedDocuments().Concat(p.GetAddedDocuments())
-					.Select(id => operation.NewSolution.GetDocument(id))
-					.OfType<Document>())
-				.Where(d => d.FilePath is not null)
-				.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
-				.Select(g => g.First())
-				.ToArray()
-			;
-			var removedDocs = projectChanges
-				.SelectMany(p => p.GetRemovedDocuments()
-					.Select(id => operation.BaseSolution.GetDocument(id))
-					.OfType<Document>())
-				.Where(d => d.FilePath is not null)
-				.GroupBy(d => d.FilePath!, StringComparer.OrdinalIgnoreCase)
-				.Select(g => g.First())
-				.Where(d => operation.NewSolution.GetDocumentIdsWithFilePath(d.FilePath!).IsEmpty)
-				.ToArray()
-			;
-			var affectedDocs = changedDocs.Concat(removedDocs).ToArray();
-			
-			if(affectedDocs.Length == 0)
-				return scope.Failed("no files changed", new ApplyCodeFixResult("Previewed code fix has no changed files. Re-run preview_code_fix.", null, "no files changed"));
-			
-			if(CheckForStalePreview(operation.FileStates) is { } staleError)
-				return scope.Failed("stale preview", new ApplyCodeFixResult(staleError, null, "stale preview"));
-			
-			bool preSaved = false
-			;
+			var rootPath         = workspace.GetRootPath(boundProjectPath);
+			PhysicalSolutionApplyPlan plan;
 			
 			try {
 				
-				foreach(var doc in changedDocs) {
-					
-					var bytes = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
-					preSaved = false;
-					await backups.SavePreAsync(doc.FilePath!, boundProjectPath, "roslyn_apply_code_fix");
-					preSaved = true;
-					await backups.SavePostAsync(doc.FilePath!, boundProjectPath, "roslyn_apply_code_fix", bytes);
-				}
+				plan = await PhysicalSolutionApplyPlan.BuildAsync(
+					operation.BaseSolution,
+					operation.NewSolution,
+					operation.FileStates,
+					cancellationToken);
+			}
+			catch(PhysicalApplyPlanException ex) {
 				
-				foreach(var doc in removedDocs) {
-					
-					preSaved = false;
-					await backups.SavePreAsync(doc.FilePath!, boundProjectPath, "roslyn_apply_code_fix");
-					preSaved = true;
-				}
+				return scope.Failed("invalid physical plan", new ApplyCodeFixResult(
+					$"Code fix cannot be applied safely: {ex.Message}",
+					null,
+					"invalid physical plan"));
+			}
+			
+			if(plan.ValidateCurrentState() is { } staleError)
+				return scope.Failed("stale preview", new ApplyCodeFixResult(
+					$"{staleError} Re-run roslyn_preview_code_fix.",
+					null,
+					"stale preview"));
+			
+			try {
+				
+				await physicalApplier.PrepareBackupsAsync(plan, boundProjectPath, "roslyn_apply_code_fix");
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				
-				var phaseWord = preSaved ? "post" : "pre";
-				var snapNote  = preSaved ? " Any pre-change snapshots already saved are not needed." : string.Empty;
-				
 				return scope.Failed("backup failed", new ApplyCodeFixResult(
-					$"Write aborted — could not save {phaseWord}-change backup: {ex.Message}. " +
-					$"No files were modified.{snapNote} " +
+					$"Write aborted — backups could not be prepared: {ex.Message}. No source files were modified. " +
 					"The approval token is still valid — retry after resolving the issue.",
 					null,
 					"backup failed"));
 			}
 			
-			if(!workspace.IsAdhoc(boundProjectPath)) {
-				
-				physicalApplyStarted = true;
-				
-				if(!workspace.ApplyChanges(boundProjectPath, operation.NewSolution))
-					return scope.Failed("apply failed", new ApplyCodeFixResult(
-						"Workspace refused to apply the previewed code fix after backups were saved. " +
-						RecoveryHint(affectedDocs, rootPath),
-						null,
-						"apply failed"));
-				
-				foreach(var doc in changedDocs) {
-					
-					var path    = doc.FilePath!;
-					var relPath = TryMakeRelative(path, rootPath) ?? path;
-					var bytes   = FileWriter.Utf8NoBom.GetBytes((await doc.GetTextAsync()).ToString());
-					
-					if(await TryRecoverTruncation(relPath, path, boundProjectPath, bytes) is { } truncErr)
-						return scope.Failed("truncation detected", new ApplyCodeFixResult(truncErr.Error ?? "File truncation detected.", null, "truncation detected"));
-				}
-			}
-			else {
-				
-				physicalApplyStarted = true;
-				
-				try {
-					
-					await SolutionDiff.ApplyToDiskAsync(operation.BaseSolution, operation.NewSolution,
-						async (path, content) => {
-							
-							await workspace.WriteAndInvalidate(boundProjectPath, path,
-								() => FileWriter.WriteAllTextAsync(path, content));
-							
-							var relPath = TryMakeRelative(path, rootPath) ?? path;
-							
-							if(CheckForTruncation(relPath, path, content.Length) is { } truncErr)
-								throw new IOException(truncErr.Error);
-						});
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or InvalidOperationException) {
-					
-					return scope.Failed("apply failed", new ApplyCodeFixResult(
-						$"Code fix write failed after backups were saved: {ex.Message}. " +
-						RecoveryHint(affectedDocs, rootPath),
-						null,
-						"apply failed"));
-				}
-			}
+			if(plan.ValidateCurrentState() is { } postBackupStaleError)
+				return scope.Failed("stale preview", new ApplyCodeFixResult(
+					$"{postBackupStaleError} The file changed while backups were being prepared. " +
+					"No source files were modified; the approval token is still valid.",
+					null,
+					"stale preview"));
 			
-			var filesDeleted = 0
+			physicalApplyStarted = true;
+			
+			var report = await physicalApplier.ApplyAsync(plan, operation.NewSolution, boundProjectPath);
+			var files = report.Files
+				.Select(file => new CodeFixFileResult(
+					TryMakeRelative(file.Path, rootPath) ?? file.Path,
+					file.State.ToString().ToLowerInvariant(),
+					file.Error))
+				.ToArray()
 			;
 			
-			foreach(var doc in removedDocs) {
-				
-				try {
-					
-					if(File.Exists(doc.FilePath!))
-						File.Delete(doc.FilePath!);
-					
-					workspace.InvalidateFile(boundProjectPath, doc.FilePath!);
-					filesDeleted++;
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					
-					return scope.Failed("delete failed", new ApplyCodeFixResult(
-						$"Code fix content changes were applied, but '{doc.FilePath}' could not be deleted: {ex.Message}. " +
-						RecoveryHint(affectedDocs, rootPath),
-						changedDocs.Length,
-						"delete failed",
-						filesDeleted));
-				}
-			}
+			if(report.Succeeded)
+				return scope.Outcome($"{report.FilesWritten} file(s) written, {report.FilesDeleted} deleted", new ApplyCodeFixResult(
+					$"Code fix applied. {report.FilesWritten} file(s) written and {report.FilesDeleted} deleted.",
+					report.FilesWritten,
+					null,
+					report.FilesDeleted,
+					files));
 			
-			var deletionNote = filesDeleted > 0 ? $" {filesDeleted} file(s) deleted." : string.Empty;
+			var error = report.IsPartial ? "partial apply" : "apply failed";
+			var executionNote = report.ExecutionError is null
+				? string.Empty
+				: $" Persistence error: {report.ExecutionError}."
+			;
 			
-			return scope.Outcome($"{changedDocs.Length} file(s) written, {filesDeleted} deleted", new ApplyCodeFixResult(
-				$"Code fix applied. Files written to disk.{deletionNote}",
-				changedDocs.Length,
-				null,
-				filesDeleted));
+			return scope.Failed(error, new ApplyCodeFixResult(
+				$"Code fix did not reach its intended state for every file.{executionNote} " +
+				RecoveryHint(plan, rootPath),
+				report.FilesWritten,
+				error,
+				report.FilesDeleted,
+				files));
 		}
 		finally {
 			
@@ -226,42 +158,12 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		}
 	}
 	
-	private static string? CheckForStalePreview(IReadOnlyDictionary<string, PreviewFileState>? fileStates)
+	private static string RecoveryHint(PhysicalSolutionApplyPlan plan, string rootPath)
 	{
-		if(fileStates is null || fileStates.Count == 0)
-			return null;
-		
-		foreach(var (path, state) in fileStates) {
-			
-			if(state.ExpectedState == ExpectedFileState.Absent) {
-				
-				if(File.Exists(path))
-					return $"Apply aborted — '{path}' was created after preview. Re-run roslyn_preview_code_fix before applying.";
-				
-				continue;
-			}
-			
-			if(!File.Exists(path))
-				return $"Apply aborted — '{path}' changed since preview: file no longer exists. Re-run roslyn_preview_code_fix.";
-			
-			var currentHash = ComputeFileHash(path);
-			
-			if(!string.Equals(currentHash, state.ContentHash, StringComparison.OrdinalIgnoreCase))
-				return $"Apply aborted — '{path}' changed since preview. Re-run roslyn_preview_code_fix before applying.";
-		}
-		
-		return null;
-	}
-	
-	private static string RecoveryHint(Document[] changedDocs, string rootPath)
-	{
-		var files = changedDocs
-			.Select(d => TryMakeRelative(d.FilePath, rootPath) ?? d.FilePath ?? d.Name)
-			.Distinct(StringComparer.OrdinalIgnoreCase)
-			.ToArray()
+		var firstFile = plan.Files
+			.Select(file => TryMakeRelative(file.Path, rootPath) ?? file.Path)
+			.FirstOrDefault()
 		;
-		
-		var firstFile = files.FirstOrDefault();
 		var fileHint = firstFile is not null
 			? $" Start with roslyn_local_history action 'list' for filePath '{firstFile}'."
 			: string.Empty
@@ -271,27 +173,32 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			"apply a 'pre' snapshot to roll back, or a 'post' snapshot to restore the intended code-fix content." +
 			fileHint;
 	}
-	
-	private static string ComputeFileHash(string path)
-	{
-		using var stream = File.OpenRead(path);
-		var hash = SHA256.HashData(stream);
-		
-		return Convert.ToHexString(hash);
-	}
 }
 
 internal sealed record ApplyCodeFixResult : ToolResult, IToolError
 {
-	public ApplyCodeFixResult(string message, int? filesWritten, string? error, int? filesDeleted = null)
+	public ApplyCodeFixResult(
+		string message,
+		int? filesWritten,
+		string? error,
+		int? filesDeleted = null,
+		CodeFixFileResult[]? files = null)
 	{
 		Message      = message;
 		FilesWritten = filesWritten;
 		FilesDeleted = filesDeleted;
+		Files        = files;
 		Error        = error;
 	}
 	
-	public string Message      { get; }
-	public int?   FilesWritten { get; }
-	public int?   FilesDeleted { get; }
+	public string               Message      { get; }
+	public int?                 FilesWritten { get; }
+	public int?                 FilesDeleted { get; }
+	public CodeFixFileResult[]? Files        { get; }
 }
+
+internal sealed record CodeFixFileResult(
+	string  Path,
+	string  State,
+	string? Error
+);
