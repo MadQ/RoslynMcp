@@ -59,6 +59,7 @@ class Program
 			RedirectStandardError  = true,
 			UseShellExecute        = false,
 		};
+		psi.Environment["ROSLYNMCP_TEST_CODE_FIXES"] = "1";
 		
 		using var proc = Process.Start(psi)!;
 		

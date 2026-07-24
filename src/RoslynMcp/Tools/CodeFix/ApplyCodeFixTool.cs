@@ -119,11 +119,19 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			physicalApplyStarted = true;
 			
 			var report = await physicalApplier.ApplyAsync(plan, operation.NewSolution, boundProjectPath);
+			var plannedFiles = plan.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
 			var files = report.Files
-				.Select(file => new CodeFixFileResult(
-					TryMakeRelative(file.Path, rootPath) ?? file.Path,
-					file.State.ToString().ToLowerInvariant(),
-					file.Error))
+				.Select(file => {
+					
+					var relativePath = TryMakeRelative(file.Path, rootPath) ?? file.Path;
+					var plannedFile  = plannedFiles[file.Path];
+					
+					return new CodeFixFileResult(
+						relativePath,
+						file.State.ToString().ToLowerInvariant(),
+						file.Error,
+						RecoveryGuidance(file.State, plannedFile.Operation, relativePath));
+				})
 				.ToArray()
 			;
 			
@@ -135,15 +143,22 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					report.FilesDeleted,
 					files));
 			
-			var error = report.IsPartial ? "partial apply" : "apply failed";
+			var error = report.AllFilesReachedIntendedState
+				? "apply state uncertain"
+				: report.IsPartial ? "partial apply" : "apply failed"
+			;
 			var executionNote = report.ExecutionError is null
 				? string.Empty
 				: $" Persistence error: {report.ExecutionError}."
 			;
+			var outcomeMessage = report.AllFilesReachedIntendedState
+				? "Every physical file matches the intended code-fix state, but the workspace reported a persistence failure."
+				: "Code fix did not reach its intended state for every file."
+			;
 			
 			return scope.Failed(error, new ApplyCodeFixResult(
-				$"Code fix did not reach its intended state for every file.{executionNote} " +
-				RecoveryHint(plan, rootPath),
+				$"{outcomeMessage}{executionNote} " +
+				"Review each files[].state and files[].recovery value before deciding whether to roll back or complete the fix.",
 				report.FilesWritten,
 				error,
 				report.FilesDeleted,
@@ -158,20 +173,43 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		}
 	}
 	
-	private static string RecoveryHint(PhysicalSolutionApplyPlan plan, string rootPath)
+	private string RecoveryGuidance(
+		PhysicalApplyState state,
+		PhysicalFileOperation operation,
+		string filePath)
 	{
-		var firstFile = plan.Files
-			.Select(file => TryMakeRelative(file.Path, rootPath) ?? file.Path)
-			.FirstOrDefault()
-		;
-		var fileHint = firstFile is not null
-			? $" Start with roslyn_local_history action 'list' for filePath '{firstFile}'."
-			: string.Empty
-		;
+		if(state == PhysicalApplyState.Untouched)
+			return "No recovery is needed; the file still matches its preview baseline.";
 		
-		return "Backups were saved before writing. Use roslyn_local_history to list snapshots for the affected file(s); " +
-			"apply a 'pre' snapshot to roll back, or a 'post' snapshot to restore the intended code-fix content." +
-			fileHint;
+		if(!backups.IsEnabled)
+			return "Local history is disabled. Inspect the file and use source control or another backup to recover it.";
+		
+		var listStep = $"Use roslyn_local_history with action 'list' and filePath '{filePath}', " +
+			"then call action 'preview' with the selected backup token before applying it.";
+		
+		return (state, operation) switch {
+			
+			(PhysicalApplyState.Written, PhysicalFileOperation.Write) =>
+				$"{listStep} Apply the 'pre' snapshot to restore the original file.",
+			
+			(PhysicalApplyState.Written, PhysicalFileOperation.Create) =>
+				$"This file did not exist before the fix, so there is no 'pre' snapshot. " +
+				$"Delete it to roll back. To restore the intended content, {listStep} Apply the 'post' snapshot.",
+			
+			(PhysicalApplyState.Deleted, _) =>
+				$"{listStep} Apply the 'pre' snapshot to recreate the deleted original file.",
+			
+			(PhysicalApplyState.Truncated or PhysicalApplyState.Uncertain, PhysicalFileOperation.Create) =>
+				$"Inspect the file first. It had no original version, so delete it to roll back. " +
+				$"To complete the fix, {listStep} Apply the 'post' snapshot.",
+			
+			(PhysicalApplyState.Truncated or PhysicalApplyState.Uncertain, PhysicalFileOperation.Delete) =>
+				$"Inspect the file first. {listStep} Apply the 'pre' snapshot to restore the original content.",
+			
+			_ =>
+				$"Inspect the file first. {listStep} Apply the 'pre' snapshot to restore the original content, " +
+				"or the 'post' snapshot to complete the intended fix."
+		};
 	}
 }
 
@@ -200,5 +238,6 @@ internal sealed record ApplyCodeFixResult : ToolResult, IToolError
 internal sealed record CodeFixFileResult(
 	string  Path,
 	string  State,
-	string? Error
+	string? Error,
+	string  Recovery
 );

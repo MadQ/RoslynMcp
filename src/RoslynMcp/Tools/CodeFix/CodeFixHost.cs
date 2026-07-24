@@ -8,11 +8,27 @@ namespace RoslynMcp.Tools;
 
 internal sealed class CodeFixHost
 {
-	readonly ImmutableArray<CodeFixProvider> providers =
-	[
-		new PreferNintOverIntPtrCodeFixProvider(),
-		new ToolScopeCodeFixProvider()
-	];
+	readonly ImmutableArray<CodeFixProvider> bundledProviders;
+	
+	public CodeFixHost()
+	{
+		bundledProviders = CreateBundledProviders();
+	}
+	
+	static ImmutableArray<CodeFixProvider> CreateBundledProviders()
+	{
+		var builder = ImmutableArray.CreateBuilder<CodeFixProvider>();
+		builder.Add(new PreferNintOverIntPtrCodeFixProvider());
+		builder.Add(new ToolScopeCodeFixProvider());
+		
+#if DEBUG
+		// The harness provider is an explicit test seam, never a discovered project provider.
+		if(Environment.GetEnvironmentVariable("ROSLYNMCP_TEST_CODE_FIXES") == "1")
+			builder.Add(new CodeFixTestProvider());
+#endif
+		
+		return builder.ToImmutable();
+	}
 	
 	public async Task<ImmutableArray<AvailableCodeFix>> GetFixesAsync(
 		Document document,
@@ -21,7 +37,7 @@ internal sealed class CodeFixHost
 	{
 		var fixes = ImmutableArray.CreateBuilder<AvailableCodeFix>();
 		
-		foreach(var provider in providers) {
+		foreach(var provider in bundledProviders) {
 			
 			if(!provider.FixableDiagnosticIds.Contains(diagnostic.Id))
 				continue;

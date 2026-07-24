@@ -41,13 +41,16 @@ internal sealed record PhysicalApplyReport(
 	public int FilesWritten => Files.Count(file => file.State == PhysicalApplyState.Written);
 	public int FilesDeleted => Files.Count(file => file.State == PhysicalApplyState.Deleted);
 	
+	public bool AllFilesReachedIntendedState =>
+		Files.All(file => file.State is PhysicalApplyState.Written or PhysicalApplyState.Deleted);
+	
 	public bool Succeeded =>
 		ExecutionError is null
-		&& Files.All(file => file.State is PhysicalApplyState.Written or PhysicalApplyState.Deleted);
+		&& AllFilesReachedIntendedState;
 	
 	public bool IsPartial =>
-		!Succeeded
-		&& Files.Any(file => file.State is PhysicalApplyState.Written or PhysicalApplyState.Deleted);
+		Files.Any(file => file.State is PhysicalApplyState.Written or PhysicalApplyState.Deleted)
+		&& Files.Any(file => file.State is not (PhysicalApplyState.Written or PhysicalApplyState.Deleted));
 }
 
 internal sealed class PhysicalSolutionApplyPlan
@@ -335,7 +338,7 @@ internal sealed class PhysicalSolutionApplier
 			else if(!workspace.ApplyChanges(projectPath, newSolution))
 				executionError = "Workspace refused to apply the previewed solution.";
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or InvalidOperationException) {
+		catch(Exception ex) when(ex is not OutOfMemoryException) {
 			
 			executionError = ex.Message;
 		}
@@ -346,7 +349,7 @@ internal sealed class PhysicalSolutionApplier
 				
 				ApplyDeletes(plan, projectPath);
 			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			catch(Exception ex) when(ex is not OutOfMemoryException) {
 				
 				executionError = ex.Message;
 			}
