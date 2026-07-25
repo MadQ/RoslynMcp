@@ -35,7 +35,11 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			
-			approvals.Reject(token);
+			if(!approvals.Reject(token))
+				return scope.Failed("token unavailable", new ApplyCodeFixResult(
+					$"Token '{token}' was not found, was consumed, or is already being applied.",
+					null,
+					"token unavailable"));
 			
 			return scope.Failed("rejected", new ApplyCodeFixResult("Code fix rejected. No files were changed.", null, "rejected"));
 		}

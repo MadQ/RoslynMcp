@@ -169,31 +169,37 @@ internal sealed class PhysicalSolutionApplyPlan
 	{
 		foreach(var file in Files) {
 			
-			try {
-				
-				if(file.OriginalState == ExpectedFileState.Absent) {
-					
-					if(File.Exists(file.Path))
-						return $"Apply aborted — '{file.Path}' was created after preview.";
-					
-					continue;
-				}
-				
-				if(!File.Exists(file.Path))
-					return $"Apply aborted — '{file.Path}' no longer exists.";
-				
-				var currentHash = ComputeFileHash(file.Path);
-				
-				if(!string.Equals(currentHash, file.OriginalHash, StringComparison.OrdinalIgnoreCase))
-					return $"Apply aborted — '{file.Path}' changed after preview.";
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				
-				return $"Apply aborted — the current state of '{file.Path}' could not be verified: {ex.Message}";
-			}
+			if(ValidateCurrentState(file) is { } error)
+				return error;
 		}
 		
 		return null;
+	}
+	
+	public static string? ValidateCurrentState(PhysicalFilePlan file)
+	{
+		try {
+			
+			if(file.OriginalState == ExpectedFileState.Absent) {
+				
+				return File.Exists(file.Path)
+					? $"Apply aborted — '{file.Path}' was created after preview."
+					: null;
+			}
+			
+			if(!File.Exists(file.Path))
+				return $"Apply aborted — '{file.Path}' no longer exists.";
+			
+			var currentHash = ComputeFileHash(file.Path);
+			
+			return string.Equals(currentHash, file.OriginalHash, StringComparison.OrdinalIgnoreCase)
+				? null
+				: $"Apply aborted — '{file.Path}' changed after preview.";
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
+			return $"Apply aborted — the current state of '{file.Path}' could not be verified: {ex.Message}";
+		}
 	}
 	
 	public PhysicalFileResult[] Verify()
@@ -294,6 +300,8 @@ internal sealed class PhysicalSolutionApplyPlan
 
 internal sealed class PhysicalSolutionApplier
 {
+	static readonly SemaphoreSlim applyGate = new(1, 1);
+	
 	readonly WorkspaceResolver workspace;
 	readonly BackupStore      backups;
 	
@@ -322,30 +330,41 @@ internal sealed class PhysicalSolutionApplier
 		PhysicalSolutionApplyPlan plan,
 		string projectPath)
 	{
-		string? executionError = null;
+		await applyGate.WaitAsync();
 		
 		try {
+			var executionError = plan.ValidateCurrentState();
 			
-			await ApplyWritesAsync(plan, projectPath);
-		}
-		catch(Exception ex) when(ex is not OutOfMemoryException) {
-			
-			executionError = ex.Message;
-		}
-		
-		if(executionError is null) {
-			
-			try {
+			if(executionError is null) {
 				
-				ApplyDeletes(plan, projectPath);
+				try {
+					
+					await ApplyWritesAsync(plan, projectPath);
+				}
+				catch(Exception ex) when(ex is not OutOfMemoryException) {
+					
+					executionError = ex.Message;
+				}
 			}
-			catch(Exception ex) when(ex is not OutOfMemoryException) {
+			
+			if(executionError is null) {
 				
-				executionError = ex.Message;
+				try {
+					
+					ApplyDeletes(plan, projectPath);
+				}
+				catch(Exception ex) when(ex is not OutOfMemoryException) {
+					
+					executionError = ex.Message;
+				}
 			}
+			
+			return new PhysicalApplyReport(executionError, plan.Verify());
 		}
-		
-		return new PhysicalApplyReport(executionError, plan.Verify());
+		finally {
+			
+			applyGate.Release();
+		}
 	}
 	
 	async Task ApplyWritesAsync(PhysicalSolutionApplyPlan plan, string projectPath)
@@ -355,8 +374,41 @@ internal sealed class PhysicalSolutionApplier
 			if(file.Operation == PhysicalFileOperation.Delete)
 				continue;
 			
-			await workspace.WriteAndInvalidate(projectPath, file.Path,
-				() => FileWriter.WriteAllBytesAsync(file.Path, file.IntendedBytes!));
+			var directory = Path.GetDirectoryName(file.Path)
+				?? throw new IOException($"File '{file.Path}' has no parent directory.");
+			var temporaryPath = Path.Combine(
+				directory,
+				$".{Path.GetFileName(file.Path)}.{Guid.NewGuid():N}.tmp");
+			
+			try {
+				
+				await FileWriter.WriteAllBytesAsync(temporaryPath, file.IntendedBytes!);
+				
+				if(!OperatingSystem.IsWindows() && file.Operation == PhysicalFileOperation.Write)
+					File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(file.Path));
+				
+				if(PhysicalSolutionApplyPlan.ValidateCurrentState(file) is { } staleError)
+					throw new IOException(staleError);
+				
+				await workspace.WriteAndInvalidate(projectPath, file.Path, () => {
+					
+					if(file.Operation == PhysicalFileOperation.Create)
+						File.Move(temporaryPath, file.Path);
+					else
+						File.Replace(temporaryPath, file.Path, null);
+					
+					return Task.CompletedTask;
+				});
+			}
+			finally {
+				
+				try {
+					
+					if(File.Exists(temporaryPath))
+						File.Delete(temporaryPath);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			}
 		}
 	}
 	
