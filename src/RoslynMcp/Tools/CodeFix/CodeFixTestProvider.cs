@@ -76,6 +76,66 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 				
 				break;
 			
+			case "TestAdditionalDocument":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Add additional document",
+						ct => AddAdditionalDocumentAsync(context.Document, ct),
+						"test_additional_document"),
+					diagnostic);
+				
+				break;
+			
+			case "TestAnalyzerConfig":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Add analyzer config document",
+						ct => AddAnalyzerConfigDocumentAsync(context.Document, ct),
+						"test_analyzer_config"),
+					diagnostic);
+				
+				break;
+			
+			case "TestAddedProject":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Add project",
+						ct => AddProjectAsync(context.Document, ct),
+						"test_added_project"),
+					diagnostic);
+				
+				break;
+			
+			case "TestMetadataReference":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Remove metadata reference",
+						ct => RemoveMetadataReferenceAsync(context.Document, ct),
+						"test_metadata_reference"),
+					diagnostic);
+				
+				break;
+			
+			case "TestProjectOptions":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Change project compilation options",
+						ct => ChangeProjectOptionsAsync(context.Document, ct),
+						"test_project_options"),
+					diagnostic);
+				
+				break;
+			
+			case "TestExternalPath":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Move changed document outside workspace",
+						ct => ChangeExternalPathAsync(context.Document, typeNode, ct),
+						"test_external_path"),
+					diagnostic);
+				
+				break;
+			
 			case "TestNoOperations":
 				context.RegisterCodeFix(
 					new FixedOperationsCodeAction("Return no operations", []),
@@ -161,6 +221,92 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 			SourceText.From(secondText.ToString().Replace("before", "after", StringComparison.Ordinal)));
 	}
 	
+	static Task<Solution> AddAdditionalDocumentAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var directory = Path.GetDirectoryName(document.FilePath!)
+			?? throw new InvalidOperationException("Test document has no directory.");
+		var solution = document.Project.Solution.AddAdditionalDocument(
+			DocumentId.CreateNewId(document.Project.Id),
+			"_CodeFixAdditional_.txt",
+			SourceText.From("additional content\n"),
+			filePath: Path.Combine(directory, "_CodeFixAdditional_.txt"));
+		
+		return Task.FromResult(solution);
+	}
+	
+	static Task<Solution> AddAnalyzerConfigDocumentAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var directory = Path.GetDirectoryName(document.FilePath!)
+			?? throw new InvalidOperationException("Test document has no directory.");
+		var solution = document.Project.Solution.AddAnalyzerConfigDocument(
+			DocumentId.CreateNewId(document.Project.Id),
+			"_CodeFix.editorconfig",
+			SourceText.From("root = true\n"),
+			filePath: Path.Combine(directory, "_CodeFix.editorconfig"));
+		
+		return Task.FromResult(solution);
+	}
+	
+	static Task<Solution> AddProjectAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var projectInfo = ProjectInfo.Create(
+			ProjectId.CreateNewId(),
+			VersionStamp.Create(),
+			"AddedByCodeFix",
+			"AddedByCodeFix",
+			LanguageNames.CSharp);
+		
+		return Task.FromResult(document.Project.Solution.AddProject(projectInfo));
+	}
+	
+	static Task<Solution> RemoveMetadataReferenceAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var reference = document.Project.MetadataReferences.FirstOrDefault()
+			?? throw new InvalidOperationException("Test project has no metadata reference.");
+		
+		return Task.FromResult(document.Project.Solution.RemoveMetadataReference(document.Project.Id, reference));
+	}
+	
+
+	static Task<Solution> ChangeProjectOptionsAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var options = document.Project.CompilationOptions
+			?? throw new InvalidOperationException("Test project has no compilation options.");
+		var solution = document.Project.Solution.WithProjectCompilationOptions(
+			document.Project.Id,
+			options.WithGeneralDiagnosticOption(ReportDiagnostic.Error));
+		
+		return Task.FromResult(solution);
+	}
+	
+
+	static async Task<Solution> ChangeExternalPathAsync(
+		Document document,
+		SyntaxNode typeNode,
+		CancellationToken cancellationToken)
+	{
+		var solution = await ReplaceTypeAsync(document, typeNode, "object", cancellationToken);
+		var directory = Path.GetDirectoryName(document.FilePath!)
+			?? throw new InvalidOperationException("Test document has no directory.");
+		var parent = Path.GetDirectoryName(directory)
+			?? throw new InvalidOperationException("Test document directory has no parent.");
+		
+		return solution.WithDocumentFilePath(
+			document.Id,
+			Path.Combine(parent, $"_{Path.GetFileName(directory)}_External.cs"));
+	}
+	
+
 	static async Task<Solution> CreateMixedSolutionAsync(
 		Document document,
 		SyntaxNode typeNode,

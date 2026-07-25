@@ -197,4 +197,7 @@ internal enum ExpectedFileState
 	Absent
 }
 
-internal sealed record PreviewFileState(ExpectedFileState ExpectedState, string? ContentHash);
+internal sealed record PreviewFileState(
+	ExpectedFileState ExpectedState,
+	string?           ContentHash,
+	byte[]?           IntendedBytes);

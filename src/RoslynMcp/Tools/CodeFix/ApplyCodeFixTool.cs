@@ -24,7 +24,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		"Commits or cancels a code fix previewed by roslyn_preview_code_fix. " +
 		"Always call preview first to obtain a token. Pass approval 'y' to apply " +
 		"or 'n' to cancel without changing files. " +
-		"Phase 1 applies targeted single-diagnostic fixes only, not FixAll.")]
+		"Phase 1 applies targeted modifications to existing in-workspace .cs files only, not file lifecycle or project-system changes.")]
 	public async Task<ApplyCodeFixResult> ApplyCodeFix(
 		[Description("The confirmation token returned by roslyn_preview_code_fix.")] string token,
 		[Description("'y' to apply this code fix; 'n' to cancel without writing files.")] string approval,
@@ -54,6 +54,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		
 		try {
 			
+			if(!operation.SymbolKey.StartsWith("codefix:", StringComparison.Ordinal))
+				return scope.Failed("token type mismatch", new ApplyCodeFixResult(
+					"The approval token was not created by roslyn_preview_code_fix. Use the matching apply tool.",
+					null,
+					"token type mismatch"));
+			
+
 			if(operation.WorkspaceBinding is null)
 				return scope.Failed("workspace binding missing", new ApplyCodeFixResult(
 					"The preview token does not contain an originating workspace. Re-run roslyn_preview_code_fix.",
@@ -90,6 +97,14 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"invalid physical plan"));
 			}
 			
+			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write
+				|| !string.Equals(Path.GetExtension(file.Path), ".cs", StringComparison.OrdinalIgnoreCase)))
+				return scope.Failed("unsupported code-fix change", new ApplyCodeFixResult(
+					"Code-fix apply accepts modifications to existing C# files only; file creation and deletion are not supported.",
+					null,
+					"unsupported code-fix change"));
+			
+
 			if(plan.ValidateCurrentState() is { } staleError)
 				return scope.Failed("stale preview", new ApplyCodeFixResult(
 					$"{staleError} Re-run roslyn_preview_code_fix.",
@@ -118,7 +133,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			
 			physicalApplyStarted = true;
 			
-			var report = await physicalApplier.ApplyAsync(plan, operation.NewSolution, boundProjectPath);
+			var report = await physicalApplier.ApplyAsync(plan, boundProjectPath);
 			var plannedFiles = plan.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
 			var files = report.Files
 				.Select(file => {

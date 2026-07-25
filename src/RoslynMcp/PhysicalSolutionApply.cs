@@ -82,9 +82,12 @@ internal sealed class PhysicalSolutionApplyPlan
 				if(document?.FilePath is null)
 					continue;
 				
-				var text = await document.GetTextAsync(cancellationToken);
-				var bytes = FileWriter.Utf8NoBom.GetBytes(text.ToString());
-				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(bytes));
+				if(!previewFileStates.TryGetValue(document.FilePath, out var previewState)
+					|| previewState.IntendedBytes is null)
+					throw new PhysicalApplyPlanException(
+						$"The preview does not contain intended bytes for '{document.FilePath}'.");
+				
+				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
 			}
 			
 			foreach(var documentId in projectChange.GetRemovedDocuments()) {
@@ -127,19 +130,10 @@ internal sealed class PhysicalSolutionApplyPlan
 				continue;
 			}
 			
-			var intendedContents = new List<byte[]>();
-			
-			foreach(var documentId in newSolution.GetDocumentIdsWithFilePath(path)) {
-				
-				var linkedDocument = newSolution.GetDocument(documentId);
-				
-				if(linkedDocument is null)
-					continue;
-				
-				var linkedText = await linkedDocument.GetTextAsync(cancellationToken);
-				intendedContents.Add(FileWriter.Utf8NoBom.GetBytes(linkedText.ToString()));
-			}
-			
+			var intendedContents = writeCandidates
+				.Select(candidate => candidate.IntendedBytes!)
+				.ToArray()
+			;
 			var intendedHashes = intendedContents
 				.Select(ComputeHash)
 				.Distinct(StringComparer.OrdinalIgnoreCase)
@@ -326,17 +320,13 @@ internal sealed class PhysicalSolutionApplier
 	
 	public async Task<PhysicalApplyReport> ApplyAsync(
 		PhysicalSolutionApplyPlan plan,
-		Solution newSolution,
 		string projectPath)
 	{
 		string? executionError = null;
 		
 		try {
 			
-			if(workspace.IsAdhoc(projectPath))
-				await ApplyAdhocWritesAsync(plan, projectPath);
-			else if(!workspace.ApplyChanges(projectPath, newSolution))
-				executionError = "Workspace refused to apply the previewed solution.";
+			await ApplyWritesAsync(plan, projectPath);
 		}
 		catch(Exception ex) when(ex is not OutOfMemoryException) {
 			
@@ -358,7 +348,7 @@ internal sealed class PhysicalSolutionApplier
 		return new PhysicalApplyReport(executionError, plan.Verify());
 	}
 	
-	async Task ApplyAdhocWritesAsync(PhysicalSolutionApplyPlan plan, string projectPath)
+	async Task ApplyWritesAsync(PhysicalSolutionApplyPlan plan, string projectPath)
 	{
 		foreach(var file in plan.Files) {
 			

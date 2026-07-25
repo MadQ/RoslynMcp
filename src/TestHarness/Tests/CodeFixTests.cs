@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json.Nodes;
 
 internal static class CodeFixTests
@@ -43,16 +44,17 @@ internal static class CodeFixTests
 		async Task<(JsonNode? Data, string Text)> PreviewAdhoc(
 			string workspacePath,
 			string marker,
-			int? actionIndex = null)
+			int? actionIndex = null,
+			string fileName = "_CodeFixFixture_.cs")
 		{
-			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var fixturePath = Path.Combine(workspacePath, fileName);
 			
 			if(!File.Exists(fixturePath))
 				await File.WriteAllTextAsync(fixturePath, Fixture(marker));
 			
 			return await Call("roslyn_preview_code_fix", new {
 				projectPath = workspacePath,
-				filePath = "_CodeFixFixture_.cs",
+				filePath = fileName,
 				line = 1,
 				column = 24,
 				diagnosticId = "CS0246",
@@ -412,7 +414,201 @@ internal static class CodeFixTests
 			}
 		}
 		
-		async Task<(bool pass, string msg)> RunMixedCreateWriteDelete()
+		async Task<(bool pass, string msg)> RunWrongWorkflowTokenRejected()
+		{
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				await File.WriteAllTextAsync(fixturePath, "class CodeFixFixture { }\n");
+				var (renamePreview, renameText) = await Call("roslyn_preview_rename", new {
+					projectPath = workspacePath,
+					symbolName = "CodeFixFixture",
+					newName = "RenamedCodeFixFixture"
+				});
+				var token = renamePreview?["token"]?.GetValue<string>();
+				
+				if(token is null)
+					return (false, $"FAIL  (rename preview: {renameText}) [{sw.ElapsedMilliseconds}ms]");
+				
+				var (apply, applyText) = await Apply(token, workspacePath);
+				var current = await File.ReadAllTextAsync(fixturePath);
+				var pass = apply?["error"]?.GetValue<string>() == "token type mismatch"
+					&& current == "class CodeFixFixture { }\n";
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (code-fix apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		async Task<(bool pass, string msg)> RunGeneratedFileRejectedAtPreview()
+		{
+			var workspacePath = NewAdhocWorkspace();
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				var (preview, previewText) = await PreviewAdhoc(
+					workspacePath,
+					"TestSingleWrite",
+					fileName: "_CodeFixFixture_.g.cs");
+				var pass = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
+					&& preview?["token"] is null
+					&& preview?["message"]?.GetValue<string>().Contains("generated source file", StringComparison.Ordinal) == true;
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		async Task<(bool pass, string msg)> RunReadOnlyFileRejectedAtPreview()
+		{
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
+				File.SetAttributes(fixturePath, File.GetAttributes(fixturePath) | FileAttributes.ReadOnly);
+				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				var pass = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
+					&& preview?["token"] is null
+					&& preview?["message"]?.GetValue<string>().Contains("writable source files", StringComparison.Ordinal) == true;
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				if(File.Exists(fixturePath))
+					File.SetAttributes(fixturePath, File.GetAttributes(fixturePath) & ~FileAttributes.ReadOnly);
+				
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		async Task<(bool pass, string msg)> RunUnsupportedSolutionShapesRejected()
+		{
+			var sw = Stopwatch.StartNew();
+			var markers = new[] {
+				"TestAdditionalDocument",
+				"TestAnalyzerConfig",
+				"TestAddedProject",
+				"TestMetadataReference",
+				"TestProjectOptions"
+			};
+			
+			foreach(var marker in markers) {
+				
+				var workspacePath = NewAdhocWorkspace();
+				
+				try {
+					
+					var (preview, previewText) = await PreviewAdhoc(workspacePath, marker);
+					
+					if(preview?["error"]?.GetValue<string>() != "unsupported code-fix change"
+						|| preview?["token"] is not null)
+						return (false, $"FAIL  ({marker}: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+				}
+				finally {
+					DeleteWorkspace(workspacePath);
+				}
+			}
+			
+			return (true, $"PASS  [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+		async Task<(bool pass, string msg)> RunEncodingPreserved()
+		{
+			var sw = Stopwatch.StartNew();
+			var cases = new (string Name, Encoding Encoding)[] {
+				("UTF-8 without BOM", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true)),
+				("UTF-8 with BOM", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true, throwOnInvalidBytes: true)),
+				("UTF-16 LE with BOM", new UnicodeEncoding(bigEndian: false, byteOrderMark: true, throwOnInvalidBytes: true))
+			};
+			
+			foreach(var testCase in cases) {
+				
+				var workspacePath = NewAdhocWorkspace();
+				var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+				
+				try {
+					
+					static byte[] Encode(string text, Encoding encoding)
+					{
+						var preamble = encoding.GetPreamble();
+						var content = encoding.GetBytes(text);
+						var bytes = new byte[preamble.Length + content.Length];
+						preamble.CopyTo(bytes, 0);
+						content.CopyTo(bytes, preamble.Length);
+						
+						return bytes;
+					}
+					
+					await File.WriteAllBytesAsync(fixturePath, Encode(Fixture("TestSingleWrite"), testCase.Encoding));
+					var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+					var token = preview?["token"]?.GetValue<string>();
+					
+					if(token is null)
+						return (false, $"FAIL  ({testCase.Name} preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+					
+					var (apply, applyText) = await Apply(token, workspacePath);
+					var actualBytes = await File.ReadAllBytesAsync(fixturePath);
+					var expectedBytes = Encode(Fixture("object"), testCase.Encoding);
+					
+					if(apply?["error"] is not null || !actualBytes.AsSpan().SequenceEqual(expectedBytes))
+						return (false, $"FAIL  ({testCase.Name} apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
+				}
+				finally {
+					DeleteWorkspace(workspacePath);
+				}
+			}
+			
+			return (true, $"PASS  [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+		async Task<(bool pass, string msg)> RunExternalPathRejectedAtPreview()
+		{
+			var workspacePath = NewAdhocWorkspace();
+			var externalPath = Path.Combine(
+				Path.GetDirectoryName(workspacePath)!,
+				$"_{Path.GetFileName(workspacePath)}_External.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				const string externalContents = "// external user file\n";
+				await File.WriteAllTextAsync(externalPath, externalContents);
+				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestExternalPath");
+				var currentExternalContents = await File.ReadAllTextAsync(externalPath);
+				var pass = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
+					&& preview?["token"] is null
+					&& currentExternalContents == externalContents;
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				if(File.Exists(externalPath))
+					File.Delete(externalPath);
+				
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		async Task<(bool pass, string msg)> RunCreateDeleteRejectedAtPreview()
 		{
 			var workspacePath = NewAdhocWorkspace();
 			var removedPath = Path.Combine(workspacePath, "_CodeFixRemoved_.cs");
@@ -421,119 +617,18 @@ internal static class CodeFixTests
 			
 			try {
 				
-				await File.WriteAllTextAsync(removedPath, "class RemovedByCodeFix { }\n");
+				const string removedContents = "class RemovedByCodeFix { }\n";
+				await File.WriteAllTextAsync(removedPath, removedContents);
 				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestMixed");
-				var token = preview?["token"]?.GetValue<string>();
-				
-				if(token is null)
-					return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
-				
-				var (apply, applyText) = await Apply(token, workspacePath);
-				var pass = apply?["error"] is null
-					&& apply?["filesWritten"]?.GetValue<int>() == 2
-					&& apply?["filesDeleted"]?.GetValue<int>() == 1
-					&& HasFileState(apply, "_CodeFixFixture_.cs", "written")
-					&& HasFileState(apply, "_CodeFixCreated_.cs", "written")
-					&& HasFileState(apply, "_CodeFixRemoved_.cs", "deleted")
-					&& EveryFileHasRecovery(apply)
-					&& File.Exists(createdPath)
-					&& !File.Exists(removedPath);
+				var currentRemovedContents = await File.ReadAllTextAsync(removedPath);
+				var pass = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
+					&& preview?["token"] is null
+					&& !File.Exists(createdPath)
+					&& currentRemovedContents == removedContents;
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
-			}
-			finally {
-				DeleteWorkspace(workspacePath);
-			}
-		}
-		
-		async Task<(bool pass, string msg)> RunAddedFileCollision()
-		{
-			var workspacePath = NewAdhocWorkspace();
-			var createdPath = Path.Combine(workspacePath, "_CodeFixCreated_.cs");
-			var sw = Stopwatch.StartNew();
-			
-			try {
-				
-				await File.WriteAllTextAsync(
-					Path.Combine(workspacePath, "_CodeFixRemoved_.cs"),
-					"class RemovedByCodeFix { }\n");
-				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestMixed");
-				var token = preview?["token"]?.GetValue<string>();
-				
-				if(token is null)
-					return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
-				
-				const string collision = "// concurrent created file\n";
-				await File.WriteAllTextAsync(createdPath, collision);
-				var (apply, _) = await Apply(token, workspacePath);
-				var current = await File.ReadAllTextAsync(createdPath);
-				var pass = apply?["error"]?.GetValue<string>() == "stale preview"
-					&& current == collision;
-				
-				return (pass, pass
-					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (collision was overwritten) [{sw.ElapsedMilliseconds}ms]");
-			}
-			finally {
-				DeleteWorkspace(workspacePath);
-			}
-		}
-		
-		async Task<(bool pass, string msg)> RunPartialApply()
-		{
-			var workspacePath = NewAdhocWorkspace();
-			var sw = Stopwatch.StartNew();
-			
-			try {
-				
-				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestPartial");
-				var token = preview?["token"]?.GetValue<string>();
-				
-				if(token is null)
-					return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
-				
-				var (apply, applyText) = await Apply(token, workspacePath);
-				var retry = await Apply(token, workspacePath);
-				var pass = apply?["error"]?.GetValue<string>() == "partial apply"
-					&& HasFileState(apply, "_CodeFixFixture_.cs", "written")
-					&& apply?["files"]?.AsArray().Any(file => file?["state"]?.GetValue<string>() == "untouched") == true
-					&& EveryFileHasRecovery(apply)
-					&& retry.Data?["error"]?.GetValue<string>() == "token unavailable";
-				
-				return (pass, pass
-					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
-			}
-			finally {
-				DeleteWorkspace(workspacePath);
-			}
-		}
-		
-		async Task<(bool pass, string msg)> RunDivergentLinkedPlan()
-		{
-			var workspacePath = NewAdhocWorkspace();
-			var sw = Stopwatch.StartNew();
-			
-			try {
-				
-				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestLinkedDivergent");
-				var token = preview?["token"]?.GetValue<string>();
-				
-				if(token is null)
-					return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
-				
-				var original = await File.ReadAllTextAsync(Path.Combine(workspacePath, "_CodeFixFixture_.cs"));
-				var (apply, applyText) = await Apply(token, workspacePath);
-				var current = await File.ReadAllTextAsync(Path.Combine(workspacePath, "_CodeFixFixture_.cs"));
-				var pass = apply?["error"]?.GetValue<string>() == "invalid physical plan"
-					&& current == original
-					&& !File.Exists(Path.Combine(workspacePath, "_CodeFixLinked_.cs"));
-				
-				return (pass, pass
-					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
+					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				DeleteWorkspace(workspacePath);
@@ -574,10 +669,13 @@ internal static class CodeFixTests
 			new("modified stale file survives and token retries", RunStaleModifiedRetainsToken),
 			new("deleted stale file can be recreated and retried", RunStaleDeletedRetainsToken),
 			new("multi-file write reports both verified files", RunMultiWrite),
-			new("mixed create/write/delete reports exact states", RunMixedCreateWriteDelete),
-			new("added-file collision is rejected as stale", RunAddedFileCollision),
-			new("partial apply reports states and consumes token", RunPartialApply),
-			new("divergent linked contents reject physical plan", RunDivergentLinkedPlan)
+			new("wrong workflow approval token is rejected", RunWrongWorkflowTokenRejected),
+			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
+			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
+			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
+			new("existing file encoding and BOM are preserved", RunEncodingPreserved),
+			new("external file changes are rejected during preview", RunExternalPathRejectedAtPreview),
+			new("create and delete changes are rejected during preview", RunCreateDeleteRejectedAtPreview)
 		]);
 	}
 }

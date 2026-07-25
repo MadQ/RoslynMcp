@@ -61,6 +61,9 @@ internal sealed class CodeFixHost
 					.ConfigureAwait(false)
 				;
 			}
+			catch(OperationCanceledException) {
+				throw;
+			}
 			catch(Exception ex) {
 				
 				throw new CodeFixProviderException(providerName, ex);
