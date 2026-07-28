@@ -17,8 +17,8 @@ For most code-understanding tasks, prefer:
 {
   projectPath: string;       // Required
   filePath?: string;         // Required for analysis; omit only for discovery
-  startLine?: number;        // Optional 1-based start line
-  endLine?: number;          // Optional 1-based end line
+  startLine?: number;        // Optional 1-based start line; default: start of file
+  endLine?: number;          // Optional 1-based end line; default: end of file
   syntaxKind?: string;       // Optional syntax node kind filter
   triviaKind?: string;       // Optional trivia kind filter
   includeLeading?: boolean;  // Default: true
@@ -26,8 +26,8 @@ For most code-understanding tasks, prefer:
   skip?: number;             // Default: 0
   take?: number;             // Default: 100, max: 500
   page_token?: string;       // Optional pagination token
-  listSyntaxKinds?: boolean; // Discovery mode
-  listTriviaKinds?: boolean; // Discovery mode
+  listSyntaxKinds?: boolean; // Default: false; discovery mode
+  listTriviaKinds?: boolean; // Default: false; discovery mode
 }
 ```
 

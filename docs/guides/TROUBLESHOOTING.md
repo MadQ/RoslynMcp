@@ -401,7 +401,7 @@ If none of the above solutions work:
 
 1. **Check logs:**
    - Default location: your OS local-app-data folder under `RoslynMcp\logs\roslynmcp.{pid}.log`
-   - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/ERROR/INFO)
+   - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/HOOK/ERROR/INFO)
 
 2. **Enable detailed logging:**
    - Set `ROSLYNMCP_LOG_PATH` environment variable to a custom path

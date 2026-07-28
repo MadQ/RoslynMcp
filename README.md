@@ -215,6 +215,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 | Tool | What it does |
 |------|--------------|
+| `roslyn_check_drift` | Diagnostic probe: reports files whose on-disk state changed without the workspace noticing |
 | `roslyn_info` | Server version, PID, uptime, MSBuild discovery, log markers |
 
 ---
