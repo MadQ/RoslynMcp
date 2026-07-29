@@ -66,7 +66,7 @@ static int PrintHelp()
 
         Commands:
           setup         Configure AI agent clients (Copilot, Claude, Cursor, ...)
-          setup-project Write per-project hook file to .github/ (git repo required)
+          setup-project Write per-project hook + server config files (git repo required)
           hook          Handle pre-tool-use hook events from stdin (used by hook runners)
           list          List configured AI agent clients
           verify        Verify agent configuration paths
@@ -91,6 +91,11 @@ static int PrintHelp()
           ROSLYNMCP_LOG_MAX_AGE_DAYS     Log retention in days (default: 30)
           ROSLYNMCP_BACKUP_MAX_AGE_DAYS  Backup retention in days (default: 90)
           ROSLYNMCP_ELICIT               Set to true to enable --elicit (see Options)
+
+        Project config:
+          A committed .madq_roslynmcp.json at the repo root (written by 'setup-project')
+          can set elicit and workspace per project. Explicit settings always win:
+          CLI arg > env var > project file > built-in default.
 
         Documentation: https://github.com/MadQ/RoslynMcp
         """);

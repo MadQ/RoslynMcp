@@ -901,8 +901,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// <summary>
 	///     Builds the structured ambiguous-name failure: candidate list with the exact
 	///     containingType / filePath+line values the agent needs for a self-recovering retry.
-	///     This is the default ambiguity response — elicitation only runs when the server was
-	///     started with --elicit (see <see cref="ServerArgs.Elicit"/>).
+	///     This is the default ambiguity response — elicitation only runs when enabled via
+	///     --elicit / ROSLYNMCP_ELICIT (see <see cref="ServerArgs.Elicit"/>) or a project-local
+	///     config file (see <see cref="ProjectConfig.EffectiveElicit"/>).
 	/// </summary>
 	protected static AmbiguousSymbolResult AmbiguousSymbolError(ISymbol[] candidates, string symbolName, string rootPath)
 	{

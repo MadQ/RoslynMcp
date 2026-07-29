@@ -53,7 +53,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		
 		// Same ambiguity policy as roslyn_preview_rename: never modify a first match — fail with
 		// a structured candidate list the agent retries from; the interactive picker is a
-		// server-level opt-in (--elicit / ROSLYNMCP_ELICIT).
+		// server-level opt-in (--elicit / ROSLYNMCP_ELICIT / project-local .madq_roslynmcp.json).
 		var candidates = FindSymbols(compilation, methodName, containingType);
 		
 		var symbol = candidates.Length == 1 ? candidates[0] : null;
@@ -62,7 +62,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			
 			var rootPath = workspace.GetRootPath(projectPath);
 			
-			if(ServerArgs.Current.Elicit)
+			if(ProjectConfig.EffectiveElicit(rootPath, logger))
 				symbol = await TryElicitSymbolChoice(server, candidates, methodName, rootPath, cancellationToken);
 			
 			if(symbol is null)

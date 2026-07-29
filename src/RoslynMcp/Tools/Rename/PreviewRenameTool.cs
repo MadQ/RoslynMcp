@@ -82,7 +82,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			// Renaming the wrong symbol mutates code silently — never fall back to a first match.
 			// On ambiguity, fail with a structured candidate list so the agent retries with
 			// containingType or filePath+line on its own; interrupting the user with an
-			// interactive picker is a server-level opt-in (--elicit / ROSLYNMCP_ELICIT).
+			// interactive picker is a server-level opt-in (--elicit / ROSLYNMCP_ELICIT / project-local .madq_roslynmcp.json).
 			var candidates = FindSymbols(compilation, symbolName, containingType);
 			
 			symbol = candidates.Length == 1 ? candidates[0] : null;
@@ -91,7 +91,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 				
 				var rootPath = workspace.GetRootPath(projectPath);
 				
-				if(ServerArgs.Current.Elicit)
+				if(ProjectConfig.EffectiveElicit(rootPath, logger))
 					symbol = await TryElicitSymbolChoice(server, candidates, symbolName, rootPath, cancellationToken);
 				
 				if(symbol is null)
