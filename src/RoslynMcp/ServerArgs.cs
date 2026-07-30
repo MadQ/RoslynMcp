@@ -97,16 +97,20 @@ internal sealed class ServerArgs
     /// <summary>
     ///     Whether <see cref="Elicit"/> was explicitly set by a CLI arg or env var. Exists so the
     ///     project-config layer (<see cref="ProjectConfig"/>) knows when it may fill in a value:
-    ///     an explicit <c>--elicit false</c> blocks a project file's <c>elicit: true</c>, while an
-    ///     absent (or unparseable) flag lets the project file decide.
+    ///     an explicit <c>--elicit false</c> blocks a project file's <c>elicit: true</c>. Each
+    ///     source binds only when it parses to a valid bool — an unparseable <c>--elicit</c> value
+    ///     falls through to <c>ROSLYNMCP_ELICIT</c>, and an absent/invalid value in both sources
+    ///     lets the project file decide.
     /// </summary>
     public bool ElicitSpecified { get; }
 
     /// <summary>
     ///     Whether <see cref="WorkspaceMode"/> was explicitly set to a concrete mode by a CLI arg
     ///     or env var. Exists so the project-config layer (<see cref="ProjectConfig"/>) knows when
-    ///     it may fill in a value. An explicit <c>--workspace auto</c> parses to Auto and counts as
-    ///     unspecified — auto is "let the server decide", so a project file's mode may still apply.
+    ///     it may fill in a value. An explicit <c>--workspace auto</c> is non-binding: it falls
+    ///     through to <c>ROSLYNMCP_WORKSPACE</c>, and when neither source names a concrete mode
+    ///     the value counts as unspecified — auto is "let the server decide", so a project file's
+    ///     mode may still apply.
     /// </summary>
     public bool WorkspaceModeSpecified { get; }
 
@@ -183,11 +187,17 @@ internal sealed class ServerArgs
             }
         }
 
-        WorkspaceMode = ParseWorkspaceMode(
-            workspaceFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_WORKSPACE"));
+        // Per-value precedence: a source binds only when it parses to a concrete mode. A merge
+        // on mere presence (?? on the raw strings) would let a non-binding CLI value mask a
+        // valid env var — e.g. `--workspace auto` silently ignoring ROSLYNMCP_WORKSPACE=sdk.
+        var workspaceFromCli = ParseWorkspaceMode(workspaceFlag);
 
-        // Specified iff CLI/env parsed to a concrete mode — an explicit "auto" stays unspecified
-        // so a project file's mode may still apply (see the property doc).
+        WorkspaceMode = workspaceFromCli != WorkspaceMode.Auto
+            ? workspaceFromCli
+            : ParseWorkspaceMode(Environment.GetEnvironmentVariable("ROSLYNMCP_WORKSPACE"));
+
+        // Specified iff CLI or env parsed to a concrete mode — "auto" from either source stays
+        // unspecified so a project file's mode may still apply (see the property doc).
         WorkspaceModeSpecified = WorkspaceMode != WorkspaceMode.Auto;
 
         PreloadPaths = [..preload];
@@ -195,12 +205,23 @@ internal sealed class ServerArgs
         LogPath     = logPathFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH");
         MsBuildPath = msBuildFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_MSBUILD_PATH");
 
-        // An explicit true/false from CLI or env counts as "specified" and blocks the
-        // project-config layer; an absent or unparseable value leaves the decision open.
-        var mergedElicit = elicitFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_ELICIT");
+        // Per-value precedence: the CLI flag binds only when it parses to a valid bool;
+        // otherwise the env var is consulted. An unparseable --elicit value must not
+        // suppress a valid ROSLYNMCP_ELICIT. A valid value from either source counts as
+        // "specified" and blocks the project-config layer; otherwise the decision stays open.
+        if(bool.TryParse(elicitFlag, out var cliElicit)) {
 
-        ElicitSpecified = bool.TryParse(mergedElicit, out var elicit);
-        Elicit          = ElicitSpecified && elicit;
+            ElicitSpecified = true;
+            Elicit          = cliElicit;
+        }
+        else {
+
+            ElicitSpecified = bool.TryParse(
+                Environment.GetEnvironmentVariable("ROSLYNMCP_ELICIT"),
+                out var envElicit
+            );
+            Elicit = ElicitSpecified && envElicit;
+        }
 
         BackupPath = Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH");
 
