@@ -142,11 +142,24 @@ internal sealed partial class WorkspaceManager : IDisposable
 				instance.Dispose();
 				cache[cacheKey] = existing with { LastAccess = DateTime.UtcNow };
 				
+				// Record the alias even on a lost race, or the next call for this path would
+				// slow-path load-and-discard again (see below).
+				if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+					projectToCacheKey[normalizedPath] = cacheKey;
+				
 				return existing.Instance;
 			}
 			
 			foreach(var csproj in instance.ProjectPaths)
 				projectToCacheKey[csproj] = cacheKey;
+			
+			// Adhoc instances are keyed by RootPath (the containing directory) but don't populate
+			// ProjectPaths, so a .csproj-resolving request in adhoc mode would miss both fast-path
+			// lookups on every call — re-loading and discarding a full AdhocWorkspace each time,
+			// and bypassing the keyed lookups in WriteAndInvalidate/ApplyChanges/InvalidateFile
+			// (losing FSW suppression). Alias the requested path to the cache key it landed on.
+			if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+				projectToCacheKey[normalizedPath] = cacheKey;
 			
 			if(cache.Count >= maxCachedWorkspaces) {
 				
