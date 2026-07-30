@@ -98,6 +98,10 @@ internal sealed partial class WorkspaceManager
 		// duration of the attempt that just failed (see ReloadAttempt).
 		private const int MaxDeferMs          = 30_000;
 
+		// How long Dispose waits for an in-flight reload before giving up and leaking the
+		// instance. Bounded so shutdown and LRU eviction cannot wedge behind a pathological load.
+		private static readonly TimeSpan ReloadQuiesceTimeout = TimeSpan.FromSeconds(30);
+
 		/// <summary>
 		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
 		///     the current load's warnings, and the retained last-unhealthy-load record.
@@ -556,10 +560,25 @@ internal sealed partial class WorkspaceManager
 			}
 
 			// Wait out an in-flight reload rather than pulling @lock and workspace from under it.
-			// Bounded: a pathological load must not wedge cache eviction or shutdown.
-			if(reloadGate.Wait(TimeSpan.FromSeconds(30)))
-				reloadGate.Release();
+			// Bounded so a pathological load cannot wedge cache eviction or shutdown.
+			//
+			// On timeout, skip teardown entirely. A reload that is still running holds references
+			// to @lock, workspace and reloadGate; disposing them under it converts a slow load into
+			// an ObjectDisposedException on another thread — and @lock.Dispose() while a writer is
+			// inside it is worse than that. Leaking one instance is the strictly safer outcome:
+			// the process is either shutting down, or evicting a single LRU cache entry.
+			if(!reloadGate.Wait(ReloadQuiesceTimeout)) {
 
+				logger.LogError(
+					"Dispose",
+					$"Reload still in flight after {ReloadQuiesceTimeout.TotalSeconds:0}s for '{loadPath}' — "
+					+ "skipping teardown rather than disposing state it is still using."
+				);
+
+				return;
+			}
+
+			// Deliberately not released: nothing may acquire the gate between here and Dispose.
 			reloadGate.Dispose();
 
 			@lock.Dispose();
@@ -1407,8 +1426,13 @@ internal sealed partial class WorkspaceManager
 		}
 	
 		/// <summary>
-		///     Fires after the deferral backoff. Runs on a timer thread, so it must never throw and
-		///     must not block: if a foreground reload holds the gate it is already doing this work.
+		///     Fires after the deferral backoff. Runs on a timer thread, so it must never throw.
+		///     <para>
+		///         It does run a full workspace load, which takes seconds — what it must not do is
+		///         <em>wait</em> on <see cref="reloadGate"/>. A held gate means a foreground reload
+		///         is already doing this work, so the callback bails via <c>Wait(0)</c> instead of
+		///         queueing a second attempt behind it.
+		///     </para>
 		/// </summary>
 		void DeferredRetryCallback()
 		{
