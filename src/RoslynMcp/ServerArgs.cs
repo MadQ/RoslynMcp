@@ -81,8 +81,12 @@ internal sealed class ServerArgs
     public int PruneMinRuns { get; }
 
     /// <summary>
-    ///     Override MSBuild installation path. CLI: <c>--msbuild-path</c>. Env: <c>ROSLYNMCP_MSBUILD_PATH</c>.
-    ///     Integration with MSBuildBootstrap is deferred (issue #138).
+    ///     Override MSBuild installation path — a dotnet SDK directory or a Visual Studio
+    ///     <c>MSBuild\Current\Bin</c> directory. CLI: <c>--msbuild-path</c>.
+    ///     Env: <c>ROSLYNMCP_MSBUILD_PATH</c>. Consumed by <see cref="MSBuildBootstrap.EnsureReady"/>,
+    ///     which applies it in every mode except <see cref="WorkspaceMode.Adhoc"/> (that mode skips
+    ///     MSBuild entirely). An empty value from either source is treated as absent — unlike
+    ///     <see cref="LogPath"/>, an empty MSBuild path carries no meaning.
     /// </summary>
     public string? MsBuildPath { get; }
 
@@ -194,7 +198,7 @@ internal sealed class ServerArgs
 
         WorkspaceMode = workspaceFromCli != WorkspaceMode.Auto
             ? workspaceFromCli
-            : ParseWorkspaceMode(Environment.GetEnvironmentVariable("ROSLYNMCP_WORKSPACE"));
+            : ParseWorkspaceMode(Env("ROSLYNMCP_WORKSPACE"));
 
         // Specified iff CLI or env parsed to a concrete mode — "auto" from either source stays
         // unspecified so a project file's mode may still apply (see the property doc).
@@ -202,13 +206,20 @@ internal sealed class ServerArgs
 
         PreloadPaths = [..preload];
 
-        LogPath     = logPathFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_PATH");
-        MsBuildPath = msBuildFlag ?? Environment.GetEnvironmentVariable("ROSLYNMCP_MSBUILD_PATH");
+        // LogPath keeps a presence-based merge: its empty string is load-bearing (logging disabled),
+        // so an explicit --log-path "" must mask ROSLYNMCP_LOG_PATH. MsBuildPath has no such
+        // meaning for empty, so each source binds only when non-empty — otherwise --msbuild-path ""
+        // would silently suppress a valid ROSLYNMCP_MSBUILD_PATH and then fall through to
+        // auto-discovery, the same inverted precedence this property was fixed for (issue #231).
+        LogPath     = logPathFlag ?? Env("ROSLYNMCP_LOG_PATH");
+        MsBuildPath = NullIfEmpty(msBuildFlag) ?? NullIfEmpty(Env("ROSLYNMCP_MSBUILD_PATH"));
 
         // Per-value precedence: the CLI flag binds only when it parses to a valid bool;
         // otherwise the env var is consulted. An unparseable --elicit value must not
         // suppress a valid ROSLYNMCP_ELICIT. A valid value from either source counts as
         // "specified" and blocks the project-config layer; otherwise the decision stays open.
+        // That tri-state is why this uses bool.TryParse rather than the EnvTrue helper below —
+        // it needs to distinguish "parsed" from "false". Plain on/off flags use EnvTrue.
         if(bool.TryParse(elicitFlag, out var cliElicit)) {
 
             ElicitSpecified = true;
@@ -216,26 +227,15 @@ internal sealed class ServerArgs
         }
         else {
 
-            ElicitSpecified = bool.TryParse(
-                Environment.GetEnvironmentVariable("ROSLYNMCP_ELICIT"),
-                out var envElicit
-            );
-            Elicit = ElicitSpecified && envElicit;
+            ElicitSpecified = bool.TryParse(Env("ROSLYNMCP_ELICIT"), out var envElicit);
+            Elicit          = ElicitSpecified && envElicit;
         }
 
-        BackupPath = Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH");
+        BackupPath = Env("ROSLYNMCP_BACKUP_PATH");
 
-        BackupMaxAgeDays = int.TryParse(Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_MAX_AGE_DAYS"), out var bakAge)
-            ? Math.Max(1, bakAge)
-            : FilePruner.DefaultBackupAgeDays;
-
-        LogMaxAgeDays = int.TryParse(Environment.GetEnvironmentVariable("ROSLYNMCP_LOG_MAX_AGE_DAYS"), out var logAge)
-            ? Math.Max(1, logAge)
-            : FilePruner.DefaultLogAgeDays;
-
-        PruneMinRuns = int.TryParse(Environment.GetEnvironmentVariable("ROSLYNMCP_PRUNE_MIN_RUNS"), out var minRuns)
-            ? Math.Max(1, minRuns)
-            : FilePruner.DefaultMinRuns;
+        BackupMaxAgeDays = EnvInt("ROSLYNMCP_BACKUP_MAX_AGE_DAYS", 1, FilePruner.DefaultBackupAgeDays);
+        LogMaxAgeDays    = EnvInt("ROSLYNMCP_LOG_MAX_AGE_DAYS",    1, FilePruner.DefaultLogAgeDays);
+        PruneMinRuns     = EnvInt("ROSLYNMCP_PRUNE_MIN_RUNS",      1, FilePruner.DefaultMinRuns);
 
         // Resolve the effective log path once — PID injected before the extension.
         // FileLogger, the crash handler, and LogViewer all read this instead of
@@ -260,21 +260,15 @@ internal sealed class ServerArgs
             ResolvedLogPath = Path.Combine(dir, $"{stem}.{Environment.ProcessId}{ext}");
         }
 
-        DisablePathCache = string.Equals(
-            Environment.GetEnvironmentVariable("ROSLYNMCP_DISABLE_PATH_CACHE"),
-            "true",
-            StringComparison.OrdinalIgnoreCase
-        );
+        DisablePathCache = EnvTrue("ROSLYNMCP_DISABLE_PATH_CACHE");
 
-        MaxCachedWorkspaces = int.TryParse(
-            Environment.GetEnvironmentVariable("ROSLYNMCP_MAX_CACHED_WORKSPACES"),
-            out var max
-        ) ? Math.Max(1, max) : 5;
+        MaxCachedWorkspaces = EnvInt("ROSLYNMCP_MAX_CACHED_WORKSPACES", 1, 5);
 
-        LoadTimeoutSeconds = int.TryParse(
-            Environment.GetEnvironmentVariable("ROSLYNMCP_LOAD_TIMEOUT_SECONDS"),
-            out var loadTimeout
-        ) ? (loadTimeout <= 0 ? 0 : Math.Max(10, loadTimeout)) : 300;
+        // Not EnvInt: the clamp is two-sided — 0 or negative disables the timeout outright,
+        // while 1–9 raise to a 10s floor. A single minimum cannot express both.
+        LoadTimeoutSeconds = int.TryParse(Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS"), out var loadTimeout)
+            ? (loadTimeout <= 0 ? 0 : Math.Max(10, loadTimeout))
+            : 300;
     }
 
     static WorkspaceMode ParseWorkspaceMode(string? value) => value?.ToLowerInvariant() switch {
@@ -284,4 +278,22 @@ internal sealed class ServerArgs
         "adhoc" => WorkspaceMode.Adhoc,
         _       => WorkspaceMode.Auto,
     };
+
+    // ── Env var readers ──────────────────────────────────────────────────────
+    // Private on purpose. ServerArgs is already the process-wide sanitizing layer for every
+    // ROSLYNMCP_* setting; these just remove the repetition inside it. Env vars read elsewhere
+    // (DOTNET_ROOT, PATH, XDG_CONFIG_HOME) are discovery probes, not configuration, and are
+    // validated at their point of use — they deliberately do not route through here.
+
+    static string? Env(string name) => Environment.GetEnvironmentVariable(name);
+
+    static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
+
+    /// <summary>Parses an int env var, clamping to <paramref name="min"/>; unset or unparseable → <paramref name="fallback"/>.</summary>
+    static int EnvInt(string name, int min, int fallback) =>
+        int.TryParse(Env(name), out var value) ? Math.Max(min, value) : fallback;
+
+    /// <summary>True only when the env var is set to the literal "true" (case-insensitive).</summary>
+    static bool EnvTrue(string name) =>
+        string.Equals(Env(name), "true", StringComparison.OrdinalIgnoreCase);
 }
