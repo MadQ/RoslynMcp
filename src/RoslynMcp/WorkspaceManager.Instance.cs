@@ -63,12 +63,44 @@ internal sealed partial class WorkspaceManager
 		/// <summary>Timestamped record of the last load that produced projects without metadata references.</summary>
 		public string? LastUnhealthyLoad => lastUnhealthyLoad;
 
-		// Set when a reload was discarded for dropped references. Until this passes, ReloadIfNeeded
-		// leaves the pending reload alone rather than paying a multi-second load on every tool call
-		// while whatever is contending the design-time build clears.
-		private long reloadCooldownUntilTicks;
+		// ── Reload scheduling ────────────────────────────────────────────────
+		//
+		// One loader at a time. Concurrent accessors join the in-flight reload instead of each
+		// running their own full load and throwing all but one result away.
+		private readonly SemaphoreSlim reloadGate = new(1, 1);
 
-		private const int ReloadRetryCooldownSeconds = 5;
+		// Consecutive reloads discarded for dropped references. Drives the deferral backoff and
+		// resets to 0 on any successful promotion.
+		private int consecutiveDiscards;
+
+		// 1 while a deferred retry is scheduled. Accessors check this and return immediately
+		// rather than blocking: the workspace is known to be unable to reload right now, so
+		// waiting would burn a full load and still hand back stale text. Staleness stays visible
+		// through roslyn_check_drift, which reports the un-applied edit as drift because the
+		// discard path never reaches MarkSynced().
+		private int deferredRetryScheduled;
+
+#if NET9_0_OR_GREATER
+		private readonly Lock             deferLock = new();
+#else
+		private readonly object           deferLock = new();
+#endif
+		private          Timer?           deferredRetryTimer;
+
+		// Up to three loads per attempt, matching FileWriter's default retry count, with the same
+		// 50/100 ms backoff between them. Contention is usually held for milliseconds, so an
+		// immediate retry tends to hit the same lock — the pause is what makes the retry worth
+		// making, and it is negligible against a load measured in seconds.
+		private const int ReloadRetries       = 2;
+		private const int MaxRetryDelayMs     = 1_000;
+
+		// Upper bound on the deferral. The lower bound is not a constant: it is the measured
+		// duration of the attempt that just failed (see ReloadAttempt).
+		private const int MaxDeferMs          = 30_000;
+
+		// How long Dispose waits for an in-flight reload before giving up and leaking the
+		// instance. Bounded so shutdown and LRU eviction cannot wedge behind a pathological load.
+		private static readonly TimeSpan ReloadQuiesceTimeout = TimeSpan.FromSeconds(30);
 
 		/// <summary>
 		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
@@ -508,7 +540,47 @@ internal sealed partial class WorkspaceManager
 				timerToQuiesce.Dispose(done.WaitHandle);
 				done.Wait();
 			}
-			
+
+			// Same treatment for the deferred reload retry — its callback touches @lock and
+			// workspace, so it must be off the thread before either is torn down.
+			Timer? deferToQuiesce
+			;
+
+			lock(deferLock) {
+
+				deferToQuiesce     = deferredRetryTimer;
+				deferredRetryTimer = null;
+			}
+
+			if(deferToQuiesce is not null) {
+
+				using var deferDone = new ManualResetEventSlim(false);
+				deferToQuiesce.Dispose(deferDone.WaitHandle);
+				deferDone.Wait();
+			}
+
+			// Wait out an in-flight reload rather than pulling @lock and workspace from under it.
+			// Bounded so a pathological load cannot wedge cache eviction or shutdown.
+			//
+			// On timeout, skip teardown entirely. A reload that is still running holds references
+			// to @lock, workspace and reloadGate; disposing them under it converts a slow load into
+			// an ObjectDisposedException on another thread — and @lock.Dispose() while a writer is
+			// inside it is worse than that. Leaking one instance is the strictly safer outcome:
+			// the process is either shutting down, or evicting a single LRU cache entry.
+			if(!reloadGate.Wait(ReloadQuiesceTimeout)) {
+
+				logger.LogError(
+					"Dispose",
+					$"Reload still in flight after {ReloadQuiesceTimeout.TotalSeconds:0}s for '{loadPath}' — "
+					+ "skipping teardown rather than disposing state it is still using."
+				);
+
+				return;
+			}
+
+			// Deliberately not released: nothing may acquire the gate between here and Dispose.
+			reloadGate.Dispose();
+
 			@lock.Dispose();
 			workspace.Dispose();
 		}
@@ -1314,7 +1386,7 @@ internal sealed partial class WorkspaceManager
 			// Fast path — no pending reload.
 			var gen = reloadVersion
 			;
-			
+
 			if(gen == 0)
 
 				return;
@@ -1328,11 +1400,103 @@ internal sealed partial class WorkspaceManager
 				return;
 			}
 
-			// A recent attempt was discarded for dropped references. Leave the reload pending and
-			// come back later rather than re-running a multi-second load on every tool call.
-			if(DateTime.UtcNow.Ticks < Interlocked.Read(ref reloadCooldownUntilTicks))
+			// A retry is already scheduled: the last attempt could not resolve references, so
+			// blocking here would pay a full load to arrive at the same stale answer.
+			if(Volatile.Read(ref deferredRetryScheduled) != 0)
 
 				return;
+
+			// Single-flight. Waiting is the point — the caller needs the reloaded workspace, and
+			// joining one load beats running a duplicate.
+			reloadGate.Wait();
+
+			try {
+
+				// Re-read under the gate: another caller may have completed the reload while we
+				// waited, or scheduled a deferral.
+				if(reloadVersion == 0 || Volatile.Read(ref deferredRetryScheduled) != 0 || disposed)
+
+					return;
+
+				ReloadAttempt();
+			}
+			finally {
+				reloadGate.Release();
+			}
+		}
+	
+		/// <summary>
+		///     Fires after the deferral backoff. Runs on a timer thread, so it must never throw.
+		///     <para>
+		///         It does run a full workspace load, which takes seconds — what it must not do is
+		///         <em>wait</em> on <see cref="reloadGate"/>. A held gate means a foreground reload
+		///         is already doing this work, so the callback bails via <c>Wait(0)</c> instead of
+		///         queueing a second attempt behind it.
+		///     </para>
+		/// </summary>
+		void DeferredRetryCallback()
+		{
+			if(disposed)
+
+				return;
+
+			if(!reloadGate.Wait(0)) {
+
+				// A foreground reload is in flight and will settle the pending generation.
+				Volatile.Write(ref deferredRetryScheduled, 0);
+
+				return;
+			}
+
+			try {
+
+				// Cleared before the attempt so a fresh discard can schedule the next retry.
+				Volatile.Write(ref deferredRetryScheduled, 0);
+
+				if(disposed || reloadVersion == 0)
+
+					return;
+
+				ReloadAttempt();
+			}
+			catch(Exception ex) {
+				// Nothing above this on a timer thread — an escape would take the process down.
+				logger.LogError("Reload", $"Deferred reload retry failed: {ex.GetType().Name}: {ex.Message}");
+			}
+			finally {
+				reloadGate.Release();
+			}
+		}
+
+		/// <summary>
+		///     Schedules the next retry. The delay is seeded with the measured cost of the attempt
+		///     that just failed, so a retry never runs more often than it costs — bounding retry
+		///     work to roughly a 50% duty cycle whether a load takes one second or twenty — and
+		///     doubling while contention persists.
+		/// </summary>
+		void ScheduleDeferredRetry(int delayMs)
+		{
+			lock(deferLock) {
+
+				if(disposed)
+
+					return;
+
+				Volatile.Write(ref deferredRetryScheduled, 1);
+
+				deferredRetryTimer?.Dispose();
+				deferredRetryTimer = new Timer(_ => DeferredRetryCallback(), null, delayMs, Timeout.Infinite);
+			}
+		}
+
+		/// <summary>
+		///     One reload attempt: load, retry on dropped references, then either promote or
+		///     discard and defer. Callers must hold <see cref="reloadGate"/>.
+		/// </summary>
+		void ReloadAttempt()
+		{
+			var gen = reloadVersion
+			;
 
 			// Load workspace OUTSIDE the write lock — this can take seconds for large solutions
 			// and would block every concurrent reader for the duration.
@@ -1348,15 +1512,24 @@ internal sealed partial class WorkspaceManager
 			(newWorkspace, newProjectId) = LoadForMode();
 
 			// Contended design-time builds can silently drop a project's references — results
-			// would be wrong, not failed. The initial load already retries once on a fresh
-			// workspace; the reload path needs the same treatment, and is in fact the likelier
-			// victim: it is often triggered by the very file writes that cause the contention.
-			if(ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } dropped) {
+			// would be wrong, not failed. The initial load retries the same way; the reload path
+			// is the likelier victim, since it is often triggered by the very file writes that
+			// cause the contention.
+			var retry = 0;
 
-				logger.LogInfo("Reload", $"No metadata references on: {string.Join(", ", dropped)} — reloading once");
+			while(retry < ReloadRetries
+			      && ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } dropped) {
+
+				var retryDelayMs = Backoff.DelayMs(retry, Backoff.DefaultSeedMs, MaxRetryDelayMs)
+				;
+
+				logger.LogInfo("Reload", $"No metadata references on: {string.Join(", ", dropped)} — attempt={retry + 2} delay_ms={retryDelayMs}");
+
 				newWorkspace.Dispose();
+				Thread.Sleep(retryDelayMs);
 
 				(newWorkspace, newProjectId) = LoadForMode();
+				retry++;
 			}
 
 			// Never replace a healthy workspace with a reference-less one. A stale-but-correct
@@ -1369,73 +1542,83 @@ internal sealed partial class WorkspaceManager
 
 				newWorkspace.Dispose();
 
+				// Seed = what this attempt actually cost, so the retry rate self-scales to the
+				// workspace instead of relying on a constant that fits neither big nor small.
+				var deferMs = Backoff.DelayMs(
+					consecutiveDiscards,
+					(int) Math.Min(sw.ElapsedMilliseconds, MaxDeferMs),
+					MaxDeferMs
+				);
+
+				consecutiveDiscards++;
+
 				RecordUnhealthyLoad(
 					$"Reload discarded — the reloaded workspace had no metadata references on: {string.Join(", ", stillDropped)}. "
 					+ "Keeping the previous workspace, whose text may now be one edit stale. "
 					+ "Call roslyn_respawn if symbol results look outdated."
 				);
 
-				logger.LogInfo("Reload", $"Discarded reload — still no metadata references on: {string.Join(", ", stillDropped)}; keeping previous workspace");
+				logger.LogInfo("Reload", $"Discarded reload — still no metadata references on: {string.Join(", ", stillDropped)}; keeping previous workspace, retry attempt={consecutiveDiscards} delay_ms={deferMs}");
 
-				// Leave reloadVersion set so a later call retries once the cooldown expires.
-				Interlocked.Exchange(ref reloadCooldownUntilTicks, DateTime.UtcNow.AddSeconds(ReloadRetryCooldownSeconds).Ticks)
-				;
+				// reloadVersion stays set: the deferred retry picks up the newest generation.
+				ScheduleDeferredRetry(deferMs);
 
 				return;
 			}
 
 			WarnIfReferencesDropped(newWorkspace);
-			Interlocked.Exchange(ref reloadCooldownUntilTicks, 0);
+			consecutiveDiscards = 0;
 
 			var newProjectMap = BuildProjectMapFor(newWorkspace);
 
 			Workspace? oldWorkspace = null;
 			int        projectCount = 0;
-			
+
 			@lock.EnterWriteLock();
-			
+
 			try {
-				
+
 				// Another thread may have loaded while we were outside the lock,
 				// or another invalidation arrived — discard our load in both cases.
 				// Leave newWorkspace non-null so the finally block disposes it.
 				if(reloadVersion != gen)
-					
+
 					return;
-				
+
 				oldWorkspace = workspace;
 				workspace    = newWorkspace;
 				newWorkspace = null;     // ownership transferred; don't dispose in finally
-				
+
 				defaultProjectId = newProjectId;
 				projectMap.Clear();
-				
+
 				foreach(var kvp in newProjectMap)
 					projectMap[kvp.Key] = kvp.Value;
-				
+
 				compilationCache.Clear();
-				
+
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.
 				Interlocked.CompareExchange(ref reloadVersion, 0, gen)
 				;
-				
+
 				projectCount = workspace.CurrentSolution.Projects.Count();
 			}
 			finally {
-				
+
 				@lock.ExitWriteLock();
-				
+
 				// Dispose and log happen outside the write lock — readers are unblocked first.
 				newWorkspace?.Dispose();    // only set if we lost the race
 			}
-			
+
 			oldWorkspace?.Dispose();
-			
+
 			MarkSynced();
 			logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({projectCount} projects)");
 		}
-	
+
+
 	// ── Compilation cache ────────────────────────────────────────────────
 		
 		Compilation RebuildCompilation(ProjectId projectId, Solution solution, int capturedGen)
