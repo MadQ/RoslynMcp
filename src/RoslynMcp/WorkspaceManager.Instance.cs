@@ -196,6 +196,13 @@ internal sealed partial class WorkspaceManager
 				
 				case LoadMode.Adhoc:
 					
+					// Deliberately no AutoDetectAndBootstrap/EnsureReady here: adhoc needs no
+					// MSBuild, and EnsureReady is one-shot process-global — spending it on
+					// "register nothing" would permanently lock MSBuild out, crashing a later
+					// load of a different repo whose effective mode is Sdk/Vs (#229/#220).
+					// Consequences: ResolvedMode stays Auto (routing in GetOrLoadInstance
+					// checks the requested effective mode instead) and roslyn_info reports
+					// MSBuild discovery as "not attempted", which is accurate.
 					rootPath = path;
 					var dirInfo = new DirectoryInfo(path);
 					
