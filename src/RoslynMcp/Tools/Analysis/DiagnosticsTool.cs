@@ -133,7 +133,27 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		
 		string? hint              = null;
 
-		if(filePath is null && errorCount >= workspaceLoadMinErrors) {
+		string[]? loadWarnings = null;
+
+		// Ask the workspace directly before falling back to the error-shape heuristic. A workspace
+		// that loaded without metadata references is an authoritative answer, and it does not
+		// depend on error volume — a small project produces only a handful of phantom errors, far
+		// below the thresholds below, and would otherwise be reported as ordinary broken code.
+		var health = TryGetHealth(projectPath)
+		;
+
+		if(health is { IsHealthy: false }) {
+
+			possibleLoadIssue = true;
+			loadWarnings      = health.LoadWarnings is { Length: > 0 } w ? w : null;
+
+			hint = "These errors are phantom. The workspace loaded without metadata references on: "
+				+ $"{string.Join(", ", health.ProjectsWithoutReferences)} — usually a contended MSBuild "
+				+ "design-time build, not a problem with your code. Call roslyn_respawn to reload the "
+				+ "workspace. Do NOT verify with roslyn_build_project: it short-circuits on this same "
+				+ "compilation and repeats these errors (pass forceBuild: true to run a real build).";
+		}
+		else if(filePath is null && errorCount >= workspaceLoadMinErrors) {
 
 			var errorsOnly    = Array.FindAll(filtered, d => d.Severity == DiagnosticSeverity.Error);
 			var loadCodeCount = Array.FindAll(errorsOnly, d => workspaceLoadCodes.Contains(d.Id)).Length;
@@ -142,12 +162,22 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			if((double) loadCodeCount / errorsOnly.Length >= workspaceLoadNamespaceFraction
 				&& distinctFiles >= workspaceLoadMinDistinctFiles) {
 
+				// The workspace reports itself healthy, so this is a guess — but the old advice
+				// ("wait a few seconds and retry, or call roslyn_build_project to verify") was
+				// actively wrong: the state is latched until a reload, and build_project
+				// short-circuits on this same compilation and repeats the errors (issue #235).
 				possibleLoadIssue = true;
-				hint = "High volume of CS0246/CS0103/CS0234/CS0012 across many files suggests the workspace "
-					+ "is still resolving dependencies. Wait a few seconds and retry, or call roslyn_build_project "
-					+ "to verify real compilation state.";
+
+				hint = "High volume of CS0246/CS0103/CS0234/CS0012 across many files. If the project really "
+					+ "does build, the workspace may have loaded badly — call roslyn_respawn to reload, or "
+					+ "roslyn_check_drift to inspect workspace health. Note that roslyn_build_project "
+					+ "short-circuits on this same compilation, so pass forceBuild: true to run a real build.";
 			}
 		}
+
+		// A recovered episode still explains results the caller may have already acted on.
+		if(possibleLoadIssue && health?.LastUnhealthyLoad is { Length: > 0 } episode)
+			hint += $" Last unhealthy load: {episode}";
 
 		if(analyzerNote is not null)
 			hint = hint is null ? analyzerNote : $"{analyzerNote} {hint}";
@@ -165,7 +195,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 				total > 0,
 				PageToken: null,
 				Items: null,
-				possibleLoadIssue) {
+				possibleLoadIssue,
+				loadWarnings) {
 					Hint = hint
 				}
 			);
@@ -195,7 +226,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			hasMore,
 			nextToken,
 			items,
-			possibleLoadIssue) {
+			possibleLoadIssue,
+			loadWarnings) {
 				Hint = hint
 			}
 		);

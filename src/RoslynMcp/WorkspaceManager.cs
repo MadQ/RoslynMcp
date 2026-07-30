@@ -19,6 +19,27 @@ enum ResolutionKind
 }
 
 /// <summary>
+///     Load-health snapshot for a workspace. <paramref name="ProjectsWithoutReferences"/> is the
+///     authoritative signal: a successfully built project always references at least the core
+///     library, so a non-empty set means the design-time build silently dropped them and symbol
+///     queries over those projects return wrong-but-plausible results rather than failing.
+/// </summary>
+/// <param name="ProjectsWithoutReferences">Projects the live workspace holds with zero metadata references.</param>
+/// <param name="LoadWarnings">Warnings from the load that produced the live workspace.</param>
+/// <param name="LastUnhealthyLoad">
+///     Timestamped record of the most recent unhealthy load, retained across the healing reload
+///     that clears <paramref name="LoadWarnings"/>. Non-null after an episode even once recovered.
+/// </param>
+internal sealed record WorkspaceHealth(
+	string[] ProjectsWithoutReferences,
+	string[] LoadWarnings,
+	string?  LastUnhealthyLoad)
+{
+	/// <summary>True when every loaded project resolved at least one metadata reference.</summary>
+	public bool IsHealthy => ProjectsWithoutReferences.Length == 0;
+}
+
+/// <summary>
 ///     Manages Roslyn workspaces with LRU caching. When a .sln/.slnx is found above a .csproj,
 ///     loads the full solution so cross-project semantics (references, rename, implementations)
 ///     work naturally. Falls back to single-project or AdhocWorkspace when no solution exists.
@@ -212,6 +233,10 @@ internal sealed partial class WorkspaceManager : IDisposable
 	/// </summary>
 	public string[] GetLoadWarnings(string resolvedProjectPath)
 		=> GetOrLoadInstance(resolvedProjectPath).LoadWarnings;
+
+	/// <summary>Load-health snapshot for the workspace serving this path — see <see cref="WorkspaceHealth"/>.</summary>
+	public WorkspaceHealth GetHealth(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).Health;
 	
 	/// <summary>UTC time of the last disk-sync event for the workspace serving this path.</summary>
 	public DateTime GetLastSyncedUtc(string resolvedProjectPath)
