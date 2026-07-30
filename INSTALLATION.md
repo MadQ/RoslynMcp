@@ -409,7 +409,7 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 
 **Cause:** MSBuildWorkspace requires MSBuild on PATH.
 
-**Fix:** Install .NET SDK or Visual Studio — both include MSBuild. If the SDK is in a non-standard location, set `ROSLYNMCP_MSBUILD_PATH` (or `DOTNET_ROOT`). RoslynMcp automatically falls back to AdhocWorkspace (source-only) if MSBuild isn't available.
+**Fix:** Install .NET SDK or Visual Studio — both include MSBuild. If the SDK is in a non-standard location, pass `--msbuild-path` (or set `ROSLYNMCP_MSBUILD_PATH` or `DOTNET_ROOT`). RoslynMcp automatically falls back to AdhocWorkspace (source-only) if MSBuild isn't available.
 
 ### No type resolution (AdhocWorkspace fallback)
 
@@ -454,12 +454,15 @@ RoslynMcp.exe [options]
 | `-p`, `--preload <path>` | Pre-warm a workspace on startup. Repeat the flag to preload multiple projects. Each tool call still requires a `projectPath` parameter regardless. |
 | `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
 | `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
-| `--msbuild-path` | Override the MSBuild installation path used for workspace loading. |
+| `--msbuild-path` | Override the MSBuild installation path used for workspace loading — a dotnet SDK directory or a Visual Studio `MSBuild\Current\Bin` directory. Honored in `auto`, `sdk`, and `vs` modes; ignored in `adhoc`, which skips MSBuild entirely. If the path is invalid, the server falls through to normal discovery. |
 | `--elicit` | On an ambiguous symbol match, ask the user to pick interactively (MCP elicitation) instead of returning a structured candidate list. Opt-in; requires client elicitation support. Default: off. |
 | `-v`, `--version` | Print the server version and exit. |
 | `-h`, `--help` | Show CLI help and exit. |
 
 ### Environment variables
+
+Where a variable has an equivalent CLI flag, the **flag wins** — the full order is
+`CLI arg > env var > project file > built-in default`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -470,7 +473,8 @@ RoslynMcp.exe [options]
 | `ROSLYNMCP_BACKUP_MAX_AGE_DAYS` | `90` | Delete old backup snapshots after this many days. |
 | `ROSLYNMCP_PRUNE_MIN_RUNS` | `3` | Minimum server starts before log/backup pruning runs. |
 | `ROSLYNMCP_MAX_CACHED_WORKSPACES` | `5` | LRU workspace cache size. Increase for large multi-project workflows. |
-| `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Force a specific MSBuild installation path. |
+| `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Same as `--msbuild-path` (which takes precedence) — force a specific MSBuild installation path. |
+| `ROSLYNMCP_LOAD_TIMEOUT_SECONDS` | `300` | Timeout for MSBuild workspace loads. Values 1–9 clamp to 10; `0` or negative disables the timeout. |
 | `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
 | `ROSLYNMCP_ELICIT` | `false` | Set to `true` to enable interactive elicitation on ambiguous symbol matches (same as `--elicit`). Not all MCP clients support elicitation; unsupported clients fall back to the structured candidate list. |
 

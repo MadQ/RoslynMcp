@@ -128,8 +128,8 @@ Other MCP clients (Claude Desktop, Cursor, etc.) keep their own approval stores 
 **Symptom:** Error message about MSBuild not being available.
 
 **Actual source messages:**
-- `MSBuild not found. Install .NET SDK or Visual Studio Build Tools. If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH.`
-- `Visual Studio MSBuild not found. Install Visual Studio or Build Tools.`
+- `MSBuild not found. Install .NET SDK or Visual Studio Build Tools. If installed in a non-standard location, pass --msbuild-path (or set ROSLYNMCP_MSBUILD_PATH or DOTNET_ROOT).`
+- `Visual Studio MSBuild not found. Install Visual Studio or Build Tools, or pass --msbuild-path (or set ROSLYNMCP_MSBUILD_PATH) to a VS MSBuild\Current\Bin directory.`
 
 **Cause:** RoslynMcp could not resolve an MSBuild instance for the selected workspace mode.
 
@@ -138,17 +138,26 @@ Other MCP clients (Claude Desktop, Cursor, etc.) keep their own approval stores 
    - .NET SDK (includes MSBuild) — recommended
    - Visual Studio or Build Tools
 
-2. **Or set environment variables** to point at your install:
-   ```bash
-   # Windows
-   set DOTNET_ROOT=C:\Program Files\dotnet
+2. **Or point RoslynMcp at your install directly.** The CLI flag takes precedence over the env var:
 
-   # Optional direct override
+   ```bash
+   # Highest precedence — a dotnet SDK dir, or a VS MSBuild\Current\Bin dir
+   RoslynMcp.exe --msbuild-path "C:\Program Files\dotnet\sdk\<sdk-version>"
+   RoslynMcp.exe --workspace vs --msbuild-path "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin"
+   ```
+
+   ```bash
+   # Windows — env var equivalents
+   set DOTNET_ROOT=C:\Program Files\dotnet
    set ROSLYNMCP_MSBUILD_PATH=C:\Program Files\dotnet\sdk\<sdk-version>
 
    # macOS/Linux
    export DOTNET_ROOT=/usr/local/share/dotnet
    ```
+
+   The override is honored in `auto`, `sdk`, and `vs` modes. In `adhoc` it is ignored — that mode
+   skips MSBuild entirely. An invalid path is not fatal: the server logs it and falls through to
+   normal discovery for the selected mode.
 
 3. **Choose the right mode explicitly:**
    - `--workspace sdk` for modern SDK-style projects

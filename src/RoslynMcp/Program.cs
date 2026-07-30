@@ -76,7 +76,9 @@ static int PrintHelp()
               --workspace    <mode>   Workspace mode: auto|sdk|vs|adhoc (default: auto)
           -p, --preload      <path>   Pre-warm workspace on startup (repeatable)
               --log-path     <path>   Log file base path (empty string = disable logging)
-              --msbuild-path <path>   Override MSBuild installation path
+              --msbuild-path <path>   Override MSBuild installation path — a dotnet SDK
+                                      directory or a VS MSBuild\Current\Bin directory.
+                                      Applies to all modes except adhoc.
               --elicit                On an ambiguous symbol match, ask the user to pick
                                       interactively (MCP elicitation) instead of returning a
                                       structured candidate list. Opt-in; needs client
@@ -84,13 +86,18 @@ static int PrintHelp()
           -v, --version               Print version and exit
           -h, --help                  Show this help and exit
 
-        Environment variables (override options above):
-          ROSLYNMCP_WORKSPACE            Workspace mode
-          ROSLYNMCP_LOG_PATH             Log file base path
-          ROSLYNMCP_BACKUP_PATH          Backup storage path
-          ROSLYNMCP_LOG_MAX_AGE_DAYS     Log retention in days (default: 30)
-          ROSLYNMCP_BACKUP_MAX_AGE_DAYS  Backup retention in days (default: 90)
-          ROSLYNMCP_ELICIT               Set to true to enable --elicit (see Options)
+        Environment variables (the CLI flags above take precedence):
+          ROSLYNMCP_WORKSPACE             Workspace mode (same as --workspace)
+          ROSLYNMCP_LOG_PATH              Log file base path (same as --log-path)
+          ROSLYNMCP_MSBUILD_PATH          MSBuild installation path (same as --msbuild-path)
+          ROSLYNMCP_ELICIT                Set to true to enable --elicit (see Options)
+          ROSLYNMCP_BACKUP_PATH           Backup storage path (empty string = disable backups)
+          ROSLYNMCP_LOG_MAX_AGE_DAYS      Log retention in days (default: 30)
+          ROSLYNMCP_BACKUP_MAX_AGE_DAYS   Backup retention in days (default: 90)
+          ROSLYNMCP_PRUNE_MIN_RUNS        Server starts before pruning runs (default: 3)
+          ROSLYNMCP_MAX_CACHED_WORKSPACES LRU workspace cache size (default: 5)
+          ROSLYNMCP_LOAD_TIMEOUT_SECONDS  MSBuild load timeout (default: 300; 0 = no timeout)
+          ROSLYNMCP_DISABLE_PATH_CACHE    Set to true to disable the path resolution cache
 
         Project config:
           A committed .madq_roslynmcp.json at the repo root (written by 'setup-project')
