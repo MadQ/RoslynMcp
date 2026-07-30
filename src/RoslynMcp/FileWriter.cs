@@ -170,14 +170,20 @@ internal static class FileWriter
     // Mutable struct — all methods that modify fields must be called on the local directly.
     private struct RetryState(string? filePath)
     {
-        private int          _delay        = 50;
+        // Delay schedule is shared with the workspace-reload deferral — see Backoff.
+        // At the default 3 attempts this is 50 then 100 ms; the cap never binds there and
+        // exists only to bound a caller that passes a large maxAttempts.
+        private const int    MaxDelayMs    = 30_000;
+
+        private int          _attempt      = 0;
+        private int          _delay        = Backoff.DelayMs(0, Backoff.DefaultSeedMs, MaxDelayMs);
         private int          _retries      = 0;
         private int          _totalBackoff = 0;
         private readonly string? _fileName = filePath is null ? null : Path.GetFileName(filePath);
 
         public int Delay => _delay;
 
-        public void Advance() => _delay *= 2;
+        public void Advance() => _delay = Backoff.DelayMs(++_attempt, Backoff.DefaultSeedMs, MaxDelayMs);
 
         // Returns true if retryable (IOException or UnauthorizedAccessException); false if non-retryable (caller must rethrow).
         public bool OnCaught(Exception ex, int attempt)
