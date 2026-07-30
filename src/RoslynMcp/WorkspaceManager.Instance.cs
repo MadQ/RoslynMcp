@@ -486,9 +486,12 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		static void AutoDetectAndBootstrap(string path, FileLogger logger)
 		{
-			// Start from the user's explicit choice; auto-detect only if not specified.
-			var mode = ServerArgs.Current.WorkspaceMode
-			;
+			// Start from the user's explicit choice (CLI arg or env var), falling back to a
+			// committed project-local config file; auto-detect only if neither specifies a mode.
+			var mode = ProjectConfig.EffectiveWorkspaceMode(path, logger);
+			
+			if(mode != ServerArgs.Current.WorkspaceMode)
+				logger.LogInfo("Workspace", $"mode={mode} (from {ProjectConfig.FileName})");
 			
 			if(mode == WorkspaceMode.Auto) {
 				

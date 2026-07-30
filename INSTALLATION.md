@@ -474,7 +474,24 @@ RoslynMcp.exe [options]
 | `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
 | `ROSLYNMCP_ELICIT` | `false` | Set to `true` to enable interactive elicitation on ambiguous symbol matches (same as `--elicit`). Not all MCP clients support elicitation; unsupported clients fall back to the structured candidate list. |
 
-**Ambiguous symbol handling.** By default, when a name in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the tool returns a structured `candidates` list and the agent retries with a `containingType` (or `filePath`+`line`) on its own — no interruption. Enabling `--elicit` (or `ROSLYNMCP_ELICIT=true`) instead prompts you to pick interactively via MCP elicitation, in clients that support it (Claude Code/Desktop do; many others don't and fall back to the candidate list). The `madq-roslynmcp setup` wizard offers this as an opt-in prompt; you can also add it by hand to the server entry's args: `"args": ["--elicit"]`.
+**Ambiguous symbol handling.** By default, when a name in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the tool returns a structured `candidates` list and the agent retries with a `containingType` (or `filePath`+`line`) on its own — no interruption. Enabling `--elicit` (or `ROSLYNMCP_ELICIT=true`) instead prompts you to pick interactively via MCP elicitation, in clients that support it (Claude Code/Desktop do; many others don't and fall back to the candidate list). The `madq-roslynmcp setup` wizard offers this as an opt-in prompt; you can also add it by hand to the server entry's args: `"args": ["--elicit"]`. A committed project file can also enable it per repo — see the next section.
+
+### Project-local server settings
+
+`madq-roslynmcp setup-project` can additionally write a committable `.madq_roslynmcp.json` at the repo root, so a team shares server preferences per project instead of every contributor hand-setting them in their global agent config:
+
+```json
+{
+  "version": 1,
+  "elicit": true,
+  "workspace": "sdk"
+}
+```
+
+- **Honored keys:** `elicit` (boolean) and `workspace` (`"sdk"`, `"vs"`, or `"adhoc"`). Unknown keys are ignored.
+- **Discovery:** the server finds the file by walking up from each tool call's resolved `projectPath` — no reliance on the server's working directory. The result is cached, so edits to the file require a server restart.
+- **Precedence:** an explicit setting always wins over the committed file — CLI arg > env var > project file > built-in default. Note that `--elicit` written into an agent's global MCP config by `madq-roslynmcp setup` is a CLI arg and therefore overrides this file.
+- **Security:** the file is committed and potentially untrusted, so machine-specific settings (`--log-path`, `--msbuild-path`, backup paths) and `--preload` are never read from it.
 
 ### Multi-project workspaces
 
