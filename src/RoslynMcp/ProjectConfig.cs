@@ -38,6 +38,10 @@ internal sealed class ProjectConfig
 	// Parsed configs keyed by the normalized directory the walk started from.
 	static readonly Dictionary<string, ProjectConfig> cache = new(StringComparer.OrdinalIgnoreCase);
 	
+	// Insertion order for approximate oldest-first eviction — avoids the full-cache
+	// thrash a Clear() at the cap would cause in long-running sessions.
+	static readonly Queue<string> cacheOrder = new();
+	
 	// Static — guards the static cache across all consumers, same pattern as
 	// RoslynMcpTool.pathCacheLock.
 #if NET9_0_OR_GREATER
@@ -139,8 +143,22 @@ internal sealed class ProjectConfig
 			
 			lock(cacheLock) {
 				
-				if(cache.Count >= cacheMaxSize)
-					cache.Clear();
+				// Another thread may have loaded the same dir while we walked; don't double-track
+				// it in cacheOrder, which would desync the queue from the dictionary.
+				if(!cache.ContainsKey(startDir)) {
+					
+					// Approximate oldest-first eviction: drop the oldest 20% when the cap is hit,
+					// avoiding the periodic full-cache thrash a Clear() would cause.
+					if(cache.Count >= cacheMaxSize) {
+						
+						var evictCount = Math.Max(1, cacheMaxSize / 5);
+						
+						for(int i = 0; i < evictCount && cacheOrder.Count > 0; i++)
+							cache.Remove(cacheOrder.Dequeue());
+					}
+					
+					cacheOrder.Enqueue(startDir);
+				}
 				
 				cache[startDir] = config;
 			}

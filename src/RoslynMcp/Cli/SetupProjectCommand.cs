@@ -109,7 +109,8 @@ internal class SetupProjectCommand : CliCommand
 		var configPath = Path.Combine(repoRoot, ProjectConfig.FileName);
 		var exists     = File.Exists(configPath);
 		
-		var root = new JsonObject();
+		var root        = new JsonObject();
+		var parseFailed = false;
 		
 		if(exists) {
 			
@@ -123,12 +124,34 @@ internal class SetupProjectCommand : CliCommand
 				
 				if(parsed is JsonObject obj)
 					root = obj;
-				else
+				else {
+					
+					parseFailed = true;
 					Console.WriteLine($"  ⚠ Existing {ProjectConfig.FileName} is not a JSON object — starting fresh (backup kept).");
+				}
 			}
 			catch(Exception ex) {
 				
+				parseFailed = true;
 				Console.WriteLine($"  ⚠ Could not parse existing {ProjectConfig.FileName} ({ex.Message}) — starting fresh (backup kept).");
+			}
+			
+			// Immediately backup a corrupted/unparseable file before prompting — if the user
+			// presses Enter through defaults, we won't silently overwrite their broken-but-maybe-
+			// recoverable config with a minimal stub.
+			if(parseFailed) {
+				
+				var errorBackupPath = configPath + ".error.bak";
+				
+				try {
+					
+					File.Copy(configPath, errorBackupPath, overwrite: true);
+					Console.WriteLine($"      Saved unreadable file to: {Path.GetRelativePath(Environment.CurrentDirectory, errorBackupPath)}");
+				}
+				catch(Exception ex) {
+					
+					Console.WriteLine($"      ⚠ Could not backup unreadable file ({ex.Message})");
+				}
 			}
 		}
 		
@@ -206,6 +229,19 @@ internal class SetupProjectCommand : CliCommand
 			
 			Console.WriteLine();
 			Console.WriteLine($"  No project server settings selected — {ProjectConfig.FileName} not written.");
+			
+			return false;
+		}
+		
+		// If parsing failed and the user kept defaults (Enter through both prompts), abort rather
+		// than silently overwriting their broken-but-maybe-recoverable config with a stub. Require
+		// explicit non-default choices to proceed.
+		if(parseFailed && !elicit && workspace == "auto") {
+			
+			Console.WriteLine();
+			Console.WriteLine($"  ⚠ Existing {ProjectConfig.FileName} is unreadable and no explicit settings were chosen.");
+			Console.WriteLine("    Not overwriting to avoid data loss. To proceed, rerun and select elicit=yes or");
+			Console.WriteLine("    a specific workspace mode, or manually fix/delete the file.");
 			
 			return false;
 		}
