@@ -55,6 +55,35 @@ internal sealed partial class WorkspaceManager
 		
 		/// <summary>Snapshot of load-health warnings, for surfacing in info tools.</summary>
 		public string[] LoadWarnings => [..loadWarnings];
+
+		// Most recent unhealthy load, retained across the healing reload that clears loadWarnings.
+		// volatile: written by the reload thread, read by tool threads without the lock.
+		private volatile string? lastUnhealthyLoad;
+
+		/// <summary>Timestamped record of the last load that produced projects without metadata references.</summary>
+		public string? LastUnhealthyLoad => lastUnhealthyLoad;
+
+		// Set when a reload was discarded for dropped references. Until this passes, ReloadIfNeeded
+		// leaves the pending reload alone rather than paying a multi-second load on every tool call
+		// while whatever is contending the design-time build clears.
+		private long reloadCooldownUntilTicks;
+
+		private const int ReloadRetryCooldownSeconds = 5;
+
+		/// <summary>
+		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
+		///     the current load's warnings, and the retained last-unhealthy-load record.
+		///     Peeks — never forces a pending reload.
+		/// </summary>
+		public WorkspaceHealth Health => new(
+			// MSBuild only. Reference health is a property of the design-time build; an
+			// AdhocWorkspace project is constructed with no metadata references at all
+			// (see LoadAdhocWorkspace), so applying the same check would flag every adhoc
+			// workspace as broken.
+			isMSBuild ? ProjectsWithoutReferences(PeekSolution()) : [],
+			[..loadWarnings],
+			lastUnhealthyLoad
+		);
 		
 		// UTC ticks of the last event that synchronized this workspace with disk: initial load,
 		// FSW debounce flush, workspace reload, or an RM-owned write. roslyn_check_drift compares
@@ -590,16 +619,30 @@ internal sealed partial class WorkspaceManager
 		///     workspace mitigation are undocumented MSBuild behavior, documented empirically by
 		///     MarcelRoozekrans/roslyn-codelens-mcp (no code reused).
 		/// </summary>
-		static string[] ProjectsWithoutReferences(Workspace ws) =>
-			[..ws.CurrentSolution.Projects
+		static string[] ProjectsWithoutReferences(Solution solution) =>
+			[..solution.Projects
 				.Where(p => p.MetadataReferences.Count == 0)
 				.Select(p => p.Name)
 				.Distinct()];
-		
+
+		static string[] ProjectsWithoutReferences(Workspace ws) => ProjectsWithoutReferences(ws.CurrentSolution);
+
 		void WarnIfReferencesDropped(Workspace ws)
 		{
 			if(ProjectsWithoutReferences(ws) is { Length: > 0 } dropped)
-				loadWarnings.Enqueue($"Projects loaded without metadata references — symbol results may be incomplete: {string.Join(", ", dropped)}");
+				RecordUnhealthyLoad($"Projects loaded without metadata references — symbol results may be incomplete: {string.Join(", ", dropped)}");
+		}
+
+		/// <summary>
+		///     Records a load-health finding in both the per-load queue and the retained
+		///     <see cref="LastUnhealthyLoad"/> slot. The queue is cleared by every subsequent load,
+		///     so without the retained copy the evidence disappears at exactly the moment a healthy
+		///     reload fixes the symptom — leaving the episode undiagnosable (issue #235).
+		/// </summary>
+		void RecordUnhealthyLoad(string message)
+		{
+			loadWarnings.Enqueue(message);
+			lastUnhealthyLoad = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z] {message}";
 		}
 		
 		static Workspace LoadSolution(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings)
@@ -1244,6 +1287,28 @@ internal sealed partial class WorkspaceManager
 		
 		// ── Workspace reload ────────────────────────────────────────────────
 		
+		/// <summary>
+		///     Loads a fresh workspace for this instance's load mode, resetting the per-load warning
+		///     queue first. Never called for <see cref="LoadMode.Adhoc"/>, which cannot reload.
+		/// </summary>
+		(Workspace Workspace, ProjectId ProjectId) LoadForMode()
+		{
+			loadWarnings.Clear();
+
+			if(loadMode is LoadMode.Solution) {
+
+				var solutionWorkspace = LoadSolution(loadPath, logger, loadWarnings)
+				;
+
+				return (
+					solutionWorkspace,
+					solutionWorkspace.CurrentSolution.Projects.FirstOrDefault()?.Id ?? defaultProjectId
+				);
+			}
+
+			return LoadMSBuildWorkspace(loadPath, logger, loadWarnings);
+		}
+
 		void ReloadIfNeeded()
 		{
 			// Fast path — no pending reload.
@@ -1251,47 +1316,79 @@ internal sealed partial class WorkspaceManager
 			;
 			
 			if(gen == 0)
-				
+
 				return;
-			
+
+			if(loadMode is LoadMode.Adhoc) {
+
+				// Adhoc workspaces don't support full reload — just clear the pending flag.
+				Interlocked.CompareExchange(ref reloadVersion, 0, gen)
+				;
+
+				return;
+			}
+
+			// A recent attempt was discarded for dropped references. Leave the reload pending and
+			// come back later rather than re-running a multi-second load on every tool call.
+			if(DateTime.UtcNow.Ticks < Interlocked.Read(ref reloadCooldownUntilTicks))
+
+				return;
+
 			// Load workspace OUTSIDE the write lock — this can take seconds for large solutions
 			// and would block every concurrent reader for the duration.
 			logger.LogInfo("Reload", $"Reloading workspace ({loadMode}: {loadPath})")
 			;
-			
+
 			var sw = System.Diagnostics.Stopwatch.StartNew();
-			
-			Workspace? newWorkspace  = null;
-			ProjectId  newProjectId  = defaultProjectId;
-			Dictionary<string, ProjectId>? newProjectMap = null;
-			
-			switch(loadMode) {
-				
-				case LoadMode.Solution:
-					loadWarnings.Clear();
-					newWorkspace  = LoadSolution(loadPath, logger, loadWarnings);
-					WarnIfReferencesDropped(newWorkspace);
-					newProjectMap = BuildProjectMapFor(newWorkspace);
-					newProjectId  = newWorkspace.CurrentSolution.Projects.FirstOrDefault()?.Id ?? defaultProjectId;
-					break;
-				
-				case LoadMode.Project:
-					loadWarnings.Clear();
-					var (ws, projectId) = LoadMSBuildWorkspace(loadPath, logger, loadWarnings);
-					WarnIfReferencesDropped(ws);
-					newWorkspace  = ws;
-					newProjectId  = projectId;
-					newProjectMap = BuildProjectMapFor(newWorkspace);
-					break;
-				
-				default:
-					// Adhoc workspaces don't support full reload — just clear the pending flag.
-					Interlocked.CompareExchange(ref reloadVersion, 0, gen)
-					;
-					
-					return;
+
+			// Nullable so the write-lock block can hand off ownership by nulling it out.
+			Workspace? newWorkspace;
+			ProjectId  newProjectId;
+
+			(newWorkspace, newProjectId) = LoadForMode();
+
+			// Contended design-time builds can silently drop a project's references — results
+			// would be wrong, not failed. The initial load already retries once on a fresh
+			// workspace; the reload path needs the same treatment, and is in fact the likelier
+			// victim: it is often triggered by the very file writes that cause the contention.
+			if(ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } dropped) {
+
+				logger.LogInfo("Reload", $"No metadata references on: {string.Join(", ", dropped)} — reloading once");
+				newWorkspace.Dispose();
+
+				(newWorkspace, newProjectId) = LoadForMode();
 			}
-			
+
+			// Never replace a healthy workspace with a reference-less one. A stale-but-correct
+			// compilation beats a fresh-but-wrong one: dropped references produce plausible-looking
+			// symbol results rather than visible failures, so promoting this would silently corrupt
+			// every subsequent query. If the live workspace is equally broken there is nothing to
+			// protect, so promote regardless — otherwise a bad first load could never recover.
+			if(ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } stillDropped
+			   && ProjectsWithoutReferences(PeekSolution()).Length == 0) {
+
+				newWorkspace.Dispose();
+
+				RecordUnhealthyLoad(
+					$"Reload discarded — the reloaded workspace had no metadata references on: {string.Join(", ", stillDropped)}. "
+					+ "Keeping the previous workspace, whose text may now be one edit stale. "
+					+ "Call roslyn_respawn if symbol results look outdated."
+				);
+
+				logger.LogInfo("Reload", $"Discarded reload — still no metadata references on: {string.Join(", ", stillDropped)}; keeping previous workspace");
+
+				// Leave reloadVersion set so a later call retries once the cooldown expires.
+				Interlocked.Exchange(ref reloadCooldownUntilTicks, DateTime.UtcNow.AddSeconds(ReloadRetryCooldownSeconds).Ticks)
+				;
+
+				return;
+			}
+
+			WarnIfReferencesDropped(newWorkspace);
+			Interlocked.Exchange(ref reloadCooldownUntilTicks, 0);
+
+			var newProjectMap = BuildProjectMapFor(newWorkspace);
+
 			Workspace? oldWorkspace = null;
 			int        projectCount = 0;
 			
@@ -1313,7 +1410,7 @@ internal sealed partial class WorkspaceManager
 				defaultProjectId = newProjectId;
 				projectMap.Clear();
 				
-				foreach(var kvp in newProjectMap!)
+				foreach(var kvp in newProjectMap)
 					projectMap[kvp.Key] = kvp.Value;
 				
 				compilationCache.Clear();

@@ -16,13 +16,18 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_check_drift", ReadOnly = true, Title = "Check Drift", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Diagnostic probe: reports files whose on-disk state changed without the workspace noticing — " +
-		"a FileSystemWatcher miss (network drives, event buffer overflow, excluded directories). " +
-		"The watcher normally keeps the workspace in sync automatically, so a healthy workspace reports " +
-		"drifted: false; use this when symbol results look inexplicably stale. " +
-		"A drifted file means results may be based on outdated text — call roslyn_respawn to reload, " +
-		"or re-save the files through roslyn editing tools. " +
-		"Changes made within the last ~2 seconds may still be syncing and are not reported.")]
+		"Workspace health probe — the tool to reach for when symbol results look wrong or stale, or when " +
+		"roslyn_get_diagnostics reports errors you do not believe. Checks two independent axes. " +
+		"(1) Source drift: files whose on-disk state changed without the workspace noticing — a " +
+		"FileSystemWatcher miss (network drives, event buffer overflow, excluded directories). A healthy " +
+		"workspace reports drifted: false; changes made within the last ~2 seconds may still be syncing and " +
+		"are not reported. (2) Reference health: workspace_healthy is false when a project loaded with zero " +
+		"metadata references, which happens when a contended MSBuild design-time build silently drops them. " +
+		"That state makes symbol results wrong-but-plausible and makes roslyn_get_diagnostics report phantom " +
+		"CS0246/CS0234 errors for code that builds fine — source can be perfectly in sync while this is broken. " +
+		"Either problem is fixed by roslyn_respawn; drift alone can also be cleared by re-saving the files " +
+		"through roslyn editing tools. last_unhealthy_load is present when a dropped-reference load happened " +
+		"at any point, even if the workspace has since recovered.")]
 	public object CheckDrift([Description(ProjectPathDescription)] string projectPath)
 	{
 		using var scope = BeginTool("roslyn_check_drift", null);
@@ -66,19 +71,51 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			.Distinct(StringComparer.OrdinalIgnoreCase)
 			.Order(StringComparer.Ordinal)];
 		
+		// Second axis: a workspace can be perfectly in sync with disk and still be useless if its
+		// design-time build dropped every metadata reference. Report both.
+		var health    = TryGetHealth(projectPath);
+		var unhealthy = health is { IsHealthy: false };
+
 		var result = new CheckDriftResult(
 			driftedFiles.Length > 0,
 			driftedFiles.Length,
 			driftedFiles[..Math.Min(driftedFiles.Length, MaxReportedFiles)],
 			checkedCount,
 			lastSynced.ToString("O"),
-			isMSBuild)
+			isMSBuild,
+			WorkspaceHealthy:          !unhealthy,
+			ProjectsWithoutReferences: unhealthy ? health!.ProjectsWithoutReferences : null,
+			LastUnhealthyLoad:         health?.LastUnhealthyLoad)
 		{
-			Hint = driftedFiles.Length > 0
-				? "Files changed on disk without the workspace noticing. Symbol results may be stale — call roslyn_respawn to reload, or re-save the files through roslyn editing tools."
-				: null
+			Hint = (driftedFiles.Length > 0, unhealthy) switch {
+
+				(true, true) =>
+					"Two separate problems. Files changed on disk without the workspace noticing, AND the workspace "
+					+ $"loaded without metadata references on: {string.Join(", ", health!.ProjectsWithoutReferences)}. "
+					+ "Call roslyn_respawn — it fixes both.",
+
+				(false, true) =>
+					$"Source is in sync, but the workspace loaded without metadata references on: "
+					+ $"{string.Join(", ", health!.ProjectsWithoutReferences)}. Symbol results are unreliable and "
+					+ "roslyn_get_diagnostics will report phantom errors — a real build would succeed. "
+					+ "Call roslyn_respawn to reload.",
+
+				(true, false) =>
+					"Files changed on disk without the workspace noticing. Symbol results may be stale — call "
+					+ "roslyn_respawn to reload, or re-save the files through roslyn editing tools.",
+
+				_ => null,
+			}
 		};
-		
-		return scope.Outcome(driftedFiles.Length > 0 ? $"{driftedFiles.Length} drifted" : "in sync", result);
+
+		var outcome = (driftedFiles.Length > 0, unhealthy) switch {
+
+			(true, true)  => $"{driftedFiles.Length} drifted, no metadata references",
+			(false, true) => "in sync, no metadata references",
+			(true, false) => $"{driftedFiles.Length} drifted",
+			_             => "in sync",
+		};
+
+		return scope.Outcome(outcome, result);
 	}
 }

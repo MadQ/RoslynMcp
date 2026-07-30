@@ -123,6 +123,40 @@ Other MCP clients (Claude Desktop, Cursor, etc.) keep their own approval stores 
 
 ## Workspace & Type Resolution Issues
 
+### Hundreds of "missing assembly reference" errors, but the project builds fine
+
+**Symptom:** `roslyn_get_diagnostics` reports a flood of `CS0246` / `CS0234` / `CS0103`
+("The type or namespace name 'X' could not be found") across files you never touched, while
+`dotnet build` succeeds.
+
+**Cause:** the workspace loaded with **zero metadata references**. An MSBuild design-time build
+that runs while another process holds one of the files it needs — typically your own editor or
+agent writing a source file or the `.csproj` — can fail and silently yield projects with no
+references at all. Every symbol query over that workspace is then wrong-but-plausible rather than
+failing outright. Nothing is wrong with your code, and a real build will succeed.
+
+**Confirm it:**
+
+```
+roslyn_check_drift  →  "workspace_healthy": false,
+                       "projects_without_references": ["YourProject"]
+```
+
+`roslyn_get_diagnostics` also sets `possible_workspace_load_issue: true` and returns
+`load_warnings` explaining the failed load.
+
+**Fix:** `roslyn_respawn` to reload the workspace. The server retries a dropped-reference load
+once automatically and will refuse to replace a healthy workspace with a reference-less one, so
+this state is usually transient — it most often appears on the *first* load of a session.
+
+> `roslyn_build_project` is the right tool to confirm the code itself is fine: it detects this
+> state and runs a real `dotnet build` rather than short-circuiting on the same Roslyn compilation.
+> Older versions did short-circuit and would simply repeat the phantom errors — pass
+> `forceBuild: true` there.
+
+`last_unhealthy_load` on `roslyn_check_drift` is retained after recovery, so you can still tell
+whether an episode happened earlier in the session.
+
 ### "MSBuild not found"
 
 **Symptom:** Error message about MSBuild not being available.

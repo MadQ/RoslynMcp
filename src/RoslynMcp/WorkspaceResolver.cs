@@ -60,8 +60,15 @@ internal sealed class WorkspaceResolver
 	public string[] GetLoadWarnings(string projectPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
-		
+
 		return manager.GetLoadWarnings(resolved);
+	}
+
+	public WorkspaceHealth GetHealth(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+
+		return manager.GetHealth(resolved);
 	}
 	
 	public DateTime GetLastSyncedUtc(string projectPath)

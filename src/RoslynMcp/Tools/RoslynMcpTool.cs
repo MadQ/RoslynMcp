@@ -140,6 +140,22 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	;
 	
 	/// <summary>
+	///     Load-health snapshot for the workspace serving <paramref name="projectPath"/>, or
+	///     <see langword="null"/> if it cannot be determined. Never throws: health is diagnostic
+	///     colour on a result the caller already has, so a failure here must not turn a successful
+	///     tool call into an error.
+	/// </summary>
+	protected WorkspaceHealth? TryGetHealth(string projectPath)
+	{
+		try {
+			return workspace.GetHealth(projectPath);
+		}
+		catch {
+			return null;
+		}
+	}
+
+	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
 	/// </summary>
 	/// <param name="projectPath">Project path (directory, .csproj, or source file). REQUIRED.</param>
