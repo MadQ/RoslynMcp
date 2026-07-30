@@ -124,8 +124,11 @@ internal sealed class ProjectConfig
 				: Path.GetDirectoryName(fullPath);
 			
 			if(startDir is null)
-				
+			
 				return Empty;
+			
+			// Normalize to avoid cache misses from trailing-separator variants.
+			startDir = Path.TrimEndingDirectorySeparator(startDir);
 			
 			lock(cacheLock)
 				if(cache.TryGetValue(startDir, out var cached))
@@ -181,7 +184,19 @@ internal sealed class ProjectConfig
 	{
 		try {
 			
-			var fileSize = new FileInfo(filePath).Length;
+			var info = new FileInfo(filePath);
+			
+			// Reject symlinks and other reparse points — a hostile repo can commit a symlink
+			// named .madq_roslynmcp.json pointing outside the repo, which would contradict
+			// the security goal of never reading arbitrary local paths.
+			if(info.Attributes.HasFlag(FileAttributes.ReparsePoint)) {
+				
+				logger.LogInfo("ProjectConfig", $"WARN: '{filePath}' is a symlink or reparse point — ignored");
+				
+				return Empty;
+			}
+			
+			var fileSize = info.Length;
 			
 			if(fileSize > maxFileSizeBytes) {
 				
