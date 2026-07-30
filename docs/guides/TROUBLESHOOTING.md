@@ -149,9 +149,10 @@ roslyn_check_drift  →  "workspace_healthy": false,
 once automatically and will refuse to replace a healthy workspace with a reference-less one, so
 this state is usually transient — it most often appears on the *first* load of a session.
 
-> **Do not** reach for `roslyn_build_project` to check whether the errors are real. It normally
-> short-circuits on the same Roslyn compilation and repeats them. It now detects this state and
-> runs a real build instead, but on older versions pass `forceBuild: true`.
+> `roslyn_build_project` is the right tool to confirm the code itself is fine: it detects this
+> state and runs a real `dotnet build` rather than short-circuiting on the same Roslyn compilation.
+> Older versions did short-circuit and would simply repeat the phantom errors — pass
+> `forceBuild: true` there.
 
 `last_unhealthy_load` on `roslyn_check_drift` is retained after recovery, so you can still tell
 whether an episode happened earlier in the session.

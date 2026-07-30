@@ -150,8 +150,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			hint = "These errors are phantom. The workspace loaded without metadata references on: "
 				+ $"{string.Join(", ", health.ProjectsWithoutReferences)} — usually a contended MSBuild "
 				+ "design-time build, not a problem with your code. Call roslyn_respawn to reload the "
-				+ "workspace. Do NOT verify with roslyn_build_project: it short-circuits on this same "
-				+ "compilation and repeats these errors (pass forceBuild: true to run a real build).";
+				+ "workspace. To confirm the code itself is fine, call roslyn_build_project — it detects "
+				+ "this state and runs a real dotnet build rather than trusting this compilation.";
 		}
 		else if(filePath is null && errorCount >= workspaceLoadMinErrors) {
 
