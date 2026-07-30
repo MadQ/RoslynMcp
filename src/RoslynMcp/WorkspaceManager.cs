@@ -88,7 +88,14 @@ internal sealed partial class WorkspaceManager : IDisposable
 		;
 		string				cacheKey;
 		
-		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc) {
+		// Route on the *requested* effective mode, not just the post-hoc ResolvedMode — on a
+		// fresh process ResolvedMode is still Auto (EnsureReady only runs inside the
+		// WorkspaceInstance constructor, after routing has committed), so the first .csproj
+		// load in adhoc mode would wrongly take the MSBuild branch and fail (#229).
+		// ResolvedMode == Adhoc stays as a fallback: once the process has skipped MSBuild
+		// registration, MSBuildWorkspace can never work, whatever this path requests.
+		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc
+			|| ProjectConfig.EffectiveWorkspaceMode(normalizedPath, logger) == WorkspaceMode.Adhoc) {
 			
 			instance = WorkspaceInstance.ForDirectory(
 				Directory.Exists(normalizedPath) ? normalizedPath : Path.GetDirectoryName(normalizedPath)!, logger)
