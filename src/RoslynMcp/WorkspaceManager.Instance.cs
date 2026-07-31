@@ -103,11 +103,6 @@ internal sealed partial class WorkspaceManager
 		private static readonly TimeSpan ReloadQuiesceTimeout = TimeSpan.FromSeconds(30);
 
 		/// <summary>
-		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
-		///     the current load's warnings, and the retained last-unhealthy-load record.
-		///     Peeks — never forces a pending reload.
-		/// </summary>
-		/// <summary>
 		///     The workspace is behind disk: a change arrived that could not be applied
 		///     incrementally, and the reload servicing it has not completed. Drift cannot report
 		///     this on its own — a file that is not yet a document is not enumerated by
@@ -115,6 +110,11 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		public bool ReloadPending => reloadVersion != 0;
 
+		/// <summary>
+		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
+		///     the current load's warnings, the retained last-unhealthy-load record, and whether a
+		///     reload is still pending. Peeks — never forces a pending reload.
+		/// </summary>
 		public WorkspaceHealth Health => new(
 			// MSBuild only. Reference health is a property of the design-time build; an
 			// AdhocWorkspace project is constructed with no metadata references at all
@@ -1150,8 +1150,23 @@ internal sealed partial class WorkspaceManager
 		
 		
 		/// <summary>
-		///     Directories that never contain compilation inputs we care about watching.
-		///     Shared with the adhoc file enumerator so both agree on what to skip.
+		///     Directories not worth walking or reloading for. Two distinct uses, and the
+		///     <c>bin</c>/<c>obj</c> entries mean something different in each:
+		///     <list type="bullet">
+		///         <item>
+		///             Adhoc enumeration skips them entirely when discovering source files.
+		///         </item>
+		///         <item>
+		///             The MSBuild flush uses it only to decide that an <em>unknown</em>
+		///             <c>.cs</c> under one of them is a build artifact, not new source, and so
+		///             must not force a full reload. Generated files under <c>obj</c> that really
+		///             are compilation inputs (<c>*.AssemblyInfo.cs</c>,
+		///             <c>*.GlobalUsings.g.cs</c>) already have document IDs, never reach that
+		///             branch, and keep receiving ordinary text updates.
+		///         </item>
+		///     </list>
+		///     For the watcher's pre-queue filter — which must not suppress those generated
+		///     documents — see <see cref="IsNeverCompilationInput"/>.
 		/// </summary>
 		static bool IsExcludedDirectoryName(string name) =>
 			name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages";
@@ -1183,13 +1198,16 @@ internal sealed partial class WorkspaceManager
 				return false;
 			}
 
-			// Outside the root entirely — not ours to filter.
-			if(relative.StartsWith("..", StringComparison.Ordinal))
-
-				return false;
-
 			var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
 			;
+
+			// Outside the root entirely — not ours to filter. The first segment must equal ".."
+			// exactly: a prefix test would also catch a directory legitimately named "..config",
+			// which is inside the root and must still be subject to the exclusions below. A rooted
+			// result means GetRelativePath could not relativize at all (different volume).
+			if(Path.IsPathRooted(relative) || segments[0] == "..")
+
+				return false;
 
 			// Last segment is the filename, not a directory.
 			for(var i = 0; i < segments.Length - 1; i++)
