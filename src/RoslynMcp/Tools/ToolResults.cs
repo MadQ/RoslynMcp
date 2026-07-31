@@ -318,7 +318,12 @@ internal sealed record CheckDriftResult(
 	string[]?                                            ProjectsWithoutReferences,
 	[property: JsonPropertyName("last_unhealthy_load")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	string?                                              LastUnhealthyLoad
+	string?                                              LastUnhealthyLoad,
+	// A third axis, and the only one that can report a file the workspace does not know about
+	// yet: drifted_files is built from existing documents, so a brand-new file is invisible to it.
+	[property: JsonPropertyName("reload_pending")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+	bool                                                 ReloadPending
 ) : ToolResult;
 
 internal sealed record GetTriviaNoMatchResult(
