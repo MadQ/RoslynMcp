@@ -30,10 +30,16 @@ enum ResolutionKind
 ///     Timestamped record of the most recent unhealthy load, retained across the healing reload
 ///     that clears <paramref name="LoadWarnings"/>. Non-null after an episode even once recovered.
 /// </param>
+/// <param name="ReloadPending">
+///     A file change could not be applied incrementally and the reload servicing it has not
+///     completed, so the workspace is behind disk. Distinct from drift: drift compares mtimes of
+///     files the workspace already knows about, and cannot see a file that is not a document yet.
+/// </param>
 internal sealed record WorkspaceHealth(
 	string[] ProjectsWithoutReferences,
 	string[] LoadWarnings,
-	string?  LastUnhealthyLoad)
+	string?  LastUnhealthyLoad,
+	bool     ReloadPending)
 {
 	/// <summary>True when every loaded project resolved at least one metadata reference.</summary>
 	public bool IsHealthy => ProjectsWithoutReferences.Length == 0;

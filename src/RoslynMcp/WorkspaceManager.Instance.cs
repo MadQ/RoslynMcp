@@ -75,9 +75,9 @@ internal sealed partial class WorkspaceManager
 
 		// 1 while a deferred retry is scheduled. Accessors check this and return immediately
 		// rather than blocking: the workspace is known to be unable to reload right now, so
-		// waiting would burn a full load and still hand back stale text. Staleness stays visible
-		// through roslyn_check_drift, which reports the un-applied edit as drift because the
-		// discard path never reaches MarkSynced().
+		// waiting would burn a full load and still hand back stale text. Staleness is reported by
+		// roslyn_check_drift as reload_pending — not as drift, which is a mtime comparison over
+		// documents the workspace already has and therefore cannot see a file it has never loaded.
 		private int deferredRetryScheduled;
 
 #if NET9_0_OR_GREATER
@@ -107,6 +107,14 @@ internal sealed partial class WorkspaceManager
 		///     the current load's warnings, and the retained last-unhealthy-load record.
 		///     Peeks — never forces a pending reload.
 		/// </summary>
+		/// <summary>
+		///     The workspace is behind disk: a change arrived that could not be applied
+		///     incrementally, and the reload servicing it has not completed. Drift cannot report
+		///     this on its own — a file that is not yet a document is not enumerated by
+		///     <c>roslyn_check_drift</c>, and the sync clock says nothing about work still pending.
+		/// </summary>
+		public bool ReloadPending => reloadVersion != 0;
+
 		public WorkspaceHealth Health => new(
 			// MSBuild only. Reference health is a property of the design-time build; an
 			// AdhocWorkspace project is constructed with no metadata references at all
@@ -114,7 +122,8 @@ internal sealed partial class WorkspaceManager
 			// workspace as broken.
 			isMSBuild ? ProjectsWithoutReferences(PeekSolution()) : [],
 			[..loadWarnings],
-			lastUnhealthyLoad
+			lastUnhealthyLoad,
+			ReloadPending
 		);
 		
 		// UTC ticks of the last event that synchronized this workspace with disk: initial load,
@@ -872,7 +881,7 @@ internal sealed partial class WorkspaceManager
 				var dirInfo = new DirectoryInfo(directory);
 				if(dirInfo.Attributes.HasFlag(FileAttributes.Hidden) ||
 				   dirInfo.Attributes.HasFlag(FileAttributes.System) ||
-				   dirInfo.Name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages")
+				   IsExcludedDirectoryName(dirInfo.Name))
 					continue;
 				
 				foreach(var file in EnumerateFilesWithErrorHandling(directory, searchPattern))
@@ -1140,6 +1149,59 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		
+		/// <summary>
+		///     Directories that never contain compilation inputs we care about watching.
+		///     Shared with the adhoc file enumerator so both agree on what to skip.
+		/// </summary>
+		static bool IsExcludedDirectoryName(string name) =>
+			name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages";
+
+		/// <summary>
+		///     Directories that can never hold a compilation document, so a change under one is
+		///     safe to drop before it is even queued. Deliberately excludes <c>bin</c>/<c>obj</c>:
+		///     SDK-style projects put generated documents there (<c>*.AssemblyInfo.cs</c>,
+		///     <c>*.GlobalUsings.g.cs</c>) which are real compilation inputs and must still receive
+		///     text updates. Build output is filtered later instead — only from the decision to
+		///     force a full reload. See <see cref="IsUnderExcludedDirectory"/>.
+		/// </summary>
+		static bool IsNeverCompilationInput(string name) =>
+			name is "node_modules" or ".git" or ".vs" or "packages";
+
+		/// <summary>
+		///     True when any directory segment of <paramref name="fullPath"/> below
+		///     <see cref="rootPath"/> matches <paramref name="excluded"/>. Name-based only — no
+		///     <c>FileInfo</c> stat, because this runs on every FileSystemWatcher event.
+		/// </summary>
+		bool IsUnderExcludedDirectory(string fullPath, Func<string, bool> excluded)
+		{
+			string relative;
+
+			try {
+				relative = Path.GetRelativePath(rootPath, fullPath);
+			}
+			catch(ArgumentException) {
+				return false;
+			}
+
+			// Outside the root entirely — not ours to filter.
+			if(relative.StartsWith("..", StringComparison.Ordinal))
+
+				return false;
+
+			var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+			;
+
+			// Last segment is the filename, not a directory.
+			for(var i = 0; i < segments.Length - 1; i++)
+
+				if(excluded(segments[i]))
+
+					return true;
+
+			return false;
+		}
+
+
 		void StartWatcher()
 		{
 			watcher = new FileSystemWatcher(rootPath, "*.cs")
@@ -1162,6 +1224,15 @@ internal sealed partial class WorkspaceManager
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)
 		{
+			// Nothing under these can be a compilation document, so drop the event before it is
+			// queued. Without this, a stray .cs anywhere below the root — a package cache, a
+			// sample in .git, anything — reaches FlushMSBuild as an unknown document and forces a
+			// full workspace reload, which is both slow and the operation that can drop metadata
+			// references (issue #235).
+			if(IsUnderExcludedDirectory(fullPath, IsNeverCompilationInput))
+
+				return;
+
 			// Skip FSW events for paths RM is currently writing — prevents spurious workspace
 			// reloads from our own writes. Ref-counted for safety; normal usage is single-threaded.
 			if(!deleted && ignoredPaths.TryGetValue(fullPath, out var count) && count > 0)
@@ -1221,9 +1292,15 @@ internal sealed partial class WorkspaceManager
 					pendingDeletes.Clear();
 				}
 				
+				// True when the flush could only flag a reload. The workspace is then behind disk
+				// until that reload completes, so the sync clock must not advance — otherwise
+				// roslyn_check_drift reports "in sync" for changes it has not applied, and a
+				// reload that is later discarded becomes invisible.
+				var reloadFlagged = false;
+
 				if(isMSBuild)
-					FlushMSBuild(changed, deleted);
-				
+					reloadFlagged = FlushMSBuild(changed, deleted);
+
 				else {
 					
 					Workspace ws;
@@ -1243,16 +1320,45 @@ internal sealed partial class WorkspaceManager
 					if(ws is AdhocWorkspace adhoc)
 						FlushAdhoc(adhoc, defId, changed, deleted);
 				}
-				
-				MarkSynced();
+
+				if(!reloadFlagged)
+					MarkSynced();
 			}
 			catch(Exception) {
 				// Swallow — best effort. Next FSW event or explicit InvalidateFile will retry.
 			}
 		}
 		
-		void FlushMSBuild(string[] changed, string[] deleted)
+		/// <summary>
+		///     Applies a debounced batch of file changes to an MSBuild workspace.
+		///     Returns <see langword="true"/> when it could only flag a full reload rather than
+		///     apply the change — meaning the workspace is now behind disk, and the caller must
+		///     not advance the sync clock.
+		/// </summary>
+		bool FlushMSBuild(string[] changed, string[] deleted)
 		{
+			// Set when this batch left the workspace behind disk.
+			var reloadFlagged = false;
+
+			// One generation bump per flush batch. Each bump moves reloadVersion, and an in-flight
+			// reload discards its work when the generation no longer matches the one it captured —
+			// so deleting several documents used to throw away a full load per extra file.
+			// The inner guard is pre-existing: InvalidateFile may already have flagged this same
+			// change, and re-flagging it would discard the reload that is servicing it.
+			void FlagReload()
+			{
+				if(reloadFlagged)
+
+					return;
+
+				reloadFlagged = true;
+
+				#pragma warning disable CS0420 // A reference to a volatile field will not be treated as volatile
+				if(Volatile.Read(ref reloadVersion) == 0)
+					Interlocked.Increment(ref reloadVersion);
+				#pragma warning restore CS0420
+			}
+
 			Workspace ws;
 			Solution  currentSolution;
 			
@@ -1274,12 +1380,17 @@ internal sealed partial class WorkspaceManager
 			// document text then calling TryApplyChanges writes an empty file back to disk,
 			// silently recreating the deleted file as a zero-byte ghost.
 			// Flag for full workspace reload instead — symmetric with the new-file case below.
+			// Flag once, not once per file: every increment moves the generation, and an in-flight
+			// reload discards its work when reloadVersion no longer matches the gen it captured —
+			// so deleting several files used to throw away one full load per extra file.
 			foreach(var path in deleted) {
-				
-				var docIds = newSolution.GetDocumentIdsWithFilePath(path);
-				
-				if(docIds.Length > 0)
-					Interlocked.Increment(ref reloadVersion);
+
+				if(newSolution.GetDocumentIdsWithFilePath(path).Length == 0)
+					continue;
+
+				FlagReload();
+
+				break;
 			}
 			
 			foreach(var path in changed) {
@@ -1311,32 +1422,49 @@ internal sealed partial class WorkspaceManager
 					
 					// MSBuildWorkspace doesn't support AddDocument via TryApplyChanges —
 					// it modifies the .csproj, conflicting with SDK-style implicit includes.
-					// Flag for full workspace reload on next tool call. Don't double-increment
-					// if a reload is already pending — InvalidateFile already set the flag,
-					// and a second increment would cause the in-flight reload to be discarded.
+					// Flag for full workspace reload on next tool call.
 					if(docIds.Length == 0) {
 
-						#pragma warning disable CS0420 // A reference to a volatile field will not be treated as volatile
-						if(Volatile.Read(ref reloadVersion) == 0)
-							Interlocked.Increment(ref reloadVersion);
-						#pragma warning restore CS0420
+						// ...unless it is build output. A .cs under bin/ or obj/ that is not
+						// already a document is a compiler artifact, not source: reloading the
+						// whole workspace for it is pure cost. Generated documents that ARE
+						// compilation inputs (*.AssemblyInfo.cs, *.GlobalUsings.g.cs) have
+						// docIds and never reach this branch, so they keep updating normally.
+						if(IsUnderExcludedDirectory(path, IsExcludedDirectoryName))
+							continue;
+
+						FlagReload();
 
 						continue;
 					}
-					
+
 					using var stream = File.OpenRead(path);
 					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
-					
+
+					// Already current. Applying identical text is not free: it still runs a
+					// TryApplyChanges, which writes to disk and flags a full reload if it fails.
+					// This catches what the rmOwnedWriteSizes check above cannot — an edit that
+					// leaves the file the same length, and any write RM did not make itself.
+					// TryGetText deliberately: it reads already-materialized text rather than
+					// forcing a load, and falls through to apply when none is available.
+					if(newSolution.GetDocument(docIds[0]) is { } existingDoc
+					   && existingDoc.TryGetText(out var existingText)
+					   && existingText.ContentEquals(text))
+
+						continue;
+
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);
-					
+
 					modified = true;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			}
 			
 			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
-				Interlocked.Increment(ref reloadVersion);
+				FlagReload();
+
+			return reloadFlagged;
 		}
 		
 		void FlushAdhoc(AdhocWorkspace adhoc, ProjectId projectId, string[] changed, string[] deleted)
