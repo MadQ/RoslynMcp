@@ -9,6 +9,7 @@ log.txt
 src/RoslynMcp/_*_.cs
 
 # User-specific files
+.DS_Store
 *.rsuser
 *.suo
 *.user

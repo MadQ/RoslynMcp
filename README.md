@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 39 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 41 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -107,7 +107,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-37 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
+39 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -164,6 +164,8 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_preview_rename` | Compute rename diff + confirmation token |
 | `roslyn_apply_rename` | Apply or reject a previewed rename |
+| `roslyn_preview_code_fix` | Preview a bundled Roslyn code fix and return a reviewed approval token |
+| `roslyn_apply_code_fix` | Apply or reject an approved code-fix preview using verified physical writes |
 | `roslyn_change_signature` | Add parameters with non-breaking forwarding overload |
 | `roslyn_apply_signature_change` | Apply or reject a previewed signature change |
 

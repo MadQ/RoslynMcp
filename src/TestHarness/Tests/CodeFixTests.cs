@@ -635,14 +635,150 @@ internal static class CodeFixTests
 			}
 		}
 		
-		async Task<(bool pass, string msg)> RunUnbundledDiagnosticRejected()
+		// Exercises the production MSBuildWorkspace path instead of the AdhocWorkspace used by
+		// most boundary tests. The exact-byte assertion also proves that the physical apply path
+		// persists the reviewed output without relying on an in-memory workspace update alone.
+		async Task<(bool pass, string msg)> RunMsBuildSingleWrite()
 		{
 			var workspacePath = NewAdhocWorkspace();
+			var projectPath = Path.Combine(workspacePath, "CodeFixFixture.csproj");
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
 			var sw = Stopwatch.StartNew();
 			
 			try {
 				
-				var (preview, previewText) = await PreviewAdhoc(workspacePath, "NotSupportedByBundledProvider");
+				const string projectFile = """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+</Project>
+""";
+				
+				await File.WriteAllTextAsync(projectPath, projectFile);
+				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
+				
+				var (preview, previewText) = await Call("roslyn_preview_code_fix", new {
+					projectPath,
+					filePath = fixturePath,
+					line = 1,
+					column = 24,
+					diagnosticId = "CS0246"
+				});
+				var token = preview?["token"]?.GetValue<string>();
+				
+				if(token is null)
+					return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+				
+				var (apply, applyText) = await Apply(token, projectPath);
+				var actualBytes = await File.ReadAllBytesAsync(fixturePath);
+				var expectedBytes = Encoding.UTF8.GetBytes(Fixture("object"));
+				var (read, readText) = await Call("roslyn_read_file", new {
+					projectPath,
+					filePath = "_CodeFixFixture_.cs"
+				});
+				var pass = apply?["error"] is null
+					&& apply?["filesWritten"]?.GetValue<int>() == 1
+					&& HasFileState(apply, "_CodeFixFixture_.cs", "written")
+					&& actualBytes.AsSpan().SequenceEqual(expectedBytes)
+					&& read is not null
+					&& readText.Contains("object value", StringComparison.Ordinal);
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (apply: {applyText}; read: {readText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		// Builds two real MSBuild projects that both include one physical source file. A fix
+		// calculated through either Roslyn document must be rejected because writing the shared
+		// path would also mutate the other project without a separately reviewed change.
+		async Task<(bool pass, string msg)> RunLinkedFileRejectedAtPreview()
+		{
+			var workspacePath = NewAdhocWorkspace();
+			var projectAPath = Path.Combine(workspacePath, "ProjectA");
+			var projectBPath = Path.Combine(workspacePath, "ProjectB");
+			var projectFile = Path.Combine(projectAPath, "ProjectA.csproj");
+			var sharedPath = Path.Combine(projectAPath, "Shared.cs");
+			var originalBytes = Encoding.UTF8.GetBytes(Fixture("TestSingleWrite"));
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				Directory.CreateDirectory(projectAPath);
+				Directory.CreateDirectory(projectBPath);
+				
+				const string projectA = """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../ProjectB/ProjectB.csproj" />
+  </ItemGroup>
+</Project>
+""";
+				const string projectB = """
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ProjectA/Shared.cs" Link="Shared.cs" />
+  </ItemGroup>
+</Project>
+""";
+				
+				await File.WriteAllTextAsync(projectFile, projectA);
+				await File.WriteAllTextAsync(Path.Combine(projectBPath, "ProjectB.csproj"), projectB);
+				await File.WriteAllBytesAsync(sharedPath, originalBytes);
+				
+				var (preview, previewText) = await Call("roslyn_preview_code_fix", new {
+					projectPath = projectFile,
+					filePath = sharedPath,
+					line = 1,
+					column = 24,
+					diagnosticId = "CS0246"
+				});
+				var currentBytes = await File.ReadAllBytesAsync(sharedPath);
+				var message = preview?["message"]?.GetValue<string>() ?? string.Empty;
+				var pass = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
+					&& preview?["token"] is null
+					&& message.Contains("linked source file", StringComparison.Ordinal)
+					&& currentBytes.AsSpan().SequenceEqual(originalBytes);
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+
+		async Task<(bool pass, string msg)> RunUnbundledDiagnosticRejected()
+		{
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				await File.WriteAllTextAsync(
+					fixturePath,
+					"class CodeFixFixture { void M() { MissingName(); } }\n");
+				var (preview, previewText) = await Call("roslyn_preview_code_fix", new {
+					projectPath = workspacePath,
+					filePath = "_CodeFixFixture_.cs",
+					line = 1,
+					column = 35,
+					diagnosticId = "CS0103"
+				});
 				var message = preview?["message"]?.GetValue<string>() ?? string.Empty;
 				var pass = preview?["error"]?.GetValue<string>() == "no fixes"
 					&& preview?["token"] is null
@@ -660,6 +796,8 @@ internal static class CodeFixTests
 		return new TestGroup("Code Fix Tools", [
 			new("unbundled diagnostic is rejected without a token", RunUnbundledDiagnosticRejected),
 			new("single write reports exact state and recovery", RunSingleWrite),
+			new("MSBuild workspace previews and applies an existing-file fix", RunMsBuildSingleWrite),
+			new("linked source file is rejected without changing physical bytes", RunLinkedFileRejectedAtPreview),
 			new("multiple actions require and honor actionIndex", RunMultipleActionSelection),
 			new("unsupported and throwing operations are structured", RunOperationShapeFailures),
 			new("invalid approval leaves token pending", RunInvalidApprovalRetainsToken),

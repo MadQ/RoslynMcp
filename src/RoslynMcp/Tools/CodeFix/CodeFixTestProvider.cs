@@ -109,8 +109,8 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 			case "TestMetadataReference":
 				context.RegisterCodeFix(
 					CodeAction.Create(
-						"Remove metadata reference",
-						ct => RemoveMetadataReferenceAsync(context.Document, ct),
+						"Add metadata reference",
+						ct => AddMetadataReferenceAsync(context.Document, ct),
 						"test_metadata_reference"),
 					diagnostic);
 				
@@ -265,14 +265,16 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 		return Task.FromResult(document.Project.Solution.AddProject(projectInfo));
 	}
 	
-	static Task<Solution> RemoveMetadataReferenceAsync(
+	static Task<Solution> AddMetadataReferenceAsync(
 		Document document,
 		CancellationToken cancellationToken)
 	{
-		var reference = document.Project.MetadataReferences.FirstOrDefault()
-			?? throw new InvalidOperationException("Test project has no metadata reference.");
+		var referencePath = Path.Combine(
+			System.Runtime.InteropServices.RuntimeEnvironment.GetRuntimeDirectory(),
+			"System.Private.CoreLib.dll");
+		var reference = MetadataReference.CreateFromFile(referencePath);
 		
-		return Task.FromResult(document.Project.Solution.RemoveMetadataReference(document.Project.Id, reference));
+		return Task.FromResult(document.Project.Solution.AddMetadataReference(document.Project.Id, reference));
 	}
 	
 
