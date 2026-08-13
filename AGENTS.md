@@ -35,10 +35,10 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | | |
 |---|---|
 | **Type** | Model Context Protocol (MCP) server — stdio transport |
-| **Runtime** | .NET 8 / .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
+| **Runtime** | .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
-| **Version** | 0.7.8-alpha (pre-1.0) |
-| **Tool Count** | 39 MCP tools (37 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
+| **Version** | 0.8.1-beta (pre-1.0) |
+| **Tool Count** | 43 MCP tools (41 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -73,8 +73,12 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `RespawnTool` |`roslyn_respawn` (DEBUG only) — terminates server process for hot-reload during development — not very reliable |
 | `FileWriter` | Centralised file write entry point; `WriteWithRetryAsync` and `WriteWithRetry` wrap all disk writes with exponential-backoff retry on `IOException`, structured `INFO`/`ERROR` log entries per attempt, and are accessible from non-tool types (`BackupStore`, `SolutionDiff`) |
 | `TypeMembersTool` |`roslyn_get_type_members` — enumerate members with full signatures + doc summaries |
+| `FindOverloadsTool` | `roslyn_find_overloads` — returns all ordinary method overloads declared on a containing type, with full signatures including generic/default/ref/out parameter details |
+| `TypeDependenciesTool` | `roslyn_get_type_dependencies` — returns direct type dependencies from a type declaration and direct member signatures; includes base type, direct interfaces, fields, properties, events, parameters, returns, generic constraints, operators, and conversions |
 | `DiagnosticsTool` | `roslyn_get_diagnostics` — structured compiler errors and warnings (summary counts + paginated items); `take: 0` for count-only fast path — returns `items: null` (not `[]`) to distinguish "not requested" from "no results" |
+| `CheckDriftTool` | `roslyn_check_drift` — workspace health probe on three axes: source drift (on-disk changes the FileSystemWatcher missed), reference health (`workspace_healthy: false` when a project loaded with zero metadata references), and `reload_pending: true` when a change is waiting on a reload that has not completed. Drift is an mtime comparison over existing documents, so `reload_pending` is the only axis that can account for a **newly added** file. Use when symbol results look stale **or** when `roslyn_get_diagnostics` reports errors you don't believe |
 | `FindReferencesTool` | `roslyn_find_references` — all references to a symbol across the project |
+| `FindUnusedTool` | `roslyn_find_unused` — private, internal, and effectively internal source symbols with zero direct static references; conservative refactoring guidance with confidence and reason metadata |
 | `FindCallersTool` | `roslyn_find_callers` — all methods that call a named symbol; filter by `isDirect` to exclude interface/delegate dispatch |
 | `GetCallGraphTool` | `roslyn_get_call_graph` — all methods invoked within a method body; walks the Roslyn IOperation tree for precise semantic results |
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
@@ -120,13 +124,13 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging), `LogEntry.cs` (shared NDJSON log schema — linked into both `RoslynMcp` and `RoslynMcp.LogViewer`).
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
-- `Tools/Analysis/` — 20 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, …)
+- `Tools/Analysis/` — 24 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, drift, …)
 - `Tools/Search/` — 4 file/content search tools (list files, text search, semantic search, string literal search)
 - `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
 - `Tools/Refactoring/` — 2 signature-change tools (`roslyn_change_signature` → `roslyn_apply_signature_change`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
-- `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RoslynMcpTool.Discovery.cs`, `InfoTool.cs`, `RespawnTool.cs` (debug-only), `DebugAttachTool.cs` (debug-only)
+- `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RoslynMcpTool.Discovery.cs`, `ToolResults.cs`, `ErrorResult.cs`, `InfoTool.cs`, `RespawnTool.cs` (debug-only), `DebugAttachTool.cs` (debug-only)
 
 **File logging:** Every tool invocation, server start/stop, and workspace error is logged to a rolling file.
 - Default path: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` (PID always injected)
@@ -142,7 +146,10 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms)
 - **VS workspace** — uses Visual Studio's MSBuild instance when available
 - See [docs/reference/WORKSPACE_MODES.md](docs/reference/WORKSPACE_MODES.md) for detailed comparison and FAQ
-- **CLI flag:** `--workspace sdk|vs|adhoc|auto` (default: `auto`) — or set `ROSLYNMCP_WORKSPACE` env var to override
+- **CLI flag:** `--workspace sdk|vs|adhoc|auto` (default: `auto`) — or set `ROSLYNMCP_WORKSPACE` env var to override; a committed `.madq_roslynmcp.json` at the repo root (written by `setup-project`) can pin a per-project mode when neither is given
+- **MSBuild override:** `--msbuild-path <dir>` (or `ROSLYNMCP_MSBUILD_PATH`) points discovery at a dotnet SDK directory or a VS `MSBuild\Current\Bin` directory, bypassing auto-discovery. Honored in `auto`, `sdk`, and `vs`; ignored in `adhoc`. Invalid paths fall through to normal discovery rather than failing. Precedence, as everywhere: CLI arg > env var
+
+**Ambiguity handling:** ambiguous symbol names in `roslyn_preview_rename` / `roslyn_change_signature` return a structured candidate list by default, so the agent self-recovers via `containingType` (or `filePath`+`line`). Start the server with `--elicit` (or `ROSLYNMCP_ELICIT=true`) to instead prompt the user interactively — requires an MCP client that supports elicitation; unsupported clients fall back to the candidate list. A committed `.madq_roslynmcp.json` at the repo root (`"elicit": true`, written by `setup-project`) enables it per project when no CLI arg or env var was given — precedence: CLI arg > env var > project file > default.
 
 **Tool Selection Guidance:**
 
@@ -770,7 +777,7 @@ Example `.mcp.json`:
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe",
       "args": ["."]

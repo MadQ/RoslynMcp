@@ -134,8 +134,8 @@ The built-in tools agent found a more impactful bug (ToString() dropping stack t
 
 ## Improvement Roadmap (from battle-test findings)
 
-1. **Enrich `find_references`** — add context snippets per reference
-2. **Enrich `get_type_hierarchy`** — per-type interfaces, intermediate base classes
+1. **Enrich `roslyn_find_references`** — add context snippets per reference
+2. **Enrich `roslyn_get_type_hierarchy`** — per-type interfaces, intermediate base classes
 3. **"Awareness hints"** — note related overrides (ToString, Dispose, etc.) when returning member bodies
 4. **~~`workspaceMode` parameter~~** — shipped in #104 as `--workspace adhoc`
 5. **Smarter `projectPath` resolution** — handle .slnx, try CWD-relative, search by filename

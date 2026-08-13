@@ -57,6 +57,34 @@ internal sealed class WorkspaceResolver
 		return manager.GetSolution(resolved);
 	}
 	
+	public string[] GetLoadWarnings(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+
+		return manager.GetLoadWarnings(resolved);
+	}
+
+	public WorkspaceHealth GetHealth(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+
+		return manager.GetHealth(resolved);
+	}
+	
+	public DateTime GetLastSyncedUtc(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.GetLastSyncedUtc(resolved);
+	}
+	
+	public Solution PeekSolution(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.PeekSolution(resolved);
+	}
+	
 	/// <summary>
 	///     Gets the root path for a resolved project.
 	///     Used for computing relative paths in tool responses.
@@ -97,6 +125,18 @@ internal sealed class WorkspaceResolver
 		var (_, isMSBuild, _) = GetWorkspaceInfo(projectPath);
 		
 		return !isMSBuild;
+	}
+	
+	/// <summary>
+	///     Returns the <see cref="SecurityBoundary"/> for the workspace, creating it if the workspace
+	///     is not yet loaded. Use to validate file paths before accessing files outside the normal
+	///     tool flow.
+	/// </summary>
+	public SecurityBoundary GetSecurityBoundary(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.GetSecurityBoundary(resolved);
 	}
 	
 	/// <summary>

@@ -25,16 +25,31 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		"This is step 1 of a two-step rename workflow; no files are written until roslyn_apply_rename is called. " +
 		"Renames can affect dozens or hundreds of files — always preview before applying. " +
 		"If the symbol was previously approved for the session, the token is pre-confirmed and the response message will say so. " +
-		"Provide containingType when multiple symbols share the same name to avoid ambiguous matches. " +
+		"Provide containingType when multiple symbols share the same name to avoid ambiguous matches, " +
+		"or pass filePath+line (and optional column) to resolve the symbol at an exact source position — " +
+		"the precise way to rename one specific overload, local, or parameter. " +
+		"Ambiguous names never rename a first match: the call fails with a structured candidates list — " +
+		"re-call with a candidate's containingType, or filePath + line. (If the server was started with " +
+		"--elicit and the client supports MCP elicitation, the user is asked to pick instead.) " +
 		"For direct text replacement without a review step, use roslyn_replace_in_code instead.")]
-	public async Task<PreviewRenameResult> PreviewRename(
+	public async Task<object> PreviewRename(
 		[Description("Current symbol name to rename, e.g. 'WindowKey'. Use roslyn_get_type_members or roslyn_find_references to verify the exact name before renaming.")] string symbolName,
 		[Description("New name for the symbol, e.g. 'WindowIdentity'. Must be a valid C# identifier.")] string newName,
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
-		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null)
+		McpServer server,
+		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null,
+		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
+		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
+		[Description("1-based column for position-based resolution. Default: 1.")] int column = 1)
 	{
-		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}", new { containingType });
+		using var scope = BeginTool("roslyn_preview_rename", $"{symbolName}→{newName}", new { containingType, line });
+		
+		if(!TryStripChatSymbolRef(ref symbolName, out var refError)             ||
+		   !TryStripChatSymbolRef(ref newName,    out refError)                 ||
+		   !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
 		
 		// Use TryGetProject so symbol and solution both derive from the same workspace
 		// snapshot — Renamer.RenameSymbolAsync requires the symbol to belong to the
@@ -50,7 +65,40 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			return scope.Failed("compilation unavailable", new PreviewRenameResult(
 				null, null, "Compilation unavailable — the project may have unresolved references or errors.", false));
 		
-		var symbol = FindSymbol(compilation, symbolName, containingType);
+		if(line > 0 && filePath is null)
+			
+			return scope.Failed("filePath required", new PreviewRenameResult(
+				null, null, "filePath is required when line is specified.", false));
+		
+		// Position (line > 0) pinpoints one symbol — the precise way to rename one overload,
+		// local, or parameter. The compilation-based lookup keeps the symbol in this snapshot.
+		ISymbol? symbol;
+		
+		if(line > 0)
+			symbol = await FindSymbolAtPosition(compilation, filePath!, line, column, cancellationToken);
+		
+		else {
+			
+			// Renaming the wrong symbol mutates code silently — never fall back to a first match.
+			// On ambiguity, fail with a structured candidate list so the agent retries with
+			// containingType or filePath+line on its own; interrupting the user with an
+			// interactive picker is a server-level opt-in (--elicit / ROSLYNMCP_ELICIT / project-local .madq_roslynmcp.json).
+			var candidates = FindSymbols(compilation, symbolName, containingType);
+			
+			symbol = candidates.Length == 1 ? candidates[0] : null;
+			
+			if(candidates.Length > 1) {
+				
+				var rootPath = workspace.GetRootPath(projectPath);
+				
+				if(ProjectConfig.EffectiveElicit(rootPath, logger))
+					symbol = await TryElicitSymbolChoice(server, candidates, symbolName, rootPath, cancellationToken);
+				
+				if(symbol is null)
+					
+					return scope.Failed("ambiguous symbol", AmbiguousSymbolError(candidates, symbolName, rootPath));
+			}
+		}
 		
 		if(symbol is null)
 			

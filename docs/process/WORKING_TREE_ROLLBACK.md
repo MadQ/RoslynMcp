@@ -7,8 +7,8 @@ appear committed but are actually zero bytes (or pre-session content) on disk.
 
 ## Symptoms
 
-- `(Get-Item path\to\file.cs).Length` returns 0 after a commit that was supposed to add content
-- `git show HEAD:path/to/file.cs` returns empty content despite the commit message referencing the file
+- `(Get-Item src\RoslynMcp\Tools\Build\RestorePackagesTool.cs).Length` returns 0 after a commit that was supposed to add content
+- `git show HEAD:src/RoslynMcp/Tools/Build/RestorePackagesTool.cs` returns empty content despite the commit message referencing the file
 - `roslyn_get_file_outline` returns an empty type list for a file that was just written
 - `git status` shows "up to date" but files are obviously broken at runtime
 
@@ -16,8 +16,8 @@ appear committed but are actually zero bytes (or pre-session content) on disk.
 
 Observed primarily when:
 
-1. A file is edited in-memory via Roslyn tools (which operate on the in-memory workspace),
-   but the corresponding disk file was never actually written.
+1. A file is edited via Roslyn tools, the workspace shows the expected content,
+   but the on-disk file later turns out to be empty or stale.
 2. A merge or branch switch discards un-persisted in-memory state.
 3. A `git add -A` followed by `git commit` picks up the disk file (which is empty/old),
    not the in-memory version the Roslyn workspace was showing.
@@ -50,11 +50,13 @@ git show HEAD:src/RoslynMcp/Tools/Build/CleanSolutionTool.cs | Measure-Object -L
 
 ### Option A — RoslynMcp backup store (try first; no git needed)
 
-`roslyn_write_file` takes a crash-safe backup before every write. Backups live under:
+Destructive RoslynMcp write tools create crash-safe backups before writing. By default, backups live under:
 
 ```
-C:\Users\madq4\AppData\Local\RoslynMcp\backups\
+%LOCALAPPDATA%\RoslynMcp\backups\
 ```
+
+If `ROSLYNMCP_BACKUP_PATH` is set, that override path is used instead.
 
 Naming convention: `{originalFileName}_{unixMs}_{nonce}.pre.bak` (pre-write snapshot; post-write copies use `.post.bak`)  
 Example: `RestorePackagesTool.cs_1775570742174_a3f9.pre.bak`
@@ -65,7 +67,7 @@ workspace is equally stale. Use PowerShell directly.
 1. List all candidates — non-empty backups for the zeroed file, newest first:
    ```powershell
    $f = "RestorePackagesTool.cs"
-   $dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
+   $dir = Join-Path $env:LOCALAPPDATA "RoslynMcp\backups"
    Get-ChildItem $dir -Recurse |
        Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
        Sort-Object LastWriteTime -Descending |
@@ -115,9 +117,9 @@ workspace is equally stale. Use PowerShell directly.
    - If changes are missing: which specific edits need to be re-applied, and are they still
      recoverable from context (the session history, the triage doc, the issue description)?
 
-   The backup is taken *before* a `roslyn_write_file` call, so if the file was written with
-   new content and then zeroed externally, the backup may predate the session's edits. Do
-   not assume the restored file is complete — verify it.
+   Backups are taken *before* destructive writes, so if the file was later zeroed or rolled
+   back externally, the newest valid backup may still predate the last intended edit. Do not
+   assume the restored file is complete — verify it.
 
    **Only proceed to commit if the content is correct for the current stage of work.
    If edits are missing, re-apply them before committing.**
@@ -137,12 +139,12 @@ workspace is equally stale. Use PowerShell directly.
 
 1. Identify the last good commit:
    ```powershell
-   git log --oneline -- path/to/file.cs
+   git log --oneline -- src\RoslynMcp\Tools\Build\RestorePackagesTool.cs
    ```
 
 2. Restore from that commit:
    ```powershell
-   git checkout <good-sha> -- path/to/file.cs
+   git checkout <good-sha> -- src\RoslynMcp\Tools\Build\RestorePackagesTool.cs
    ```
 
 3. Verify content is restored, then commit the fix:
@@ -150,15 +152,16 @@ workspace is equally stale. Use PowerShell directly.
    fix: restore <file> zeroed by working-tree rollback
    ```
 
-## Root Cause (Hypothesis)
+## Current Source-Backed Understanding
 
-The Roslyn MCP server operates on an in-memory `MSBuildWorkspace`. When Copilot edits a
-`.cs` file via `roslyn_replace_in_code` or similar, the change is applied to the workspace
-in memory. The server does NOT automatically flush changes back to disk. If the Copilot
-tool that was supposed to write the file (e.g., `roslyn_write_file`) was not called or
-returned before the in-memory state was lost, the disk file remains at its prior state.
+Current source does **not** treat destructive edits as workspace-only changes. The write
+paths for tools such as `roslyn_replace_in_code`, `roslyn_replace_in_file`,
+`roslyn_insert_lines`, and `roslyn_write_file` are implemented to persist to disk and
+invalidate/reload workspace state as needed, while also capturing backups.
 
-A `git add -A` then commits the disk version — which may be empty or old.
+The exact rollback trigger is still unresolved. The observed failure mode is consistent
+with an unexpected disk-level truncation/rollback or a stale workspace view after
+external interference — not with an intended "edit memory only, save later" workflow.
 
 ## Workaround / Prevention
 
@@ -177,5 +180,5 @@ Until this is root-caused and fixed:
 
 This issue is not yet filed as a GitHub issue. When we return to it, consider:
 - Adding a post-commit git hook that fails on zero-byte `.cs` files
-- Investigating whether `roslyn_replace_in_code` always flushes to disk
-- Checking if the Roslyn MCP server has a "save all" or "flush" operation
+- Investigating why disk writes can still be lost or rolled back despite the write-through paths
+- Tracing where truncation/rollback occurs relative to backup capture and workspace invalidation

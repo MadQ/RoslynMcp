@@ -1,109 +1,99 @@
 ﻿# Quick Reference: roslyn_get_trivia
 
-**EXPERIMENTAL** — Trivia extraction tool for understanding C# formatting and whitespace.
+**Tool name:** `roslyn_get_trivia`  
+**Status:** **EXPERIMENTAL**
 
 ## TL;DR
 
 ```json
-// Step 1: Discover available values
-{ "projectPath": ".", "listSyntaxKinds": true }
-{ "projectPath": ".", "listTriviaKinds": true }
+// Discovery
+{ "projectPath": "src/RoslynMcp/RoslynMcp.csproj", "listSyntaxKinds": true }
+{ "projectPath": "src/RoslynMcp/RoslynMcp.csproj", "listTriviaKinds": true }
 
-// Step 2: Analyze specific patterns
+// Analysis
 {
-  "projectPath": ".",
-  "filePath": "MyFile.cs",
-  "syntaxKind": "IfStatement",        // Filter by node type
-  "triviaKind": "WhitespaceTrivia"    // Filter by trivia type
+  "projectPath": "src/RoslynMcp/RoslynMcp.csproj",
+  "filePath": "Tools/Analysis/GetTriviaTool.cs",
+  "syntaxKind": "IfStatement",
+  "triviaKind": "WhitespaceTrivia"
 }
 ```
 
-## Common Use Cases
+Discovery returns:
+- `list_syntax_kinds` → `count: 568`, plus `common_kinds` and `all_kinds`
+- `list_trivia_kinds` → `count: 31`, plus `common_kinds` and `all_kinds`
+
+## Common use cases
 
 | Task | Parameters |
 |------|------------|
-| **Discover options** | `listSyntaxKinds: true` or `listTriviaKinds: true` |
-| **Check indentation** | `triviaKind: "WhitespaceTrivia"` |
-| **Find blank lines** | `triviaKind: "EndOfLineTrivia"` |
-| **Extract comments** | `triviaKind: "SingleLineCommentTrivia"` |
-| **XML doc comments** | `triviaKind: "SingleLineDocumentationCommentTrivia"` |
-| **Format of `if` blocks** | `syntaxKind: "IfStatement"` |
-| **Specific line range** | `startLine: 50, endLine: 100` |
+| Discover valid kinds | `listSyntaxKinds: true` or `listTriviaKinds: true` |
+| Check indentation | `triviaKind: "WhitespaceTrivia"` |
+| Find blank lines | `triviaKind: "EndOfLineTrivia"` |
+| Extract comments | `triviaKind: "SingleLineCommentTrivia"` |
+| Extract XML docs | `triviaKind: "SingleLineDocumentationCommentTrivia"` |
+| Inspect `if` formatting | `syntaxKind: "IfStatement"` |
+| Limit to a range | `startLine: 50, endLine: 100` |
 
-## Response Format
+## Response format
 
 ```json
 {
-  "file": "MyFile.cs",
-  "total_nodes": 47,
-  "filtered_nodes": 12,
+  "file": "Tools/Analysis/GetTriviaTool.cs",
+  "total_nodes": 34,
+  "filtered_nodes": 20,
   "skip": 0,
-  "take": 100,
+  "take": 3,
   "results": [
     {
-      "node_kind": "IfStatement",
-      "node_span": { "start": 234, "end": 456, "start_line": 12, "end_line": 18 },
-      "node_text": "if(condition)",
+      "node_kind": "AttributeList",
+      "node_span": { "start": 440, "end": 560, "start_line": 14, "end_line": 14 },
+      "node_text": "[McpServerTool(Name = \"roslyn_get_trivia\", ReadOnly = true, Title = \"Get Trivia\"…",
       "leading_trivia": [
-        { "kind": "WhitespaceTrivia", "text": "\t\t", "span": {...} }
+        { "kind": "WhitespaceTrivia", "text": "    ", "span": { "start": 436, "end": 440 } }
       ],
-      "trailing_trivia": [ ... ]
+      "trailing_trivia": []
     }
   ],
   "page_token": "abc123",
-  "has_more": false
+  "has_more": true
 }
 ```
 
-## Top 10 Syntax Kinds
+## Common kinds
 
-1. `IfStatement` / `ElseClause`
-2. `ForEachStatement` / `ForStatement` / `WhileStatement`
-3. `MethodDeclaration`
-4. `ClassDeclaration`
-5. `TryStatement` / `CatchClause` / `FinallyClause`
-6. `SwitchStatement` / `SwitchExpression`
-7. `PropertyDeclaration`
-8. `ReturnStatement`
-9. `LocalDeclarationStatement`
-10. `NamespaceDeclaration`
+### Syntax
 
-## Top 6 Trivia Kinds
+`IfStatement`, `ElseClause`, `ForStatement`, `ForEachStatement`, `WhileStatement`, `DoStatement`, `SwitchStatement`, `SwitchExpression`, `TryStatement`, `MethodDeclaration`
 
-1. `WhitespaceTrivia` — tabs/spaces
-2. `EndOfLineTrivia` — line breaks
-3. `SingleLineCommentTrivia` — `// comments`
-4. `MultiLineCommentTrivia` — `/* comments */`
-5. `SingleLineDocumentationCommentTrivia` — `/// XML docs`
-6. `MultiLineDocumentationCommentTrivia` — `/** XML docs */`
+### Trivia
 
-## When to Use This Tool
+`WhitespaceTrivia`, `EndOfLineTrivia`, `SingleLineCommentTrivia`, `MultiLineCommentTrivia`, `SingleLineDocumentationCommentTrivia`, `MultiLineDocumentationCommentTrivia`
 
-✅ **Use when:**
-- Understanding indentation context for code generation
-- Analyzing comment placement patterns
-- Debugging why formatter produces specific output
-- Building custom style analysis tools
-
-❌ **Don't use when:**
-- Enforcing style rules → Use `.\scripts\Test-CodeStyle.ps1`
-- Editing code → Use `roslyn_replace_in_code` or `roslyn_replace_in_file`
-- Semantic analysis → Use dedicated tools (`roslyn_get_symbol_info`, etc.)
-
-## Helpful Errors
-
-If you use an invalid kind name, the tool returns suggestions:
+## Helpful error
 
 ```json
 {
   "error": "no_matching_nodes",
-  "message": "No syntax nodes of kind 'if' found...",
+  "message": "No syntax nodes of kind 'if' found in the specified range.",
   "hint": "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
   "provided_kind": "if",
-  "common_kinds": [ "IfStatement", "ForEachStatement", ... ]
+  "common_kinds": [ "IfStatement", "ElseClause", "ForStatement" ]
 }
 ```
 
-## Full Documentation
+## Use / avoid
 
-See [docs/tools/roslyn_get_trivia.md](roslyn_get_trivia.md) for complete details, all examples, and design rationale.
+✅ Use for:
+- indentation context
+- blank-line/comment analysis
+- trivia-aware formatting investigation
+
+❌ Avoid for:
+- normal file reading → `roslyn_read_file`
+- structure-only browsing → `roslyn_get_file_outline`
+- semantic symbol analysis → `roslyn_get_symbol_info`, `roslyn_find_references`
+
+## Full docs
+
+See [roslyn_get_trivia.md](roslyn_get_trivia.md).

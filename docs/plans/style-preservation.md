@@ -1,20 +1,20 @@
-# Style Preservation in RoslynMcp: Thoughts on `get_trivia` and Beyond
+# Style Preservation in RoslynMcp: Thoughts on `roslyn_get_trivia` and Beyond
 
 ## Where Trivia Actually Lives in Roslyn's Model
 
-Style *is* trivia in Roslyn — blank lines, column alignment of fields, comment placement above vs. inline, spacing around operators. `get_trivia` is therefore the right instinct: you're reaching for the right layer of the AST. The issue is the gap between having the raw trivia data and knowing what to *do* with it.
+Style *is* trivia in Roslyn — blank lines, column alignment of fields, comment placement above vs. inline, spacing around operators. `roslyn_get_trivia` is therefore the right instinct: you're reaching for the right layer of the AST. The issue is the gap between having the raw trivia data and knowing what to *do* with it.
 
 ---
 
 ## Where the Current Tools Fall Short
 
-`replace_in_code` already calls `WithTriviaFrom(originalNode)` — so the outer trivia (leading/trailing whitespace and comments on the replaced node itself) is preserved. What's lost is the *internal* trivia of the replacement: blank lines inside a method body, column alignment of a field block, spacing within expressions. The replacement text brings its own trivia and there's no reconciliation step.
+`roslyn_replace_in_code` already calls `WithTriviaFrom(originalNode)` — so the outer trivia (leading/trailing whitespace and comments on the replaced node itself) is preserved. What's lost is the *internal* trivia of the replacement: blank lines inside a method body, column alignment of a field block, spacing within expressions. The replacement text brings its own trivia and there's no reconciliation step.
 
 For rename, trivia is actually well-preserved already since Roslyn's renamer only touches identifier tokens — the surrounding structure stays intact.
 
 ---
 
-## What `get_trivia` Can Realistically Contribute
+## What `roslyn_get_trivia` Can Realistically Contribute
 
 As a raw data feed to an agent it's probably too low-level to be directly actionable. An agent reading trivia spans can't easily derive "this author aligns field declarations in columns" or "this author always puts a blank line before a comment but not after." The cognitive overhead of going from raw trivia → inferred pattern → applied-to-replacement is too many steps.
 
@@ -43,7 +43,7 @@ This gets derived from trivia analysis internally but gives the agent named rule
 
 ## A `preserveStyle` Flag on Editing Tools
 
-The most seamless approach for the common case would be a `preserveStyle: true` option on `replace_in_code` that doesn't require the agent to know anything about style explicitly. The tool would:
+The most seamless approach for the common case would be a `preserveStyle: true` option on `roslyn_replace_in_code` that doesn't require the agent to know anything about style explicitly. The tool would:
 
 1. Extract the trivia structure of the surrounding context (the nodes immediately before and after the replacement site)
 2. Parse the replacement text
@@ -72,10 +72,10 @@ Roslyn's `SyntaxEditor` and the `Formatter` can handle structural formatting, bu
 
 ## Honest Assessment
 
-`get_trivia` as currently designed is better suited as infrastructure than as an agent-facing tool. The path forward is probably:
+`roslyn_get_trivia` as currently designed is better suited as infrastructure than as an agent-facing tool. The path forward is probably:
 
 1. Keep it as the low-level primitive it is (useful for diagnostic/analysis work like the code style checker already in `Test-CodeStyle.ps1`)
 2. Build `roslyn_get_style_profile` on top of it as the agent-facing surface
-3. Add a `preserveStyle` flag to `replace_in_code` that uses trivia analysis internally to normalize replacement text against its context
+3. Add a `preserveStyle` flag to `roslyn_replace_in_code` that uses trivia analysis internally to normalize replacement text against its context
 
-The rename tools probably don't need this — Roslyn's renamer already does the right thing. The gap is squarely in `replace_in_code` when the replacement is structurally similar to the original but not identical.
+The rename tools probably don't need this — Roslyn's renamer already does the right thing. The gap is squarely in `roslyn_replace_in_code` when the replacement is structurally similar to the original but not identical.

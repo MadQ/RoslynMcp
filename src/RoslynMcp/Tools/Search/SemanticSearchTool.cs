@@ -87,96 +87,54 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		context = context.ToLowerInvariant();
 		
 		// Compile regex
+		var options = RegexOptions.Compiled;
+		
+		if(!caseSensitive)
+			options |= RegexOptions.IgnoreCase;
+		
 		Regex regex;
 		
 		try {
-			
-			var options = RegexOptions.Compiled;
-			
-			if(!caseSensitive)
-				options |= RegexOptions.IgnoreCase;
-			
 			regex = new Regex(pattern, options);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
 		
-		var solution   = workspace.GetSolution(projectPath);
-		var rootPath   = workspace.GetRootPath(projectPath);
-		var allMatches = new List<SemanticMatchResult>();
-		// seenPaths prevents searching the same physical file twice in multi-targeted projects
-		// (e.g., net8.0 + net10.0 each have their own Document for the same .cs file).
-		// The first TFM's parse wins; #if NET10_0 blocks may be absent in the skipped parse.
-		var seenPaths  = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-		;
+		var solution = workspace.GetSolution(projectPath);
+		var rootPath = workspace.GetRootPath(projectPath);
 		
-		foreach(var project in solution.Projects)
-			foreach(var document in project.Documents) {
+		var allMatches = await CollectAsync(regex);
+		
+		// Chat-reference fallback (#228): a 'sym:'-prefixed pattern that matched nothing verbatim
+		// is retried with the prefix stripped — literal 'sym:' searches stay verbatim-first.
+		string? fallbackCaution = null;
+		string? fallbackHint    = null;
+		
+		if(allMatches.Count == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
+			
+			if(stripped.Length == 0)
+				fallbackHint = ChatRefTruncatedHint;
+			else {
 				
-				if(document.FilePath is null || !seenPaths.Add(document.FilePath))
-					continue;
+				Regex? strippedRegex = null;
 				
-				var fileName = Path.GetFileName(document.FilePath);
-				
-				if(!GlobMatcher.Matches(fileName, filePattern))
-					continue;
-				
-				if(!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-					continue;
-				
-				var tree = await document.GetSyntaxTreeAsync(cancellationToken);
-				
-				if(tree is null)
-					continue;
-				
-				if(excludeGenerated && IsGeneratedCode(tree))
-					continue;
-				
-				var root = tree.GetRoot(cancellationToken);
-				var text = tree.GetText(cancellationToken);
-				
-				// Search based on context
-				var matches = context switch {
-					
-					"comments"    => SearchInComments(root, text, regex),
-					"strings"     => SearchInStrings(root, text, regex),
-					"identifiers" => SearchInIdentifiers(root, text, regex),
-					"code"        => SearchInCode(root, text, regex),
-					"xmldocs"     => SearchInXmlDocs(root, text, regex),
-					"all"         => SearchInAll(root, text, regex),
-					_             => Array.Empty<SemanticMatchResult>()
-				};
-				
-				// Filter by containing syntax kind if specified.
-				if(containingKind is not null && Enum.TryParse<SyntaxKind>(containingKind, ignoreCase: true, out var requiredKind)) {
-					
-					matches = matches.Where(m => {
-						
-						// Use the exact match position, not the line start — FindToken(lineStart)
-						// returns the indentation trivia token for indented code, causing the
-						// enclosing-kind walk to land on the wrong node.
-						var node = root.FindToken(m.Position).Parent
-						;
-						
-						while(node is not null) {
-							
-							if(node.IsKind(requiredKind))
-								
-								return true;
-							
-							node = node.Parent;
-						}
-						
-						return false;
-					});
+				try {
+					strippedRegex = new Regex(stripped, options);
 				}
+				catch(ArgumentException) { }
 				
-				var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
+				var retry = strippedRegex is null ? null : await CollectAsync(strippedRegex);
 				
-				foreach(var match in matches)
-					allMatches.Add(match with { File = relativePath });
+				if(retry is { Count: > 0 }) {
+					
+					allMatches      = retry;
+					fallbackCaution = ChatRefFallbackCaution(pattern, stripped);
+				}
+				else
+					fallbackHint = ChatRefBothTriedHint(pattern, stripped);
 			}
+		}
 		
 		var allResults = allMatches.ToArray();
 		var result     = PaginateAndStore(allResults, ref skip, take);
@@ -189,8 +147,88 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			result.HasMore,
 			context)
 		{
-			Caution = AdhocCaution(projectPath)
+			Caution = ComposeCautions(fallbackCaution, AdhocCaution(projectPath)),
+			Hint    = fallbackHint
 		});
+		
+		async Task<List<SemanticMatchResult>> CollectAsync(Regex rx)
+		{
+			var collected = new List<SemanticMatchResult>();
+			// seenPaths prevents searching the same physical file twice in multi-targeted projects
+			// (e.g., net8.0 + net10.0 each have their own Document for the same .cs file).
+			// The first TFM's parse wins; #if NET10_0 blocks may be absent in the skipped parse.
+			var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+			;
+			
+			foreach(var project in solution.Projects)
+				foreach(var document in project.Documents) {
+					
+					if(document.FilePath is null || !seenPaths.Add(document.FilePath))
+						continue;
+					
+					var fileName = Path.GetFileName(document.FilePath);
+					
+					if(!GlobMatcher.Matches(fileName, filePattern))
+						continue;
+					
+					if(!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+						continue;
+					
+					var tree = await document.GetSyntaxTreeAsync(cancellationToken);
+					
+					if(tree is null)
+						continue;
+					
+					if(excludeGenerated && IsGeneratedCode(tree))
+						continue;
+					
+					var root = tree.GetRoot(cancellationToken);
+					var text = tree.GetText(cancellationToken);
+					
+					// Search based on context
+					var matches = context switch {
+						
+						"comments"    => SearchInComments(root, text, rx),
+						"strings"     => SearchInStrings(root, text, rx),
+						"identifiers" => SearchInIdentifiers(root, text, rx),
+						"code"        => SearchInCode(root, text, rx),
+						"xmldocs"     => SearchInXmlDocs(root, text, rx),
+						"all"         => SearchInAll(root, text, rx),
+						_             => Array.Empty<SemanticMatchResult>()
+					};
+					
+					// Filter by containing syntax kind if specified.
+					if(containingKind is not null && Enum.TryParse<SyntaxKind>(containingKind, ignoreCase: true, out var requiredKind)) {
+						
+						matches = matches.Where(m => {
+							
+							// Use the exact match position, not the line start — FindToken(lineStart)
+							// returns the indentation trivia token for indented code, causing the
+							// enclosing-kind walk to land on the wrong node.
+							var node = root.FindToken(m.Position).Parent
+							;
+							
+							while(node is not null) {
+								
+								if(node.IsKind(requiredKind))
+									
+									return true;
+								
+								node = node.Parent;
+							}
+							
+							return false;
+						});
+					}
+					
+					var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
+					
+					foreach(var match in matches)
+						collected.Add(match with { File = relativePath });
+				}
+			
+			return collected;
+		}
 	}
 	
 	bool IsGeneratedCode(SyntaxTree tree)

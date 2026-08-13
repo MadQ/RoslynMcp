@@ -6,9 +6,11 @@ Run this checklist before making the repository public or after significant stru
 
 ## AI Agent: Running a Full Sweep
 
-When a user says `/doc-sweep`, "doc sweep", or "doc↔code sync", the `doc-sweep` extension
-(`.github/extensions/doc-sweep/extension.mjs`) fires automatically and injects the full briefing.
-If the extension isn't loaded, tell the user to type `/doc-sweep` or paste this summary manually.
+When a user says `/doc-sweep`, "doc sweep", or "doc↔code sync", the sweep briefing loads
+automatically — in **Claude Code** via the `doc-sweep` skill (`.claude/skills/doc-sweep/SKILL.md`),
+in **Copilot** via the `doc-sweep` extension (`.github/extensions/doc-sweep/extension.mjs`).
+Same briefing, two hosts. If neither is loaded, tell the user to type `/doc-sweep` or paste
+this summary manually. (The issues sweep is a separate command: `/issue-sweep`.)
 
 **Scope:** Read EVERY `.md` and EVERY `.cs` file in the solution. Fix only `.md` files — code is truth.
 - `docs/ScratchPad*.md` — read as reference context, not authoritative
@@ -25,16 +27,17 @@ If the extension isn't loaded, tell the user to type `/doc-sweep` or paste this 
 | E | WORKSPACE_MODES.md + TROUBLESHOOTING.md + DISCOVERY_PATTERN.md | WorkspaceManager*, MSBuildBootstrap |
 | F | CODE_STYLE_ENFORCEMENT.md + DOC_REVIEW_CHECKLIST.md + RELEASE_CHECKLIST.md | scripts/Test-CodeStyle.ps1 |
 | G | docs/tools/*.md + docs/reference/tools-assessment.md | Relevant tool .cs files |
-| H | HANDOFF.md + .github/copilot-instructions.md + AGENT-INSTRUCTIONS.md | Current state of everything |
+| H | docs/sessions/HANDOFF.md + .github/copilot-instructions.md + docs/AGENT-INSTRUCTIONS.md | Current state of everything |
 | I | docs/plans/*.md + battle-test-results.md + MSBUILD_API_ANALYSIS.md | Historical; flag stale claims |
 | J | .github/PULL_REQUEST_TEMPLATE.md + ISSUE_TEMPLATE/*.md | GitHub workflow accuracy |
+| K | NUGET.md + artifacts/release-notes-*.md + benchmarks/BASELINE.md + .github/agents/*.agent.md + docs/development/RENAME_FILE_BEHAVIOR.md + docs/development/WORKSPACE_SYNC.md + docs/process/WORKING_TREE_ROLLBACK.md + docs/sessions/*.md (excluding HANDOFF.md, covered by H) + docs/troubleshooting/*.md + src/RoslynMcp.Analyzers/AnalyzerReleases.*.md | Catch-all for docs not covered by A–J; audit normally except session logs (light pass — historical record) |
 
 **Every subagent must include this constraint block verbatim:**
 ```
 MANDATORY TOOL CONSTRAINTS — do NOT violate these:
 - Use roslyn_* MCP tools for ALL C# file operations.
 - Do NOT use cd — the CWD is already correct.
-- Do NOT use roslyn_read_file on non-.cs files — use the view tool instead.
+- Do NOT use roslyn_read_file on non-.cs files — use the host's plain file reader (Read/view) instead.
 - Do NOT run Test-CodeStyle.ps1 — style passes are suspended. Violators get the dunce cap. 🎓
 - Do NOT reformat, reorder, or restyle any code while fixing docs — you are a doc editor, not a formatter.
 - Do NOT commit without being explicitly asked.
@@ -45,7 +48,7 @@ MANDATORY TOOL CONSTRAINTS — do NOT violate these:
 
 ---
 
-## Documentation Structure (v0.3.0+)
+## Documentation Structure (current)
 
 ### Primary User-Facing Docs
 - **README.md** — Quick overview, selling points, tool list (keep concise, link to details)
@@ -75,8 +78,8 @@ rg "RoslynMcp/RoslynMcp\.csproj" --type md --glob "!HANDOFF*.md"
 # 2. Check for dotnet run in MCP configs (should use published executable)
 rg "dotnet.*run.*--project.*\.mcp\.json" --type md -A 3 -B 3
 
-# 3. Verify tool count is consistent (should be 39 tools = 37 public + 2 debug-only)
-rg "23 tools|22 tools|21 tools" --type md
+# 3. Verify tool count is consistent (should be 43 tools = 41 public + 2 debug-only)
+rg "42 tools|40 public|39 tools|37 public|37 tools|38 tools|36 tools|23 tools|22 tools|21 tools" --type md
 
 # 4. Check for stale "deferred" or "planned" features that shipped
 rg -i "deferred|planned feature|TODO:" --type md --glob "README.md" --glob "AGENTS.md" --glob "INSTALLATION.md"
@@ -105,7 +108,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
   - [ ] AGENTS.md
   - [ ] `docs/sessions/HANDOFF.md` header
   - [ ] TestHarness header comment
-- [ ] Architecture tables list all 37 public tools consistently
+- [ ] Architecture tables list all 41 public tools consistently
 - [ ] New tools added to all relevant docs
 
 ### Code Examples
@@ -153,7 +156,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] Examples are copy-paste ready
 
 ### AGENTS.md
-- [ ] Architecture table has all 37 tools
+- [ ] Architecture table has all 43 tools (41 public + 2 debug-only)
 - [ ] Code style rules are current
 - [ ] MCP/Roslyn patterns are accurate
 - [ ] Testing section references correct paths
@@ -216,9 +219,11 @@ After fixing issues found:
 
 2. **Update `docs/sessions/HANDOFF.md`** with audit summary
 
-3. **Build and test:**
+3. **Validate and test:**
+   ```text
+   roslyn_get_diagnostics(projectPath: "src/RoslynMcp/RoslynMcp.csproj", severity: "errors")
+   ```
    ```bash
-   dotnet build src/RoslynMcp/RoslynMcp.csproj
    dotnet run --project src/TestHarness/TestHarness.csproj
    ```
 

@@ -8,7 +8,7 @@ Make RoslynMcp the tool that serious C# developers actually want their AI agents
 
 ## Shipped Releases
 
-All milestones through v0.8.0-beta are complete. Highlights per release:
+Highlights per shipped release. The latest tagged version is v0.8.1-beta; the current source also contains part of the planned v0.9.0 semantic-analysis work:
 
 | Release | Key additions |
 |---------|---------------|
@@ -23,7 +23,8 @@ All milestones through v0.8.0-beta are complete. Highlights per release:
 | v0.7.6 | `roslyn_find_callers`, `roslyn_get_call_graph`; write-retry telemetry (#136); FSW reload suppression + let Roslyn save (#140); `roslyn_local_history` double-write fix (#141); `roslyn_find_callers` dedup fix (#143); `roslyn_build_project` false-failure fix; `FileWriter` centralised write entry point (#139); RMCP007/008/009 diagnostics; BOM fixes; tool description improvements (#99) |
 | v0.7.8 | Thread-safety hardening, DotnetRunner deadlock fix, BackupStore async, SemanticSearch correctness, self-healing truncation, pre/post backups, TFM context in build diagnostics, rename stale-file fix, MSBuildBootstrap hardening (#145, #151, #153–#159, #161–#163, #165–#166) |
 | v0.7.9 | TestHarness split (#167), shutdown fix (#170), TFM context fix in project-level diagnostics (#169); folded into v0.8.0-beta — no separate tag |
-| v0.8.0-beta | `roslyn_find_string_literal`, `roslyn_check_syntax`; `--help`/`-h` flag + TTY auto-help (#181); LogViewer port auto-increment + multi-file watch (#180); BackupStore pruning + per-PID logs (#172); `setup-hooks` → `setup-project` command rename; BOM fixes |
+| v0.8.0-beta | `roslyn_find_string_literal`, `roslyn_check_syntax`, `roslyn_find_unused`, `roslyn_get_type_dependencies`, `roslyn_find_overloads`; `--help`/`-h` flag + TTY auto-help (#181); LogViewer port auto-increment + multi-file watch (#180); BackupStore pruning + per-PID logs (#172); `setup-hooks` → `setup-project` command rename; BOM fixes |
+| v0.8.1-beta | Breaking (pre-1.0): tool identity namespaced under `MadQ` — NuGet package id `MadQ.RoslynMcp`, command `madq-roslynmcp`, MCP server key `MadQ.RoslynMcp` (#215); now published on NuGet via Trusted Publishing (OIDC); duplicate hook-entry fix and third-party MCP entry collision guard (#215, #216) |
 
 ---
 
@@ -97,7 +98,7 @@ Distribution infrastructure and pre-launch hardening. First beta release — the
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
 | ✅ | feature | Global BackupStore pruning + per-PID logs | Max-age eviction with run-count guard; PID-suffixed log files for multi-process safety | #172 |
-| — | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, NuGet CI/CD pipeline, INSTALLATION.md Option A update | #173 |
+| ✅ | feature | dotnet tool packaging | `<PackAsTool>true</PackAsTool>`, `ToolCommandName`, `PackageId`, NuGet packaging support | #173 |
 | — | feature | MCP marketplace listings | smithery.yaml, listings on Smithery / mcp.so / glama.ai, README badges | #174 |
 
 **Theme:** Ship it. Anyone can install in 30 seconds; AI tool directories surface RoslynMcp to new users.
@@ -110,14 +111,15 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 
 | # | Type | Title | Scope | Refs |
 |---|------|-------|-------|------|
-| — | feature | `roslyn_find_unused` | Find unused types, members, and variables via semantic analysis | #33 |
-| — | feature | `roslyn_get_type_dependencies` | Return type dependency graph (imports, references, coupling) | #36 |
-| — | feature | `roslyn_find_overloads` | List all overloads of a method | #37 |
+| ✅ | feature | `roslyn_find_unused` | Find unused private/internal/effectively-internal source symbols with conservative semantic filtering — shipped in v0.8.0-beta | #33 |
+| ✅ | feature | `roslyn_get_type_dependencies` | Return direct type dependencies from a type declaration and member signatures — shipped in v0.8.0-beta | #33 |
+| ✅ | feature | `roslyn_find_overloads` | List all ordinary overloads declared on a containing type — shipped in v0.8.0-beta | #33 |
 | ✅ | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation — shipped in v0.8.0-beta | — |
 | — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
-| — | investigation | LogViewer rework | `RoslynMcp.LogViewer` currently a dev-only skeleton; evaluate scope for a proper rework | #118 |
+| — | investigation | LogViewer rework | `RoslynMcp.LogViewer` has active usability/correctness work; evaluate whether it should remain dev-only or become a broader supported surface | #118 |
 | — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
-| — | enhancement | Surface persistent prune/log failures | Sentinel file or `roslyn_info` field for silent prune failures | #176 |
+| ✅ | enhancement | Surface persistent prune/log failures | `roslyn_info` now exposes `prune_errors` for persistent backup/log pruning failures — shipped in v0.8.0-beta | #176 |
+| ✅ | enhancement | Per-project server args in `setup-project` | `setup-project` writes a committable `.madq_roslynmcp.json` at the repo root, read by the server itself (works with every MCP client, unlike per-agent project configs) and carrying `elicit` / `workspace`; follow-up to the #219 `setup` opt-in — shipped (Unreleased) | #220 |
 
 **Theme:** The "wow" release. Capabilities that grep can't match and agents can't fake.
 
@@ -131,8 +133,8 @@ Agents that use RoslynMcp don't just understand code — they respect the author
 |---|------|-------|-------|------------|
 | — | feature | Implement `roslyn_get_style_profile` | StyleSampler helper; trivia-based style inference; returns named style properties | #34 |
 | — | feature | Add `preserveStyle` flag to `replace_in_code` | StyleNormalizer helper; contextual trivia normalization during targeted edits | #35 |
-| — | feature | Implement `roslyn_preview_style` / `roslyn_apply_style` | Two-phase style normalization; column alignment scoped to per-type bodies | — |
-| — | feature | Full file-wide column alignment rebalancing | Cross-type trivia rewriting; the hardest case | — |
+| — | feature | Implement `roslyn_preview_style` / `roslyn_apply_style` | Two-phase style normalization; column alignment scoped to per-type bodies | #36 |
+| — | feature | Full file-wide column alignment rebalancing | Cross-type trivia rewriting; the hardest case | #37 |
 
 **Theme:** Respect. The author's column alignment, blank line patterns, and comment placement survive AI-assisted editing.
 

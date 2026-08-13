@@ -154,12 +154,27 @@ internal static class RefactoringTests
 					new { symbolName = "NormalizePath", newName = "NormalizePath2", containingType = "RoslynMcpTool", projectPath = ctx.TargetPath },
 					data => data?["token"] is not null)),
 			
+			// The harness starts the server without --elicit, so ambiguity must take the default
+			// agent-first path: a structured candidates failure with the machine-usable retry
+			// fields — never a silent first match, never an interactive prompt. GetSolution is
+			// naturally ambiguous in the target (WorkspaceManager, WorkspaceInstance, WorkspaceResolver).
+			new("roslyn_preview_rename: ambiguous name fails with candidate list",
+				() => ctx.RunTestAsync(
+					"roslyn_preview_rename",
+					new { symbolName = "GetSolution", newName = "GetSolution2", projectPath = ctx.TargetPath },
+					data => data?["token"] is null
+						&& data?["error"]?.GetValue<string>()?.Contains("match 'GetSolution'") == true
+						&& data?["candidates"]?.AsArray().Count >= 2
+						&& data?["candidates"]?[0]?["containingType"]?.GetValue<string>() is not null
+						&& data?["candidates"]?[0]?["filePath"]?.GetValue<string>() is not null
+						&& data?["candidates"]?[0]?["line"]?.GetValue<int>() > 0)),
+			
 			// ── apply_rename ────────────────────────────────────────────────────────
 			
 			new("roslyn_apply_rename: rename class, verify file updated",
 				() => RunApplySuccess()),
 			
-			new("roslyn_apply_rename: cancel with 'n' returns rejected",
+			new("roslyn_apply_rename: cancel with 'n' succeeds, writes nothing",
 				async () => {
 					
 					var sw = Stopwatch.StartNew();
@@ -177,9 +192,10 @@ internal static class RefactoringTests
 					var (_, apData, _) = await Call("roslyn_apply_rename", new {
 						token, approval = "n", projectPath = ctx.TargetPath
 					});
-					var pass = apData?["error"]?.GetValue<string>() == "rejected";
+					var pass = apData?["error"] is null
+						&& apData?["message"]?.GetValue<string>()?.Contains("No files were changed") == true;
 					
-					return (pass, pass ? $"PASS  [{sw.ElapsedMilliseconds}ms]" : $"FAIL  (error: {apData?["error"]}) [{sw.ElapsedMilliseconds}ms]");
+					return (pass, pass ? $"PASS  [{sw.ElapsedMilliseconds}ms]" : $"FAIL  (error: {apData?["error"]}, message: {apData?["message"]}) [{sw.ElapsedMilliseconds}ms]");
 				}),
 			
 			new("roslyn_apply_rename: invalid approval returns error",
@@ -257,7 +273,38 @@ internal static class RefactoringTests
 					data => data?["token"] is not null
 						&& data?["diff"]?.GetValue<string>().Contains("Obsolete") == true
 						&& data?["parameters_added"]?.AsArray().Count == 1
-						&& data?["deprecation_message"]?.GetValue<string>().Contains("NormalizePath") == true)),
+						&& data?["deprecation_message"]?.GetValue<string>().Contains("NormalizePath") == true
+						// Well-formedness of the synthesized code — regression guard for the
+						// unformatted-SyntaxFactory bugs (returnFoo, comma/equals spacing) and
+						// for the diff builder swallowing inserted lines as context.
+						&& data?["diff"]?.GetValue<string>().Contains("bool toLower = false") == true
+						&& data?["diff"]?.GetValue<string>().Contains("(string filePath) => NormalizePath(filePath, false);") == true)),
+			
+			new("roslyn_apply_signature_change: cancel with 'n' succeeds, writes nothing",
+				async () => {
+					
+					var sw = Stopwatch.StartNew();
+					var (_, pvData, _) = await Call("roslyn_change_signature", new {
+						
+						methodName     = "NormalizePath",
+						containingType = "RoslynMcpTool",
+						addParameters  = """[{"name":"toLower","type":"bool","defaultValue":"false"}]""",
+						projectPath    = ctx.TargetPath
+					});
+					var token = pvData?["token"]?.GetValue<string>();
+					
+					if(token is null)
+						
+						return (false, $"FAIL  (no preview token) [{sw.ElapsedMilliseconds}ms]");
+					
+					var (_, apData, _) = await Call("roslyn_apply_signature_change", new {
+						token, approval = "n", projectPath = ctx.TargetPath
+					});
+					var pass = apData?["error"] is null
+						&& apData?["message"]?.GetValue<string>()?.Contains("No files were changed") == true;
+					
+					return (pass, pass ? $"PASS  [{sw.ElapsedMilliseconds}ms]" : $"FAIL  (error: {apData?["error"]}, message: {apData?["message"]}) [{sw.ElapsedMilliseconds}ms]");
+				}),
 			
 			new("roslyn_change_signature: reject non-method symbol",
 				() => ctx.RunTestAsync(

@@ -8,6 +8,8 @@ assignees: ''
 
 > **Before starting work on this issue:** `git checkout dev && git checkout -b feat/issue-NNN-short-title`
 
+> **Before filing:** Check [ROADMAP.md](../../ROADMAP.md). If this idea is already listed there, link the relevant milestone or issue instead of duplicating it.
+
 ## Feature Description
 
 A clear and concise description of the feature you'd like to see.

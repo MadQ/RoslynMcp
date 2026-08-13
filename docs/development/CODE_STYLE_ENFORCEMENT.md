@@ -36,11 +36,11 @@ RoslynMcp includes automated style auditing and fixing to ensure all quirky rule
    - ✅ `if(condition)` 
    - ❌ `if (condition)`
 
-### Manual Fix Required (Info/Warning)
-
 4. **BlankLineBeforeReturn** (Info)
    - Return statements should have a blank line before them
    - Exceptions: after opening brace, consecutive returns
+
+### Manual Fix Required (Info/Warning)
 
 5. **SingleStatementBraces** (Info)
    - Single-statement blocks shouldn't use braces
@@ -186,7 +186,7 @@ To add a new style check:
 1. Add a `Test-RuleName` function in `Test-CodeStyle.ps1`
 2. Call it from `Invoke-StyleAudit`
 3. (Optional) Add a `Repair-RuleName` function for auto-fix
-4. Update this README
+4. Update this document
 
 ## Related
 
@@ -196,4 +196,4 @@ To add a new style check:
 
 ---
 
-**Last Updated:** 2026-03-31
+**Last Updated:** 2026-07-18

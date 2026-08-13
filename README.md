@@ -1,14 +1,14 @@
 # RoslynMcp
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![.NET](https://img.shields.io/badge/.NET-8%20%7C%2010-512BD4)](https://dotnet.microsoft.com/)
-[![MCP](https://img.shields.io/badge/MCP-1.2.0-blue)](https://modelcontextprotocol.io/)
-[![Alpha](https://img.shields.io/badge/status-alpha-orange)]()
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4)](https://dotnet.microsoft.com/)
+[![MCP](https://img.shields.io/badge/MCP-1.4.1-blue)](https://modelcontextprotocol.io/)
+[![Beta](https://img.shields.io/badge/status-beta-blue)]()
 
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 41 tools. Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 43 MCP tools (41 public + 2 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -19,29 +19,66 @@ With RoslynMcp:     roslyn_preview_rename -> reviews diff across 3 projects -> r
 
 Works with any MCP-compatible client: Claude Code, GitHub Copilot, Claude Desktop, Cline, Cursor, Windsurf, Roo Code, Continue, and more.
 
-> **Security Note:** RoslynMcp runs with your user permissions and has unrestricted filesystem access. Only use with trusted agents and on projects you control. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
+> **Security Note:** RoslynMcp runs with your user permissions. File access is bounded to the resolved workspace tree — project/solution root plus referenced projects ([#9](https://github.com/MadQ/RoslynMcp/issues/9)) — but `projectPath` can still target any project you can read, so only use with trusted agents and on projects you control.
+
+> [!IMPORTANT]
+> **Breaking change (pre-1.0): the tool identity was namespaced under `MadQ`.** To avoid a hard clash with the unrelated [`RoslynMcp`](https://www.nuget.org/packages/RoslynMcp) package already on NuGet, the package id, its `dotnet tool` command, and the MCP server key all changed:
+>
+> | | Old | New |
+> |---|-----|-----|
+> | NuGet package | `RoslynMcp` | `MadQ.RoslynMcp` |
+> | `dotnet tool` command | `roslynmcp` | `madq-roslynmcp` |
+> | MCP server key | `roslyn` | `MadQ.RoslynMcp` |
+>
+> If you configured an earlier build, update your MCP config to the new server key and command. Your client's cached tool approvals are keyed to the old name and will re-prompt — see [Troubleshooting](docs/guides/TROUBLESHOOTING.md#tools-re-prompt-for-approval-after-renaming-the-mcp-server-key).
 
 ---
 
 ## Quick Start
 
-> **TL;DR:** Download the [latest release zip](https://github.com/MadQ/RoslynMcp/releases/latest), extract it, and add `"command": "/absolute/path/to/RoslynMcp.exe"` to your client's MCP config. Tell your agent to pass `projectPath` with every `roslyn_*` call. Done. Details below.
-
 **1. Get RoslynMcp**
 
-**Option A — Download and extract** (simplest, no SDK required):
+**Option A — Install from NuGet as a .NET tool** (requires .NET 10 or 11 SDK; easiest to keep updated):
 
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0` if you prefer). Extract it anywhere and note the full path to `RoslynMcp.exe`.
+```bash
+dotnet tool install --global MadQ.RoslynMcp --prerelease
+```
 
-**Option B — Clone and build** (requires .NET 8 or 10 SDK):
+This puts the `madq-roslynmcp` command on your PATH. In the MCP config below, use
+`"command": "madq-roslynmcp"` instead of a full `.exe` path. Update later with
+`dotnet tool update --global MadQ.RoslynMcp --prerelease`.
+
+> `--prerelease` is required while RoslynMcp is in beta — a prerelease-only package won't resolve without it.
+
+Then run:
+
+```bash
+madq-roslynmcp setup
+```
+
+`setup` detects your installed MCP-compatible clients and writes the server config for you —
+no manual JSON editing needed. It's interactive, so it'll also ask about optional flags like
+`--elicit`. If you'd rather configure a client by hand (or `setup` doesn't detect it), use the
+manual JSON in step 2 below.
+
+> [!IMPORTANT]
+> **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
+> Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
+
+**Option B — Download and extract** (simplest, no SDK required):
+
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
+
+**Option C — Clone and build** (requires .NET 10 or 11 SDK; for contributing or testing local changes):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg --include-symbols -c Debug
+dotnet tool install --global MadQ.RoslynMcp --add-source ./nupkg --version 0.8.1-beta
 ```
 
-The executable will be at `./publish/net10.0/RoslynMcp.exe`.
+This installs your local build as the `madq-roslynmcp` command, exactly like Option A — run `madq-roslynmcp setup` from there. (Made more code changes? Re-pack, then `dotnet tool uninstall --global MadQ.RoslynMcp` before reinstalling — a stale global install otherwise keeps serving the old build.)
 
 **2. Add to your MCP client config.**
 
@@ -50,9 +87,9 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
@@ -65,9 +102,9 @@ The executable will be at `./publish/net10.0/RoslynMcp.exe`.
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
@@ -84,10 +121,6 @@ See [INSTALLATION.md](INSTALLATION.md) for Claude Desktop, Cursor, Windsurf, Cli
 -> Agent calls roslyn_get_member_body("ProcessOrder", projectPath: "src/MyApp")
 -> Returns just that method's source. 20 lines, not a 600-line file dump.
 ```
-
-> [!IMPORTANT]
-> **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
-> Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
 
 ---
 
@@ -107,7 +140,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-39 public tools organized by what you need to do (plus 2 debug-only tools not listed here). All tools work in-process using Roslyn APIs unless noted.
+43 total MCP tools: 41 public tools organized by what you need to do below, plus 2 debug-only tools: `roslyn_respawn` and `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -124,6 +157,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | Tool | What it does |
 |------|--------------|
 | `roslyn_find_references` | Every reference to a symbol across the solution |
+| `roslyn_find_unused` | Private/internal source symbols with zero direct static references |
 | `roslyn_find_callers` | All methods that call a named symbol (direct or via interface dispatch) |
 | `roslyn_get_call_graph` | All methods invoked within a method body (IOperation tree walk) |
 | `roslyn_find_implementations` | All types implementing an interface or overriding a member |
@@ -138,6 +172,8 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_get_member_body` | Source of a single method/property/field -- the token saver |
 | `roslyn_get_type_members` | All members of a type with full signatures and doc summaries |
+| `roslyn_find_overloads` | All overloads for a method on a containing type, with full signatures |
+| `roslyn_get_type_dependencies` | Direct type dependencies from a type declaration and member signatures |
 | `roslyn_get_file_outline` | File structure (types + member signatures, no bodies) |
 | `roslyn_get_symbol_documentation` | XML doc comments for any symbol |
 | `roslyn_get_usings` | Using directives + implicit global usings |
@@ -181,6 +217,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 | Tool | What it does |
 |------|--------------|
+| `roslyn_check_drift` | Workspace health probe on three axes: source drift (files changed without the workspace noticing), reference health (projects that loaded with no metadata references), and pending reload (a change not yet applied — the only signal that can account for a brand-new file) |
 | `roslyn_info` | Server version, PID, uptime, MSBuild discovery, log markers |
 
 ---
@@ -281,7 +318,7 @@ Contributions are welcome at every level. See [CONTRIBUTING.md](CONTRIBUTING.md)
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 
 # Run the test suite (tests RoslynMcp against itself)
-dotnet run --project src/TestHarness/TestHarness.csproj
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.
@@ -290,7 +327,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide and [CODE_OF_CONDUCT.m
 
 ## Requirements
 
-- .NET 8 or .NET 10 SDK (multi-targeted -- use whichever you have installed)
+- .NET 10 SDK to build from source (`net11.0` is auto-added when a .NET 11 SDK is detected)
 
 ---
 

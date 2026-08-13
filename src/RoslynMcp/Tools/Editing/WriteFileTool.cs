@@ -38,12 +38,13 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		using var scope   = BeginTool("roslyn_write_file", filePath, new { createNew, dryRun });
 		
 		var       rootPath = workspace.GetRootPath(projectPath);
+		var       boundary = workspace.GetSecurityBoundary(projectPath);
 		
 		string fullPath;
 		
 		if(createNew) {
 			
-			if(!TryResolveTargetPath(filePath, rootPath, out var target, out var pathError))
+			if(!TryResolveTargetPath(filePath, rootPath, boundary, out var target, out var pathError))
 				
 				return scope.Failed("invalid path", new ErrorResult(pathError));
 			
@@ -51,7 +52,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		}
 		else {
 			
-			var existing = ResolveFilePath(filePath, rootPath);
+			var existing = ResolveFilePath(filePath, rootPath, boundary);
 			
 			if(existing is null)
 				

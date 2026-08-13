@@ -25,6 +25,10 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_symbol_definition", symbolName, new { containingType });
 		
+		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);

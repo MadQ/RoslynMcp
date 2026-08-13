@@ -9,6 +9,7 @@ Use this checklist when preparing a new release of RoslynMcp.
 ### Code Quality
 - [ ] ~~All source files follow code style guidelines~~ — **style passes currently suspended; skip this step**
 - [ ] No compiler errors (`roslyn_get_diagnostics` — never use `dotnet build` for this)
+- [ ] Full build succeeds (`roslyn_build_project` preferred; `dotnet build src/RoslynMcp/RoslynMcp.csproj` also works)
 - [ ] No Roslyn analyzer warnings
 - [ ] All tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj`)
 - [ ] Code coverage is adequate for new features
@@ -51,7 +52,7 @@ Use this checklist when preparing a new release of RoslynMcp.
 
 ### 1. Version Bump
 - [ ] Update version in `Directory.Build.props` (`<VersionPrefix>` and `<VersionSuffix>` tags)
-- [ ] Confirm the GitHub milestone `vX.Y.Z` exists (omit pre-release suffix — use `v0.7.4`, not `v0.7.4-alpha`)
+- [ ] Confirm the GitHub milestone `vX.Y.Z` exists (omit pre-release suffix — use `vX.Y.Z`, not `vX.Y.Z-alpha`)
 - [ ] Update CHANGELOG.md
   - [ ] Move `[Unreleased]` items to new version section
   - [ ] Add release date
@@ -77,8 +78,7 @@ git push && git push origin vX.Y.Z-alpha
 > **Important:** Do NOT use `--self-contained` for the MCP server. Roslyn resolves external assemblies from the SDK installation at runtime; self-contained binaries break this. The log viewer has no such constraint but framework-dependent is fine since users already have .NET installed.
 
 ```powershell
-# MCP server — framework-dependent for both targets
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net8.0  -o ./publish/net8.0
+# MCP server — framework-dependent, net10.0 (net11.0 auto-added when a .NET 11 SDK is present)
 dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
 
 # Log viewer — framework-dependent, net10.0 only (no Roslyn deps, ASP.NET Core web app)
@@ -86,12 +86,11 @@ dotnet publish src/RoslynMcp.LogViewer/RoslynMcp.LogViewer.csproj -c Release -f 
 
 # Verify MCP server zip contents BEFORE creating the release — check for unexpected executables
 # RoslynMcpA.exe is a local dev copy created by pub.ps1 and must NOT be included in releases
-Get-ChildItem ./publish/net8.0/*.exe, ./publish/net10.0/*.exe | Select-Object Name
+Get-ChildItem ./publish/net10.0/*.exe | Select-Object Name
 # Expected: only RoslynMcp.exe. If RoslynMcpA.exe appears, exclude it explicitly.
 
-# Zip MCP server targets (excluding local dev copy)
+# Zip MCP server target (excluding local dev copy)
 $exc = @("RoslynMcpA.exe")
-Compress-Archive -Path (Get-ChildItem ./publish/net8.0  | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip
 Compress-Archive -Path (Get-ChildItem ./publish/net10.0 | Where-Object { $_.Name -notin $exc }) -DestinationPath ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip
 
 # Zip log viewer
@@ -109,7 +108,6 @@ Compress-Archive -Path ./publish/logviewer/* -DestinationPath ./artifacts/Roslyn
 gh release create vX.Y.Z-alpha --draft --prerelease `
   --title "RoslynMcp vX.Y.Z-alpha" `
   --notes-file "$env:TEMP\release-notes.md" `
-  ./artifacts/RoslynMcp-vX.Y.Z-alpha-net8.0.zip `
   ./artifacts/RoslynMcp-vX.Y.Z-alpha-net10.0.zip `
   ./artifacts/RoslynMcp-LogViewer-vX.Y.Z-alpha-net10.0.zip
 
@@ -124,12 +122,52 @@ gh release create vX.Y.Z-alpha --draft --prerelease `
 - [ ] Verify zip contents and release page look correct
 - [ ] Publish (un-draft) — ⚠️ requires TWO explicit user confirmations; never publish unilaterally
 
-### 5. Publish to NuGet (Future)
-```bash
-dotnet nuget push artifacts/RoslynMcp.0.X.Y.nupkg \
-    --api-key $NUGET_API_KEY \
-    --source https://api.nuget.org/v3/index.json
+### 5. Publish to NuGet (Trusted Publishing / OIDC)
+
+> **Package identity:** the package ships as **`MadQ.RoslynMcp`** with tool command
+> **`madq-roslynmcp`** — the plain `RoslynMcp` / `roslynmcp` names are taken by an unrelated
+> package on NuGet (chrismo80).
+>
+> **Trusted Publishing (OIDC) — no API key.** Publishing runs through the `publish.yml`
+> workflow, which uses NuGet Trusted Publishing: the `NuGet/login@v1` step exchanges the
+> GitHub OIDC token for a short-lived key. There is **no `NUGET_API_KEY` secret** to store or
+> rotate. The workflow is gated on the `release` GitHub environment — add a required-reviewer
+> protection rule there for a manual approval gate before any token is minted.
+>
+> **`--prerelease` is required to install a prerelease-only version** (e.g. `0.8.1-beta`) —
+> `dotnet tool install --global MadQ.RoslynMcp --prerelease`.
+>
+> **Optional dress rehearsal:** before publishing to prod, push the package to
+> <https://int.nugettest.org> — a throwaway test gallery (uploads may not be preserved) that
+> renders the real nuget.org gallery page and README (Markdig) exactly. Best way to preview the
+> icon, tags, and README before the irreversible prod push. See
+> <https://learn.microsoft.com/nuget/nuget-org/publish-a-package>.
+
+```powershell
+# 1. (optional) build the package locally to inspect the nuspec/icon/readme
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -c Pack -o artifacts
+
+# 2. Dry run — build + OIDC login + pack, but skip the push. Proves the Trusted
+#    Publishing policy (repo + workflow + environment) is configured correctly.
+gh workflow run publish.yml --ref vX.Y.Z-beta -f dry_run=true
+
+# 3. Real publish — pushes to nuget.org. The dispatched ref must be the release tag,
+#    and the tag must point at the exact commit the package is built from.
+gh workflow run publish.yml --ref vX.Y.Z-beta -f dry_run=false
 ```
+
+> ⚠️ **Order matters:** publish to NuGet **before** un-drafting the GitHub release — the
+> release notes tell users to `dotnet tool install`, which 404s until NuGet has the package.
+>
+> ⚠️ **Point of no return:** once NuGet accepts a version it is **permanent** — it can never be
+> re-pushed (even after unlisting), so the tag can no longer be force-moved. Do all csproj-level
+> polish (icon, README, tags, release notes) and move the tag *before* the real push, while the
+> GitHub release is still a draft.
+
+- [ ] (optional) Dress-rehearse the gallery page + README render on int.nugettest.org
+- [ ] Dry run green (OIDC login + pack succeed)
+- [ ] Real publish — version accepted; tag now frozen
+- [ ] Verify install from prod: `dotnet tool install --global MadQ.RoslynMcp --prerelease`
 
 ### 6. Announce Release
 - [ ] Update README.md with new installation instructions (if NuGet published)
@@ -185,16 +223,16 @@ Guidelines for what gets which bump:
 - Description rewrites, attribute metadata, polish → PATCH
 - Bug fixes, correctness corrections → PATCH
 
-**Milestone naming:** Milestones omit the pre-release suffix (use `v0.7.2`, not `v0.7.2-alpha`) — the suffix is noise at the planning level.
+**Milestone naming:** Milestones omit the pre-release suffix (use `vX.Y.Z`, not `vX.Y.Z-alpha`) — the suffix is noise at the planning level.
 
-**Tags and releases:** Always include the suffix (e.g. `v0.7.2-alpha`). Mark GitHub releases as pre-release until v1.0.0-beta.
+**Tags and releases:** Always include the suffix (e.g. `vX.Y.Z-alpha`). Mark GitHub releases as pre-release until v1.0.0-beta.
 
 ---
 
 ## First Public Release (v1.0.0) Criteria
 
 Before declaring v1.0.0, ensure:
-- [ ] All 37 public tools stable and well-tested (39 total including 2 debug-only)
+- [ ] All 41 public tools stable and well-tested (43 total including 2 debug-only)
 - [ ] Comprehensive test coverage (>80%)
 - [ ] Documentation complete and polished
 - [ ] CI/CD pipeline operational

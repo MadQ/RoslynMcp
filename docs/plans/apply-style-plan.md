@@ -4,7 +4,7 @@
 
 The natural write-side complement to `roslyn_get_style_profile`. Applies an inferred (or explicitly provided) style profile to an entire file, using the same two-phase preview/apply pattern as `roslyn_preview_rename` / `roslyn_apply_rename`.
 
-**Target release:** v1.1.0 (after `get_style_profile` and `StyleNormalizer` are battle-tested in v1.0.0)
+**Target release:** v1.1.0 (after `roslyn_get_style_profile` and `StyleNormalizer` are battle-tested in v1.0.0)
 
 ---
 
@@ -29,7 +29,7 @@ Applies a style profile to a file in-memory and returns a unified diff + confirm
 **Parameters:**
 - `filePath` — the file to reformat
 - `projectPath` — standard project path parameter
-- `profile` (optional) — explicit style profile JSON; if omitted, inferred from the file itself via `get_style_profile`
+- `profile` (optional) — explicit style profile JSON; if omitted, inferred from the file itself via `roslyn_get_style_profile`
 - `confidence` (optional, default `2`) — minimum sample count required before a property is applied; lower = more aggressive, higher = more conservative
 - `propertiesOnly` (optional) — array of property names to apply (e.g., `["blank_lines_between_methods", "field_alignment"]`); omit to apply all high-confidence properties
 
@@ -106,7 +106,7 @@ Recommend: ship v1.1.0 with column alignment rebalancing scoped to **single type
 |------|------|
 | `roslyn_get_trivia` | Low-level primitive; internal engine for style inference |
 | `roslyn_get_style_profile` | Reads and infers style rules; agent-facing |
-| `preserveStyle` on `replace_in_code` | Incremental style preservation during targeted edits |
+| `preserveStyle` on `roslyn_replace_in_code` | Incremental style preservation during targeted edits |
 | `roslyn_preview_style` | Whole-file style normalization preview |
 | `roslyn_apply_style` | Commits a previewed style normalization |
 
@@ -116,8 +116,8 @@ Recommend: ship v1.1.0 with column alignment rebalancing scoped to **single type
 
 | Version | Work |
 |---------|------|
-| v0.4.0 | Bug fixes, `get_member_body`, `AGENTS.md` |
-| v1.0.0 | `get_style_profile`, `StyleNormalizer`, `preserveStyle` flag on `replace_in_code` |
+| v0.4.0 | Bug fixes, `roslyn_get_member_body`, `AGENTS.md` |
+| v1.0.0 | `roslyn_get_style_profile`, `StyleNormalizer`, `preserveStyle` flag on `roslyn_replace_in_code` |
 | v1.1.0 | `roslyn_preview_style`, `roslyn_apply_style` (column alignment scoped to single type bodies) |
 | v1.2.0 | Full file-wide column alignment rebalancing |
 
@@ -125,6 +125,6 @@ Recommend: ship v1.1.0 with column alignment rebalancing scoped to **single type
 
 ## Open Questions
 
-- **Profile source:** Should `preview_style` accept a profile inferred from a *different* file? E.g., "apply the style of `WorkspaceManager.cs` to `WorkspaceResolver.cs`." Useful for bringing new files into line with established ones. Low implementation cost once the profile is serializable.
+- **Profile source:** Should `roslyn_preview_style` accept a profile inferred from a *different* file? E.g., "apply the style of `WorkspaceManager.cs` to `WorkspaceResolver.cs`." Useful for bringing new files into line with established ones. Low implementation cost once the profile is serializable.
 - **Selective application:** Should the agent be able to apply style to a single named type or method within a file, rather than the whole file? Reduces risk, easier to review. Worth considering as the default scope.
 - **`.editorconfig` interaction:** If a `.editorconfig` exists, should inferred profile properties that conflict with it be flagged? Or should `.editorconfig` take precedence?

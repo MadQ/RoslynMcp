@@ -48,6 +48,109 @@ internal sealed partial class WorkspaceManager
 		private readonly LoadMode   loadMode;
 		private readonly FileLogger logger;
 		
+		// Load-health warnings: WorkspaceFailed failures captured during the MSBuild load, plus
+		// post-load findings (projects whose metadata references were silently dropped by a
+		// contended design-time build). Repopulated on every full load/reload.
+		private readonly ConcurrentQueue<string> loadWarnings = new();
+		
+		/// <summary>Snapshot of load-health warnings, for surfacing in info tools.</summary>
+		public string[] LoadWarnings => [..loadWarnings];
+
+		// Most recent unhealthy load, retained across the healing reload that clears loadWarnings.
+		// volatile: written by the reload thread, read by tool threads without the lock.
+		private volatile string? lastUnhealthyLoad;
+
+		/// <summary>Timestamped record of the last load that produced projects without metadata references.</summary>
+		public string? LastUnhealthyLoad => lastUnhealthyLoad;
+
+		// ── Reload scheduling ────────────────────────────────────────────────
+		//
+		// One loader at a time. Concurrent accessors join the in-flight reload instead of each
+		// running their own full load and throwing all but one result away.
+		private readonly SemaphoreSlim reloadGate = new(1, 1);
+
+		// Consecutive reloads discarded for dropped references. Drives the deferral backoff and
+		// resets to 0 on any successful promotion.
+		private int consecutiveDiscards;
+
+		// 1 while a deferred retry is scheduled. Accessors check this and return immediately
+		// rather than blocking: the workspace is known to be unable to reload right now, so
+		// waiting would burn a full load and still hand back stale text. Staleness is reported by
+		// roslyn_check_drift as reload_pending — not as drift, which is a mtime comparison over
+		// documents the workspace already has and therefore cannot see a file it has never loaded.
+		private int deferredRetryScheduled;
+
+#if NET9_0_OR_GREATER
+		private readonly Lock             deferLock = new();
+#else
+		private readonly object           deferLock = new();
+#endif
+		private          Timer?           deferredRetryTimer;
+
+		// Up to three loads per attempt, matching FileWriter's default retry count, with the same
+		// 50/100 ms backoff between them. Contention is usually held for milliseconds, so an
+		// immediate retry tends to hit the same lock — the pause is what makes the retry worth
+		// making, and it is negligible against a load measured in seconds.
+		private const int ReloadRetries       = 2;
+		private const int MaxRetryDelayMs     = 1_000;
+
+		// Upper bound on the deferral. The lower bound is not a constant: it is the measured
+		// duration of the attempt that just failed (see ReloadAttempt).
+		private const int MaxDeferMs          = 30_000;
+
+		// How long Dispose waits for an in-flight reload before giving up and leaking the
+		// instance. Bounded so shutdown and LRU eviction cannot wedge behind a pathological load.
+		private static readonly TimeSpan ReloadQuiesceTimeout = TimeSpan.FromSeconds(30);
+
+		/// <summary>
+		///     The workspace is behind disk: a change arrived that could not be applied
+		///     incrementally, and the reload servicing it has not completed. Drift cannot report
+		///     this on its own — a file that is not yet a document is not enumerated by
+		///     <c>roslyn_check_drift</c>, and the sync clock says nothing about work still pending.
+		/// </summary>
+		public bool ReloadPending => reloadVersion != 0;
+
+		/// <summary>
+		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
+		///     the current load's warnings, the retained last-unhealthy-load record, and whether a
+		///     reload is still pending. Peeks — never forces a pending reload.
+		/// </summary>
+		public WorkspaceHealth Health => new(
+			// MSBuild only. Reference health is a property of the design-time build; an
+			// AdhocWorkspace project is constructed with no metadata references at all
+			// (see LoadAdhocWorkspace), so applying the same check would flag every adhoc
+			// workspace as broken.
+			isMSBuild ? ProjectsWithoutReferences(PeekSolution()) : [],
+			[..loadWarnings],
+			lastUnhealthyLoad,
+			ReloadPending
+		);
+		
+		// UTC ticks of the last event that synchronized this workspace with disk: initial load,
+		// FSW debounce flush, workspace reload, or an RM-owned write. roslyn_check_drift compares
+		// on-disk mtimes against this to detect FileSystemWatcher misses.
+		private long lastSyncedUtcTicks = DateTime.UtcNow.Ticks;
+		
+		public DateTime LastSyncedUtc => new(Interlocked.Read(ref lastSyncedUtcTicks), DateTimeKind.Utc);
+		
+		private void MarkSynced() => Interlocked.Exchange(ref lastSyncedUtcTicks, DateTime.UtcNow.Ticks);
+		
+		/// <summary>
+		///     Current solution snapshot WITHOUT running a pending reload. The drift probe must
+		///     observe the workspace as-is — syncing first would hide exactly what it measures.
+		/// </summary>
+		public Solution PeekSolution()
+		{
+			@lock.EnterReadLock();
+			
+			try {
+				return workspace.CurrentSolution;
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
+		}
+		
 		// Debounce: accumulate FSW events for 300ms before processing.
 #if NET9_0_OR_GREATER
 		private readonly Lock             debounceLock   = new();
@@ -103,7 +206,19 @@ internal sealed partial class WorkspaceManager
 					
 					logger.LogInfo("Load", $"Loading solution: {path}");
 					var slnSw = System.Diagnostics.Stopwatch.StartNew();
-					workspace = LoadSolution(path, logger);
+					workspace = LoadSolution(path, logger, loadWarnings);
+					
+					// Contended design-time builds can silently drop a project's references —
+					// results would be wrong, not failed. One fresh reload usually clears it.
+					if(ProjectsWithoutReferences(workspace) is { Length: > 0 } droppedSln) {
+						
+						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedSln)} — reloading once");
+						workspace.Dispose();
+						loadWarnings.Clear();
+						workspace = LoadSolution(path, logger, loadWarnings);
+					}
+					
+					WarnIfReferencesDropped(workspace);
 					isMSBuild = true;
 					
 					foreach(var kvp in BuildProjectMapFor(workspace))
@@ -125,7 +240,17 @@ internal sealed partial class WorkspaceManager
 					logger.LogInfo("Load", $"Loading project: {path}");
 					var projSw = System.Diagnostics.Stopwatch.StartNew();
 					
-					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger);
+					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings);
+					
+					if(ProjectsWithoutReferences(msbuildWs) is { Length: > 0 } droppedProj) {
+						
+						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedProj)} — reloading once");
+						msbuildWs.Dispose();
+						loadWarnings.Clear();
+						(msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings);
+					}
+					
+					WarnIfReferencesDropped(msbuildWs);
 					workspace        = msbuildWs;
 					defaultProjectId = projectId;
 					isMSBuild        = true;
@@ -141,6 +266,13 @@ internal sealed partial class WorkspaceManager
 				
 				case LoadMode.Adhoc:
 					
+					// Deliberately no AutoDetectAndBootstrap/EnsureReady here: adhoc needs no
+					// MSBuild, and EnsureReady is one-shot process-global — spending it on
+					// "register nothing" would permanently lock MSBuild out, crashing a later
+					// load of a different repo whose effective mode is Sdk/Vs (#229/#220).
+					// Consequences: ResolvedMode stays Auto (routing in GetOrLoadInstance
+					// checks the requested effective mode instead) and roslyn_info reports
+					// MSBuild discovery as "not attempted", which is accurate.
 					rootPath = path;
 					var dirInfo = new DirectoryInfo(path);
 					
@@ -160,6 +292,8 @@ internal sealed partial class WorkspaceManager
 				default:
 					throw new ArgumentOutOfRangeException(nameof(mode));
 			}
+			
+			MarkSynced();
 		}
 		
 		static Dictionary<string, ProjectId> BuildProjectMapFor(Workspace ws)
@@ -415,7 +549,47 @@ internal sealed partial class WorkspaceManager
 				timerToQuiesce.Dispose(done.WaitHandle);
 				done.Wait();
 			}
-			
+
+			// Same treatment for the deferred reload retry — its callback touches @lock and
+			// workspace, so it must be off the thread before either is torn down.
+			Timer? deferToQuiesce
+			;
+
+			lock(deferLock) {
+
+				deferToQuiesce     = deferredRetryTimer;
+				deferredRetryTimer = null;
+			}
+
+			if(deferToQuiesce is not null) {
+
+				using var deferDone = new ManualResetEventSlim(false);
+				deferToQuiesce.Dispose(deferDone.WaitHandle);
+				deferDone.Wait();
+			}
+
+			// Wait out an in-flight reload rather than pulling @lock and workspace from under it.
+			// Bounded so a pathological load cannot wedge cache eviction or shutdown.
+			//
+			// On timeout, skip teardown entirely. A reload that is still running holds references
+			// to @lock, workspace and reloadGate; disposing them under it converts a slow load into
+			// an ObjectDisposedException on another thread — and @lock.Dispose() while a writer is
+			// inside it is worse than that. Leaking one instance is the strictly safer outcome:
+			// the process is either shutting down, or evicting a single LRU cache entry.
+			if(!reloadGate.Wait(ReloadQuiesceTimeout)) {
+
+				logger.LogError(
+					"Dispose",
+					$"Reload still in flight after {ReloadQuiesceTimeout.TotalSeconds:0}s for '{loadPath}' — "
+					+ "skipping teardown rather than disposing state it is still using."
+				);
+
+				return;
+			}
+
+			// Deliberately not released: nothing may acquire the gate between here and Dispose.
+			reloadGate.Dispose();
+
 			@lock.Dispose();
 			workspace.Dispose();
 		}
@@ -429,9 +603,12 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		static void AutoDetectAndBootstrap(string path, FileLogger logger)
 		{
-			// Start from the user's explicit choice; auto-detect only if not specified.
-			var mode = ServerArgs.Current.WorkspaceMode
-			;
+			// Start from the user's explicit choice (CLI arg or env var), falling back to a
+			// committed project-local config file; auto-detect only if neither specifies a mode.
+			var mode = ProjectConfig.EffectiveWorkspaceMode(path, logger);
+			
+			if(mode != ServerArgs.Current.WorkspaceMode)
+				logger.LogInfo("Workspace", $"mode={mode} (from {ProjectConfig.FileName})");
 			
 			if(mode == WorkspaceMode.Auto) {
 				
@@ -494,16 +671,73 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		
-		static Workspace LoadSolution(string solutionPath)
-			=> LoadSolution(solutionPath, null);
-		
-		static Workspace LoadSolution(string solutionPath, FileLogger? log)
+		/// <summary>
+		///     Cancellation source bounding a single MSBuild workspace load. Fires after
+		///     <see cref="ServerArgs.LoadTimeoutSeconds"/>; never fires when the timeout is disabled.
+		/// </summary>
+		static CancellationTokenSource CreateLoadTimeoutCts()
 		{
+			var cts     = new CancellationTokenSource();
+			var seconds = ServerArgs.Current.LoadTimeoutSeconds;
+			
+			if(seconds > 0)
+				cts.CancelAfter(TimeSpan.FromSeconds(seconds));
+			
+			return cts;
+		}
+		
+		static InvalidOperationException LoadTimeout(string path) =>
+			new(
+				$"Loading '{path}' timed out after {ServerArgs.Current.LoadTimeoutSeconds}s. " +
+				"The workspace may be too large or MSBuild may be stuck. Try loading a single .csproj " +
+				"instead of the full solution, or raise ROSLYNMCP_LOAD_TIMEOUT_SECONDS.");
+		
+		/// <summary>
+		///     Projects whose design-time build produced zero metadata references. A successfully
+		///     built project always references at least the core library, so an empty set means the
+		///     build silently dropped them and symbol queries over that project would return
+		///     wrong-but-plausible results. The BuildHost-contention cause and the retry-on-fresh-
+		///     workspace mitigation are undocumented MSBuild behavior, documented empirically by
+		///     MarcelRoozekrans/roslyn-codelens-mcp (no code reused).
+		/// </summary>
+		static string[] ProjectsWithoutReferences(Solution solution) =>
+			[..solution.Projects
+				.Where(p => p.MetadataReferences.Count == 0)
+				.Select(p => p.Name)
+				.Distinct()];
+
+		static string[] ProjectsWithoutReferences(Workspace ws) => ProjectsWithoutReferences(ws.CurrentSolution);
+
+		void WarnIfReferencesDropped(Workspace ws)
+		{
+			if(ProjectsWithoutReferences(ws) is { Length: > 0 } dropped)
+				RecordUnhealthyLoad($"Projects loaded without metadata references — symbol results may be incomplete: {string.Join(", ", dropped)}");
+		}
+
+		/// <summary>
+		///     Records a load-health finding in both the per-load queue and the retained
+		///     <see cref="LastUnhealthyLoad"/> slot. The queue is cleared by every subsequent load,
+		///     so without the retained copy the evidence disappears at exactly the moment a healthy
+		///     reload fixes the symptom — leaving the episode undiagnosable (issue #235).
+		/// </summary>
+		void RecordUnhealthyLoad(string message)
+		{
+			loadWarnings.Enqueue(message);
+			lastUnhealthyLoad = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z] {message}";
+		}
+		
+		static Workspace LoadSolution(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings)
+		{
+			using var loadCts = CreateLoadTimeoutCts();
+			
 			var msbuildWorkspace = MSBuildWorkspace.Create();
 			msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
 			{
 				var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
 				log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
+				
+				if(e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
+					warnings.Enqueue(e.Diagnostic.Message);
 			}, options: null);
 			
 			
@@ -527,7 +761,7 @@ internal sealed partial class WorkspaceManager
 					foreach(var projectPath in projectPaths) {
 						
 						try {
-							msbuildWorkspace.OpenProjectAsync(projectPath).GetAwaiter().GetResult();
+							msbuildWorkspace.OpenProjectAsync(projectPath, cancellationToken: loadCts.Token).GetAwaiter().GetResult();
 						}
 						catch(Exception ex) when(ex is not OperationCanceledException) {
 							// Multi-TFM projects or transitive references may already be loaded
@@ -539,9 +773,15 @@ internal sealed partial class WorkspaceManager
 				}
 				
 				else
-					msbuildWorkspace.OpenSolutionAsync(solutionPath).GetAwaiter().GetResult();
+					msbuildWorkspace.OpenSolutionAsync(solutionPath, cancellationToken: loadCts.Token).GetAwaiter().GetResult();
 				
 				return msbuildWorkspace;
+			}
+			catch(OperationCanceledException) when(loadCts.IsCancellationRequested) {
+				
+				log?.LogError("LoadSolution", $"Load timed out after {ServerArgs.Current.LoadTimeoutSeconds}s: {solutionPath}");
+				msbuildWorkspace.Dispose();
+				throw LoadTimeout(solutionPath);
 			}
 			catch(Exception ex) when(ex is not OperationCanceledException) {
 				
@@ -551,23 +791,33 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
-		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log)
+		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings)
 		{
+			using var loadCts = CreateLoadTimeoutCts();
+			
+			var msbuildWorkspace = MSBuildWorkspace.Create();
+			
+			msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
+			{
+				var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
+				log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
+				
+				if(e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure)
+					warnings.Enqueue(e.Diagnostic.Message);
+			}, options: null);
+			
 			try {
 				
-				var msbuildWorkspace = MSBuildWorkspace.Create();
-				
-				msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
-				{
-					var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
-					log?.LogInfo("WorkspaceFailed", $"[{level}] {e.Diagnostic.Message}");
-				}, options: null);
-				
-				var project = msbuildWorkspace.OpenProjectAsync(csprojPath).GetAwaiter().GetResult();
+				var project = msbuildWorkspace.OpenProjectAsync(csprojPath, cancellationToken: loadCts.Token).GetAwaiter().GetResult();
 				
 				return (msbuildWorkspace, project.Id);
 			}
+			catch(OperationCanceledException) when(loadCts.IsCancellationRequested) {
+				msbuildWorkspace.Dispose();
+				throw LoadTimeout(csprojPath);
+			}
 			catch(Exception ex) when(ex is not OperationCanceledException) {
+				msbuildWorkspace.Dispose();
 				throw new InvalidOperationException($"Failed to load MSBuildWorkspace for '{csprojPath}': {ex.Message}", ex);
 			}
 		}
@@ -631,7 +881,7 @@ internal sealed partial class WorkspaceManager
 				var dirInfo = new DirectoryInfo(directory);
 				if(dirInfo.Attributes.HasFlag(FileAttributes.Hidden) ||
 				   dirInfo.Attributes.HasFlag(FileAttributes.System) ||
-				   dirInfo.Name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages")
+				   IsExcludedDirectoryName(dirInfo.Name))
 					continue;
 				
 				foreach(var file in EnumerateFilesWithErrorHandling(directory, searchPattern))
@@ -891,6 +1141,7 @@ internal sealed partial class WorkspaceManager
 				// event fired unsuppressed between the decrement and the workspace invalidation.
 				InvalidateFile(fullPath)
 				;
+				MarkSynced();
 			}
 			finally {
 				ignoredPaths.AddOrUpdate(fullPath, 0, (_, count) => count - 1);
@@ -898,6 +1149,77 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		
+		/// <summary>
+		///     Directories not worth walking or reloading for. Two distinct uses, and the
+		///     <c>bin</c>/<c>obj</c> entries mean something different in each:
+		///     <list type="bullet">
+		///         <item>
+		///             Adhoc enumeration skips them entirely when discovering source files.
+		///         </item>
+		///         <item>
+		///             The MSBuild flush uses it only to decide that an <em>unknown</em>
+		///             <c>.cs</c> under one of them is a build artifact, not new source, and so
+		///             must not force a full reload. Generated files under <c>obj</c> that really
+		///             are compilation inputs (<c>*.AssemblyInfo.cs</c>,
+		///             <c>*.GlobalUsings.g.cs</c>) already have document IDs, never reach that
+		///             branch, and keep receiving ordinary text updates.
+		///         </item>
+		///     </list>
+		///     For the watcher's pre-queue filter — which must not suppress those generated
+		///     documents — see <see cref="IsNeverCompilationInput"/>.
+		/// </summary>
+		static bool IsExcludedDirectoryName(string name) =>
+			name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages";
+
+		/// <summary>
+		///     Directories that can never hold a compilation document, so a change under one is
+		///     safe to drop before it is even queued. Deliberately excludes <c>bin</c>/<c>obj</c>:
+		///     SDK-style projects put generated documents there (<c>*.AssemblyInfo.cs</c>,
+		///     <c>*.GlobalUsings.g.cs</c>) which are real compilation inputs and must still receive
+		///     text updates. Build output is filtered later instead — only from the decision to
+		///     force a full reload. See <see cref="IsUnderExcludedDirectory"/>.
+		/// </summary>
+		static bool IsNeverCompilationInput(string name) =>
+			name is "node_modules" or ".git" or ".vs" or "packages";
+
+		/// <summary>
+		///     True when any directory segment of <paramref name="fullPath"/> below
+		///     <see cref="rootPath"/> matches <paramref name="excluded"/>. Name-based only — no
+		///     <c>FileInfo</c> stat, because this runs on every FileSystemWatcher event.
+		/// </summary>
+		bool IsUnderExcludedDirectory(string fullPath, Func<string, bool> excluded)
+		{
+			string relative;
+
+			try {
+				relative = Path.GetRelativePath(rootPath, fullPath);
+			}
+			catch(ArgumentException) {
+				return false;
+			}
+
+			var segments = relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+			;
+
+			// Outside the root entirely — not ours to filter. The first segment must equal ".."
+			// exactly: a prefix test would also catch a directory legitimately named "..config",
+			// which is inside the root and must still be subject to the exclusions below. A rooted
+			// result means GetRelativePath could not relativize at all (different volume).
+			if(Path.IsPathRooted(relative) || segments[0] == "..")
+
+				return false;
+
+			// Last segment is the filename, not a directory.
+			for(var i = 0; i < segments.Length - 1; i++)
+
+				if(excluded(segments[i]))
+
+					return true;
+
+			return false;
+		}
+
+
 		void StartWatcher()
 		{
 			watcher = new FileSystemWatcher(rootPath, "*.cs")
@@ -920,6 +1242,15 @@ internal sealed partial class WorkspaceManager
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)
 		{
+			// Nothing under these can be a compilation document, so drop the event before it is
+			// queued. Without this, a stray .cs anywhere below the root — a package cache, a
+			// sample in .git, anything — reaches FlushMSBuild as an unknown document and forces a
+			// full workspace reload, which is both slow and the operation that can drop metadata
+			// references (issue #235).
+			if(IsUnderExcludedDirectory(fullPath, IsNeverCompilationInput))
+
+				return;
+
 			// Skip FSW events for paths RM is currently writing — prevents spurious workspace
 			// reloads from our own writes. Ref-counted for safety; normal usage is single-threaded.
 			if(!deleted && ignoredPaths.TryGetValue(fullPath, out var count) && count > 0)
@@ -979,9 +1310,15 @@ internal sealed partial class WorkspaceManager
 					pendingDeletes.Clear();
 				}
 				
+				// True when the flush could only flag a reload. The workspace is then behind disk
+				// until that reload completes, so the sync clock must not advance — otherwise
+				// roslyn_check_drift reports "in sync" for changes it has not applied, and a
+				// reload that is later discarded becomes invisible.
+				var reloadFlagged = false;
+
 				if(isMSBuild)
-					FlushMSBuild(changed, deleted);
-				
+					reloadFlagged = FlushMSBuild(changed, deleted);
+
 				else {
 					
 					Workspace ws;
@@ -1001,14 +1338,45 @@ internal sealed partial class WorkspaceManager
 					if(ws is AdhocWorkspace adhoc)
 						FlushAdhoc(adhoc, defId, changed, deleted);
 				}
+
+				if(!reloadFlagged)
+					MarkSynced();
 			}
 			catch(Exception) {
 				// Swallow — best effort. Next FSW event or explicit InvalidateFile will retry.
 			}
 		}
 		
-		void FlushMSBuild(string[] changed, string[] deleted)
+		/// <summary>
+		///     Applies a debounced batch of file changes to an MSBuild workspace.
+		///     Returns <see langword="true"/> when it could only flag a full reload rather than
+		///     apply the change — meaning the workspace is now behind disk, and the caller must
+		///     not advance the sync clock.
+		/// </summary>
+		bool FlushMSBuild(string[] changed, string[] deleted)
 		{
+			// Set when this batch left the workspace behind disk.
+			var reloadFlagged = false;
+
+			// One generation bump per flush batch. Each bump moves reloadVersion, and an in-flight
+			// reload discards its work when the generation no longer matches the one it captured —
+			// so deleting several documents used to throw away a full load per extra file.
+			// The inner guard is pre-existing: InvalidateFile may already have flagged this same
+			// change, and re-flagging it would discard the reload that is servicing it.
+			void FlagReload()
+			{
+				if(reloadFlagged)
+
+					return;
+
+				reloadFlagged = true;
+
+				#pragma warning disable CS0420 // A reference to a volatile field will not be treated as volatile
+				if(Volatile.Read(ref reloadVersion) == 0)
+					Interlocked.Increment(ref reloadVersion);
+				#pragma warning restore CS0420
+			}
+
 			Workspace ws;
 			Solution  currentSolution;
 			
@@ -1030,12 +1398,17 @@ internal sealed partial class WorkspaceManager
 			// document text then calling TryApplyChanges writes an empty file back to disk,
 			// silently recreating the deleted file as a zero-byte ghost.
 			// Flag for full workspace reload instead — symmetric with the new-file case below.
+			// Flag once, not once per file: every increment moves the generation, and an in-flight
+			// reload discards its work when reloadVersion no longer matches the gen it captured —
+			// so deleting several files used to throw away one full load per extra file.
 			foreach(var path in deleted) {
-				
-				var docIds = newSolution.GetDocumentIdsWithFilePath(path);
-				
-				if(docIds.Length > 0)
-					Interlocked.Increment(ref reloadVersion);
+
+				if(newSolution.GetDocumentIdsWithFilePath(path).Length == 0)
+					continue;
+
+				FlagReload();
+
+				break;
 			}
 			
 			foreach(var path in changed) {
@@ -1067,32 +1440,49 @@ internal sealed partial class WorkspaceManager
 					
 					// MSBuildWorkspace doesn't support AddDocument via TryApplyChanges —
 					// it modifies the .csproj, conflicting with SDK-style implicit includes.
-					// Flag for full workspace reload on next tool call. Don't double-increment
-					// if a reload is already pending — InvalidateFile already set the flag,
-					// and a second increment would cause the in-flight reload to be discarded.
+					// Flag for full workspace reload on next tool call.
 					if(docIds.Length == 0) {
 
-						#pragma warning disable CS0420 // A reference to a volatile field will not be treated as volatile
-						if(Volatile.Read(ref reloadVersion) == 0)
-							Interlocked.Increment(ref reloadVersion);
-						#pragma warning restore CS0420
+						// ...unless it is build output. A .cs under bin/ or obj/ that is not
+						// already a document is a compiler artifact, not source: reloading the
+						// whole workspace for it is pure cost. Generated documents that ARE
+						// compilation inputs (*.AssemblyInfo.cs, *.GlobalUsings.g.cs) have
+						// docIds and never reach this branch, so they keep updating normally.
+						if(IsUnderExcludedDirectory(path, IsExcludedDirectoryName))
+							continue;
+
+						FlagReload();
 
 						continue;
 					}
-					
+
 					using var stream = File.OpenRead(path);
 					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
-					
+
+					// Already current. Applying identical text is not free: it still runs a
+					// TryApplyChanges, which writes to disk and flags a full reload if it fails.
+					// This catches what the rmOwnedWriteSizes check above cannot — an edit that
+					// leaves the file the same length, and any write RM did not make itself.
+					// TryGetText deliberately: it reads already-materialized text rather than
+					// forcing a load, and falls through to apply when none is available.
+					if(newSolution.GetDocument(docIds[0]) is { } existingDoc
+					   && existingDoc.TryGetText(out var existingText)
+					   && existingText.ContentEquals(text))
+
+						continue;
+
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);
-					
+
 					modified = true;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			}
 			
 			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
-				Interlocked.Increment(ref reloadVersion);
+				FlagReload();
+
+			return reloadFlagged;
 		}
 		
 		void FlushAdhoc(AdhocWorkspace adhoc, ProjectId projectId, string[] changed, string[] deleted)
@@ -1115,96 +1505,266 @@ internal sealed partial class WorkspaceManager
 		
 		// ── Workspace reload ────────────────────────────────────────────────
 		
+		/// <summary>
+		///     Loads a fresh workspace for this instance's load mode, resetting the per-load warning
+		///     queue first. Never called for <see cref="LoadMode.Adhoc"/>, which cannot reload.
+		/// </summary>
+		(Workspace Workspace, ProjectId ProjectId) LoadForMode()
+		{
+			loadWarnings.Clear();
+
+			if(loadMode is LoadMode.Solution) {
+
+				var solutionWorkspace = LoadSolution(loadPath, logger, loadWarnings)
+				;
+
+				return (
+					solutionWorkspace,
+					solutionWorkspace.CurrentSolution.Projects.FirstOrDefault()?.Id ?? defaultProjectId
+				);
+			}
+
+			return LoadMSBuildWorkspace(loadPath, logger, loadWarnings);
+		}
+
 		void ReloadIfNeeded()
 		{
 			// Fast path — no pending reload.
 			var gen = reloadVersion
 			;
-			
+
 			if(gen == 0)
-				
+
 				return;
-			
+
+			if(loadMode is LoadMode.Adhoc) {
+
+				// Adhoc workspaces don't support full reload — just clear the pending flag.
+				Interlocked.CompareExchange(ref reloadVersion, 0, gen)
+				;
+
+				return;
+			}
+
+			// A retry is already scheduled: the last attempt could not resolve references, so
+			// blocking here would pay a full load to arrive at the same stale answer.
+			if(Volatile.Read(ref deferredRetryScheduled) != 0)
+
+				return;
+
+			// Single-flight. Waiting is the point — the caller needs the reloaded workspace, and
+			// joining one load beats running a duplicate.
+			reloadGate.Wait();
+
+			try {
+
+				// Re-read under the gate: another caller may have completed the reload while we
+				// waited, or scheduled a deferral.
+				if(reloadVersion == 0 || Volatile.Read(ref deferredRetryScheduled) != 0 || disposed)
+
+					return;
+
+				ReloadAttempt();
+			}
+			finally {
+				reloadGate.Release();
+			}
+		}
+	
+		/// <summary>
+		///     Fires after the deferral backoff. Runs on a timer thread, so it must never throw.
+		///     <para>
+		///         It does run a full workspace load, which takes seconds — what it must not do is
+		///         <em>wait</em> on <see cref="reloadGate"/>. A held gate means a foreground reload
+		///         is already doing this work, so the callback bails via <c>Wait(0)</c> instead of
+		///         queueing a second attempt behind it.
+		///     </para>
+		/// </summary>
+		void DeferredRetryCallback()
+		{
+			if(disposed)
+
+				return;
+
+			if(!reloadGate.Wait(0)) {
+
+				// A foreground reload is in flight and will settle the pending generation.
+				Volatile.Write(ref deferredRetryScheduled, 0);
+
+				return;
+			}
+
+			try {
+
+				// Cleared before the attempt so a fresh discard can schedule the next retry.
+				Volatile.Write(ref deferredRetryScheduled, 0);
+
+				if(disposed || reloadVersion == 0)
+
+					return;
+
+				ReloadAttempt();
+			}
+			catch(Exception ex) {
+				// Nothing above this on a timer thread — an escape would take the process down.
+				logger.LogError("Reload", $"Deferred reload retry failed: {ex.GetType().Name}: {ex.Message}");
+			}
+			finally {
+				reloadGate.Release();
+			}
+		}
+
+		/// <summary>
+		///     Schedules the next retry. The delay is seeded with the measured cost of the attempt
+		///     that just failed, so a retry never runs more often than it costs — bounding retry
+		///     work to roughly a 50% duty cycle whether a load takes one second or twenty — and
+		///     doubling while contention persists.
+		/// </summary>
+		void ScheduleDeferredRetry(int delayMs)
+		{
+			lock(deferLock) {
+
+				if(disposed)
+
+					return;
+
+				Volatile.Write(ref deferredRetryScheduled, 1);
+
+				deferredRetryTimer?.Dispose();
+				deferredRetryTimer = new Timer(_ => DeferredRetryCallback(), null, delayMs, Timeout.Infinite);
+			}
+		}
+
+		/// <summary>
+		///     One reload attempt: load, retry on dropped references, then either promote or
+		///     discard and defer. Callers must hold <see cref="reloadGate"/>.
+		/// </summary>
+		void ReloadAttempt()
+		{
+			var gen = reloadVersion
+			;
+
 			// Load workspace OUTSIDE the write lock — this can take seconds for large solutions
 			// and would block every concurrent reader for the duration.
 			logger.LogInfo("Reload", $"Reloading workspace ({loadMode}: {loadPath})")
 			;
-			
+
 			var sw = System.Diagnostics.Stopwatch.StartNew();
-			
-			Workspace? newWorkspace  = null;
-			ProjectId  newProjectId  = defaultProjectId;
-			Dictionary<string, ProjectId>? newProjectMap = null;
-			
-			switch(loadMode) {
-				
-				case LoadMode.Solution:
-					newWorkspace  = LoadSolution(loadPath);
-					newProjectMap = BuildProjectMapFor(newWorkspace);
-					newProjectId  = newWorkspace.CurrentSolution.Projects.FirstOrDefault()?.Id ?? defaultProjectId;
-					break;
-				
-				case LoadMode.Project:
-					var (ws, projectId) = LoadMSBuildWorkspace(loadPath, logger);
-					newWorkspace  = ws;
-					newProjectId  = projectId;
-					newProjectMap = BuildProjectMapFor(newWorkspace);
-					break;
-				
-				default:
-					// Adhoc workspaces don't support full reload — just clear the pending flag.
-					Interlocked.CompareExchange(ref reloadVersion, 0, gen)
-					;
-					
-					return;
+
+			// Nullable so the write-lock block can hand off ownership by nulling it out.
+			Workspace? newWorkspace;
+			ProjectId  newProjectId;
+
+			(newWorkspace, newProjectId) = LoadForMode();
+
+			// Contended design-time builds can silently drop a project's references — results
+			// would be wrong, not failed. The initial load retries the same way; the reload path
+			// is the likelier victim, since it is often triggered by the very file writes that
+			// cause the contention.
+			var retry = 0;
+
+			while(retry < ReloadRetries
+			      && ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } dropped) {
+
+				var retryDelayMs = Backoff.DelayMs(retry, Backoff.DefaultSeedMs, MaxRetryDelayMs)
+				;
+
+				logger.LogInfo("Reload", $"No metadata references on: {string.Join(", ", dropped)} — attempt={retry + 2} delay_ms={retryDelayMs}");
+
+				newWorkspace.Dispose();
+				Thread.Sleep(retryDelayMs);
+
+				(newWorkspace, newProjectId) = LoadForMode();
+				retry++;
 			}
-			
+
+			// Never replace a healthy workspace with a reference-less one. A stale-but-correct
+			// compilation beats a fresh-but-wrong one: dropped references produce plausible-looking
+			// symbol results rather than visible failures, so promoting this would silently corrupt
+			// every subsequent query. If the live workspace is equally broken there is nothing to
+			// protect, so promote regardless — otherwise a bad first load could never recover.
+			if(ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } stillDropped
+			   && ProjectsWithoutReferences(PeekSolution()).Length == 0) {
+
+				newWorkspace.Dispose();
+
+				// Seed = what this attempt actually cost, so the retry rate self-scales to the
+				// workspace instead of relying on a constant that fits neither big nor small.
+				var deferMs = Backoff.DelayMs(
+					consecutiveDiscards,
+					(int) Math.Min(sw.ElapsedMilliseconds, MaxDeferMs),
+					MaxDeferMs
+				);
+
+				consecutiveDiscards++;
+
+				RecordUnhealthyLoad(
+					$"Reload discarded — the reloaded workspace had no metadata references on: {string.Join(", ", stillDropped)}. "
+					+ "Keeping the previous workspace, whose text may now be one edit stale. "
+					+ "Call roslyn_respawn if symbol results look outdated."
+				);
+
+				logger.LogInfo("Reload", $"Discarded reload — still no metadata references on: {string.Join(", ", stillDropped)}; keeping previous workspace, retry attempt={consecutiveDiscards} delay_ms={deferMs}");
+
+				// reloadVersion stays set: the deferred retry picks up the newest generation.
+				ScheduleDeferredRetry(deferMs);
+
+				return;
+			}
+
+			WarnIfReferencesDropped(newWorkspace);
+			consecutiveDiscards = 0;
+
+			var newProjectMap = BuildProjectMapFor(newWorkspace);
+
 			Workspace? oldWorkspace = null;
 			int        projectCount = 0;
-			
+
 			@lock.EnterWriteLock();
-			
+
 			try {
-				
+
 				// Another thread may have loaded while we were outside the lock,
 				// or another invalidation arrived — discard our load in both cases.
 				// Leave newWorkspace non-null so the finally block disposes it.
 				if(reloadVersion != gen)
-					
+
 					return;
-				
+
 				oldWorkspace = workspace;
 				workspace    = newWorkspace;
 				newWorkspace = null;     // ownership transferred; don't dispose in finally
-				
+
 				defaultProjectId = newProjectId;
 				projectMap.Clear();
-				
-				foreach(var kvp in newProjectMap!)
+
+				foreach(var kvp in newProjectMap)
 					projectMap[kvp.Key] = kvp.Value;
-				
+
 				compilationCache.Clear();
-				
+
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.
 				Interlocked.CompareExchange(ref reloadVersion, 0, gen)
 				;
-				
+
 				projectCount = workspace.CurrentSolution.Projects.Count();
 			}
 			finally {
-				
+
 				@lock.ExitWriteLock();
-				
+
 				// Dispose and log happen outside the write lock — readers are unblocked first.
 				newWorkspace?.Dispose();    // only set if we lost the race
 			}
-			
+
 			oldWorkspace?.Dispose();
-			
+
+			MarkSynced();
 			logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({projectCount} projects)");
 		}
-	
+
+
 	// ── Compilation cache ────────────────────────────────────────────────
 		
 		Compilation RebuildCompilation(ProjectId projectId, Solution solution, int capturedGen)

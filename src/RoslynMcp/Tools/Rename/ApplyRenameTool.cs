@@ -37,7 +37,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			
 			approvals.Reject(token);
 			
-			return scope.Failed("rejected", new ApplyRenameResult("Rename rejected. No files were changed.", null, null, "rejected", null));
+			return scope.Outcome("cancelled", new ApplyRenameResult("Rename cancelled. No files were changed.", null, null, null, null));
 		}
 		
 		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase) && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))

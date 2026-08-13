@@ -1,4 +1,4 @@
-﻿name: Build and Test
+name: Build and Test
 permissions:
   contents: read
 
@@ -11,10 +11,15 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    # RestoreLockedMode + ContinuousIntegrationBuild are enabled in CI via Directory.Build.props
+    # (gated on GITHUB_ACTIONS). The lock is validated, not regenerated: the SDK is pinned by
+    # global.json (10.0.302) and RuntimeIdentifiers in the csproj keeps packages.lock.json
+    # multi-RID and platform-independent, so one committed lock satisfies every matrix platform.
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        dotnet-version: ['8.0.x', '10.0.x']
+        dotnet-version: ['10.0.302']
 
     steps:
     - uses: actions/checkout@v4
@@ -32,3 +37,22 @@ jobs:
 
     #- name: Run tests
     #  run: dotnet run --project src/TestHarness/TestHarness.csproj --no-build
+
+  # Dedicated guard: fails the PR if packages.lock.json is stale or not multi-RID, with an
+  # actionable message. RuntimeIdentifiers makes the restore graph platform-independent, so one
+  # locked restore on Ubuntu validates every matrix RID (win-x64/linux-x64/osx-arm64) at once.
+  # Mark this job's check ("lock-check") required in the branch ruleset to block such merges.
+  lock-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.302'
+
+    - name: Validate packages.lock.json (locked, multi-RID)
+      run: |
+        dotnet restore src/RoslynMcp/RoslynMcp.csproj --locked-mode \
+          || { echo "::error::packages.lock.json is stale or not multi-RID. Regenerate and commit it: dotnet restore src/RoslynMcp/RoslynMcp.csproj --force-evaluate"; exit 1; }

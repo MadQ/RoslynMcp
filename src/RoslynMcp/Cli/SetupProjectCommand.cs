@@ -4,9 +4,12 @@ using System.Text.Json.Nodes;
 namespace RoslynMcp.Cli;
 
 /// <summary>
-///     Implements the <c>dotnet roslynmcp setup-project</c> subcommand. Writes a per-project
-///     hook file to the nearest git repository root, enabling per-agent tool guidance for
-///     .cs file operations in VS Code Copilot and Copilot CLI.
+///     Implements the <c>madq-roslynmcp setup-project</c> subcommand. Writes committable
+///     per-project files to the nearest git repository root: a hook file under <c>.github/</c>
+///     enabling per-agent tool guidance for .cs file operations, and (opt-in) a
+///     <c>.madq_roslynmcp.json</c> server config holding commit-worthy server settings
+///     (<c>elicit</c>, <c>workspace</c>) that the server folds in where no CLI arg or env var
+///     was given — see <see cref="ProjectConfig"/>.
 /// </summary>
 internal class SetupProjectCommand : CliCommand
 {
@@ -18,7 +21,7 @@ internal class SetupProjectCommand : CliCommand
 			
 			Console.WriteLine();
 			Console.WriteLine("  ✗ Could not find a git repository root from the current directory.");
-			Console.WriteLine("    Run 'dotnet roslynmcp setup-project' from inside a git repository.")
+			Console.WriteLine("    Run '" + ToolCommand.Name + " setup-project' from inside a git repository.")
 			;
 			Console.WriteLine()
 			;
@@ -32,10 +35,10 @@ internal class SetupProjectCommand : CliCommand
 		
 		var hookFile = Path.Combine(githubDir, "roslynmcp.json");
 		
-		// dotnet roslynmcp hook reads tool event JSON from stdin and writes allow/additionalContext.
-		// Using the dotnet tool invocation (not a raw binary path) keeps it cross-platform and
-		// stable across tool reinstalls — no path updates needed after dotnet tool update.
-		const string hookCommand = "dotnet roslynmcp hook";
+		// The hook reads tool event JSON from stdin and writes allow/additionalContext.
+		// See ToolCommand.HookCommand for why this is the bare command name (not `dotnet …`
+		// and not an absolute path — this file is committed and shared across contributors).
+		const string hookCommand = ToolCommand.HookCommand;
 		
 		string? backupPath = null;
 		bool    isNew      = !File.Exists(hookFile);
@@ -65,16 +68,29 @@ internal class SetupProjectCommand : CliCommand
 		if(backupPath is not null)
 			Console.WriteLine($"      Backup: {Path.GetRelativePath(Environment.CurrentDirectory, backupPath)}");
 		
+		var wroteConfig = ConfigureServerConfig(repoRoot);
+		
 		Console.WriteLine();
-		Console.WriteLine("  Commit .github/roslynmcp.json so all project contributors benefit.");
+		Console.WriteLine(wroteConfig
+			? "  Commit .github/roslynmcp.json and " + ProjectConfig.FileName + " so all project contributors benefit."
+			: "  Commit .github/roslynmcp.json so all project contributors benefit.");
 		Console.WriteLine("  The hook guides agents to prefer roslyn_* tools for .cs files —");
 		Console.WriteLine("  no file operations are blocked.");
+		
+		if(wroteConfig) {
+			
+			Console.WriteLine();
+			Console.WriteLine("  Note: --elicit/--workspace args in an agent's global MCP config (written by");
+			Console.WriteLine("  '" + ToolCommand.Name + " setup') override the project file. Precedence:");
+			Console.WriteLine("  CLI arg > env var > project file > default. Running servers pick up changes");
+			Console.WriteLine("  on restart.");
+		}
 		
 		if(ExecutablePath is null) {
 			
 			Console.WriteLine();
-			Console.WriteLine("  ⚠ 'dotnet roslynmcp hook' must be available in PATH for the hook to work.");
-			Console.WriteLine("    Install globally: dotnet tool install -g RoslynMcp");
+			Console.WriteLine("  ⚠ '" + ToolCommand.HookCommand + "' must be available in PATH for the hook to work.");
+			Console.WriteLine("    Install globally: dotnet tool install -g " + ToolCommand.PackageId);
 		}
 		
 		Console.WriteLine();
@@ -82,6 +98,205 @@ internal class SetupProjectCommand : CliCommand
 		Console.WriteLine();
 		
 		return 0;
+	}
+	
+	// Prompts for the commit-worthy server settings and writes them to .madq_roslynmcp.json at
+	// the repo root — the file ProjectConfig discovers by walking up from each request's project
+	// path. Reruns preserve earlier choices (prompt defaults reflect the existing file) and any
+	// unknown keys in it. Returns whether the config file was written.
+	static bool ConfigureServerConfig(string repoRoot)
+	{
+		var configPath = Path.Combine(repoRoot, ProjectConfig.FileName);
+		var exists     = File.Exists(configPath);
+		
+		var root        = new JsonObject();
+		var parseFailed = false;
+		
+		if(exists) {
+			
+			try {
+				
+				var parsed = JsonNode.Parse(File.ReadAllText(configPath), documentOptions: new JsonDocumentOptions {
+					
+					AllowTrailingCommas = true,
+					CommentHandling     = JsonCommentHandling.Skip,
+				});
+				
+				if(parsed is JsonObject obj)
+					root = obj;
+				else {
+					
+					parseFailed = true;
+					Console.WriteLine($"  ⚠ Existing {ProjectConfig.FileName} is not a JSON object — starting fresh (backup kept).");
+				}
+			}
+			catch(Exception ex) {
+				
+				parseFailed = true;
+				Console.WriteLine($"  ⚠ Could not parse existing {ProjectConfig.FileName} ({ex.Message}) — starting fresh (backup kept).");
+			}
+			
+			// Immediately backup a corrupted/unparseable file before prompting — if the user
+			// presses Enter through defaults, we won't silently overwrite their broken-but-maybe-
+			// recoverable config with a minimal stub.
+			if(parseFailed) {
+				
+				var errorBackupPath = configPath + ".error.bak";
+				
+				try {
+					
+					File.Copy(configPath, errorBackupPath, overwrite: true);
+					Console.WriteLine($"      Saved unreadable file to: {Path.GetRelativePath(Environment.CurrentDirectory, errorBackupPath)}");
+				}
+				catch(Exception ex) {
+					
+					Console.WriteLine($"      ⚠ Could not backup unreadable file ({ex.Message})");
+				}
+			}
+		}
+		
+		// Current values drive the prompt defaults so a rerun preserves earlier choices.
+		var currentElicit = root["elicit"] is JsonValue elicitNode
+			&& elicitNode.TryGetValue<bool>(out var existingElicit)
+			&& existingElicit;
+		
+		var currentWorkspace = root["workspace"] is JsonValue workspaceNode
+			&& workspaceNode.TryGetValue<string>(out var existingWorkspace)
+			? existingWorkspace.ToLowerInvariant()
+			: "auto";
+		
+		if(currentWorkspace is not ("sdk" or "vs" or "adhoc"))
+			currentWorkspace = "auto";
+		
+		// Same explanation as the global setup wizard's --elicit prompt, scoped per-project.
+		Console.WriteLine();
+		Console.WriteLine("  On an ambiguous symbol match, roslyn_preview_rename / roslyn_change_signature");
+		Console.WriteLine("  return a structured candidate list the agent resolves on its own (default).");
+		Console.WriteLine("  With elicitation they instead ask you to pick — but only in MCP clients that");
+		Console.WriteLine("  support elicitation (Claude Code/Desktop do; many others don't and silently");
+		Console.WriteLine("  fall back to the candidate list).");
+		Console.Write($"  Enable interactive elicitation for this project? [{(currentElicit ? "Y/n" : "y/N")}]: ");
+		
+		var elicitAnswer = Console.ReadLine()?.Trim() ?? "";
+		
+		bool elicit;
+		
+		if(elicitAnswer.Equals("y", StringComparison.OrdinalIgnoreCase) ||
+		   elicitAnswer.Equals("yes", StringComparison.OrdinalIgnoreCase))
+			
+			elicit = true;
+		
+		else if(elicitAnswer.Equals("n", StringComparison.OrdinalIgnoreCase) ||
+		        elicitAnswer.Equals("no", StringComparison.OrdinalIgnoreCase))
+			
+			elicit = false;
+		
+		else
+			// Enter (or anything unrecognized) keeps the current value.
+			elicit = currentElicit;
+		
+		Console.WriteLine();
+		Console.WriteLine("  Pin the MSBuild workspace mode for this repo: sdk (modern SDK-style projects),");
+		Console.WriteLine("  vs (.NET Framework via Visual Studio MSBuild), adhoc (no MSBuild, reduced");
+		Console.WriteLine("  semantics); auto detects per project.");
+		Console.Write($"  Workspace mode for this project (auto/sdk/vs/adhoc) [{currentWorkspace}]: ");
+		
+		var workspaceAnswer = Console.ReadLine()?.Trim().ToLowerInvariant() ?? "";
+		
+		string workspace;
+		
+		switch(workspaceAnswer) {
+			
+			case "auto":
+			case "sdk":
+			case "vs":
+			case "adhoc":
+				workspace = workspaceAnswer;
+				break;
+			
+			case "":
+				workspace = currentWorkspace;
+				break;
+			
+			default:
+				Console.WriteLine($"    Unrecognized mode '{workspaceAnswer}' — keeping '{currentWorkspace}'.");
+				workspace = currentWorkspace;
+				break;
+		}
+		
+		// Nothing meaningful chosen and nothing to preserve — don't create the file at all.
+		if(!exists && !elicit && workspace == "auto") {
+			
+			Console.WriteLine();
+			Console.WriteLine($"  No project server settings selected — {ProjectConfig.FileName} not written.");
+			
+			return false;
+		}
+		
+		// If parsing failed and the user kept defaults (Enter through both prompts), abort rather
+		// than silently overwriting their broken-but-maybe-recoverable config with a stub. Require
+		// explicit non-default choices to proceed.
+		if(parseFailed && !elicit && workspace == "auto") {
+			
+			Console.WriteLine();
+			Console.WriteLine($"  ⚠ Existing {ProjectConfig.FileName} is unreadable and no explicit settings were chosen.");
+			Console.WriteLine("    Not overwriting to avoid data loss. To proceed, rerun and select elicit=yes or");
+			Console.WriteLine("    a specific workspace mode, or manually fix/delete the file.");
+			
+			return false;
+		}
+		
+		// Compose: unknown keys in the existing file are preserved via the JsonObject round-trip.
+		// elicit is always written explicitly — a committed team decision is self-documenting.
+		root["version"] = 1;
+		root["elicit"]  = elicit;
+		
+		if(workspace == "auto")
+			root.Remove("workspace");
+		else
+			root["workspace"] = workspace;
+		
+		string? backupPath = null;
+		
+		if(exists) {
+			
+			backupPath = configPath + ".roslynmcp.bak";
+			File.Copy(configPath, backupPath, overwrite: true);
+		}
+		
+		// Atomic write: temp → final so a crash mid-write can't corrupt the config.
+		var tempPath = configPath + ".roslynmcp.tmp";
+		
+		try {
+			
+			File.WriteAllText(tempPath, root.ToJsonString(new JsonSerializerOptions {
+				
+				WriteIndented = true,
+				Encoder       = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+			}));
+			
+			File.Move(tempPath, configPath, overwrite: true);
+		}
+		finally {
+			
+			// Clean up temp file if the move didn't happen (exception path).
+			if(File.Exists(tempPath)) {
+				
+				try { File.Delete(tempPath); } catch { }
+			}
+		}
+		
+		var relativeConfig = Path.GetRelativePath(Environment.CurrentDirectory, configPath);
+		
+		Console.WriteLine();
+		Console.WriteLine(exists
+			? $"  ✓ Updated project server config: {relativeConfig}"
+			: $"  ✓ Wrote project server config: {relativeConfig}");
+		
+		if(backupPath is not null)
+			Console.WriteLine($"      Backup: {Path.GetRelativePath(Environment.CurrentDirectory, backupPath)}");
+		
+		return true;
 	}
 	
 	// Builds a fresh hook config JSON string.
@@ -143,22 +358,20 @@ internal class SetupProjectCommand : CliCommand
 				["timeoutSec"] = 5
 			};
 			
-			// Upsert: find existing RoslynMcp entry by matching the hook command value.
-			for(var i = 0; i < preToolUse.Count; i++) {
+			// Remove any existing RoslynMcp entries (current or legacy command forms), then add
+			// one fresh. Matching by the whole invocation — not exact string equality — so a
+			// renamed command doesn't leave a stale duplicate behind.
+			for(var i = preToolUse.Count - 1; i >= 0; i--) {
 				
 				if(preToolUse[i] is not JsonObject entry)
 					continue;
 				
-				if(entry["powershell"]?.GetValue<string>() == hookCommand ||
-				   entry["bash"]?.GetValue<string>() == hookCommand) {
+				if(ToolCommand.IsOurCommandInvocation(entry["powershell"]?.GetValue<string>()) ||
+				   ToolCommand.IsOurCommandInvocation(entry["bash"]?.GetValue<string>()))
 					
-					preToolUse[i] = ourEntry;
-					
-					return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-				}
+					preToolUse.RemoveAt(i);
 			}
 			
-			// Not found — append.
 			preToolUse.Add(ourEntry);
 			
 			return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
@@ -169,14 +382,18 @@ internal class SetupProjectCommand : CliCommand
 		}
 	}
 	
-	// Walks up from startDir to find the nearest directory containing a .git folder.
+	// Walks up from startDir to find the nearest directory containing a .git entry.
+	// .git is a directory in a normal checkout but a file in git worktrees and submodules —
+	// accept both so setup-project works from a worktree.
 	static string? FindRepoRoot(string startDir)
 	{
 		var dir = startDir;
 		
 		while(true) {
 			
-			if(Directory.Exists(Path.Combine(dir, ".git")))
+			var gitPath = Path.Combine(dir, ".git");
+			
+			if(Directory.Exists(gitPath) || File.Exists(gitPath))
 				
 				return dir;
 			

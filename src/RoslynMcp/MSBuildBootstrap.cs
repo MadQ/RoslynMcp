@@ -115,6 +115,30 @@ internal static class MSBuildBootstrap
 					return null;
 				}
 				
+				// Direct path override — CLI --msbuild-path or ROSLYNMCP_MSBUILD_PATH, already
+				// merged by ServerArgs (CLI wins). Point it at a directory containing MSBuild:
+				// a dotnet SDK directory, or a VS install's MSBuild\Current\Bin. Bypasses
+				// MSBuildLocator auto-discovery entirely — intended for self-contained exe
+				// scenarios where hostfxr cannot enumerate SDKs.
+				//
+				// Applies to sdk, vs, and auto: an explicit user-supplied path wins regardless of
+				// mode. Adhoc returns above — it skips MSBuild entirely, and an override must not
+				// re-enable it.
+				var overridePath = ServerArgs.Current.MsBuildPath
+				;
+
+				if(!string.IsNullOrEmpty(overridePath)) {
+
+					if(TryRegisterPath(overridePath)) {
+
+						discoveryMethod = $"resolved via --msbuild-path / ROSLYNMCP_MSBUILD_PATH ({overridePath})";
+
+						return null;
+					}
+
+					// Override was set but invalid — fall through to this mode's normal discovery.
+				}
+
 				// VS mode: skip SDK, go straight to vswhere.
 				if(mode == WorkspaceMode.Vs) {
 					
@@ -139,32 +163,15 @@ internal static class MSBuildBootstrap
 						}
 					}
 					
-					failureReason = "Visual Studio MSBuild not found. Install Visual Studio or Build Tools.";
+					failureReason = "Visual Studio MSBuild not found. Install Visual Studio or Build Tools, "
+						+ "or pass --msbuild-path (or set ROSLYNMCP_MSBUILD_PATH) to a VS MSBuild\\Current\\Bin directory.";
 					discoveryMethod = "not found — " + failureReason;
 					
 					return failureReason;
 				}
 				
 				// SDK mode (or Auto): standard discovery chain.
-				
-				// 0. Direct path override — set ROSLYNMCP_MSBUILD_PATH to a dotnet SDK directory
-				//    (one containing MSBuild.dll) to bypass MSBuildLocator auto-discovery entirely.
-				//    Intended for self-contained exe scenarios where hostfxr cannot enumerate SDKs.
-				var overridePath = Environment.GetEnvironmentVariable("ROSLYNMCP_MSBUILD_PATH")
-				;
-				
-				if(!string.IsNullOrEmpty(overridePath)) {
-					
-					if(TryRegisterPath(overridePath)) {
-						
-						discoveryMethod = $"resolved via ROSLYNMCP_MSBUILD_PATH env var ({overridePath})";
-						
-						return null;
-					}
-					
-					// Override was set but invalid — fall through to auto-discovery.
-				}
-				
+
 				// 1. Try MSBuildLocator directly — works when .NET SDK is on PATH.
 				if(TryRegister()) {
 					
@@ -216,9 +223,11 @@ internal static class MSBuildBootstrap
 				
 				failureReason = OperatingSystem.IsWindows()
 					? "MSBuild not found. Install .NET SDK or Visual Studio Build Tools. "
-						+ "If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH."
+						+ "If installed in a non-standard location, pass --msbuild-path (or set "
+						+ "ROSLYNMCP_MSBUILD_PATH or DOTNET_ROOT)."
 					: "MSBuild not found. Install the .NET SDK (https://dot.net). "
-						+ "If installed in a non-standard location, set DOTNET_ROOT or ROSLYNMCP_MSBUILD_PATH."
+						+ "If installed in a non-standard location, pass --msbuild-path (or set "
+						+ "ROSLYNMCP_MSBUILD_PATH or DOTNET_ROOT)."
 				;
 				
 				discoveryMethod = "not found — " + failureReason;
@@ -365,7 +374,8 @@ internal static class MSBuildBootstrap
 	}
 	
 	/// <summary>
-	///     Registers MSBuild from a specific SDK directory path, bypassing
+	///     Registers MSBuild from a specific directory path — a dotnet SDK directory or a
+	///     Visual Studio <c>MSBuild\Current\Bin</c> directory — bypassing
 	///     MSBuildLocator.RegisterDefaults() and the hostfxr P/Invoke it relies on.
 	///     Use when running as a self-contained executable, where the bundled hostfxr
 	///     cannot enumerate system-installed SDKs.
@@ -378,8 +388,12 @@ internal static class MSBuildBootstrap
 				
 				return false;
 			
-			if(!File.Exists(Path.Combine(msbuildDir, "MSBuild.dll")))
-				
+			// A dotnet SDK directory ships MSBuild.dll; a VS install's MSBuild\Current\Bin ships
+			// only MSBuild.exe. Accept either — RegisterMSBuildPath itself validates the rest
+			// (it looks for the Microsoft.Build.* assemblies, present in both layouts).
+			if(!File.Exists(Path.Combine(msbuildDir, "MSBuild.dll")) &&
+			   !File.Exists(Path.Combine(msbuildDir, "MSBuild.exe")))
+
 				return false;
 			
 			MSBuildLocator.RegisterMSBuildPath(msbuildDir);

@@ -2,8 +2,14 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <!-- Base targets always available -->
-    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <!-- .NET 10 is the minimum runtime (GA LTS); net11.0 auto-added below when its SDK is present -->
+    <TargetFrameworks>net10.0</TargetFrameworks>
+    <!-- Declares the CI matrix RIDs so every restore resolves all of them and packages.lock.json
+         stays multi-RID on any host — a plain local restore can't trim it to the host RID, and
+         locked-mode CI passes on every platform. Excluded from the Pack config, where it would
+         otherwise make dotnet pack emit RID-specific tool packages. A plain build stays
+         framework-dependent (a RID build needs an explicit -r). -->
+    <RuntimeIdentifiers Condition="'$(Configuration)' != 'Pack'">win-x64;linux-x64;osx-arm64</RuntimeIdentifiers>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -17,19 +23,33 @@
     <RepositoryUrl>https://github.com/MadQ/RoslynMcp</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageTags>roslyn;mcp;model-context-protocol;ai;code-intelligence</PackageTags>
+    <PackageTags>roslyn;mcp;model-context-protocol;csharp;dotnet;ai;llm;ai-agents;code-intelligence;code-analysis;static-analysis;refactoring;developer-tools;copilot;claude</PackageTags>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>v0.8.1-beta — Establishes the permanent MadQ.RoslynMcp identity (package id, madq-roslynmcp command, and MadQ.RoslynMcp MCP server key) to avoid collision with the unrelated RoslynMcp package. Adds identity-safe agent-config detection and hook-entry dedupe. Published via NuGet Trusted Publishing (OIDC). Full notes: https://github.com/MadQ/RoslynMcp/releases/tag/v0.8.1-beta</PackageReleaseNotes>
 
     <!-- Self-contained so dnx / copilot can run it without a matching SDK on PATH -->
     <PublishSingleFile>true</PublishSingleFile>
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
+
+    <!-- Source Link (built into the .NET SDK for github.com) + embedded PDBs: a
+         source-debuggable published tool with symbols inside the assemblies (no separate
+         snupkg). PublishRepositoryUrl writes the repo + commit into the package metadata;
+         deterministic source paths come from ContinuousIntegrationBuild (Directory.Build.props).
+         DebugType lives here (not per-config) so it also applies to the Pack configuration,
+         which otherwise defaulted to portable PDBs that pack omitted — shipping a symbol-less package. -->
+    <DebugType>embedded</DebugType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
 
   <!-- dotnet tool packaging — only active when building with -c Pack -->
   <PropertyGroup Condition="'$(Configuration)' == 'Pack'">
     <PackAsTool>true</PackAsTool>
-    <ToolCommandName>dotnet-roslynmcp</ToolCommandName>
-    <PackageId>RoslynMcp</PackageId>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- PackageId and ToolCommandName are namespaced under MadQ to avoid a hard collision
+         with the unrelated `RoslynMcp` package (chrismo80) already published on NuGet. -->
+    <ToolCommandName>madq-roslynmcp</ToolCommandName>
+    <PackageId>MadQ.RoslynMcp</PackageId>
+    <PackageReadmeFile>NUGET.md</PackageReadmeFile>
     <!-- Tool assemblies must be loose on disk — BuildHost requires it -->
     <PublishSingleFile>false</PublishSingleFile>
   </PropertyGroup>
@@ -39,33 +59,21 @@
     <PropertyGroup>
       <!-- Try to resolve if net11.0 is supported by checking NETCoreSdkVersion -->
       <_Net11Available Condition="$([MSBuild]::VersionGreaterThanOrEquals('$(NETCoreSdkVersion)', '11.0'))">true</_Net11Available>
-      <TargetFrameworks Condition="'$(_Net11Available)' == 'true'">net8.0;net10.0;net11.0</TargetFrameworks>
+      <TargetFrameworks Condition="'$(_Net11Available)' == 'true'">net10.0;net11.0</TargetFrameworks>
     </PropertyGroup>
     <Message Importance="high" Text="Building for: $(TargetFrameworks)" />
   </Target>
 
-  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net8.0|AnyCPU'">
-    <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
-  </PropertyGroup>
-
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net10.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|net11.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net8.0|AnyCPU'">
-    <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
-  </PropertyGroup>
-
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net10.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
-    <DebugType>embedded</DebugType>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net11.0|AnyCPU'">
@@ -73,7 +81,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\NUGET.md" Pack="true" PackagePath="\" />
+    <None Include="icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
 
   <ItemGroup>
@@ -84,7 +93,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="ModelContextProtocol" Version="1.2.0" />
+    <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Features" Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.3.0" />
@@ -99,6 +108,11 @@
   <ItemGroup>
     <ProjectReference Include="..\RoslynMcp.Analyzers\RoslynMcp.Analyzers.csproj" />
     <ProjectReference Include="..\RoslynMcp.Analyzers\RoslynMcp.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Benchmarks drive WorkspaceManager directly rather than through the MCP transport. -->
+    <InternalsVisibleTo Include="RoslynMcp.Benchmarks" />
   </ItemGroup>
 
   <!--

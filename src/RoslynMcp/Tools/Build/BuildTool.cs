@@ -69,11 +69,21 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			return scope.Error(new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode."));
 		
-		// Fast path: check Roslyn diagnostics first (unless forceBuild=true).
-		if(!forceBuild) {
-			
+		// A workspace that loaded without metadata references reports a flood of phantom
+		// CS0246/CS0234 for code that compiles fine. Short-circuiting on those would fail a healthy
+		// project — and worse, this tool is what callers reach for to check whether the workspace is
+		// lying, so repeating the lie leaves them with no way out short of knowing about forceBuild.
+		// Skip straight to the real build instead (issue #235).
+		var health = TryGetHealth(projectPath)
+		;
+		var unhealthyWorkspace = health is { IsHealthy: false };
+
+		// Fast path: check Roslyn diagnostics first (unless forceBuild=true, or the workspace
+		// itself is unhealthy and its diagnostics cannot be trusted).
+		if(!forceBuild && !unhealthyWorkspace) {
+
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
-				
+
 				return scope.Error(error!);
 			
 			var roslynDiagnostics = GetRoslynDiagnostics(compilation, rootPath);
@@ -153,7 +163,15 @@ internal sealed class BuildTool : RoslynMcpTool
 			DurationMs:   (int) elapsed.TotalMilliseconds,
 			ExitCode:     exitCode,
 			ErrorDetails: errorDetails
-		));
+		) {
+			// Say so explicitly: a build that succeeds while roslyn_get_diagnostics reports
+			// hundreds of errors is otherwise baffling.
+			Hint = unhealthyWorkspace
+				? "The Roslyn fast-path was skipped: the workspace loaded without metadata references on "
+					+ $"{string.Join(", ", health!.ProjectsWithoutReferences)}, so its diagnostics are phantom. "
+					+ "This result comes from a real dotnet build. Call roslyn_respawn to reload the workspace."
+				: null
+		});
 	}
 	
 	static string[] BuildArgs(string csprojPath, string? tfm)

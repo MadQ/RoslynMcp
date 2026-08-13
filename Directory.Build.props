@@ -1,12 +1,30 @@
 <Project>
 	<PropertyGroup>
         
-        <VersionPrefix>0.8.0</VersionPrefix>
+        <VersionPrefix>0.8.1</VersionPrefix>
         
         
         <VersionSuffix>beta</VersionSuffix>
         
         <Copyright>Copyright (c) 2026 Quinten Martens &lt;madq42@gmail.com&gt;</Copyright>
+        
+        <!-- Pin transitive package versions in a committed packages.lock.json per project. -->
+        <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+        
+        <!-- Deterministic (reproducible) builds in CI: ContinuousIntegrationBuild enables
+             /pathmap source normalization so binaries/PDBs carry no machine-specific paths.
+             CI-only (via GITHUB_ACTIONS) — setting it locally would break debugging by
+             pathmapping sources. Guarded on '' so an explicit -p:/env value still wins. -->
+        <ContinuousIntegrationBuild Condition="'$(ContinuousIntegrationBuild)' == '' and '$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+        
+        <!-- In CI, fail on a stale/incomplete lock file instead of silently regenerating it —
+             genuinely enforced (force-evaluate removed). This is durable because the restore graph
+             is stable: global.json pins the SDK (10.0.302), so SDK-versioned packages like
+             ILLink.Tasks don't drift, and RuntimeIdentifiers in RoslynMcp.csproj makes the graph
+             platform-independent (win-x64;linux-x64;osx-arm64), so one committed multi-RID
+             packages.lock.json satisfies every matrix platform. GITHUB_ACTIONS auto-fires in
+             every Actions workflow; ContinuousIntegrationBuild covers any non-Actions CI. -->
+        <RestoreLockedMode Condition="'$(GITHUB_ACTIONS)' == 'true' or '$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
         
 	</PropertyGroup>
 </Project>

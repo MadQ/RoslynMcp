@@ -74,16 +74,42 @@ class SetupCommand : CliCommand
 
         WarnIfProcessesRunning();
 
+        // Opt-in: interactive elicitation on ambiguous symbol matches (writes --elicit into args).
+        // Default is No — the agent-first structured candidate list is the intended default.
+        Console.WriteLine("  On an ambiguous symbol match, roslyn_preview_rename / roslyn_change_signature");
+        Console.WriteLine("  return a structured candidate list the agent resolves on its own (default).");
+        Console.WriteLine("  With --elicit they instead ask you to pick — but only in MCP clients that");
+        Console.WriteLine("  support elicitation (Claude Code/Desktop do; many others don't and silently");
+        Console.WriteLine("  fall back to the candidate list).");
+        Console.Write("  Enable interactive elicitation (--elicit)? [y/N]: ");
+
+        var elicitAnswer = Console.ReadLine()?.Trim() ?? "";
+        var elicitMode   = elicitAnswer.Equals("y",   StringComparison.OrdinalIgnoreCase) ||
+                           elicitAnswer.Equals("yes", StringComparison.OrdinalIgnoreCase)
+            ? ElicitMode.Enable
+            : ElicitMode.Disable;
+
+        Console.WriteLine();
+
         Console.WriteLine($"  Configuring {selected.Count} agent(s)...");
         Console.WriteLine();
 
         var addedCount = 0;
         var updatedCount = 0;
         var failedCount = 0;
+        var skippedCount = 0;
 
         foreach(var r in selected)
         {
-            var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath);
+            if(!ConfirmOverwriteForeignEntry(r))
+            {
+                Console.WriteLine($"  ↷ {r.Client.Name}  — skipped (left existing entry untouched)");
+                Console.WriteLine();
+                skippedCount++;
+                continue;
+            }
+
+            var outcome = AgentConfigPatcher.Patch(r.ConfigPath, r.Client, executablePath, elicitMode);
 
             switch(outcome.Result)
             {
@@ -121,7 +147,7 @@ class SetupCommand : CliCommand
             Console.WriteLine();
         }
 
-        Console.WriteLine($"  Done: {addedCount} added, {updatedCount} updated, {failedCount} failed.");
+        Console.WriteLine($"  Done: {addedCount} added, {updatedCount} updated, {failedCount} failed{(skippedCount > 0 ? $", {skippedCount} skipped" : "")}.");
 
         if(failedCount == 0)
         {
@@ -147,7 +173,7 @@ class SetupCommand : CliCommand
             if(hookAnswer.Equals("y", StringComparison.OrdinalIgnoreCase) ||
                hookAnswer.Equals("yes", StringComparison.OrdinalIgnoreCase))
             {
-                const string hookCommand = "dotnet roslynmcp hook";
+                const string hookCommand = ToolCommand.HookCommand;
                 var ok = ((ClaudeCodeClient) claudeResult.Client).UpsertHook(hookCommand);
 
                 Console.WriteLine();
@@ -160,7 +186,7 @@ class SetupCommand : CliCommand
         }
 
         Console.WriteLine();
-        Console.WriteLine("  Tip: run 'dotnet roslynmcp setup-project' in each project/repo directory to");
+        Console.WriteLine("  Tip: run '" + ToolCommand.Name + " setup-project' in each project/repo directory to");
         Console.WriteLine("  enable per-project guidance for VS Code Copilot and Copilot CLI.");
         Console.WriteLine();
 

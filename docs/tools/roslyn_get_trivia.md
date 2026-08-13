@@ -1,281 +1,192 @@
 # roslyn_get_trivia (EXPERIMENTAL)
 
+**Tool name:** `roslyn_get_trivia`  
 **Status:** Experimental — may be removed or significantly changed in future releases.
 
 ## Purpose
 
-Returns whitespace, comments, and formatting trivia from C# source files. Useful for understanding indentation context, blank line patterns, and comment placement without parsing the entire file manually.
+Returns whitespace, comments, and formatting trivia from C# source files. Use it when you need trivia grouped by syntax node rather than raw file text — for example, to inspect indentation, blank lines, or comment placement in context.
 
-## When to Use
-
-- **Understanding indentation context** — "What's the indentation level at line X?"
-- **Analyzing comment placement** — "Are there XML doc comments on this method?"
-- **Debugging formatting issues** — "Why is this blank line unindented?"
-- **Building style tools** — Extract trivia patterns for analysis
-
-## When NOT to Use
-
-- **General style enforcement** — Use `.\scripts\Test-CodeStyle.ps1` instead
-- **Reformatting code** — Use `roslyn_replace_in_code` or text tools
-- **Semantic analysis** — Use dedicated semantic tools (`roslyn_get_symbol_info`, etc.)
+For most code-understanding tasks, prefer:
+- `roslyn_read_file` for content
+- `roslyn_get_file_outline` for structure
 
 ## Parameters
 
 ```typescript
 {
-  projectPath: string;      // Required: Project or directory path
-  filePath?: string;        // Required for analysis; omit when listing kinds
-  startLine?: number;       // Optional: 1-based starting line
-  endLine?: number;         // Optional: 1-based ending line
-  syntaxKind?: string;      // Optional: Filter by node kind (e.g., 'IfStatement')
-  triviaKind?: string;      // Optional: Filter by trivia kind (e.g., 'WhitespaceTrivia')
-  includeLeading?: boolean; // Include leading trivia (default: true)
-  includeTrailing?: boolean;// Include trailing trivia (default: true)
-  skip?: number;            // Skip N results for pagination (default: 0)
-  take?: number;            // Max results (default: 100, max: 500)
-  page_token?: string;      // Pagination token from a previous response
-  listSyntaxKinds?: boolean;// List all available syntax kinds (educational)
-  listTriviaKinds?: boolean;// List all available trivia kinds (educational)
+  projectPath: string;       // Required
+  filePath?: string;         // Required for analysis; omit only for discovery
+  startLine?: number;        // Optional 1-based start line; default: start of file
+  endLine?: number;          // Optional 1-based end line; default: end of file
+  syntaxKind?: string;       // Optional syntax node kind filter
+  triviaKind?: string;       // Optional trivia kind filter
+  includeLeading?: boolean;  // Default: true
+  includeTrailing?: boolean; // Default: true
+  skip?: number;             // Default: 0
+  take?: number;             // Default: 100, max: 500
+  page_token?: string;       // Optional pagination token
+  listSyntaxKinds?: boolean; // Default: false; discovery mode
+  listTriviaKinds?: boolean; // Default: false; discovery mode
 }
 ```
 
-### Discovery: Listing Available Kinds
-
-**Not sure what values to use?** The tool includes built-in discovery:
+## Discovery: list valid kinds first
 
 ```json
-// List all syntax kinds (IfStatement, ForEachStatement, etc.)
 {
-  "projectPath": "src/RoslynMcp",
+  "projectPath": "src/RoslynMcp/RoslynMcp.csproj",
   "listSyntaxKinds": true
 }
 ```
 
 Returns:
+
 ```json
 {
   "mode": "list_syntax_kinds",
-  "count": 387,
-  "commonKinds": [
-    "IfStatement", "ForEachStatement", "MethodDeclaration",
-    "ClassDeclaration", "TryStatement", ...
+  "count": 568,
+  "common_kinds": [
+    "IfStatement",
+    "ElseClause",
+    "ForStatement",
+    "ForEachStatement",
+    "WhileStatement"
   ],
-  "allKinds": [ /* all 387 kinds */ ]
+  "all_kinds": [ "AbstractKeyword", "AccessorList", "AddAccessorDeclaration" ]
 }
 ```
 
 ```json
-// List all trivia kinds (WhitespaceTrivia, EndOfLineTrivia, etc.)
 {
-  "projectPath": "src/RoslynMcp",
+  "projectPath": "src/RoslynMcp/RoslynMcp.csproj",
   "listTriviaKinds": true
 }
 ```
 
 Returns:
+
 ```json
 {
   "mode": "list_trivia_kinds",
-  "count": 23,
-  "commonKinds": [
-    "WhitespaceTrivia", "EndOfLineTrivia",
-    "SingleLineCommentTrivia", "MultiLineCommentTrivia",
-    "SingleLineDocumentationCommentTrivia", ...
+  "count": 31,
+  "common_kinds": [
+    "WhitespaceTrivia",
+    "EndOfLineTrivia",
+    "SingleLineCommentTrivia",
+    "MultiLineCommentTrivia",
+    "SingleLineDocumentationCommentTrivia"
   ],
-  "allKinds": [ /* all 23 kinds */ ]
+  "all_kinds": [ "BadDirectiveTrivia", "ConflictMarkerTrivia", "DefineDirectiveTrivia" ]
 }
 ```
 
-**Pro tip:** Use `common_kinds` for the most frequently used values. Use `all_kinds` when you need something specific.
+Use `common_kinds` as the quick shortlist and `all_kinds` when you need an exact Roslyn kind name.
 
-### Common Syntax Kinds
-
-**Most frequently used (use these first):**
-- Control flow: `IfStatement`, `ElseClause`, `ForStatement`, `ForEachStatement`, `WhileStatement`, `DoStatement`
-- Switch: `SwitchStatement`, `SwitchExpression`
-- Error handling: `TryStatement`, `CatchClause`, `FinallyClause`
-- Declarations: `MethodDeclaration`, `PropertyDeclaration`, `FieldDeclaration`
-- Types: `ClassDeclaration`, `InterfaceDeclaration`, `StructDeclaration`, `RecordDeclaration`
-- Statements: `ReturnStatement`, `ThrowStatement`, `LocalDeclarationStatement`
-
-**Need something else?** Call the tool with `listSyntaxKinds=true` to see all 387 available kinds.
-
-### Common Trivia Kinds
-
-**Most frequently used (use these first):**
-- `WhitespaceTrivia` — tabs and spaces
-- `EndOfLineTrivia` — `\r\n` or `\n`
-- `SingleLineCommentTrivia` — `// comments`
-- `MultiLineCommentTrivia` — `/* comments */`
-- `SingleLineDocumentationCommentTrivia` — `/// XML docs`
-- `MultiLineDocumentationCommentTrivia` — `/** XML docs */`
-
-**Need something else?** Call the tool with `listTriviaKinds=true` to see all 23 available kinds.
-
-## Response Format
+## Response format
 
 ```json
 {
-  "file": "Core/WindowTracker.cs",
-  "total_nodes": 47,
-  "filtered_nodes": 12,
+  "file": "Tools/Analysis/GetTriviaTool.cs",
+  "total_nodes": 34,
+  "filtered_nodes": 20,
   "skip": 0,
-  "take": 100,
+  "take": 3,
   "results": [
     {
-      "node_kind": "IfStatement",
+      "node_kind": "AttributeList",
       "node_span": {
-        "start": 234,
-        "end": 456,
-        "start_line": 12,
-        "end_line": 18
+        "start": 440,
+        "end": 560,
+        "start_line": 14,
+        "end_line": 14
       },
-      "node_text": "if(windowKey is null)",
+      "node_text": "[McpServerTool(Name = \"roslyn_get_trivia\", ReadOnly = true, Title = \"Get Trivia\"…",
       "leading_trivia": [
         {
           "kind": "WhitespaceTrivia",
-          "text": "\t\t\t",
-          "span": { "start": 231, "end": 234 }
+          "text": "    ",
+          "span": { "start": 436, "end": 440 }
         }
       ],
-      "trailing_trivia": [
-        {
-          "kind": "WhitespaceTrivia",
-          "text": " ",
-          "span": { "start": 456, "end": 457 }
-        }
-      ]
+      "trailing_trivia": []
     }
   ],
   "page_token": "abc123",
-  "has_more": false
+  "has_more": true
 }
 ```
 
-## Examples
+### Notes
 
-### Example 0: Discover Available Options (Start Here!)
+- Results are grouped by syntax node.
+- `node_text` is truncated for readability.
+- `filtered_nodes` is the number of nodes that still have matching trivia after filters are applied.
+- Use `page_token` to fetch the next page without re-running the query.
 
-**If you're not a Roslyn expert**, start by discovering what filter values are available:
+## Common use cases
 
-```json
-{
-  "projectPath": "src/RoslynMcp",
-  "listSyntaxKinds": true
-}
-```
-
-Returns a categorized list of all syntax node kinds you can filter by. The `commonKinds` array contains the most useful ones.
+### Analyze indentation in a range
 
 ```json
 {
-  "projectPath": "src/RoslynMcp",
-  "listTriviaKinds": true
-}
-```
-
-Returns all available trivia kinds (whitespace, comments, etc.).
-
-**Pro tip:** Run these once to understand what's available, then use the specific values in your analysis calls.
-
-### Example 1: Get all trivia in a file
-
-```json
-{
-  "projectPath": "src/RoslynMcp",
-  "filePath": "Tools/Build/BuildTool.cs"
-}
-```
-
-Returns all leading and trailing trivia for all syntax nodes in the file (up to 100 results).
-
-### Example 2: Analyze indentation on specific lines
-
-```json
-{
-  "projectPath": "src/RoslynMcp",
-  "filePath": "WorkspaceManager.cs",
-  "startLine": 50,
-  "endLine": 75,
+  "projectPath": "src/RoslynMcp/RoslynMcp.csproj",
+  "filePath": "Tools/Analysis/GetTriviaTool.cs",
+  "startLine": 14,
+  "endLine": 20,
   "triviaKind": "WhitespaceTrivia"
 }
 ```
 
-Returns only whitespace trivia for syntax nodes between lines 50-75.
-
-### Example 3: Find all XML doc comments
+### Inspect only `if` statement trivia
 
 ```json
 {
-  "projectPath": "src/RoslynMcp",
+  "projectPath": "src/RoslynMcp/RoslynMcp.csproj",
+  "filePath": "Tools/Analysis/DiagnosticsTool.cs",
+  "syntaxKind": "IfStatement"
+}
+```
+
+### Extract XML doc comments
+
+```json
+{
+  "projectPath": "src/RoslynMcp/RoslynMcp.csproj",
   "filePath": "Tools/RoslynMcpTool.cs",
   "triviaKind": "SingleLineDocumentationCommentTrivia",
   "includeTrailing": false
 }
 ```
 
-Returns only `///` XML documentation comments (leading trivia only).
+## Helpful error shape
 
-### Example 4: Analyze `if` statement formatting
-
-```json
-{
-  "projectPath": "src/RoslynMcp",
-  "filePath": "Tools/Analysis/DiagnosticsTool.cs",
-  "syntaxKind": "IfStatement"
-}
-```
-
-Returns trivia for all `if` statements in the file. Useful for checking indentation consistency.
-
-### Example 5: Check blank line patterns in a method
+If `syntaxKind` matches no nodes in the selected range, the tool returns:
 
 ```json
 {
-  "projectPath": "src/RoslynMcp",
-  "filePath": "WorkspaceManager.cs",
-  "startLine": 100,
-  "endLine": 150,
-  "triviaKind": "EndOfLineTrivia"
+  "error": "no_matching_nodes",
+  "message": "No syntax nodes of kind 'if' found in the specified range.",
+  "hint": "Use listSyntaxKinds=true to see all available syntax kinds, or check spelling (e.g., 'IfStatement' not 'if').",
+  "provided_kind": "if",
+  "common_kinds": [ "IfStatement", "ElseClause", "ForStatement" ]
 }
 ```
 
-Returns all line breaks in the specified range. Useful for analyzing blank line patterns.
+## Limits and behavior
 
-## Performance Notes
+- C# files only
+- `filePath` is required unless using `listSyntaxKinds` or `listTriviaKinds`
+- Default page size is 100; maximum is 500
+- `includeLeading` and `includeTrailing` default to `true`
 
-- **Fast** — Parsing is cached in Roslyn's workspace
-- **Efficient** — Only walks specified nodes/trivia, not entire tree
-- **Paging** — Use `take` parameter to limit results for large files
+## When not to use this tool
 
-## Limitations
+- General content reading → `roslyn_read_file`
+- Structural overview → `roslyn_get_file_outline`
+- Semantic symbol analysis → `roslyn_get_symbol_info`, `roslyn_find_references`, etc.
 
-- **C# files only** — Not applicable to non-C# files
-- **Syntax-node based** — Trivia is attached to syntax nodes, not standalone
-- **Truncated node text** — Node text is limited to 80 characters for readability
+## See also
 
-## Why Experimental?
-
-This tool is **exploring** whether trivia analysis via MCP tools is useful for AI agents. Potential outcomes:
-
-1. **Useful** — Agents use it frequently for style/formatting tasks → stabilize and document thoroughly
-2. **Niche** — Only useful for specific edge cases → keep as experimental
-3. **Redundant** — PowerShell scripts work better → remove in future release
-
-**Feedback welcome!** If you find this tool useful (or useless), let us know.
-
-## Alternative: Text-Based Tools
-
-For most style enforcement tasks, **text-based tools are faster and simpler**:
-
-- `.\scripts\Test-CodeStyle.ps1` — Automated style checking with auto-fix
-- `roslyn_replace_in_file` — Text-level editing with regex
-- PowerShell one-liners — Fast, simple, no Roslyn overhead
-
-Use `roslyn_get_trivia` when you need **semantic context** (e.g., "Is this whitespace inside a `try` block or a method?"). Use text tools when you just need to process characters.
-
----
-
-**See also:**
-- [docs/development/CODE_STYLE_ENFORCEMENT.md](../development/CODE_STYLE_ENFORCEMENT.md) — Style enforcement guide
-- [AGENTS.md § Code Style](../../AGENTS.md#code-style) — Complete style rules
+- [roslyn_get_trivia_quickref.md](roslyn_get_trivia_quickref.md)
+- [docs/development/CODE_STYLE_ENFORCEMENT.md](../development/CODE_STYLE_ENFORCEMENT.md)

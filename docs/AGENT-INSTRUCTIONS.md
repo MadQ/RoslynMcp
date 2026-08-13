@@ -21,8 +21,8 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_get_member_body` — Read a single method, property, or type body.
   Use this INSTEAD OF reading the entire file. Returns only the code you need.
 - `roslyn_read_file` — Read a file from the Roslyn workspace (in-memory, always
-  up-to-date). Use INSTEAD OF Read for .cs files. Also works for non-.cs files
-  (falls back to disk).
+  up-to-date for `.cs` files). Use INSTEAD OF Read for .cs files. For non-.cs
+  files, it reads from disk.
 - `roslyn_get_file_outline` — Get the structure of a file (types, members,
   signatures). Use INSTEAD OF reading a file to understand its layout.
 - `roslyn_get_line_count` — Get line counts for one or more files. Use INSTEAD
@@ -57,6 +57,9 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_find_callers` — Find all methods that call a named symbol. The inverse
   of `roslyn_find_references`. Semantically impossible with text search alone.
   Filter by `isDirect` to exclude interface dispatch or delegate calls.
+- `roslyn_find_unused` — Find private/internal source symbols with zero direct
+  static references. Use before dead-code cleanup; attributed symbols and
+  inheritance/interface-dispatched members are conservatively excluded.
 - `roslyn_get_call_graph` — Find all methods invoked within a named method body.
   Answers "what does this method depend on?" by walking the Roslyn IOperation
   tree — finds actual invocations, not text patterns. Pair with
@@ -75,6 +78,12 @@ built-in tools only if a roslyn tool fails.
 
 - `roslyn_get_type_members` — List all members of a type with full signatures.
   Use INSTEAD OF reading the file and scanning for members.
+- `roslyn_find_overloads` — List all overloads for a method on a containing
+  type. Use before editing, calling, renaming, or changing a method that may
+  have overloads.
+- `roslyn_get_type_dependencies` — List direct type dependencies from a type
+  declaration and member signatures. Use before extracting, moving, or
+  refactoring a type.
 - `roslyn_get_type_hierarchy` — Show base types, interfaces, and derived types.
   Grep cannot reliably determine inheritance chains.
 - `roslyn_get_usings` — Extract using directives from a file.
@@ -98,10 +107,10 @@ built-in tools only if a roslyn tool fails.
   or anchor pattern). Use when ADDING new lines rather than replacing existing
   content -- no need to construct surrounding-context patterns.
 - `roslyn_write_file` — Write or create files atomically with automatic
-  pre-write backup. Use for wholesale file rewrites or creating new files.
+  crash-safe backup snapshots. Use for wholesale file rewrites or creating new files.
   Returns a backup token usable with `roslyn_local_history` to undo.
 - `roslyn_local_history` — List, preview, and apply crash-safe file backup
-  snapshots created by `roslyn_write_file`. Use to undo destructive writes.
+  snapshots created automatically before destructive writes. Use to undo destructive writes.
 
 ### Refactoring
 

@@ -2,7 +2,7 @@
 
 Complete setup instructions for all major MCP-compatible AI coding assistants.
 
-> **⚠️ Security Note:** RoslynMcp runs with your user permissions and currently has unrestricted filesystem access. Only use with trusted agents and on projects you control. See [Issue #9](https://github.com/MadQ/RoslynMcp/issues/9).
+> **⚠️ Security Note:** RoslynMcp runs with your user permissions. File access is bounded to the resolved workspace tree — project/solution root plus referenced projects ([#9](https://github.com/MadQ/RoslynMcp/issues/9)) — but `projectPath` can still target any project you can read, so only use with trusted agents and on projects you control.
 
 > **⚠️ Not all configurations have been verified in production.**  
 > GitHub Copilot and Claude Desktop are tested and confirmed working. Other clients follow documented MCP patterns but may require adjustments. Contributions and corrections welcome!
@@ -15,19 +15,27 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 ## Quick Start
 
-1. **Get the binary:** Either download [RoslynMcp-vX.Y.Z-net10.0.zip](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere, **or** install via dotnet tool:
+1. **Get the binary:** Install as a global .NET tool:
 
    ```bash
-   dotnet tool install -g RoslynMcp
+   dotnet tool install -g MadQ.RoslynMcp --prerelease
    ```
 
-2. **Add to your client config.** Most clients take a JSON block like this (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
+   Or download the latest `net10.0` release zip from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) and extract it anywhere.
+
+2. **Configure your client.** If you installed via `dotnet tool`, run:
+
+   ```bash
+   madq-roslynmcp setup
+   ```
+
+   `setup` detects your installed MCP-compatible clients and writes the server config for you. Otherwise, add a JSON block like this to your client's config (the outer key name varies — `"mcpServers"` for Claude, `"servers"` for Copilot, etc.):
 
    ```json
    {
-     "roslyn": {
+     "MadQ.RoslynMcp": {
        "type": "stdio",
-       "command": "roslynmcp"
+       "command": "madq-roslynmcp"
      }
    }
    ```
@@ -36,9 +44,9 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
    ```json
    {
-     "roslyn": {
+     "MadQ.RoslynMcp": {
        "type": "stdio",
-       "command": "/absolute/path/to/RoslynMcp.exe"
+       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
      }
    }
    ```
@@ -55,53 +63,51 @@ See the client sections below for exact config file locations and JSON structure
 
 ### Step 1: Get RoslynMcp
 
-**Option A — Download and extract** (simplest, no SDK required):
-
-Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab `RoslynMcp-vX.Y.Z-net10.0.zip` (or `net8.0`). Extract it anywhere and note the full path to `RoslynMcp.exe`.
-
-**Option B — dotnet tool** (recommended for .NET developers, requires .NET SDK):
+**Option A — dotnet tool** (recommended for .NET developers, requires .NET SDK):
 
 ```bash
-dotnet tool install -g RoslynMcp
+dotnet tool install -g MadQ.RoslynMcp --prerelease
 ```
 
-This installs `roslynmcp` globally on PATH. Use `"roslynmcp"` as the command in your client config — no path needed.
+This installs `madq-roslynmcp` globally on PATH. Use `"madq-roslynmcp"` as the command in your client config — no path needed. Then run `madq-roslynmcp setup` to auto-detect your installed clients and write the config for you (see Step 2 for the manual alternative).
 
-**Option C — Clone and build** (requires .NET 8, 10, or 11 SDK):
+**Option B — Download and extract** (simplest, no SDK required):
+
+Download the latest release from the [Releases page](https://github.com/MadQ/RoslynMcp/releases/latest) — grab the `net10.0` asset. Extract it anywhere and note the full path to `RoslynMcp.exe`.
+
+**Option C — Clone and build** (requires .NET 10 or 11 SDK; for contributing or testing local changes):
 
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -o ./publish/net10.0
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg --include-symbols -c Debug
+dotnet tool install --global MadQ.RoslynMcp --add-source ./nupkg --version 0.8.1-beta
 ```
 
-**Choose your framework:**
-- `net8.0` — .NET 8 (LTS)
-- `net10.0` — .NET 10 (recommended)
-- `net11.0` — .NET 11 (auto-added when .NET 11 SDK is detected)
+This installs your local build as `madq-roslynmcp` on PATH — exactly like Option A, so use the **Option A / C** config below. After making code changes and re-packing, run `dotnet tool uninstall --global MadQ.RoslynMcp` before reinstalling — a stale global install otherwise keeps serving the old build.
 
 ### Step 2: Configure Your MCP Client
 
 Point your MCP client to the server using one of these approaches:
 
-**Option A / C — absolute path** (download or clone/build):
+**Option B — absolute path** (download and extract):
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "type": "stdio",
-    "command": "/absolute/path/to/RoslynMcp.exe"
+    "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
   }
 }
 ```
 
-**Option B — dotnet tool (global install):**
+**Option A / C — dotnet tool (global install):**
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "type": "stdio",
-    "command": "roslynmcp"
+    "command": "madq-roslynmcp"
   }
 }
 ```
@@ -109,17 +115,17 @@ Point your MCP client to the server using one of these approaches:
 **Local tool install (advanced — per-project version pinning):**
 
 ```bash
-dotnet tool install --create-manifest-if-needed RoslynMcp
+dotnet tool install --create-manifest-if-needed MadQ.RoslynMcp --prerelease
 ```
 
 Local tools require `dotnet tool run` as the invocation, and your client config must set `cwd` to the project root so the tool manifest is found:
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "type": "stdio",
     "command": "dotnet",
-    "args": ["tool", "run", "roslynmcp"],
+    "args": ["tool", "run", "madq-roslynmcp"],
     "cwd": "/absolute/path/to/your/project"
   }
 }
@@ -133,7 +139,8 @@ Do not pass project paths as args — each `roslyn_*` tool call specifies `proje
 
 ## Requirements
 
-- .NET 8 or .NET 10 SDK (net11.0 target added automatically if .NET 11 SDK is present)
+- Running the published binary or release zip does not require a .NET SDK on PATH
+- Building from source requires a .NET 10 SDK (`net11.0` is auto-added when a .NET 11 SDK is present)
 - MSBuild on PATH (installed with .NET SDK or Visual Studio) for full project resolution
 
 ---
@@ -145,7 +152,7 @@ Add to `.mcp.json` at your workspace root:
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
@@ -166,9 +173,9 @@ Add to `.mcp.json` at your workspace root:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
-      "command": "/absolute/path/to/RoslynMcp.exe"
+      "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
 }
@@ -195,7 +202,7 @@ Add to your Claude Desktop MCP settings file:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -215,7 +222,7 @@ Add to `.cursor/mcp.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -244,7 +251,7 @@ Add to `.windsurf/mcp_config.json` in your project root:
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -276,7 +283,7 @@ Add to `.windsurf/mcp_config.json` in your project root:
 
 ```json
 {
-  "roslyn": {
+  "MadQ.RoslynMcp": {
     "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
   }
 }
@@ -289,7 +296,7 @@ Add to `.vscode/mcp.json` or `.cline/mcp_settings.json` in your project root (ex
 ```json
 {
   "mcpServers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
   }
@@ -309,7 +316,7 @@ Add to `.continue/config.json` in your project root:
   "experimental": {
     "modelContextProtocolServers": [
       {
-        "name": "roslyn",
+        "name": "MadQ.RoslynMcp",
         "transport": {
           "type": "stdio",
           "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
@@ -333,7 +340,7 @@ Add to `.vscode/mcp.json` in your project root:
 ```json
 {
   "servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "type": "stdio",
       "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
     }
@@ -352,7 +359,7 @@ Add to `~/.config/zed/settings.json`:
 ```json
 {
   "context_servers": {
-    "roslyn": {
+    "MadQ.RoslynMcp": {
       "settings": {
         "command": "/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe"
       }
@@ -375,13 +382,13 @@ Run RoslynMcp directly from the command line:
 
 ```bash
 # Minimal — no preloading
-/path/to/RoslynMcp.exe
+/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe
 
 # Preload a workspace for faster first tool call
-/path/to/RoslynMcp.exe /path/to/your/project
+/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe --preload /path/to/your/project
 
 # Force a specific workspace mode
-/path/to/RoslynMcp.exe --workspace adhoc /path/to/your/project
+/absolute/path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe --workspace adhoc --preload /path/to/your/project
 ```
 
 This starts the MCP server on stdio — useful for testing or custom integrations. See [CLI flags](#cli-flags) for all options.
@@ -402,7 +409,7 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 
 **Cause:** MSBuildWorkspace requires MSBuild on PATH.
 
-**Fix:** Install .NET SDK or Visual Studio — both include MSBuild. Or set `MSBUILD_EXE_PATH`. RoslynMcp automatically falls back to AdhocWorkspace (source-only) if MSBuild isn't available.
+**Fix:** Install .NET SDK or Visual Studio — both include MSBuild. If the SDK is in a non-standard location, pass `--msbuild-path` (or set `ROSLYNMCP_MSBUILD_PATH` or `DOTNET_ROOT`). RoslynMcp automatically falls back to AdhocWorkspace (source-only) if MSBuild isn't available.
 
 ### No type resolution (AdhocWorkspace fallback)
 
@@ -424,6 +431,14 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 
 **Fix:** RoslynMcp auto-detects file changes via `FileSystemWatcher`. If diagnostics aren't updating, verify `projectPath` points to your source directory.
 
+### Tools re-prompt for approval after renaming the server key
+
+**Symptom:** Previously "always allowed" write/build/rename tools ask for permission again after you change the MCP server key (e.g. upgrading from the legacy `roslyn` key to `MadQ.RoslynMcp`).
+
+**Cause:** MCP clients cache tool approvals keyed to the server name, so the old approvals no longer match.
+
+**Fix:** Either re-approve ("always allow") on the next prompt, or tell your agent to migrate the stale approvals to the new server name. See [Troubleshooting Guide → Tools re-prompt for approval after renaming the MCP server key](docs/guides/TROUBLESHOOTING.md#tools-re-prompt-for-approval-after-renaming-the-mcp-server-key) for the full procedure (including a copy-paste instruction for your agent).
+
 ---
 
 ## Advanced Configuration
@@ -431,24 +446,56 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 ### CLI flags
 
 ```bash
-RoslynMcp.exe [path...] [--workspace sdk|vs|adhoc|auto]
+RoslynMcp.exe [options]
 ```
 
 | Argument | Description |
 |----------|-------------|
-| `path...` | One or more paths to preload on startup (optional). Useful for reducing first-call latency. Each tool call still requires a `projectPath` parameter regardless. |
+| `-p`, `--preload <path>` | Pre-warm a workspace on startup. Repeat the flag to preload multiple projects. Each tool call still requires a `projectPath` parameter regardless. |
 | `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
+| `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
+| `--msbuild-path` | Override the MSBuild installation path used for workspace loading — a dotnet SDK directory or a Visual Studio `MSBuild\Current\Bin` directory. Honored in `auto`, `sdk`, and `vs` modes; ignored in `adhoc`, which skips MSBuild entirely. If the path is invalid, the server falls through to normal discovery. |
+| `--elicit` | On an ambiguous symbol match, ask the user to pick interactively (MCP elicitation) instead of returning a structured candidate list. Opt-in; requires client elicitation support. Default: off. |
+| `-v`, `--version` | Print the server version and exit. |
+| `-h`, `--help` | Show CLI help and exit. |
 
 ### Environment variables
+
+Where a variable has an equivalent CLI flag, the **flag wins** — the full order is
+`CLI arg > env var > project file > built-in default`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ROSLYNMCP_WORKSPACE` | `auto` | Same as `--workspace` flag — `sdk`, `vs`, `adhoc`, or `auto` |
-| `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.log` | Log file base path (PID is always injected before the extension, e.g. `roslynmcp.1234.log`). Set to empty string to disable logging. |
+| `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` | Log file base path. PID is always injected before the extension. Set to empty string to disable logging. |
 | `ROSLYNMCP_BACKUP_PATH` | `%LOCALAPPDATA%\RoslynMcp\backups` | Backup store root for `roslyn_write_file` / `roslyn_local_history`. Set to empty to disable backups. |
+| `ROSLYNMCP_LOG_MAX_AGE_DAYS` | `30` | Delete old per-PID log files after this many days. |
+| `ROSLYNMCP_BACKUP_MAX_AGE_DAYS` | `90` | Delete old backup snapshots after this many days. |
+| `ROSLYNMCP_PRUNE_MIN_RUNS` | `3` | Minimum server starts before log/backup pruning runs. |
 | `ROSLYNMCP_MAX_CACHED_WORKSPACES` | `5` | LRU workspace cache size. Increase for large multi-project workflows. |
-| `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Force a specific MSBuild installation path. |
+| `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Same as `--msbuild-path` (which takes precedence) — force a specific MSBuild installation path. |
+| `ROSLYNMCP_LOAD_TIMEOUT_SECONDS` | `300` | Timeout for MSBuild workspace loads. Values 1–9 clamp to 10; `0` or negative disables the timeout. |
 | `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
+| `ROSLYNMCP_ELICIT` | `false` | Set to `true` to enable interactive elicitation on ambiguous symbol matches (same as `--elicit`). Not all MCP clients support elicitation; unsupported clients fall back to the structured candidate list. |
+
+**Ambiguous symbol handling.** By default, when a name in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the tool returns a structured `candidates` list and the agent retries with a `containingType` (or `filePath`+`line`) on its own — no interruption. Enabling `--elicit` (or `ROSLYNMCP_ELICIT=true`) instead prompts you to pick interactively via MCP elicitation, in clients that support it (Claude Code/Desktop do; many others don't and fall back to the candidate list). The `madq-roslynmcp setup` wizard offers this as an opt-in prompt; you can also add it by hand to the server entry's args: `"args": ["--elicit"]`. A committed project file can also enable it per repo — see the next section.
+
+### Project-local server settings
+
+`madq-roslynmcp setup-project` can additionally write a committable `.madq_roslynmcp.json` at the repo root, so a team shares server preferences per project instead of every contributor hand-setting them in their global agent config:
+
+```json
+{
+  "version": 1,
+  "elicit": true,
+  "workspace": "sdk"
+}
+```
+
+- **Honored keys:** `elicit` (boolean) and `workspace` (`"sdk"`, `"vs"`, or `"adhoc"`). Unknown keys are ignored.
+- **Discovery:** the server finds the file by walking up from each tool call's resolved `projectPath` — no reliance on the server's working directory. The result is cached, so edits to the file require a server restart.
+- **Precedence:** an explicit setting always wins over the committed file — CLI arg > env var > project file > built-in default. Note that `--elicit` written into an agent's global MCP config by `madq-roslynmcp setup` is a CLI arg and therefore overrides this file.
+- **Security:** the file is committed and potentially untrusted, so machine-specific settings (`--log-path`, `--msbuild-path`, backup paths) and `--preload` are never read from it.
 
 ### Multi-project workspaces
 
@@ -487,4 +534,3 @@ For large codebases (>100K LOC), consider:
 - **Documentation:** [README.md](README.md), [AGENTS.md](AGENTS.md)
 - **Issues:** [GitHub Issues](https://github.com/MadQ/RoslynMcp/issues)
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)
-

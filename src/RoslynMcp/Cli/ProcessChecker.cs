@@ -11,8 +11,10 @@ static class ProcessChecker
         var results = new List<RunningProcess>();
         var currentPid = Environment.ProcessId;
 
-        // Match all known binary names — old bare tool, new dotnet-prefixed tool, PascalCase dev build.
-        foreach(var p in Process.GetProcessesByName("roslynmcp")
+        // Match all known binary names — current MadQ.RoslynMcp command, legacy bare/dotnet-prefixed
+        // tools, and the PascalCase dev/publish build (exe/assembly name is still RoslynMcp).
+        foreach(var p in Process.GetProcessesByName(ToolCommand.Name)
+            .Concat(Process.GetProcessesByName("roslynmcp"))
             .Concat(Process.GetProcessesByName("RoslynMcp"))
             .Concat(Process.GetProcessesByName("dotnet-roslynmcp")))
         {

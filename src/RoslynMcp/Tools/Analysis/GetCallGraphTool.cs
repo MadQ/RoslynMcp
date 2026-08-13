@@ -30,6 +30,10 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_call_graph", symbolName, new { containingType, skip, take });
 		
+		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
+			
+			return scope.Error(refError!);
+		
 		if(scope.TryServeCachedPage<CallSiteEntry>(page_token, ref skip, ref take, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);

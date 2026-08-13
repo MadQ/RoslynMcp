@@ -35,7 +35,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			
 			approvals.Reject(token);
 			
-			return scope.Failed("rejected", new ApplySignatureChangeResult("Signature change rejected. No files were changed.", null, "rejected"));
+			return scope.Outcome("cancelled", new ApplySignatureChangeResult("Signature change cancelled. No files were changed.", null, null));
 		}
 		
 		if(!approval.Equals("y", StringComparison.OrdinalIgnoreCase) && !approval.Equals("session", StringComparison.OrdinalIgnoreCase))

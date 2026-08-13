@@ -12,10 +12,13 @@ record AgentProbeResult(
 );
 
 // Describes the RoslynMcp entry currently in an agent's config.
+// Ambiguous is true when the entry only matched a legacy/shared name that the unrelated
+// chrismo80/RoslynMcp package also uses — callers must confirm before overwriting it.
 record DetectedEntry(
     string ServerName,
     string? CommandPath,
-    bool CommandExists
+    bool CommandExists,
+    bool Ambiguous
 );
 
 static class AgentDetector
@@ -59,13 +62,15 @@ static class AgentDetector
             {
                 var found = client.FindEntry(root);
 
-                if(found is var (key, entryNode))
+                if(found is { } f)
                 {
+                    var (key, entryNode, ambiguous) = f;
                     var cmd = client.GetCommandPath(entryNode);
                     entry = new DetectedEntry(
                         ServerName: key,
                         CommandPath: cmd,
-                        CommandExists: cmd is not null && File.Exists(cmd)
+                        CommandExists: cmd is not null && File.Exists(cmd),
+                        Ambiguous: ambiguous
                     );
                 }
             }

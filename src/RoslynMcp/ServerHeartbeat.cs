@@ -36,6 +36,16 @@ internal static class ServerHeartbeat
                 , TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays)
                 , ServerArgs.Current.PruneMinRuns
             );
+
+            // Analyzer shadow copies from dead servers. Copies still loaded by a live
+            // server survive — Windows keeps loaded images locked and Prune skips them.
+            FilePruner.Prune(
+                  ShadowCopyAnalyzerLoader.ShadowRoot
+                , "*.dll"
+                , TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays)
+                , ServerArgs.Current.PruneMinRuns
+                , recursive: true
+            );
         }
         catch { }
     }

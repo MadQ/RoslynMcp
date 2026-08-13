@@ -36,8 +36,8 @@ This file contains Copilot-specific overrides and notes only.
 
 ### GitHub Copilot Chat Integration
 - When suggesting code, prefer using RoslynMcp tools to understand the codebase semantically
-- Always dogfood the tools — use `search_files`, `get_type_members`, `find_references`, etc.
-- For C# edits, strongly prefer `replace_in_code` over text-based replacements
+- Always dogfood the tools — use `roslyn_search_files`, `roslyn_get_type_members`, `roslyn_find_references`, etc.
+- For C# edits, strongly prefer `roslyn_replace_in_code` over text-based replacements
 - **Performance:** Default to modern zero-allocation patterns (`Span<T>`, `ReadOnlySpan<T>`, `stackalloc`) when equally readable — see AGENTS.md § Performance & Allocation
 
 ### ⚠️ Zero-Byte File Check — Required Before Every Commit
@@ -48,7 +48,7 @@ Get-ChildItem src\RoslynMcp -Recurse -Filter *.cs | Where-Object { $_.Length -lt
 Any result is a red flag. Before reaching for git, check the RoslynMcp backup store — `roslyn_write_file` snapshots files before every write. **Use PowerShell directly, not `roslyn_*` tools** (the workspace is equally stale when a file is 0 bytes on disk):
 ```powershell
 $f = "MyFile.cs"
-$dir = "C:\Users\madq4\AppData\Local\RoslynMcp\backups"
+$dir = Join-Path $env:LOCALAPPDATA "RoslynMcp\backups"
 Get-ChildItem $dir -Recurse |
     Where-Object { $_.Name -like "${f}_*.bak" -and $_.Length -gt 0 } |
     Sort-Object LastWriteTime -Descending |
@@ -60,7 +60,7 @@ Backup naming: `{originalFileName}_{unixMs}_{nonce}.pre.bak` (pre-write) or `{or
 
 **All details in [`AGENTS.md`](../AGENTS.md):**
 - Project overview and architecture
-- All 39 tool descriptions (37 public + 2 debug-only)
+- All 43 tool descriptions (41 public + 2 debug-only)
 - Code style rules (braces, naming, blank lines, etc.)
 - MCP protocol patterns
 - Roslyn API patterns

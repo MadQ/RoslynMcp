@@ -78,7 +78,7 @@ Common issues and solutions when setting up and using RoslynMcp.
 **Checklist:**
 1. ✅ Server process started successfully (check client logs)
 2. ✅ MCP session initialized (`initialize` request succeeded)
-3. ✅ Target directory is correct (check server stderr for `Target: ...` message)
+3. ✅ `projectPath` values are explicit and correct — every Roslyn tool requires one
 4. ✅ RoslynMcp is built/published correctly
 
 **Verification:**
@@ -91,31 +91,114 @@ Common issues and solutions when setting up and using RoslynMcp.
 
 ---
 
+### Tools re-prompt for approval after renaming the MCP server key
+
+**Symptom:** Roslyn tools that were previously "always allowed" (write/build/rename tools such as `roslyn_write_file`, `roslyn_replace_in_code`, `roslyn_build_project`, `roslyn_apply_rename`) suddenly ask for permission again. This commonly happens after **renaming your MCP server key** — for example, upgrading from the legacy `roslyn` / `RoslynMcp` identity to `MadQ.RoslynMcp`, or otherwise changing the key in your `.mcp.json` / `mcp-config.json`.
+
+**Cause:** MCP clients cache tool approvals **keyed to the server name**. When the key changes, the old approvals no longer match the new server, so every previously-trusted tool prompts again. Read-only Roslyn tools (`roslyn_search_files`, `roslyn_read_file`, `roslyn_get_member_body`, …) auto-approve and are unaffected — only mutating tools (write / build / rename / restore) are re-gated.
+
+For **GitHub Copilot CLI**, approvals live in `~/.copilot/permissions-config.json` (`%USERPROFILE%\.copilot\permissions-config.json` on Windows), under `locations.<repo-path>.tool_approvals` as entries shaped like:
+
+```json
+{ "kind": "mcp", "serverName": "roslyn", "toolName": "roslyn_write_file" }
+```
+
+After the rename, `"serverName": "roslyn"` no longer matches the live server (`MadQ.RoslynMcp`).
+
+**Fix — pick one:**
+
+1. **Re-approve on next prompt (simplest).** The first time each tool prompts, choose "always allow". The client persists the new approval under the new server name automatically. A handful of prompts and you're done.
+
+2. **Ask your agent to migrate the approvals for you.** Because this is a mechanical find-and-mirror, you can just tell your coding agent:
+
+   > "Update my GitHub Copilot CLI permissions file (`~/.copilot/permissions-config.json`) for this repo: for every MCP tool approval keyed to the old server name (`roslyn`), add a matching approval with the new server name (`MadQ.RoslynMcp`) and the same `toolName`. Back the file up first, keep the JSON valid, then have me restart the CLI so the changes lock in."
+
+   Only the write/build/rename/restore tools need mirroring; the read-only tools don't appear in the file at all.
+
+> ⚠️ **Restart after manual edits.** The running CLI holds the permissions file in memory and may overwrite it when you approve something new. After editing `permissions-config.json` by hand (or via your agent), restart the CLI (`/restart`) so it reloads the file — otherwise your additions can be clobbered.
+
+Other MCP clients (Claude Desktop, Cursor, etc.) keep their own approval stores keyed by server name; the same principle applies — either re-approve, or update that client's approval cache to the new key.
+
+---
+
 ## Workspace & Type Resolution Issues
+
+### Hundreds of "missing assembly reference" errors, but the project builds fine
+
+**Symptom:** `roslyn_get_diagnostics` reports a flood of `CS0246` / `CS0234` / `CS0103`
+("The type or namespace name 'X' could not be found") across files you never touched, while
+`dotnet build` succeeds.
+
+**Cause:** the workspace loaded with **zero metadata references**. An MSBuild design-time build
+that runs while another process holds one of the files it needs — typically your own editor or
+agent writing a source file or the `.csproj` — can fail and silently yield projects with no
+references at all. Every symbol query over that workspace is then wrong-but-plausible rather than
+failing outright. Nothing is wrong with your code, and a real build will succeed.
+
+**Confirm it:**
+
+```
+roslyn_check_drift  →  "workspace_healthy": false,
+                       "projects_without_references": ["YourProject"]
+```
+
+`roslyn_get_diagnostics` also sets `possible_workspace_load_issue: true` and returns
+`load_warnings` explaining the failed load.
+
+**Fix:** `roslyn_respawn` to reload the workspace. The server retries a dropped-reference load
+once automatically and will refuse to replace a healthy workspace with a reference-less one, so
+this state is usually transient — it most often appears on the *first* load of a session.
+
+> `roslyn_build_project` is the right tool to confirm the code itself is fine: it detects this
+> state and runs a real `dotnet build` rather than short-circuiting on the same Roslyn compilation.
+> Older versions did short-circuit and would simply repeat the phantom errors — pass
+> `forceBuild: true` there.
+
+`last_unhealthy_load` on `roslyn_check_drift` is retained after recovery, so you can still tell
+whether an episode happened earlier in the session.
 
 ### "MSBuild not found"
 
 **Symptom:** Error message about MSBuild not being available.
 
-**Cause:** MSBuildWorkspace mode requires MSBuild on PATH.
+**Actual source messages:**
+- `MSBuild not found. Install .NET SDK or Visual Studio Build Tools. If installed in a non-standard location, pass --msbuild-path (or set ROSLYNMCP_MSBUILD_PATH or DOTNET_ROOT).`
+- `Visual Studio MSBuild not found. Install Visual Studio or Build Tools, or pass --msbuild-path (or set ROSLYNMCP_MSBUILD_PATH) to a VS MSBuild\Current\Bin directory.`
+
+**Cause:** RoslynMcp could not resolve an MSBuild instance for the selected workspace mode.
 
 **Solution:**
-1. **Install MSBuild** via one of:
+1. **Install MSBuild support** via one of:
    - .NET SDK (includes MSBuild) — recommended
-   - Visual Studio (includes MSBuild)
+   - Visual Studio or Build Tools
 
-2. **Or set environment variable** to point to your .NET SDK install location:
+2. **Or point RoslynMcp at your install directly.** The CLI flag takes precedence over the env var:
+
    ```bash
-   # Windows
+   # Highest precedence — a dotnet SDK dir, or a VS MSBuild\Current\Bin dir
+   RoslynMcp.exe --msbuild-path "C:\Program Files\dotnet\sdk\<sdk-version>"
+   RoslynMcp.exe --workspace vs --msbuild-path "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin"
+   ```
+
+   ```bash
+   # Windows — env var equivalents
    set DOTNET_ROOT=C:\Program Files\dotnet
+   set ROSLYNMCP_MSBUILD_PATH=C:\Program Files\dotnet\sdk\<sdk-version>
 
    # macOS/Linux
    export DOTNET_ROOT=/usr/local/share/dotnet
    ```
 
-3. **Fallback behavior:**
-   - RoslynMcp automatically falls back to AdhocWorkspace (source-only mode) if MSBuild isn't available
-   - You'll lose NuGet type resolution but basic analysis still works
+   The override is honored in `auto`, `sdk`, and `vs` modes. In `adhoc` it is ignored — that mode
+   skips MSBuild entirely. An invalid path is not fatal: the server logs it and falls through to
+   normal discovery for the selected mode.
+
+3. **Choose the right mode explicitly:**
+   - `--workspace sdk` for modern SDK-style projects
+   - `--workspace vs` for Windows + Visual Studio MSBuild
+   - `--workspace adhoc` only if you intentionally want reduced semantics
+
+> RoslynMcp does **not** auto-fallback from a failed MSBuild initialization into a full MSBuildWorkspace equivalent. If you want source-only behavior, force `adhoc`.
 
 ---
 
@@ -123,7 +206,7 @@ Common issues and solutions when setting up and using RoslynMcp.
 
 **Symptom:** NuGet types like `List<T>`, `HttpClient`, etc. don't resolve correctly.
 
-**Cause:** No `.csproj` file in target directory, so RoslynMcp uses AdhocWorkspace (source-only mode).
+**Cause:** Your `projectPath` resolved to a directory with no `.csproj`, or you explicitly selected `--workspace adhoc`, so RoslynMcp used AdhocWorkspace (source-only mode).
 
 **Solution:**
 1. **Ensure .csproj exists:**
@@ -150,14 +233,20 @@ Common issues and solutions when setting up and using RoslynMcp.
 
 ### "Could not find project file"
 
-**Symptom:** Error message about missing project file.
+**Symptom:** One of these path-resolution errors:
+- `missing_project_path`
+- `No .csproj file found in or above: ...`
+- `Multiple .csproj files found in ...`
+- `Invalid project path '...': ...`
 
-**Cause:** Path specified doesn't contain a `.csproj` or is incorrect.
+**Cause:** `projectPath` is missing, ambiguous, or points at the wrong place.
 
 **Solution:**
-1. **Use absolute paths** in global configs
-2. **Verify relative paths** in workspace configs are from workspace root
-3. **Check directory structure:**
+1. **Always pass `projectPath` explicitly** — Roslyn tools require it
+2. **Prefer the `.csproj` path directly** when you have one
+3. **If you pass a source file path,** RoslynMcp walks upward looking for exactly one `.csproj`
+4. **If you pass a directory,** RoslynMcp checks that directory for `.csproj`; no match means AdhocWorkspace
+5. **Check directory structure:**
    ```bash
    ls src/MyApp/MyApp.csproj  # Should exist
    ```
@@ -205,8 +294,8 @@ NETSDK1209: The current Visual Studio version does not support targeting .NET 11
 
 **Solution:**
 1. **Verify target directory:**
-   - Check RoslynMcp stderr for `Target: ...` message on startup
-   - Ensure it points to your source directory
+   - Check the `projectPath` you passed to the tool
+   - Prefer the `.csproj` path directly to avoid ambiguity
 
 2. **Manually invalidate:**
    - Make a trivial edit and save
@@ -249,27 +338,26 @@ NETSDK1209: The current Visual Studio version does not support targeting .NET 11
 
 **Solution:**
 1. **Target specific project** — don't load entire solution if unnecessary
-2. **Use `projectPath` parameter** — v0.3.0 allows per-tool project selection
+2. **Use `projectPath` parameter** — prefer the exact `.csproj` you want to inspect
 3. **Restart RoslynMcp** — clears workspace cache
 
-**Expected memory usage:**
-- Small project (<10K LOC): ~50-100 MB
-- Medium project (10-50K LOC): ~200-500 MB
-- Large solution (>50K LOC): ~500 MB - 1 GB
+**Expected memory usage:** highly project-dependent; multi-project MSBuild workspaces use
+more memory than small Adhoc workspaces.
 
 ---
 
 ## Tool-Specific Issues
 
-### `roslyn_build_project` fails with "forceBuild required"
+### `roslyn_build_project` stops after Roslyn errors
 
-**Symptom:** Build tool reports errors but suggests using `forceBuild=true`.
+**Symptom:** Build tool reports:
+`Roslyn reported errors — fix these first, then call roslyn_build_project again.`
 
 **Cause:** Roslyn diagnostics detected errors, so MSBuild was skipped (fast path).
 
 **Solution:**
 1. **Fix Roslyn errors first** — use `roslyn_get_diagnostics` to see what's wrong
-2. **Or force MSBuild** if you suspect MSBuild-specific issues:
+2. **Only use `forceBuild: true`** if you suspect an MSBuild-specific issue (restore, `.targets`, source generator crash):
    ```javascript
    roslyn_build_project({ forceBuild: true })
    ```
@@ -355,8 +443,8 @@ Or: **System Preferences → Security & Privacy → Allow**
 If none of the above solutions work:
 
 1. **Check logs:**
-   - Default location: `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` (Windows) or `~/.local/share/RoslynMcp/logs/roslynmcp.{pid}.log` (macOS/Linux)
-   - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/ERROR/INFO)
+   - Default location: your OS local-app-data folder under `RoslynMcp\logs\roslynmcp.{pid}.log`
+   - Look for entries with `"level":"ERROR"` (log format is NDJSON; valid levels are START/STOP/TOOL/HOOK/ERROR/INFO)
 
 2. **Enable detailed logging:**
    - Set `ROSLYNMCP_LOG_PATH` environment variable to a custom path
@@ -378,4 +466,4 @@ If none of the above solutions work:
 
 ---
 
-**Last Updated:** 2026-03-28 (v0.7.8-alpha)
+**Last Updated:** 2026-07-18 (v0.8.1-beta)

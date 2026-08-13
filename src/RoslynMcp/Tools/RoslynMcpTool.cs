@@ -2,6 +2,8 @@ using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
+using ModelContextProtocol.Protocol;
+using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
 
@@ -89,7 +91,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			_                                      => false
 		};
 	}
-
+	
 	/// <summary>
 	///     Starts a timed tool scope. Dispose the returned handle to log the outcome.
 	///     Usage: <c>using var scope = BeginTool("roslyn_foo", subject);</c>
@@ -120,19 +122,39 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	// Static cache for project path inference: maps relative/bare paths to resolved full paths.
 	// Enabled by default; disable via ROSLYNMCP_DISABLE_PATH_CACHE=true env var.
 	// Entries evicted above 500 to prevent unbounded growth in long-running server sessions.
-	const int pathCacheMaxSize = 500;
+	const int pathCacheMaxSize = 500
+	;
 	
 	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
-	
+
+	// Static — must guard the static pathCache across ALL tool instances. A per-instance lock
+	// would let different tool types write the shared Dictionary concurrently and corrupt it.
 #if NET9_0_OR_GREATER
-		private readonly Lock             pathCacheLock   = new();
+	static readonly Lock              pathCacheLock   = new();
 #else
-		private readonly object           pathCacheLock   = new();
+	static readonly object            pathCacheLock   = new();
 #endif
 	
 	// Computed on every access so the read is guaranteed to happen after ServerArgs.Initialize().
-	static bool PathCacheEnabled => !ServerArgs.Current.DisablePathCache;
+	static bool PathCacheEnabled => !ServerArgs.Current.DisablePathCache
+	;
 	
+	/// <summary>
+	///     Load-health snapshot for the workspace serving <paramref name="projectPath"/>, or
+	///     <see langword="null"/> if it cannot be determined. Never throws: health is diagnostic
+	///     colour on a result the caller already has, so a failure here must not turn a successful
+	///     tool call into an error.
+	/// </summary>
+	protected WorkspaceHealth? TryGetHealth(string projectPath)
+	{
+		try {
+			return workspace.GetHealth(projectPath);
+		}
+		catch {
+			return null;
+		}
+	}
+
 	/// <summary>
 	///     Tries to resolve a project path and get the compilation. Returns structured errors on failure.
 	/// </summary>
@@ -184,7 +206,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				// which when passed back on the next call would load an AdhocWorkspace with no
 				// BCL references. Path.GetFullPath resolves relative to CWD — the same resolution
 				// that WorkspaceManager.ResolveProjectPath performs.
-				var resolvedFull = Path.GetFullPath(originalPath);
+				var resolvedFull = Path.GetFullPath(originalPath)
+				;
 				
 				lock(pathCacheLock) {
 					
@@ -433,18 +456,23 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     if the file isn't found there, walks subdirectories looking for a suffix match.
 	///     Returns null if the file can't be found.
 	/// </summary>
-	protected static string? ResolveFilePath(string filePath, string rootPath)
+	protected static string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary)
 	{
 		try {
 			
-			if(Path.IsPathRooted(filePath))
+			if(Path.IsPathRooted(filePath)) {
 				
-				return File.Exists(filePath) ? filePath : null;
+				// Normalize first — prevents traversal via ".." in rooted paths.
+				var full = Path.GetFullPath(filePath)
+				;
+				
+				return boundary.IsPathAllowed(full) && File.Exists(full) ? full : null;
+			}
 			
 			var normalized = NormalizePath(filePath);
 			var direct     = Path.GetFullPath(Path.Combine(rootPath, normalized));
 			
-			if(File.Exists(direct))
+			if(File.Exists(direct) && boundary.IsPathAllowed(direct))
 				
 				return direct;
 			
@@ -462,6 +490,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
 				
 				try {
+					if(!boundary.IsPathAllowed(candidate))
+						continue;
 					
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
 						
@@ -574,6 +604,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static bool TryResolveTargetPath(
 		string filePath,
 		string rootPath,
+		SecurityBoundary boundary,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out string? fullPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
 	{
@@ -584,17 +615,18 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			if(Path.IsPathRooted(filePath)) {
 				
-				// Absolute path — verify it stays under root with separator guard
-				// to prevent prefix collisions (e.g. root "D:\Foo" matching "D:\FooBar\file.cs").
-				if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
-					(filePath.Length > rootPath.Length && filePath[rootPath.Length] is not '\\' and not '/')) {
+				// Normalize first — prevents traversal via ".." embedded in rooted paths.
+				var rootedFull = Path.GetFullPath(filePath)
+				;
+				
+				if(!boundary.IsPathAllowed(rootedFull)) {
 					
-					error = $"Path '{filePath}' is outside the project root.";
+					error = "The specified path is not accessible.";
 					
 					return false;
 				}
 				
-				fullPath = filePath;
+				fullPath = rootedFull;
 				
 				return true;
 			}
@@ -603,10 +635,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			var candidate  = Path.GetFullPath(Path.Combine(rootPath, normalized));
 			
 			// Under-root guard — prevent path traversal (e.g. ../../etc/passwd).
-			if(!candidate.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase) ||
-				(candidate.Length > rootPath.Length && candidate[rootPath.Length] is not '\\' and not '/')) {
+			if(!boundary.IsPathAllowed(candidate)) {
 				
-				error = $"Path '{filePath}' resolves outside the project root.";
+				error = "The specified path is not accessible.";
 				
 				return false;
 			}
@@ -615,9 +646,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return true;
 		}
-		catch(Exception ex) when(ex is ArgumentException or IOException) {
+		catch(Exception ex) when(ex is ArgumentException or IOException or NotSupportedException or UnauthorizedAccessException) {
 			
-			error = $"Invalid path '{filePath}': {ex.Message}";
+			error = "The specified path is not accessible.";
 			
 			return false;
 		}
@@ -625,6 +656,24 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	protected static string FormatModifiers(ISymbol symbol)
 		=> SymbolFormatter.FormatModifiers(symbol);
+	
+	/// <summary>
+	///     Returns true if <paramref name="path"/> is at or below <paramref name="root"/>.
+	///     Expects both arguments to already be normalized via <see cref="Path.GetFullPath"/>.
+	///     Uses a separator-aware comparison to prevent prefix collisions
+	///     (e.g. root <c>D:\Foo</c> must not match <c>D:\FooBar\file.cs</c>).
+	/// </summary>
+	protected static bool IsPathUnderRoot(string path, string root)
+	{
+		var rootNorm = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		
+		if(string.Equals(path, rootNorm, StringComparison.OrdinalIgnoreCase))
+			
+			return true;
+		
+		return path.StartsWith(rootNorm + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+			|| path.StartsWith(rootNorm + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+	}
 	
 	/// <summary>
 	///     Finds a SyntaxTree in the compilation by relative file path suffix match.
@@ -668,13 +717,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static string NormalizeLineEndings(string replacement, string fileContent)
 	{
 		var hasCrlf = fileContent.Contains("\r\n");
-
+		
 		return hasCrlf && !replacement.Contains("\r\n")
 			? replacement.Replace("\n", "\r\n")
 			: replacement
 		;
 	}
-
+	
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 	
@@ -745,6 +794,32 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     Resolves a type by CLR metadata name, tolerating cross-assembly ambiguity.
+	///     <see cref="Compilation.GetTypeByMetadataName"/> returns null when several referenced
+	///     assemblies define the same metadata name — even if all but one are inaccessible — so
+	///     this falls back to <see cref="Compilation.GetTypesByMetadataName"/>, preferring the
+	///     source assembly, then public metadata types.
+	/// </summary>
+	protected static INamedTypeSymbol? GetTypeByMetadataNameOrBest(Compilation compilation, string metadataName)
+	{
+		var direct = compilation.GetTypeByMetadataName(metadataName);
+		
+		if(direct is not null)
+			
+			return direct;
+		
+		var candidates = compilation.GetTypesByMetadataName(metadataName);
+		
+		if(candidates.IsEmpty)
+			
+			return null;
+		
+		return candidates.FirstOrDefault(t => SymbolEqualityComparer.Default.Equals(t.ContainingAssembly, compilation.Assembly))
+			?? candidates.FirstOrDefault(t => t.DeclaredAccessibility == Accessibility.Public)
+			?? candidates[0];
+	}
+	
+	/// <summary>
 	///     Resolves a symbol by name from a compilation. When <paramref name="containingType"/> is
 	///     provided, searches that type's members. Otherwise tries type-first lookup (metadata name →
 	///     SimpleNameFinder) before falling back to AnySymbolFinder for members.
@@ -753,21 +828,21 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	{
 		if(containingType is not null) {
 			
-			var type = compilation.GetTypeByMetadataName(containingType)
+			var type = GetTypeByMetadataNameOrBest(compilation, containingType)
 				?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(containingType));
 			
 			return type?.GetMembers(name).FirstOrDefault();
 		}
 		
-		var typeSymbol = compilation.GetTypeByMetadataName(name)
+		var typeSymbol = GetTypeByMetadataNameOrBest(compilation, name)
 			?? compilation.GlobalNamespace.Accept(new SimpleNameFinder<INamedTypeSymbol>(name));
-
+		
 		return typeSymbol is not null
 			? typeSymbol
 			: compilation.GlobalNamespace.Accept(new AnySymbolFinder(name))
 		;
 	}
-
+	
 	/// <summary>
 	///     Finds all symbols with <paramref name="symbolName"/> in the compilation. When
 	///     <paramref name="containingType"/> is provided, returns the single matching member (or empty
@@ -790,6 +865,135 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     Resolves the symbol at a 1-based line/column in a file of this compilation — the
+	///     declared symbol at the position, or the referenced one. Position resolution pinpoints
+	///     overloads, locals, and parameters that name-based lookup cannot distinguish. Works from
+	///     the compilation (not a Document), so the result belongs to the same snapshot — required
+	///     by Renamer — and Adhoc workspaces are covered. Returns null when the file, position, or
+	///     symbol cannot be resolved.
+	/// </summary>
+	protected static async Task<ISymbol?> FindSymbolAtPosition(Compilation compilation, string filePath, int line, int column, CancellationToken cancellationToken)
+	{
+		if(FindSyntaxTree(compilation, filePath) is not { } tree)
+			
+			return null;
+		
+		var text     = await tree.GetTextAsync(cancellationToken);
+		var position = GetPosition(text, line, column);
+		
+		if(position < 0)
+			
+			return null;
+		
+		var model = compilation.GetSemanticModel(tree);
+		var token = (await tree.GetRootAsync(cancellationToken)).FindToken(position);
+		
+		for(var node = token.Parent; node is not null; node = node.Parent) {
+			
+			if(model.GetDeclaredSymbol(node, cancellationToken) is { } declared)
+				
+				return declared;
+			
+			var info = model.GetSymbolInfo(node, cancellationToken);
+			
+			if((info.Symbol ?? info.CandidateSymbols.FirstOrDefault()) is { } referenced)
+				
+				return referenced;
+		}
+		
+		return null;
+	}
+	
+	/// <summary>Formats one ambiguous-symbol candidate as "kind Display — file:line".</summary>
+	protected static string FormatSymbolCandidate(ISymbol symbol, string rootPath)
+	{
+		var span = symbol.Locations.FirstOrDefault(l => l.IsInSource)?.GetLineSpan();
+		var file = span?.Path is { Length: > 0 } p ? TryMakeRelative(p, rootPath) ?? p : "?";
+		var line = span is { } s ? s.StartLinePosition.Line + 1 : 0;
+		
+		return $"{symbol.Kind.ToString().ToLowerInvariant()} {symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} — {file}:{line}";
+	}
+	
+	/// <summary>
+	///     Builds the structured ambiguous-name failure: candidate list with the exact
+	///     containingType / filePath+line values the agent needs for a self-recovering retry.
+	///     This is the default ambiguity response — elicitation only runs when enabled via
+	///     --elicit / ROSLYNMCP_ELICIT (see <see cref="ServerArgs.Elicit"/>) or a project-local
+	///     config file (see <see cref="ProjectConfig.EffectiveElicit"/>).
+	/// </summary>
+	protected static AmbiguousSymbolResult AmbiguousSymbolError(ISymbol[] candidates, string symbolName, string rootPath)
+	{
+		var items = candidates.Select(s => {
+			
+			var span = s.Locations.FirstOrDefault(l => l.IsInSource)?.GetLineSpan();
+			var file = span?.Path is { Length: > 0 } p ? TryMakeRelative(p, rootPath) ?? p : null;
+			
+			return new SymbolCandidate(
+				s.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+				s.Kind.ToString().ToLowerInvariant(),
+				s.ContainingType?.Name,
+				file,
+				span is { } sp ? sp.StartLinePosition.Line + 1 : 0);
+		}).ToArray();
+		
+		return new AmbiguousSymbolResult(
+			$"{candidates.Length} symbols match '{symbolName}'.",
+			items,
+			"Pick the intended symbol and re-call with its containingType (or filePath + line to pinpoint an overload, local, or parameter). " +
+			"If the user's intent is not clear from the conversation, ask them which candidate they meant.");
+	}
+	
+	/// <summary>
+	///     Resolves an ambiguous name to one symbol by asking the user through MCP elicitation
+	///     (single-select form). Returns null when the client lacks elicitation support, the user
+	///     declined, or the answer did not resolve — callers then fail with the candidate list so
+	///     the agent can retry with containingType or filePath+line. Elicitation-based
+	///     disambiguation follows darylmcd/Roslyn-Backed-MCP's UX (no code reused).
+	/// </summary>
+	protected static async Task<ISymbol?> TryElicitSymbolChoice(McpServer server, ISymbol[] candidates, string symbolName, string rootPath, CancellationToken cancellationToken)
+	{
+		if(server.ClientCapabilities?.Elicitation is null)
+			
+			return null;
+		
+		// Const values must be unique — display strings can collide (e.g. partial types), so the
+		// 1-based index is the round-tripped value and the display string is only the title.
+		var options = candidates
+			.Select((s, i) => new ElicitRequestParams.EnumSchemaOption {
+				Const = $"{i + 1}",
+				Title = FormatSymbolCandidate(s, rootPath),
+			})
+			.ToList();
+		
+		ElicitResult result;
+		
+		try {
+			result = await server.ElicitAsync(
+				new ElicitRequestParams {
+					Message         = $"Multiple symbols match '{symbolName}'. Which one should be used?",
+					RequestedSchema = new ElicitRequestParams.RequestSchema {
+						Properties = { ["symbol"] = new ElicitRequestParams.TitledSingleSelectEnumSchema { OneOf = options } },
+						Required   = ["symbol"],
+					},
+				},
+				cancellationToken);
+		}
+		catch(Exception ex) when(ex is not OperationCanceledException) {
+			// A client that advertises elicitation but fails the request must not break the tool —
+			// fall through to the candidate-list failure path.
+			return null;
+		}
+		
+		if(!result.IsAccepted || result.Content is not { } content || !content.TryGetValue("symbol", out var chosen))
+			
+			return null;
+		
+		return int.TryParse(chosen.GetString(), out var index) && index >= 1 && index <= candidates.Length
+			? candidates[index - 1]
+			: null;
+	}
+	
+	/// <summary>
 	///     Returns a canonical "symbol not found" <see cref="ErrorResult"/> with standardized hint text.
 	///     Callers must pass this to <c>scope.Failed("symbol not found", ...)</c> — the analyzer
 	///     requires the scope terminal to appear directly at the return site.
@@ -798,6 +1002,96 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		new(
 			$"Symbol '{symbolName}' not found.",
 			"Use roslyn_get_type_members or roslyn_find_references to verify the name.");
+	
+	/// <summary>
+	///     Detects a VS Code Copilot chat symbol-reference prefix ("sym:" or "#sym:") that chat
+	///     serialization prepends to backtick-quoted terms. Returns true when the prefix is
+	///     present; <paramref name="stripped"/> is the trimmed remainder — possibly empty when
+	///     the chat pipeline truncated the reference to the bare prefix.
+	/// </summary>
+	protected static bool HasChatSymbolRefPrefix(string value, out string stripped)
+	{
+		var trimmed = value.TrimStart();
+		
+		var rest =
+			  trimmed.StartsWith("#sym:", StringComparison.Ordinal) ? trimmed["#sym:".Length..]
+			: trimmed.StartsWith("sym:",  StringComparison.Ordinal) ? trimmed["sym:".Length..]
+			: null
+		;
+		
+		if(rest is null) {
+			
+			stripped = value;
+			return false;
+		}
+		
+		stripped = rest.Trim();
+		return true;
+	}
+	
+	/// <summary>
+	///     Guard for symbol/type/method name arguments: strips a chat symbol-reference prefix in
+	///     place — identifiers can never contain ':', so the prefix is unambiguous chat noise.
+	///     Returns false with a populated <paramref name="error"/> when only the bare prefix
+	///     arrived (the name was truncated upstream), so the agent re-sends the plain name.
+	///     Call after BeginTool so the log keeps the original value.
+	/// </summary>
+	protected static bool TryStripChatSymbolRef(ref string value, out ErrorResult? error)
+	{
+		error = null;
+		
+		if(!HasChatSymbolRefPrefix(value, out var stripped))
+			
+			return true;
+		
+		if(stripped.Length == 0) {
+			
+			error = new ErrorResult(
+				"The argument was a VS Code chat symbol reference whose name was lost ('sym:').",
+				"Re-send the plain symbol name without the 'sym:' prefix.");
+			
+			return false;
+		}
+		
+		value = stripped;
+		return true;
+	}
+	
+	/// <summary>
+	///     Null-tolerant companion for optional name arguments (e.g. containingType). A separate
+	///     name, not an overload — nullable annotations are erased from CLR signatures, so
+	///     'ref string' and 'ref string?' overloads would collide (CS0111).
+	/// </summary>
+	protected static bool TryStripChatSymbolRefOptional(ref string? value, out ErrorResult? error)
+	{
+		error = null;
+		
+		if(value is null)
+			
+			return true;
+		
+		var name = value;
+		var ok   = TryStripChatSymbolRef(ref name, out error);
+		
+		value = name;
+		return ok;
+	}
+	
+	/// <summary>Caution for a search that only matched after stripping a chat symbol-reference prefix.</summary>
+	protected static string ChatRefFallbackCaution(string original, string stripped) =>
+		$"No matches for '{original}'; interpreted it as a VS Code chat symbol reference and searched '{stripped}' instead.";
+	
+	/// <summary>Hint for a zero-match search whose pattern was a bare chat-reference prefix (name truncated upstream).</summary>
+	protected const string ChatRefTruncatedHint =
+		"0 matches. If this was a VS Code chat symbol reference whose name was truncated to 'sym:', re-send the plain symbol name.";
+	
+	/// <summary>Hint for a zero-match search where the verbatim pattern and its chat-reference-stripped form both found nothing.</summary>
+	protected static string ChatRefBothTriedHint(string original, string stripped) =>
+		$"0 matches for '{original}' (also tried '{stripped}' in case the pattern was a VS Code chat symbol reference).";
+	
+	/// <summary>Joins two optional caution strings, or null when both are null.</summary>
+	protected static string? ComposeCautions(string? first, string? second) =>
+		first is null ? second : second is null ? first : $"{first} {second}";
 	
 	/// <summary>
 	///     Saves pre- and post-change backup snapshots, returning the pre-change token on success

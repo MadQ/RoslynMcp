@@ -54,6 +54,25 @@ internal sealed record FindReferencesResult(
 	[property: JsonPropertyName("has_more")]         bool     HasMore
 ) : ToolResult;
 
+internal sealed record UnusedSymbolEntry(
+	[property: JsonPropertyName("kind")]          string Kind,
+	[property: JsonPropertyName("name")]          string Name,
+	[property: JsonPropertyName("accessibility")] string Accessibility,
+	[property: JsonPropertyName("confidence")]    string Confidence,
+	[property: JsonPropertyName("reason")]        string Reason,
+	[property: JsonPropertyName("file")]          string File,
+	[property: JsonPropertyName("line")]          int    Line
+);
+
+internal sealed record FindUnusedResult(
+	[property: JsonPropertyName("total_unused")] int                 TotalUnused,
+	[property: JsonPropertyName("skip")]         int                 Skip,
+	[property: JsonPropertyName("take")]         int                 Take,
+	[property: JsonPropertyName("unused")]       UnusedSymbolEntry[] Unused,
+	[property: JsonPropertyName("page_token")]   string?             PageToken,
+	[property: JsonPropertyName("has_more")]     bool                HasMore
+) : ToolResult;
+
 internal sealed record FindImplementationsResult(
 	[property: JsonPropertyName("symbol_type")]           string   SymbolType,
 	[property: JsonPropertyName("symbol_name")]           string   SymbolName,
@@ -119,6 +138,23 @@ internal sealed record ListTypesResult(
 
 internal sealed record ListTypesEmptyResult(
 	[property: JsonPropertyName("message")] string Message
+) : ToolResult;
+
+internal sealed record TypeDependencyEntry(
+	[property: JsonPropertyName("type_name")]       string  TypeName,
+	[property: JsonPropertyName("dependency_kind")] string  DependencyKind,
+	[property: JsonPropertyName("member")]          string? Member
+);
+
+internal sealed record TypeDependenciesResult(
+	[property: JsonPropertyName("type_name")]          string                TypeName,
+	[property: JsonPropertyName("type_kind")]          string                TypeKind,
+	[property: JsonPropertyName("total_dependencies")] int                   TotalDependencies,
+	[property: JsonPropertyName("skip")]               int                   Skip,
+	[property: JsonPropertyName("take")]               int                   Take,
+	[property: JsonPropertyName("dependencies")]       TypeDependencyEntry[] Dependencies,
+	[property: JsonPropertyName("page_token")]         string?               PageToken,
+	[property: JsonPropertyName("has_more")]           bool                  HasMore
 ) : ToolResult;
 
 internal sealed record TypeHierarchyResult(
@@ -262,7 +298,32 @@ internal sealed record ProjectInfoResult(
 	[property: JsonPropertyName("root_namespace")]       string?   RootNamespace,
 	[property: JsonPropertyName("target_frameworks")]    string[]? TargetFrameworks,
 	[property: JsonPropertyName("allow_unsafe_blocks")]  bool?     AllowUnsafeBlocks,
-	[property: JsonPropertyName("warnings_as_errors")]   bool?     WarningsAsErrors
+	[property: JsonPropertyName("warnings_as_errors")]   bool?     WarningsAsErrors,
+	[property: JsonPropertyName("load_warnings")]        string[]? LoadWarnings
+) : ToolResult;
+
+internal sealed record CheckDriftResult(
+	[property: JsonPropertyName("drifted")]              bool     Drifted,
+	[property: JsonPropertyName("drifted_count")]        int      DriftedCount,
+	[property: JsonPropertyName("drifted_files")]        string[] DriftedFiles,
+	[property: JsonPropertyName("checked_count")]        int      CheckedCount,
+	[property: JsonPropertyName("last_synced_utc")]      string   LastSyncedUtc,
+	[property: JsonPropertyName("is_msbuild_workspace")] bool     IsMsbuildWorkspace,
+	// Reference health is a second, independent axis: source can be perfectly in sync while the
+	// workspace holds no metadata references at all. Reporting only drift gave a false all-clear
+	// on exactly that failure (issue #235).
+	[property: JsonPropertyName("workspace_healthy")]    bool     WorkspaceHealthy,
+	[property: JsonPropertyName("projects_without_references")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]?                                            ProjectsWithoutReferences,
+	[property: JsonPropertyName("last_unhealthy_load")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string?                                              LastUnhealthyLoad,
+	// A third axis, and the only one that can report a file the workspace does not know about
+	// yet: drifted_files is built from existing documents, so a brand-new file is invisible to it.
+	[property: JsonPropertyName("reload_pending")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+	bool                                                 ReloadPending
 ) : ToolResult;
 
 internal sealed record GetTriviaNoMatchResult(
@@ -324,7 +385,12 @@ internal sealed record DiagnosticsResult(
 	DiagnosticItem[]?                             Items,
 	[property: JsonPropertyName("possible_workspace_load_issue")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-	bool                                         PossibleWorkspaceLoadIssue
+	bool                                         PossibleWorkspaceLoadIssue,
+	// Present only when the workspace is genuinely unhealthy — the symptom shows up here, so the
+	// evidence has to be here too rather than only on roslyn_get_project_info (issue #235).
+	[property: JsonPropertyName("load_warnings")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]?                                    LoadWarnings
 ) : ToolResult;
 
 internal sealed record ListFilesResult(

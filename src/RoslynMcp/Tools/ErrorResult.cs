@@ -45,3 +45,34 @@ internal record ErrorResult : ToolResult, IToolError
 		Hint  = hint;
 	}
 }
+
+/// <summary>
+///     One candidate in an <see cref="AmbiguousSymbolResult"/>. <see cref="ContainingType"/> and
+///     <see cref="FilePath"/>+<see cref="Line"/> are the exact values an agent copies into the
+///     retry call's disambiguation parameters.
+/// </summary>
+internal sealed record SymbolCandidate(
+	[property: JsonPropertyName("symbol")]         string  Symbol,
+	[property: JsonPropertyName("kind")]           string  Kind,
+	[property: JsonPropertyName("containingType")] string? ContainingType,
+	[property: JsonPropertyName("filePath")]       string? FilePath,
+	[property: JsonPropertyName("line")]           int     Line
+);
+
+/// <summary>
+///     Ambiguous-name failure carrying the candidate list in machine-usable form, so the calling
+///     agent can self-recover by re-calling with a candidate's containingType or filePath+line
+///     instead of the workflow stalling. Serializes to:
+///     <c>{ "error": "...", "candidates": [ { symbol, kind, containingType, filePath, line } ], "hint": "..." }</c>
+/// </summary>
+internal sealed record AmbiguousSymbolResult : ErrorResult
+{
+	public AmbiguousSymbolResult(string error, SymbolCandidate[] candidates, string hint) : base(error, hint)
+	{
+		Candidates = candidates;
+	}
+	
+	[JsonPropertyName("candidates")]
+	[JsonPropertyOrder(-8)]
+	public SymbolCandidate[] Candidates { get; init; }
+}

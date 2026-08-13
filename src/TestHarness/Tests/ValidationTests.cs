@@ -15,6 +15,47 @@ static class ValidationTests
 					new { projectPath = ctx.TargetPath },
 					data => data is not null)),
 			
+			// The target project consumes RoslynMcp.Analyzers, so a healthy analyzer run
+			// produces a summary WITHOUT the degraded-mode notes in hint.
+			new("roslyn_get_diagnostics: includeAnalyzers runs project analyzers",
+				() => ctx.RunTestAsync(
+					"roslyn_get_diagnostics",
+					new { projectPath = ctx.TargetPath, includeAnalyzers = true, take = 0 },
+					data => {
+						
+						var hint = data?["hint"]?.GetValue<string>();
+						
+						return data?["summary"] is not null
+							&& hint?.Contains("Analyzer execution failed") is not true
+							&& hint?.Contains("no analyzer references") is not true;
+					})),
+			
+			// Must run AFTER the includeAnalyzers test above: proves shadow-copy loading left
+			// the original analyzer DLL writable (the server never locks analyzed outputs).
+			new("roslyn_get_diagnostics: includeAnalyzers does not lock analyzer DLLs",
+				() => {
+					
+					var analyzerDll = Directory
+						.EnumerateFiles(
+							Path.Combine(ctx.RepoRoot, "src", "RoslynMcp.Analyzers", "bin"),
+							"RoslynMcp.Analyzers.dll",
+							SearchOption.AllDirectories)
+						.FirstOrDefault();
+					
+					if(analyzerDll is null)
+						return Task.FromResult((true, "PASS  (no analyzer output found — nothing to lock)"));
+					
+					try {
+						
+						using var fs = File.Open(analyzerDll, FileMode.Open, FileAccess.Write, FileShare.None);
+						
+						return Task.FromResult((true, "PASS  (original DLL writable)"));
+					}
+					catch(IOException) {
+						return Task.FromResult((false, $"FAIL  (analyzer DLL locked: {analyzerDll})"));
+					}
+				}),
+			
 			new("roslyn_build_project: smart Roslyn-first build",
 				() => ctx.RunTestAsync(
 					"roslyn_build_project",
@@ -94,6 +135,86 @@ static class ValidationTests
 							&& tfms.Any(t => t?.GetValue<string>()?.StartsWith("net") == true)
 						);
 					})),
+			
+			// Drift probe: bump an existing file's mtime WITHOUT changing content (no source
+			// mutation risk). The probe must report drift before the FSW debounce flush lands,
+			// and self-heal after it. The probe reads a non-reloading snapshot, so it can
+			// observe the pre-flush staleness window.
+			new("roslyn_check_drift: detects out-of-band mtime change, then self-heals",
+				async () => {
+					
+					var touchPath = Path.Combine(ctx.RepoRoot, "src", "RoslynMcp", "Program.cs");
+					
+					// Let any recent sync age past the 2s drift tolerance, then touch.
+					await Task.Delay(2500);
+					File.SetLastWriteTimeUtc(touchPath, DateTime.UtcNow);
+					
+					var (driftSeen, msg1) = await ctx.RunTestAsync(
+						"roslyn_check_drift",
+						new { projectPath = ctx.TargetPath },
+						data => data?["drifted"]?.GetValue<bool>() == true
+							&& data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Program.cs") == true) == true);
+					
+					if(!driftSeen)
+						return (false, $"FAIL  (mtime touch not reported as drift) {msg1}");
+					
+					// The FSW flush lands ~300ms after the touch; give it a second, then expect healed.
+					await Task.Delay(1200);
+					
+					var (healed, msg2) = await ctx.RunTestAsync(
+						"roslyn_check_drift",
+						new { projectPath = ctx.TargetPath },
+						data => data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Program.cs") == true) is not true);
+					
+					return healed
+						? (true, "PASS  (drift detected, then healed)")
+						: (false, $"FAIL  (drift did not heal after flush) {msg2}");
+				}),
+			
+			// #228: VS Code Copilot chat serializes backticked terms as 'sym:'-prefixed references.
+			// Tier 1 (name params): the prefix is stripped eagerly — identifiers cannot contain ':'.
+			new("roslyn_find_references: strips sym: chat-reference prefix from symbolName",
+				() => ctx.RunTestAsync(
+					"roslyn_find_references",
+					new { symbolName = "sym:GetCompilation", projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["total_references"]?.GetValue<int>() > 0)),
+			
+			// Tier 1, bare prefix: the name was truncated upstream — structured error + recovery hint.
+			new("roslyn_find_references: bare sym: prefix errors with recovery hint",
+				() => ctx.RunTestAsync(
+					"roslyn_find_references",
+					new { symbolName = "sym:", projectPath = ctx.TargetPath },
+					data => data?["error"] is not null
+						&& data?["hint"]?.GetValue<string>()?.Contains("Re-send the plain symbol name") == true)),
+			
+			// Tier 2 fallback: the probe pattern is concatenated so this file (which IS part of the
+			// searched corpus — the workspace loads the full solution) never contains it verbatim.
+			// The verbatim search finds nothing, the stripped retry fires — 'BeginTool' results + caution.
+			new("roslyn_semantic_search: sym:-prefixed pattern falls back with caution",
+				() => ctx.RunTestAsync(
+					"roslyn_semantic_search",
+					new { pattern = "sym:" + "Begin" + "Tool", projectPath = ctx.TargetPath },
+					data => data?["total_matches"]?.GetValue<int>() > 0
+						&& data?["_caution"]?.GetValue<string>()?.Contains("chat symbol reference") == true)),
+			
+			// Tier 2 verbatim-first: the server source contains literal 'sym:' text (this feature's
+			// own strings and comments), so a bare 'sym:' pattern matches verbatim — no fallback caution.
+			new("roslyn_semantic_search: literal sym: text still matches verbatim",
+				() => ctx.RunTestAsync(
+					"roslyn_semantic_search",
+					new { pattern = "sym:", projectPath = ctx.TargetPath },
+					data => data?["total_matches"]?.GetValue<int>() > 0
+						&& data?["_caution"]?.GetValue<string>()?.Contains("chat symbol reference") is not true)),
+			
+			// Tier 2, both readings empty: verbatim and stripped both miss — hint says both were tried.
+			// Concatenated for the same reason as above: neither the prefixed nor the stripped form
+			// may appear verbatim anywhere in the searched corpus (which includes this file).
+			new("roslyn_semantic_search: sym:-prefixed miss hints both readings tried",
+				() => ctx.RunTestAsync(
+					"roslyn_semantic_search",
+					new { pattern = "sym:" + "NoSuchName" + "Xyzzy", projectPath = ctx.TargetPath },
+					data => data?["total_matches"]?.GetValue<int>() == 0
+						&& data?["hint"]?.GetValue<string>()?.Contains("also tried") == true)),
 		};
 		
 		return new TestGroup($"Validation Tools ({tests.Count} tests)", tests, Teardown: () =>

@@ -44,12 +44,22 @@ internal sealed class AddParameterEditor : SignatureEditor
 		Compilation compilation,
 		CancellationToken cancellationToken)
 	{
-		// Build the new parameter list (existing + added).
-		List<ParameterSyntax> newParams = [.. declaration.ParameterList.Parameters]
+		// Match the file's line-ending style and the declaration's indentation so synthesized
+		// nodes blend into the surrounding code without a formatting pass — Formatter would
+		// impose its default options on projects that carry no .editorconfig.
+		var eolTrivia = declaration.GetTrailingTrivia().LastOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia))
+		;
+		var eol          = eolTrivia.IsKind(SyntaxKind.EndOfLineTrivia) ? eolTrivia : SyntaxFactory.CarriageReturnLineFeed;
+		var indentTrivia = declaration.GetLeadingTrivia().LastOrDefault(t => t.IsKind(SyntaxKind.WhitespaceTrivia));
+		var indent       = indentTrivia.IsKind(SyntaxKind.WhitespaceTrivia) ? indentTrivia : SyntaxFactory.Whitespace("");
+		
+		// Append to the existing parameter list in place so its original formatting survives.
+		var newParamList = declaration.ParameterList
 		;
 		
 		foreach(var p in request.AddParameters) {
 			
+			// The trailing space separates the type from the parameter name.
 			var typeSyntax = SyntaxFactory.ParseTypeName(p.Type + " ");
 			
 			if(typeSyntax.ContainsDiagnostics)
@@ -68,15 +78,19 @@ internal sealed class AddParameterEditor : SignatureEditor
 					
 					return SignatureChangeResult.Failed(solution, $"Default value '{p.DefaultValue}' for '{p.Name}' is not valid C#.");
 				
-				param = param.WithDefault(SyntaxFactory.EqualsValueClause(defaultExpr));
+				param = param.WithDefault(SyntaxFactory.EqualsValueClause(
+					SyntaxFactory.Token(SyntaxKind.EqualsToken).WithLeadingTrivia(SyntaxFactory.Space).WithTrailingTrivia(SyntaxFactory.Space),
+					defaultExpr));
 			}
 			
-			newParams.Add(param);
+			// Space after the comma AddParameters inserts (skipped when the list was empty).
+			if(newParamList.Parameters.Count > 0)
+				param = param.WithLeadingTrivia(SyntaxFactory.Space);
+			
+			newParamList = newParamList.AddParameters(param);
 		}
 		
-		var updatedMethod = declaration.WithParameterList(
-			SyntaxFactory.ParameterList(SyntaxFactory.SeparatedList(newParams))
-		);
+		var updatedMethod = declaration.WithParameterList(newParamList);
 		
 		// Build the forwarding overload (old signature → calls new method with defaults).
 		var forwardingArgs = new List<ArgumentSyntax>()
@@ -96,17 +110,13 @@ internal sealed class AddParameterEditor : SignatureEditor
 			forwardingArgs.Add(SyntaxFactory.Argument(defaultExpr));
 		}
 		
+		// NormalizeWhitespace canonicalizes the single-line call — spaces after argument commas.
 		var forwardingCall = SyntaxFactory.InvocationExpression(
 			SyntaxFactory.IdentifierName(method.Name),
 			SyntaxFactory.ArgumentList(SyntaxFactory.SeparatedList(forwardingArgs))
-		);
+		).NormalizeWhitespace();
 		
-		var forwardingBody = method.ReturnsVoid
-			? (StatementSyntax) SyntaxFactory.ExpressionStatement(forwardingCall)
-			: SyntaxFactory.ReturnStatement(forwardingCall)
-		;
-		
-		var deprecationMessage = $"Use {method.Name}({string.Join(", ", newParams.Select(p => p.Type?.ToString().Trim()))}) instead.";
+		var deprecationMessage = $"Use {method.Name}({string.Join(", ", newParamList.Parameters.Select(p => p.Type?.ToString().Trim()))}) instead.";
 		
 		var obsoleteAttr = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(
 			SyntaxFactory.Attribute(
@@ -118,13 +128,28 @@ internal sealed class AddParameterEditor : SignatureEditor
 					))
 				))
 			)
-		));
+		)).WithTrailingTrivia(eol, indent);
 		
+		// Expression-bodied stub: old signature => NewCall(...);. The XML doc comment stays on
+		// the updated method only — the declaration's leading trivia must be stripped BEFORE the
+		// attribute list is added, while it is still attached to what is currently the first
+		// token; added afterwards, the [Obsolete] attribute would render above the doc comment.
 		var forwardingMethod = declaration
-			.WithAttributeLists(declaration.AttributeLists.Add(obsoleteAttr))
-			.WithBody(SyntaxFactory.Block(forwardingBody))
-			.WithExpressionBody(null)
-			.WithSemicolonToken(default)
+			.WithLeadingTrivia()
+		;
+		
+		forwardingMethod = forwardingMethod
+			.WithAttributeLists(forwardingMethod.AttributeLists.Add(obsoleteAttr))
+			// Strip the close paren's trailing trivia so the arrow follows on the same line even
+			// when the original declaration wrapped before its body.
+			.WithParameterList(declaration.ParameterList.WithTrailingTrivia())
+			.WithBody(null)
+			.WithExpressionBody(SyntaxFactory.ArrowExpressionClause(
+				SyntaxFactory.Token(SyntaxKind.EqualsGreaterThanToken).WithLeadingTrivia(SyntaxFactory.Space).WithTrailingTrivia(SyntaxFactory.Space),
+				forwardingCall))
+			.WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken))
+			.WithLeadingTrivia(eol, indent)
+			.WithTrailingTrivia(declaration.GetTrailingTrivia())
 		;
 		
 		// Apply to the syntax tree.

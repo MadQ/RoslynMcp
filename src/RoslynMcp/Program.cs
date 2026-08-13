@@ -43,7 +43,7 @@ if(args.Length > 0)
 
 static int PrintVersion()
 {
-    Console.WriteLine($"roslynmcp v{Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
+    Console.WriteLine($"{RoslynMcp.Cli.ToolCommand.Name} v{Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown"}");
 
     return 0;
 }
@@ -58,15 +58,15 @@ static int PrintHelp()
 
     Console.OutputEncoding = System.Text.Encoding.UTF8;
     Console.WriteLine($"""
-        roslynmcp v{version} — Roslyn MCP server for AI coding agents
+        {RoslynMcp.Cli.ToolCommand.Name} v{version} — Roslyn MCP server for AI coding agents
 
         Usage:
-          roslynmcp [options]            Start MCP server (stdio transport)
-          roslynmcp <command> [options]
+          {RoslynMcp.Cli.ToolCommand.Name} [options]            Start MCP server (stdio transport)
+          {RoslynMcp.Cli.ToolCommand.Name} <command> [options]
 
         Commands:
           setup         Configure AI agent clients (Copilot, Claude, Cursor, ...)
-          setup-project Write per-project hook file to .github/ (git repo required)
+          setup-project Write per-project hook + server config files (git repo required)
           hook          Handle pre-tool-use hook events from stdin (used by hook runners)
           list          List configured AI agent clients
           verify        Verify agent configuration paths
@@ -76,16 +76,33 @@ static int PrintHelp()
               --workspace    <mode>   Workspace mode: auto|sdk|vs|adhoc (default: auto)
           -p, --preload      <path>   Pre-warm workspace on startup (repeatable)
               --log-path     <path>   Log file base path (empty string = disable logging)
-              --msbuild-path <path>   Override MSBuild installation path
+              --msbuild-path <path>   Override MSBuild installation path — a dotnet SDK
+                                      directory or a VS MSBuild\Current\Bin directory.
+                                      Applies to all modes except adhoc.
+              --elicit                On an ambiguous symbol match, ask the user to pick
+                                      interactively (MCP elicitation) instead of returning a
+                                      structured candidate list. Opt-in; needs client
+                                      elicitation support. Default: off.
           -v, --version               Print version and exit
           -h, --help                  Show this help and exit
 
-        Environment variables (override options above):
-          ROSLYNMCP_WORKSPACE            Workspace mode
-          ROSLYNMCP_LOG_PATH             Log file base path
-          ROSLYNMCP_BACKUP_PATH          Backup storage path
-          ROSLYNMCP_LOG_MAX_AGE_DAYS     Log retention in days (default: 30)
-          ROSLYNMCP_BACKUP_MAX_AGE_DAYS  Backup retention in days (default: 90)
+        Environment variables (the CLI flags above take precedence):
+          ROSLYNMCP_WORKSPACE             Workspace mode (same as --workspace)
+          ROSLYNMCP_LOG_PATH              Log file base path (same as --log-path)
+          ROSLYNMCP_MSBUILD_PATH          MSBuild installation path (same as --msbuild-path)
+          ROSLYNMCP_ELICIT                Set to true to enable --elicit (see Options)
+          ROSLYNMCP_BACKUP_PATH           Backup storage path (empty string = disable backups)
+          ROSLYNMCP_LOG_MAX_AGE_DAYS      Log retention in days (default: 30)
+          ROSLYNMCP_BACKUP_MAX_AGE_DAYS   Backup retention in days (default: 90)
+          ROSLYNMCP_PRUNE_MIN_RUNS        Server starts before pruning runs (default: 3)
+          ROSLYNMCP_MAX_CACHED_WORKSPACES LRU workspace cache size (default: 5)
+          ROSLYNMCP_LOAD_TIMEOUT_SECONDS  MSBuild load timeout (default: 300; 0 = no timeout)
+          ROSLYNMCP_DISABLE_PATH_CACHE    Set to true to disable the path resolution cache
+
+        Project config:
+          A committed .madq_roslynmcp.json at the repo root (written by 'setup-project')
+          can set elicit and workspace per project. Explicit settings always win:
+          CLI arg > env var > project file > built-in default.
 
         Documentation: https://github.com/MadQ/RoslynMcp
         """);
@@ -194,9 +211,9 @@ lifetime.ApplicationStarted.Register(() => {
 	if(currentExe is not null)
 	{
 		foreach(var r in RoslynMcp.Cli.AgentDetector.ProbeAll()
-			.Where(r => r.Entry?.CommandPath is not null
+			.Where(r => r.Entry is { Ambiguous: false, CommandPath: not null }
 				&& !string.Equals(r.Entry.CommandPath, currentExe, StringComparison.OrdinalIgnoreCase)))
-			logger.LogInfo("AgentConfig", $"WARN: {r.Client.Name} config points to '{r.Entry!.CommandPath}' — run 'roslynmcp update'");
+			logger.LogInfo("AgentConfig", $"WARN: {r.Client.Name} config points to '{r.Entry!.CommandPath}' — run '{RoslynMcp.Cli.ToolCommand.Name} update'");
 	}
 
 });

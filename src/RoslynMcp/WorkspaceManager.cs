@@ -19,6 +19,33 @@ enum ResolutionKind
 }
 
 /// <summary>
+///     Load-health snapshot for a workspace. <paramref name="ProjectsWithoutReferences"/> is the
+///     authoritative signal: a successfully built project always references at least the core
+///     library, so a non-empty set means the design-time build silently dropped them and symbol
+///     queries over those projects return wrong-but-plausible results rather than failing.
+/// </summary>
+/// <param name="ProjectsWithoutReferences">Projects the live workspace holds with zero metadata references.</param>
+/// <param name="LoadWarnings">Warnings from the load that produced the live workspace.</param>
+/// <param name="LastUnhealthyLoad">
+///     Timestamped record of the most recent unhealthy load, retained across the healing reload
+///     that clears <paramref name="LoadWarnings"/>. Non-null after an episode even once recovered.
+/// </param>
+/// <param name="ReloadPending">
+///     A file change could not be applied incrementally and the reload servicing it has not
+///     completed, so the workspace is behind disk. Distinct from drift: drift compares mtimes of
+///     files the workspace already knows about, and cannot see a file that is not a document yet.
+/// </param>
+internal sealed record WorkspaceHealth(
+	string[] ProjectsWithoutReferences,
+	string[] LoadWarnings,
+	string?  LastUnhealthyLoad,
+	bool     ReloadPending)
+{
+	/// <summary>True when every loaded project resolved at least one metadata reference.</summary>
+	public bool IsHealthy => ProjectsWithoutReferences.Length == 0;
+}
+
+/// <summary>
 ///     Manages Roslyn workspaces with LRU caching. When a .sln/.slnx is found above a .csproj,
 ///     loads the full solution so cross-project semantics (references, rename, implementations)
 ///     work naturally. Falls back to single-project or AdhocWorkspace when no solution exists.
@@ -26,7 +53,7 @@ enum ResolutionKind
 /// </summary>
 internal sealed partial class WorkspaceManager : IDisposable
 {
-	record CacheEntry(string Key, WorkspaceInstance Instance, DateTime LastAccess);
+	record CacheEntry(string Key, WorkspaceInstance Instance, SecurityBoundary Boundary, DateTime LastAccess);
 	
 	readonly Dictionary<string, CacheEntry> cache = new(StringComparer.OrdinalIgnoreCase);
 	
@@ -88,7 +115,14 @@ internal sealed partial class WorkspaceManager : IDisposable
 		;
 		string				cacheKey;
 		
-		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc) {
+		// Route on the *requested* effective mode, not just the post-hoc ResolvedMode — on a
+		// fresh process ResolvedMode is still Auto (EnsureReady only runs inside the
+		// WorkspaceInstance constructor, after routing has committed), so the first .csproj
+		// load in adhoc mode would wrongly take the MSBuild branch and fail (#229).
+		// ResolvedMode == Adhoc stays as a fallback: once the process has skipped MSBuild
+		// registration, MSBuildWorkspace can never work, whatever this path requests.
+		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc
+			|| ProjectConfig.EffectiveWorkspaceMode(normalizedPath, logger) == WorkspaceMode.Adhoc) {
 			
 			instance = WorkspaceInstance.ForDirectory(
 				Directory.Exists(normalizedPath) ? normalizedPath : Path.GetDirectoryName(normalizedPath)!, logger)
@@ -135,11 +169,24 @@ internal sealed partial class WorkspaceManager : IDisposable
 				instance.Dispose();
 				cache[cacheKey] = existing with { LastAccess = DateTime.UtcNow };
 				
+				// Record the alias even on a lost race, or the next call for this path would
+				// slow-path load-and-discard again (see below).
+				if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+					projectToCacheKey[normalizedPath] = cacheKey;
+				
 				return existing.Instance;
 			}
 			
 			foreach(var csproj in instance.ProjectPaths)
 				projectToCacheKey[csproj] = cacheKey;
+			
+			// Adhoc instances are keyed by RootPath (the containing directory) but don't populate
+			// ProjectPaths, so a .csproj-resolving request in adhoc mode would miss both fast-path
+			// lookups on every call — re-loading and discarding a full AdhocWorkspace each time,
+			// and bypassing the keyed lookups in WriteAndInvalidate/ApplyChanges/InvalidateFile
+			// (losing FSW suppression). Alias the requested path to the cache key it landed on.
+			if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+				projectToCacheKey[normalizedPath] = cacheKey;
 			
 			if(cache.Count >= maxCachedWorkspaces) {
 				
@@ -162,7 +209,9 @@ internal sealed partial class WorkspaceManager : IDisposable
 				SweepRetired();
 			}
 			
-			cache[cacheKey] = new CacheEntry(cacheKey, instance, DateTime.UtcNow);
+			var boundary = new SecurityBoundary(instance.RootPath);
+			
+			cache[cacheKey] = new CacheEntry(cacheKey, instance, boundary, DateTime.UtcNow);
 			
 			return instance;
 		}
@@ -184,6 +233,25 @@ internal sealed partial class WorkspaceManager : IDisposable
 		return instance.GetSolution();
 	}
 	
+	/// <summary>
+	///     Load-health warnings for the workspace serving this path: MSBuild load failures and
+	///     projects whose metadata references were silently dropped by the design-time build.
+	/// </summary>
+	public string[] GetLoadWarnings(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).LoadWarnings;
+
+	/// <summary>Load-health snapshot for the workspace serving this path — see <see cref="WorkspaceHealth"/>.</summary>
+	public WorkspaceHealth GetHealth(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).Health;
+	
+	/// <summary>UTC time of the last disk-sync event for the workspace serving this path.</summary>
+	public DateTime GetLastSyncedUtc(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).LastSyncedUtc;
+	
+	/// <summary>Solution snapshot without triggering a pending reload — see WorkspaceInstance.PeekSolution.</summary>
+	public Solution PeekSolution(string resolvedProjectPath)
+		=> GetOrLoadInstance(resolvedProjectPath).PeekSolution();
+	
 	public Project GetProject(string resolvedProjectPath)
 	{
 		var instance = GetOrLoadInstance(resolvedProjectPath);
@@ -198,6 +266,42 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		return (instance.RootPath, instance.IsMSBuild, csprojPath);
 	}
+	
+	public SecurityBoundary GetSecurityBoundary(string resolvedProjectPath)
+	{
+		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var mapped))
+				
+				return mapped.Boundary;
+			
+			if(cache.TryGetValue(normalizedPath, out var direct))
+				
+				return direct.Boundary;
+		}
+		
+		// Not cached yet — load the workspace (which creates and caches the boundary).
+		GetOrLoadInstance(resolvedProjectPath)
+		;
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey2)
+				&& cache.TryGetValue(mappedKey2, out var mapped2))
+				
+				return mapped2.Boundary;
+			
+			if(cache.TryGetValue(normalizedPath, out var direct2))
+				
+				return direct2.Boundary;
+		}
+		
+		throw new InvalidOperationException($"Workspace loaded but no boundary found for '{normalizedPath}'.");
+	}
+	
 	
 	public void InvalidateFile(string resolvedProjectPath, string fullPath)
 	{
