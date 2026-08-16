@@ -538,14 +538,37 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
-	///     Formats a workspace-resolution guard error (from <see cref="TryResolveRoot"/> and friends) into a
-	///     single user-facing message, folding in the retry hint so tools whose result type has no dedicated
-	///     hint field still tell the agent the failure is transient and worth retrying.
+	///     Decomposes a workspace-resolution guard error (from <see cref="TryResolveRoot"/> and friends) into a
+	///     stable programmatic <c>Kind</c> and a single user-facing <c>Message</c> (retry hint folded in), so
+	///     tools whose concrete result type cannot carry a <see cref="ToolResult"/> directly can still populate
+	///     their own message/error fields consistently.
+	///     <para>
+	///         <see cref="PathErrorResult"/> already separates the two: its <see cref="ToolResult.Error"/> is a
+	///         stable code (<c>project_not_found</c>, <c>missing_project_path</c>, …) and the human text lives in
+	///         <see cref="PathErrorResult.Message"/>. <see cref="TransientWorkspaceError"/> instead carries its
+	///         human text in <see cref="ToolResult.Error"/>, so it maps to the stable kind
+	///         <c>transient_workspace_error</c> — keeping the <c>Error</c> field a kind, not a full message.
+	///     </para>
 	/// </summary>
-	protected static string DescribeResolveError(ToolResult error)
-		=> error.Hint is { Length: > 0 } hint
-			? $"{error.Error} {hint}"
-			: error.Error ?? "Workspace was unavailable — likely reloading. Retry shortly.";
+	protected static (string Message, string Kind) DescribeResolveFailure(ToolResult error)
+	{
+		var (text, kind) = error switch {
+			
+			PathErrorResult path    => (path.Message, error.Error ?? "path_error"),
+			TransientWorkspaceError => (error.Error,  "transient_workspace_error"),
+			_                       => (error.Error,  error.Error)
+		};
+		
+		text ??= "Workspace was unavailable — likely reloading. Retry shortly.";
+		kind ??= "workspace_unavailable";
+		
+		var message = error.Hint is { Length: > 0 } hint
+			? $"{text} {hint}"
+			: text
+		;
+		
+		return (message, kind);
+	}
 	
 	/// <summary>
 	///     Applies a changed <see cref="Solution"/> to the workspace, guarding the same transient

@@ -71,10 +71,12 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					null,
 					"workspace binding missing"));
 			
-			if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError))
+			if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
 				
-				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(
-					DescribeResolveError(wsInfoError), null, wsInfoError.Error));
+				var (message, kind) = DescribeResolveFailure(wsInfoError);
+				
+				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(message, null, kind));
+			}
 			
 			var requestedBinding = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
 			
@@ -86,10 +88,12 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"workspace mismatch"));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;
-			if(!TryResolveRoot(boundProjectPath, out var rootPath, out var rootError))
+			if(!TryResolveRoot(boundProjectPath, out var rootPath, out var rootError)) {
 				
-				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(
-					DescribeResolveError(rootError), null, rootError.Error));
+				var (message, kind) = DescribeResolveFailure(rootError);
+				
+				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(message, null, kind));
+			}
 			
 			PhysicalSolutionApplyPlan plan;
 			
