@@ -200,6 +200,8 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_preview_rename` | Compute rename diff + confirmation token |
 | `roslyn_apply_rename` | Apply or reject a previewed rename |
+| `roslyn_preview_code_fix` | Preview a bundled Roslyn code fix and return a reviewed approval token |
+| `roslyn_apply_code_fix` | Apply or reject an approved code-fix preview using verified physical writes |
 | `roslyn_change_signature` | Add parameters with non-breaking forwarding overload |
 | `roslyn_apply_signature_change` | Apply or reject a previewed signature change |
 

@@ -106,7 +106,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\RoslynMcp.Analyzers\RoslynMcp.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\RoslynMcp.Analyzers\RoslynMcp.Analyzers.csproj" OutputItemType="Analyzer" />
   </ItemGroup>
 
   <ItemGroup>

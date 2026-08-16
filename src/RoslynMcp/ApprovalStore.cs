@@ -9,6 +9,7 @@ namespace RoslynMcp;
 internal sealed class ApprovalStore
 {
 	private readonly Dictionary<string, PendingOperation> pending        = new();
+	private readonly Dictionary<string, PendingOperation> applying       = new();
 	private readonly LinkedList<string>                   insertionOrder  = new();
 	private readonly HashSet<string>                      sessionApproved = new(StringComparer.Ordinal);
 	private readonly object                               syncRoot        = new();
@@ -21,6 +22,16 @@ internal sealed class ApprovalStore
 		=> Register(baseSolution, newSolution, diff, symbolKey, null);
 	
 	public string Register(Solution baseSolution, Solution newSolution, string diff, string symbolKey, (string OldPath, string NewPath)? fileRename)
+		=> Register(baseSolution, newSolution, diff, symbolKey, fileRename, null);
+	
+	public string Register(
+		Solution baseSolution,
+		Solution newSolution,
+		string diff,
+		string symbolKey,
+		(string OldPath, string NewPath)? fileRename,
+		IReadOnlyDictionary<string, PreviewFileState>? fileStates,
+		WorkspaceBinding? workspaceBinding = null)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
 		
@@ -35,7 +46,7 @@ internal sealed class ApprovalStore
 			}
 			
 			var preConfirmed = sessionApproved.Contains(symbolKey);
-			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename);
+			pending[token] = new PendingOperation(baseSolution, newSolution, diff, symbolKey, preConfirmed, fileRename, fileStates, workspaceBinding);
 			insertionOrder.AddLast(token);
 		}
 		
@@ -51,6 +62,68 @@ internal sealed class ApprovalStore
 		lock(syncRoot)
 			
 			return pending.GetValueOrDefault(token);
+	}
+	
+	/// <summary>
+	///     Atomically moves a pending operation into the applying state and returns it.
+	///     Returns null when the token is unknown, consumed, or already being applied.
+	/// </summary>
+	public PendingOperation? TryBeginApply(string token)
+	{
+		lock(syncRoot) {
+			
+			if(!pending.Remove(token, out var operation))
+				
+				return null;
+			
+			insertionOrder.Remove(token);
+			applying.Add(token, operation);
+			
+			return operation;
+		}
+	}
+	
+	/// <summary>
+	///     Completes an applying operation and permanently consumes its token.
+	/// </summary>
+	public bool CompleteApply(string token, bool approveForSession)
+	{
+		lock(syncRoot) {
+			
+			if(!applying.Remove(token, out var operation))
+				
+				return false;
+			
+			if(approveForSession)
+				sessionApproved.Add(operation.SymbolKey);
+			
+			return true;
+		}
+	}
+	
+	/// <summary>
+	///     Returns an applying operation to pending when physical mutation never began.
+	/// </summary>
+	public bool ReturnToPending(string token)
+	{
+		lock(syncRoot) {
+			
+			if(!applying.Remove(token, out var operation))
+				
+				return false;
+			
+			while(pending.Count >= MaxPending && insertionOrder.First is not null) {
+				
+				var oldest = insertionOrder.First.Value;
+				insertionOrder.RemoveFirst();
+				pending.Remove(oldest);
+			}
+			
+			pending.Add(token, operation);
+			insertionOrder.AddLast(token);
+			
+			return true;
+		}
 	}
 	
 	/// <summary>
@@ -98,5 +171,33 @@ internal sealed record PendingOperation(
 	string                            Diff,
 	string                            SymbolKey,
 	bool                              PreConfirmed,
-	(string OldPath, string NewPath)? FileRename
+	(string OldPath, string NewPath)? FileRename,
+	IReadOnlyDictionary<string, PreviewFileState>? FileStates,
+	WorkspaceBinding?                 WorkspaceBinding
 );
+
+internal sealed record WorkspaceBinding(string CanonicalPath, bool IsMSBuild)
+{
+	public static WorkspaceBinding Create(string rootPath, bool isMSBuild, string? csprojPath)
+	{
+		var identityPath = isMSBuild && csprojPath is not null ? csprojPath : rootPath;
+		var canonicalPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(identityPath));
+		
+		return new WorkspaceBinding(canonicalPath, isMSBuild);
+	}
+	
+	public bool Matches(WorkspaceBinding other) =>
+		IsMSBuild == other.IsMSBuild
+		&& string.Equals(CanonicalPath, other.CanonicalPath, StringComparison.OrdinalIgnoreCase);
+}
+
+internal enum ExpectedFileState
+{
+	Exists,
+	Absent
+}
+
+internal sealed record PreviewFileState(
+	ExpectedFileState ExpectedState,
+	string?           ContentHash,
+	byte[]?           IntendedBytes);
