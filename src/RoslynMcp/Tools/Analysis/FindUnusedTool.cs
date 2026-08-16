@@ -36,8 +36,13 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var solution            = workspace.GetSolution(projectPath);
-		var rootPath            = workspace.GetRootPath(projectPath);
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
+		
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 		var hasFriendAssemblies = HasFriendAssemblies(compilation.Assembly);
 		var candidates          = new List<ISymbol>();
 		var seen                = new HashSet<ISymbol>(SymbolEqualityComparer.Default);

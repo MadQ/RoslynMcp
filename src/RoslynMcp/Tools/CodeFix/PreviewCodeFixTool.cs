@@ -46,8 +46,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var rootPath = workspace.GetRootPath(projectPath);
-		var boundary = workspace.GetSecurityBoundary(projectPath);
+		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+			
+			return scope.Error(resolveError);
 		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
 		
 		if(fullPath is null)
@@ -204,7 +205,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"preview file state changed"));
 		}
 		
-		var (workspaceRoot, isMSBuild, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
+		if(!TryResolveWorkspaceInfo(projectPath, out var workspaceRoot, out var isMSBuild, out var csprojPath, out var wsInfoError))
+			
+			return scope.Error(wsInfoError);
 		var workspaceBinding = WorkspaceBinding.Create(workspaceRoot, isMSBuild, csprojPath);
 		var token = approvals.Register(document.Project.Solution, newSolution, diff, operationKey, ApprovalWorkflow.CodeFix, null, fileStates, workspaceBinding);
 		var selectedAction = choices[selectedIndex];

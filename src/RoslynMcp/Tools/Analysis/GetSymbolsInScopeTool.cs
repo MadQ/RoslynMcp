@@ -94,7 +94,9 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 			}
 		}
 		
-		var rootPath = workspace.GetRootPath(projectPath);
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 		
 		SymbolInfo[] localsArr     = [.. locals];
 		SymbolInfo[] parametersArr = [.. parameters];

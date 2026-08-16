@@ -71,7 +71,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					null,
 					"workspace binding missing"));
 			
-			var (requestedRoot, requestedIsMSBuild, requestedCsproj) = workspace.GetWorkspaceInfo(projectPath);
+			if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
+				
+				var (message, kind) = DescribeResolveFailure(wsInfoError);
+				
+				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(message, null, kind));
+			}
+			
 			var requestedBinding = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
 			
 			if(!operation.WorkspaceBinding.Matches(requestedBinding))
@@ -82,7 +88,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"workspace mismatch"));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;
-			var rootPath         = workspace.GetRootPath(boundProjectPath);
+			if(!TryResolveRoot(boundProjectPath, out var rootPath, out var rootError)) {
+				
+				var (message, kind) = DescribeResolveFailure(rootError);
+				
+				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(message, null, kind));
+			}
+			
 			PhysicalSolutionApplyPlan plan;
 			
 			try {

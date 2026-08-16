@@ -63,7 +63,9 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			
 			return scope.Error(error!);
 		
-		var rootPath = workspace.GetRootPath(projectPath);
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 		IEnumerable<Diagnostic> diagnostics;
 		
 		if(filePath is not null) {

@@ -33,7 +33,9 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var rootPath = workspace.GetRootPath(projectPath);
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 		var symbol      = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)

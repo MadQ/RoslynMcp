@@ -51,7 +51,13 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			
 			return scope.Failed("token not found", new ApplyRenameResult($"Token '{token}' not found or already consumed. Run preview_rename again.", null, null, "token not found", null));
 		
-		var rootPath       = workspace.GetRootPath(projectPath);
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError)) {
+			
+			var (message, kind) = DescribeResolveFailure(rootError);
+			
+			return scope.Failed("workspace unavailable", new ApplyRenameResult(message, null, null, kind, null));
+		}
+		
 		var projectChanges = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()
 			.ToArray()
