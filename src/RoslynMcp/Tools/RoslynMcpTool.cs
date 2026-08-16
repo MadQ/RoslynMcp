@@ -390,17 +390,24 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		}
 	}
 	
+	// OutOfMemoryException and OperationCanceledException are never caught anywhere in this codebase:
+	// swallowing OOM makes failure unpredictable and retrying past a cancellation delays it. Kept as its
+	// own predicate so the retry classifier reads as one intent, not a grab-bag of unrelated exclusions.
+	private static bool IsFatal(Exception ex)
+		=> ex is OutOfMemoryException or OperationCanceledException;
+	
 	/// <summary>
-	///     True when a fault is one a bounded retry can plausibly clear — anything that is not a deterministic
-	///     path-resolution failure. Path errors are configuration problems a retry cannot fix, so they are
-	///     excluded to keep the budget for genuinely transient faults.
+	///     True when a fault is one a bounded retry can plausibly clear — not fatal (see <see cref="IsFatal"/>)
+	///     and not a deterministic path-resolution failure. Path errors are configuration problems a retry
+	///     cannot fix, so they are excluded to keep the budget for genuinely transient faults.
 	/// </summary>
 	private static bool IsRetryableWorkspaceFault(Exception ex)
-		=> ex is not (ProjectNotFoundException
-			or MultipleProjectsFoundException
-			or InvalidProjectPathException
-			or AmbiguousFileException
-			or ArgumentException);
+		=> !IsFatal(ex)
+			&& ex is not (ProjectNotFoundException
+				or MultipleProjectsFoundException
+				or InvalidProjectPathException
+				or AmbiguousFileException
+				or ArgumentException);
 	
 
 	/// <summary>
