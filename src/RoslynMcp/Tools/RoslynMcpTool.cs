@@ -356,6 +356,164 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		}
 	}
 	
+	/// <summary>
+	///     Resolves the workspace root path and security boundary for an editing tool, guarding against
+	///     transient mid-reload failures and deterministic path-resolution errors. Editing tools call the
+	///     resolver directly (unlike analysis tools, which funnel through <see cref="TryGetCompilation"/> /
+	///     <see cref="TryGetProject"/>), so without this guard a call landing while the workspace reloads
+	///     throws unhandled and surfaces as an opaque MCP invocation error. On failure returns a structured
+	///     <see cref="ToolResult"/>: deterministic path problems map to their usual errors; any other
+	///     exception becomes a retryable <see cref="TransientWorkspaceError"/>. The exception type and
+	///     message are always logged.
+	/// </summary>
+	protected bool TryResolveEditContext(
+		string projectPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out string?           rootPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out SecurityBoundary? boundary,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult?       error)
+	{
+		rootPath = null;
+		boundary = null;
+		error    = null;
+		
+		try {
+			
+			var (rPath, isMSBuild, _) = workspace.GetWorkspaceInfo(projectPath);
+			rootPath = rPath;
+			boundary = workspace.GetSecurityBoundary(projectPath);
+			
+			activeScope.Value?.SetWorkspaceMode(isMSBuild);
+			
+			return true;
+		}
+		catch(Exception ex) {
+			
+			error = MapEditWorkspaceFault("TryResolveEditContext", ex);
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Reads the current <see cref="Solution"/> for an editing tool, guarding the same transient
+	///     mid-reload and path-resolution failures as <see cref="TryResolveEditContext"/>.
+	/// </summary>
+	protected bool TryGetEditSolution(
+		string projectPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out Solution?   solution,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
+	{
+		solution = null;
+		error    = null;
+		
+		try {
+			
+			solution = workspace.GetSolution(projectPath);
+			
+			return true;
+		}
+		catch(Exception ex) {
+			
+			error = MapEditWorkspaceFault("TryGetEditSolution", ex);
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Applies a changed <see cref="Solution"/> to the workspace, guarding the same transient
+	///     mid-reload and path-resolution failures as <see cref="TryResolveEditContext"/>. On success the
+	///     workspace has accepted (or scheduled a reload for) the change; on failure <paramref name="error"/>
+	///     carries a structured, retryable result.
+	/// </summary>
+	protected bool TryApplyEdit(
+		string projectPath,
+		Solution newSolution,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
+	{
+		error = null;
+		
+		try {
+			
+			if(!workspace.ApplyChanges(projectPath, newSolution)) {
+				
+				logger.LogError("TryApplyEdit", "ApplyChanges returned false — workspace rejected the solution change.");
+				
+				error = new TransientWorkspaceError("ApplyChanges returned false")
+				{
+					Error = "Workspace rejected the solution change — likely reloading after a prior edit.",
+					Hint  = "Transient: retry the call in a moment. If it persists, the workspace may need roslyn_respawn."
+				};
+				
+				return false;
+			}
+			
+			return true;
+		}
+		catch(Exception ex) {
+			
+			error = MapEditWorkspaceFault("TryApplyEdit", ex);
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Maps an exception thrown by a <see cref="WorkspaceResolver"/> call during an editing operation
+	///     into a structured <see cref="ToolResult"/>, logging the exception type and message. Deterministic
+	///     path-resolution failures map to their specific errors (mirroring <see cref="TryGetProject"/>);
+	///     any other exception is treated as a transient fault — typically a workspace mid-reload — and
+	///     returned as a retryable <see cref="TransientWorkspaceError"/>.
+	/// </summary>
+	private ToolResult MapEditWorkspaceFault(string op, Exception ex)
+	{
+		switch(ex) {
+			
+			case ProjectNotFoundException e:
+				logger.LogError(op, e.Message);
+				
+				return ProjectNotFoundError(e);
+			
+			case MultipleProjectsFoundException e:
+				logger.LogError(op, e.Message);
+				
+				return MultipleProjectsError(e);
+			
+			case InvalidProjectPathException e:
+				logger.LogError(op, e.Message);
+				
+				return InvalidPathError(e);
+			
+			case AmbiguousFileException e:
+				logger.LogError(op, e.Message);
+				
+				return AmbiguousFileError(e);
+			
+			case ArgumentException e:
+				logger.LogError(op, e.Message);
+				
+				return new PathErrorResult(e.Message)
+				{
+					Error = "missing_project_path",
+					Hint  = "projectPath is required. Pass the .csproj file path or a directory containing one."
+				};
+			
+			default:
+				// Any other exception is almost always the workspace resolving a project mid-reload: a prior
+				// edit triggered an MSBuild reload and this call landed before it settled. Surface it as a
+				// clearly retryable error instead of letting it propagate unhandled — an unhandled throw here
+				// is what the MCP transport reports as an opaque "An error occurred invoking …".
+				logger.LogError(op, $"{ex.GetType().Name}: {ex.Message}");
+				
+				return new TransientWorkspaceError($"{ex.GetType().Name}: {ex.Message}")
+				{
+					Error = $"Workspace temporarily unavailable ({ex.GetType().Name}) — likely reloading after a prior edit.",
+					Hint  = "Transient: retry the call in a moment. If it persists, the workspace may need roslyn_respawn."
+				};
+		}
+	}
+	
+
 	private static PathErrorResult ProjectNotFoundError(ProjectNotFoundException ex)
 		=> new(ex.Message, SearchPath: ex.SearchPath)
 		{

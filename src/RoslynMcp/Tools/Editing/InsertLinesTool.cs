@@ -38,8 +38,10 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_insert_lines", filePath, new { atLine, insertAfter, insertBefore, dryRun });
 		
-		var rootPath = workspace.GetRootPath(projectPath);
-		var boundary = workspace.GetSecurityBoundary(projectPath);
+		if(!TryResolveEditContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+			
+			return scope.Error(resolveError);
+		
 		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
 		
 		if(fullPath is null)

@@ -37,8 +37,9 @@ internal sealed class WriteFileTool : RoslynMcpTool
 	{
 		using var scope   = BeginTool("roslyn_write_file", filePath, new { createNew, dryRun });
 		
-		var       rootPath = workspace.GetRootPath(projectPath);
-		var       boundary = workspace.GetSecurityBoundary(projectPath);
+		if(!TryResolveEditContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+			
+			return scope.Error(resolveError);
 		
 		string fullPath;
 		

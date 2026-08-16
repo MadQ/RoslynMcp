@@ -47,8 +47,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	{
 		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force });
 		
-		var       rootPath = workspace.GetRootPath(projectPath);
-		var       boundary = workspace.GetSecurityBoundary(projectPath);
+		if(!TryResolveEditContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+			
+			return scope.Error(resolveError);
 		
 		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
 		
@@ -68,8 +69,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		SyntaxTree syntaxTree;
 		
 		// Prefer the in-memory workspace document to avoid races with concurrent edits.
-		var solution = workspace.GetSolution(projectPath		   )
-		;
+		if(!TryGetEditSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
 		var docIds   = solution.GetDocumentIdsWithFilePath(fullPath);
 		
 		if(docIds.Length > 0) {
@@ -180,7 +182,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(deletedRoot);
 				var newSolution = newDoc.Project.Solution;
-				workspace.ApplyChanges(projectPath, newSolution);
+				
+				if(!TryApplyEdit(projectPath, newSolution, out var applyError))
+					
+					return scope.Error(applyError);
 				
 				if(await TryRecoverTruncation(filePath, fullPath, projectPath, deletedBytes) is { } truncErr)
 					
@@ -296,7 +301,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(newRoot);
 			var newSolution = newDoc.Project.Solution;
-			workspace.ApplyChanges(projectPath, newSolution);
+			
+			if(!TryApplyEdit(projectPath, newSolution, out var applyError))
+				
+				return scope.Error(applyError);
 			
 			if(await TryRecoverTruncation(filePath, fullPath, projectPath, newBytes) is { } truncErr)
 				
