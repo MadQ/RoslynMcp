@@ -4,8 +4,8 @@
     "preToolUse": [
       {
         "type": "command",
-        "powershell": "madq-roslynmcp hook --log",
-        "bash": "madq-roslynmcp hook --log",
+        "powershell": "madq-roslynmcp hook",
+        "bash": "madq-roslynmcp hook",
         "timeoutSec": 5
       }
     ]

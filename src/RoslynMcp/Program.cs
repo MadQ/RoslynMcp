@@ -10,6 +10,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 
+// Set unconditionally so both the CLI subcommands and the MCP server path emit UTF-8.
+// Safe for the stdio protocol: .NET strips the preamble (RemovePreamble) when building
+// Console.Out, and the MCP SDK writes JSON-RPC to the raw stdout stream, not Console.Out.
+Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 // Route CLI subcommands before starting the MCP server.
 // No args + stdin is a terminal → human ran this directly; show help instead of silently starting the server.
@@ -19,8 +23,6 @@ if(args.Length == 0 && !Console.IsInputRedirected)
 
 if(args.Length > 0)
 {
-    Console.OutputEncoding = System.Text.Encoding.UTF8;
-
     var exit = args[0].ToLowerInvariant() switch {
 
         "setup"       => RoslynMcp.Cli.SetupCommand.Run(),
