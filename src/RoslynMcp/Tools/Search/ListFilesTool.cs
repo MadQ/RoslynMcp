@@ -34,7 +34,9 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		var rootPath = workspace.GetRootPath(projectPath);
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 		
 		var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
 		matcher.AddInclude(pattern);

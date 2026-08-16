@@ -80,8 +80,13 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Invalid pattern: {ex.Message}"));
 		}
 
-		var solution = workspace.GetSolution(projectPath);
-		var rootPath = workspace.GetRootPath(projectPath);
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
+		
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 
 		var allMatches = await CollectAsync(regex);
 

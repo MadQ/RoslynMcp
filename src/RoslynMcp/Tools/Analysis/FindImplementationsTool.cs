@@ -50,7 +50,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
-		var solution = workspace.GetSolution(projectPath);
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
 		
 		// Handle type symbols (interface or abstract class).
 		if(symbol is INamedTypeSymbol typeSymbol) {

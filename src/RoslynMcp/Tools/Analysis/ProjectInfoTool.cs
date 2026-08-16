@@ -48,8 +48,9 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			
 			return scope.Error(error);
 		
-		var rootPath		  = workspace.GetRootPath(projectPath);
-		var (_, isMSBuild, _) = workspace.GetWorkspaceInfo(projectPath);
+		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
+			
+			return scope.Error(wsError);
 		
 		var compOpts  = project.CompilationOptions  as CSharpCompilationOptions;
 		var parseOpts = project.ParseOptions         as CSharpParseOptions;

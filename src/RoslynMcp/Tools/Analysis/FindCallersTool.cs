@@ -52,8 +52,13 @@ internal sealed class FindCallersTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var solution = workspace.GetSolution(projectPath);
-		var rootPath = workspace.GetRootPath(projectPath);
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
+		
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 		
 		// Position (line > 0) pinpoints one symbol — the precise way to target one overload.
 		ISymbol[] symbols;

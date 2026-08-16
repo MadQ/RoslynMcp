@@ -48,8 +48,9 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			return scope.Error(new ErrorResult(ex.Message));
 		}
 		
-		var rootPath          = workspace.GetRootPath(projectPath);
-		var (_, isMSBuild, _) = workspace.GetWorkspaceInfo(projectPath);
+		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
+			
+			return scope.Error(wsError);
 		var lastSynced        = workspace.GetLastSyncedUtc(projectPath);
 		var cutoff            = lastSynced + DriftTolerance;
 		

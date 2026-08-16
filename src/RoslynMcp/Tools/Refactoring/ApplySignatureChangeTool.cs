@@ -50,8 +50,11 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			return scope.Failed("token not found", new ApplySignatureChangeResult($"Token '{token}' not found or already consumed. Run change_signature again.", null, "token not found"));
 		
 		// Collect changed docs so we can back them up and verify each one after writing.
-		var rootPath    = workspace.GetRootPath(projectPath)
-		;
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Failed("workspace unavailable", new ApplySignatureChangeResult(
+				DescribeResolveError(rootError), null, rootError.Error));
+		
 		var changedDocs = operation.NewSolution.GetChanges(operation.BaseSolution)
 			.GetProjectChanges()
 			.SelectMany(p => p.GetChangedDocuments()

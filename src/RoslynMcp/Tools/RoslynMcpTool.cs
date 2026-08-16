@@ -411,16 +411,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 
 	/// <summary>
-	///     Resolves the workspace root path and security boundary for an editing tool, guarding against
-	///     transient mid-reload failures and deterministic path-resolution errors. Editing tools call the
-	///     resolver directly (unlike analysis tools, which funnel through <see cref="TryGetCompilation"/> /
-	///     <see cref="TryGetProject"/>), so without this guard a call landing while the workspace reloads
-	///     throws unhandled and surfaces as an opaque MCP invocation error. On failure returns a structured
-	///     <see cref="ToolResult"/>: deterministic path problems map to their usual errors; any other
-	///     exception becomes a retryable <see cref="TransientWorkspaceError"/>. The exception type and
-	///     message are always logged.
+	///     Resolves the workspace root path and security boundary for a tool, guarding against transient
+	///     mid-reload failures and deterministic path-resolution errors. Tools that call the resolver
+	///     directly (rather than funnelling through <see cref="TryGetCompilation"/> / <see cref="TryGetProject"/>)
+	///     would otherwise throw unhandled when a call lands while the workspace reloads, surfacing as an
+	///     opaque MCP invocation error. On failure returns a structured <see cref="ToolResult"/>: deterministic
+	///     path problems map to their usual errors; any other exception becomes a retryable
+	///     <see cref="TransientWorkspaceError"/>. The exception type and message are always logged.
 	/// </summary>
-	protected bool TryResolveEditContext(
+	protected bool TryResolveFileContext(
 		string projectPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out string?           rootPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out SecurityBoundary? boundary,
@@ -432,9 +431,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			var (rPath, isMSBuild, _) = ResolveWithRetry("TryResolveEditContext", () => workspace.GetWorkspaceInfo(projectPath));
+			var (rPath, isMSBuild, _) = ResolveWithRetry("TryResolveFileContext", () => workspace.GetWorkspaceInfo(projectPath));
 			rootPath = rPath;
-			boundary = ResolveWithRetry("TryResolveEditContext", () => workspace.GetSecurityBoundary(projectPath));
+			boundary = ResolveWithRetry("TryResolveFileContext", () => workspace.GetSecurityBoundary(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(isMSBuild);
 			
@@ -442,17 +441,17 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		}
 		catch(Exception ex) {
 			
-			error = MapEditWorkspaceFault("TryResolveEditContext", ex);
+			error = MapWorkspaceFault("TryResolveFileContext", ex);
 			
 			return false;
 		}
 	}
 	
 	/// <summary>
-	///     Reads the current <see cref="Solution"/> for an editing tool, guarding the same transient
-	///     mid-reload and path-resolution failures as <see cref="TryResolveEditContext"/>.
+	///     Reads the current <see cref="Solution"/> for a tool, guarding the same transient mid-reload and
+	///     path-resolution failures as <see cref="TryResolveFileContext"/>.
 	/// </summary>
-	protected bool TryGetEditSolution(
+	protected bool TryResolveSolution(
 		string projectPath,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out Solution?   solution,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
@@ -462,21 +461,95 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			solution = ResolveWithRetry("TryGetEditSolution", () => workspace.GetSolution(projectPath));
+			solution = ResolveWithRetry("TryResolveSolution", () => workspace.GetSolution(projectPath));
 			
 			return true;
 		}
 		catch(Exception ex) {
 			
-			error = MapEditWorkspaceFault("TryGetEditSolution", ex);
+			error = MapWorkspaceFault("TryResolveSolution", ex);
 			
 			return false;
 		}
 	}
 	
 	/// <summary>
+	///     Resolves only the workspace root path for a tool, guarding the same transient mid-reload and
+	///     path-resolution failures as <see cref="TryResolveFileContext"/>. Use in tools that call
+	///     <c>workspace.GetRootPath</c> directly and do not also need the security boundary.
+	/// </summary>
+	protected bool TryResolveRoot(
+		string projectPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out string?     rootPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
+	{
+		rootPath = null;
+		error    = null;
+		
+		try {
+			
+			rootPath = ResolveWithRetry("TryResolveRoot", () => workspace.GetRootPath(projectPath));
+			
+			return true;
+		}
+		catch(Exception ex) {
+			
+			error = MapWorkspaceFault("TryResolveRoot", ex);
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Resolves the workspace root path, the workspace mode (MSBuild vs. Adhoc), and the resolved
+	///     project (.csproj) path together, guarding the same transient mid-reload and path-resolution
+	///     failures as <see cref="TryResolveFileContext"/>. Use in tools that need any combination of the
+	///     three values from <c>workspace.GetWorkspaceInfo</c>; pass <c>out _</c> for the parts not needed.
+	/// </summary>
+	protected bool TryResolveWorkspaceInfo(
+		string projectPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(true)]  out string?     rootPath,
+		out bool isMSBuild,
+		out string? csprojPath,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
+	{
+		rootPath   = null;
+		isMSBuild  = false;
+		csprojPath = null;
+		error      = null;
+		
+		try {
+			
+			var (rPath, msb, csproj) = ResolveWithRetry("TryResolveWorkspaceInfo", () => workspace.GetWorkspaceInfo(projectPath));
+			rootPath   = rPath;
+			isMSBuild  = msb;
+			csprojPath = csproj;
+			
+			activeScope.Value?.SetWorkspaceMode(msb);
+			
+			return true;
+		}
+		catch(Exception ex) {
+			
+			error = MapWorkspaceFault("TryResolveWorkspaceInfo", ex);
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Formats a workspace-resolution guard error (from <see cref="TryResolveRoot"/> and friends) into a
+	///     single user-facing message, folding in the retry hint so tools whose result type has no dedicated
+	///     hint field still tell the agent the failure is transient and worth retrying.
+	/// </summary>
+	protected static string DescribeResolveError(ToolResult error)
+		=> error.Hint is { Length: > 0 } hint
+			? $"{error.Error} {hint}"
+			: error.Error ?? "Workspace was unavailable — likely reloading. Retry shortly.";
+	
+	/// <summary>
 	///     Applies a changed <see cref="Solution"/> to the workspace, guarding the same transient
-	///     mid-reload and path-resolution failures as <see cref="TryResolveEditContext"/>. On success the
+	///     mid-reload and path-resolution failures as <see cref="TryResolveFileContext"/>. On success the
 	///     workspace has accepted (or scheduled a reload for) the change; on failure <paramref name="error"/>
 	///     carries a structured, retryable result.
 	/// </summary>
@@ -506,7 +579,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		}
 		catch(Exception ex) {
 			
-			error = MapEditWorkspaceFault("TryApplyEdit", ex);
+			error = MapWorkspaceFault("TryApplyEdit", ex);
 			
 			return false;
 		}
@@ -519,7 +592,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     any other exception is treated as a transient fault — typically a workspace mid-reload — and
 	///     returned as a retryable <see cref="TransientWorkspaceError"/>.
 	/// </summary>
-	private ToolResult MapEditWorkspaceFault(string op, Exception ex)
+	private ToolResult MapWorkspaceFault(string op, Exception ex)
 	{
 		switch(ex) {
 			

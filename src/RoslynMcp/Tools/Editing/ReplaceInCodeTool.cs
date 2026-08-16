@@ -47,7 +47,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	{
 		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force });
 		
-		if(!TryResolveEditContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			
 			return scope.Error(resolveError);
 		
@@ -69,7 +69,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		SyntaxTree syntaxTree;
 		
 		// Prefer the in-memory workspace document to avoid races with concurrent edits.
-		if(!TryGetEditSolution(projectPath, out var solution, out var solutionError))
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
 			
 			return scope.Error(solutionError);
 		var docIds   = solution.GetDocumentIdsWithFilePath(fullPath);

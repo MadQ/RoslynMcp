@@ -57,7 +57,9 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 				.Order()
 		];
 		
-		var solution    = workspace.GetSolution(projectPath);
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
 		
 		// FindDerivedClassesAsync only finds subclasses — for interfaces, use FindImplementationsAsync.
 		var derivedRefs = type.TypeKind == TypeKind.Interface

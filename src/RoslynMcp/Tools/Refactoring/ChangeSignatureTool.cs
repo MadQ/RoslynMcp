@@ -60,7 +60,9 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		
 		if(candidates.Length > 1) {
 			
-			var rootPath = workspace.GetRootPath(projectPath);
+			if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+				
+				return scope.Error(rootError);
 			
 			if(ProjectConfig.EffectiveElicit(rootPath, logger))
 				symbol = await TryElicitSymbolChoice(server, candidates, methodName, rootPath, cancellationToken);
@@ -96,7 +98,9 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		}
 		
 		var planner  = new SignatureChangePlanner();
-		var solution = workspace.GetSolution(projectPath);
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
 		
 		var result = await planner.PrepareAsync(method, new SignatureChangeRequest {
 			AddParameters = paramsToAdd

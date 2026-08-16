@@ -19,7 +19,9 @@ public async Task<object> RestorePackages(
 {
 using var scope = BeginTool("roslyn_restore_packages");
 
-var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
+if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
+
+return scope.Error(wsError);
 
 if(csprojPath is null)
 return scope.Error(new ErrorResult("No .csproj found - restore requires a project file."));

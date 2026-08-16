@@ -65,7 +65,7 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		
 		if(filePath is not null) {
 			
-			if(!TryResolveEditContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+			if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 				
 				return resolveError;
 			
@@ -82,7 +82,7 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		
 		var all           = backups.List(absolutePath);
 		
-		if(!TryResolveEditContext(projectPath, out var rootDir, out _, out var rootError))
+		if(!TryResolveFileContext(projectPath, out var rootDir, out _, out var rootError))
 			
 			return rootError;
 		

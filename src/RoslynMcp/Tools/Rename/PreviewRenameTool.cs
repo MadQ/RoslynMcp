@@ -89,7 +89,9 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			
 			if(candidates.Length > 1) {
 				
-				var rootPath = workspace.GetRootPath(projectPath);
+				if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+					
+					return scope.Error(rootError);
 				
 				if(ProjectConfig.EffectiveElicit(rootPath, logger))
 					symbol = await TryElicitSymbolChoice(server, candidates, symbolName, rootPath, cancellationToken);

@@ -20,7 +20,9 @@ public async Task<object> CleanSolution(
 {
 using var scope = BeginTool("roslyn_clean_solution");
 
-var (rootPath, _, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
+if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
+
+return scope.Error(wsError);
 
 if(csprojPath is null)
 return scope.Error(new ErrorResult("No .csproj found - clean requires a project file."));

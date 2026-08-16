@@ -29,8 +29,9 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var rootPath = workspace.GetRootPath(projectPath);
-		var boundary = workspace.GetSecurityBoundary(projectPath);
+		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+			
+			return scope.Error(resolveError);
 		var paths    = filePaths
 			.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
 		;
