@@ -530,6 +530,20 @@ internal sealed record UnexpectedErrorResult(
 	[property: JsonPropertyName("type")]    string Type
 ) : ToolResult, IToolError;
 
+/// <summary>
+///     Transient workspace failure — almost always the workspace resolving a project mid-reload:
+///     a prior edit triggered an MSBuild reload and this call landed before it settled. The operation
+///     is safe to retry once the reload completes (seconds). <see cref="Fault"/> carries the underlying
+///     exception type and message for log diagnosis; <see cref="Retryable"/> is always <see langword="true"/>.
+///     Returned by the editing tools' guarded workspace-resolution helpers instead of letting the
+///     exception propagate unhandled (which the MCP transport reports as an opaque invocation error).
+/// </summary>
+internal sealed record TransientWorkspaceError(
+	[property: JsonPropertyName("fault")]     string Fault,
+	[property: JsonPropertyName("retryable")] bool   Retryable = true
+) : ToolResult, IToolError;
+
+
 // ── Editing tools ────────────────────────────────────────────────────────────
 
 internal sealed record ReplaceInFileResult(

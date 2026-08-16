@@ -65,8 +65,10 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		
 		if(filePath is not null) {
 			
-			var rootPath = workspace.GetRootPath(projectPath);
-			var boundary = workspace.GetSecurityBoundary(projectPath);
+			if(!TryResolveEditContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+				
+				return resolveError;
+			
 			absolutePath = ResolveFilePath(filePath, rootPath, boundary);
 		}
 		
@@ -79,7 +81,11 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 		}
 		
 		var all           = backups.List(absolutePath);
-		var rootDir       = workspace.GetRootPath(projectPath);
+		
+		if(!TryResolveEditContext(projectPath, out var rootDir, out _, out var rootError))
+			
+			return rootError;
+		
 		var currentBranch = backups.GetCurrentBranch(rootDir);
 		
 		var items = all.Select(e => new LocalHistoryEntry(

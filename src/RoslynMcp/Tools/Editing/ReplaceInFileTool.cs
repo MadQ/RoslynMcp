@@ -42,8 +42,10 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_replace_in_file", filePath, new { pattern, useRegex, caseSensitive, dryRun, normalizeLineEndings });
 		
-		var rootPath = workspace.GetRootPath(projectPath);
-		var boundary = workspace.GetSecurityBoundary(projectPath);
+		if(!TryResolveEditContext(projectPath, out var rootPath, out var boundary, out var resolveError))
+			
+			return scope.Error(resolveError);
+		
 		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
 		
 		if(fullPath is null)
