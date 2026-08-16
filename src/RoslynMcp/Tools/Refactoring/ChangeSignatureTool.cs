@@ -107,7 +107,8 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			return scope.Failed("change failed", new ErrorResult(result.Error!));
 		
 		var token = approvals.Register(result.BaseSolution, result.NewSolution, result.Diff!,
-			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})"
+			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})",
+			ApprovalWorkflow.SignatureChange
 		)
 		;
 		

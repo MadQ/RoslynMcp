@@ -433,14 +433,62 @@ internal static class CodeFixTests
 				if(token is null)
 					return (false, $"FAIL  (rename preview: {renameText}) [{sw.ElapsedMilliseconds}ms]");
 				
+				// A rename token must be refused by the code-fix apply path — the workflow discriminator
+				// rejects it at TryBeginApply ("token unavailable") — and, critically, must NOT be
+				// consumed, so its rightful owner (apply_rename) can still apply it afterward.
 				var (apply, applyText) = await Apply(token, workspacePath);
-				var current = await File.ReadAllTextAsync(fixturePath);
-				var pass = apply?["error"]?.GetValue<string>() == "token type mismatch"
-					&& current == "class CodeFixFixture { }\n";
+				var afterReject = await File.ReadAllTextAsync(fixturePath);
+				var rejected = apply?["error"]?.GetValue<string>() == "token unavailable"
+					&& afterReject == "class CodeFixFixture { }\n";
+				
+				var (rename, renameApplyText) = await Call("roslyn_apply_rename", new { token, approval = "y", projectPath = workspacePath });
+				var afterRename = await File.ReadAllTextAsync(fixturePath);
+				var stillValid = rename?["error"] is null
+					&& afterRename.Contains("RenamedCodeFixFixture", StringComparison.Ordinal);
+				
+				var pass = rejected && stillValid;
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (code-fix apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
+					: $"FAIL  (code-fix apply: {applyText}; rename apply: {renameApplyText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		async Task<(bool pass, string msg)> RunCodeFixTokenRejectedByRename()
+		{
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				var token = preview?["token"]?.GetValue<string>();
+				
+				if(token is null)
+					return (false, $"FAIL  (code-fix preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+				
+				// The opposite direction: a code-fix token must be refused by the rename apply path
+				// ("token not found") without being consumed, so the code-fix apply still completes.
+				var (rename, renameText) = await Call("roslyn_apply_rename", new { token, approval = "y", projectPath = workspacePath });
+				var afterReject = await File.ReadAllTextAsync(fixturePath);
+				var rejected = rename?["error"]?.GetValue<string>() == "token not found"
+					&& afterReject == Fixture("TestSingleWrite");
+				
+				var (apply, applyText) = await Apply(token, workspacePath);
+				var afterApply = await File.ReadAllTextAsync(fixturePath);
+				var stillValid = apply?["error"] is null
+					&& apply?["filesWritten"]?.GetValue<int>() == 1
+					&& afterApply.Contains("object value", StringComparison.Ordinal);
+				
+				var pass = rejected && stillValid;
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (rename apply: {renameText}; code-fix apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				DeleteWorkspace(workspacePath);
@@ -807,7 +855,8 @@ internal static class CodeFixTests
 			new("modified stale file survives and token retries", RunStaleModifiedRetainsToken),
 			new("deleted stale file can be recreated and retried", RunStaleDeletedRetainsToken),
 			new("multi-file write reports both verified files", RunMultiWrite),
-			new("wrong workflow approval token is rejected", RunWrongWorkflowTokenRejected),
+			new("rename token is rejected by code-fix apply and survives", RunWrongWorkflowTokenRejected),
+			new("code-fix token is rejected by rename apply and survives", RunCodeFixTokenRejectedByRename),
 			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
 			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),

@@ -35,7 +35,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			
-			if(!approvals.Reject(token))
+			if(!approvals.Reject(token, ApprovalWorkflow.CodeFix))
 				return scope.Failed("token unavailable", new ApplyCodeFixResult(
 					$"Token '{token}' was not found, was consumed, or is already being applied.",
 					null,
@@ -48,7 +48,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			
 			return scope.Failed("invalid approval", new ApplyCodeFixResult("Invalid approval value. Use 'y' or 'n'.", null, "invalid approval"));
 		
-		var operation = approvals.TryBeginApply(token);
+		var operation = approvals.TryBeginApply(token, ApprovalWorkflow.CodeFix);
 		
 		if(operation is null)
 			
@@ -109,6 +109,8 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"unsupported code-fix change"));
 			
 
+			// Second layer of the TOCTOU guard: the preview may be minutes old. Re-validate against
+			// disk before spending any effort on backups, so a stale preview aborts early and cheap.
 			if(plan.ValidateCurrentState() is { } staleError)
 				return scope.Failed("stale preview", new ApplyCodeFixResult(
 					$"{staleError} Re-run roslyn_preview_code_fix.",
@@ -128,6 +130,9 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"backup failed"));
 			}
 			
+			// Third layer: preparing backups did real I/O and took time — re-validate so a file that
+			// changed during backup is caught before the write loop (which validates a fourth time,
+			// per-file, immediately before each atomic swap). Each layer narrows the TOCTOU window.
 			if(plan.ValidateCurrentState() is { } postBackupStaleError)
 				return scope.Failed("stale preview", new ApplyCodeFixResult(
 					$"{postBackupStaleError} The file changed while backups were being prepared. " +
@@ -137,7 +142,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			
 			physicalApplyStarted = true;
 			
-			var report = await physicalApplier.ApplyAsync(plan, boundProjectPath);
+			var report = await physicalApplier.ApplyAsync(plan, boundProjectPath, cancellationToken);
 			var plannedFiles = plan.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
 			var files = report.Files
 				.Select(file => {
@@ -186,9 +191,9 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		finally {
 			
 			if(physicalApplyStarted)
-				approvals.CompleteApply(token, approveForSession: false);
+				approvals.CompleteApply(token, ApprovalWorkflow.CodeFix, approveForSession: false);
 			else
-				approvals.ReturnToPending(token);
+				approvals.ReturnToPending(token, ApprovalWorkflow.CodeFix);
 		}
 	}
 	

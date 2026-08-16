@@ -206,7 +206,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		
 		var (workspaceRoot, isMSBuild, csprojPath) = workspace.GetWorkspaceInfo(projectPath);
 		var workspaceBinding = WorkspaceBinding.Create(workspaceRoot, isMSBuild, csprojPath);
-		var token = approvals.Register(document.Project.Solution, newSolution, diff, operationKey, null, fileStates, workspaceBinding);
+		var token = approvals.Register(document.Project.Solution, newSolution, diff, operationKey, ApprovalWorkflow.CodeFix, null, fileStates, workspaceBinding);
 		var selectedAction = choices[selectedIndex];
 		
 		return scope.Outcome("preview ready", new PreviewCodeFixResult(
@@ -589,7 +589,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		return matches.Length == 1 ? matches[0] : null;
 	}
 	
-	private static async Task<ImmutableArray<Diagnostic>> GetDocumentDiagnosticsAsync(Project project, Document document, CancellationToken cancellationToken)
+	private async Task<ImmutableArray<Diagnostic>> GetDocumentDiagnosticsAsync(Project project, Document document, CancellationToken cancellationToken)
 	{
 		var compilation = await project.GetCompilationAsync(cancellationToken)
 			.ConfigureAwait(false)
@@ -608,28 +608,30 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		var builder = ImmutableArray.CreateBuilder<Diagnostic>();
 		builder.AddRange(compilation.GetSemanticModel(tree).GetDiagnostics(cancellationToken: cancellationToken));
 		
-		var analyzers = await GetAnalyzersAsync(project, cancellationToken);
-		
-		if(analyzers.Length > 0) {
+		// Analyzer failures must never sink the whole preview: the compiler diagnostics above (with
+		// their bundled fixes) are already collected. A broken or throwing project analyzer degrades
+		// to compiler-only diagnostics instead of aborting; cancellation still propagates. Assemblies
+		// load through the shared shadow-copy loader so the analyzed project's outputs stay unlocked.
+		try {
 			
-			var withAnalyzers = compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
-			var analyzerDiagnostics = await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken)
-				.ConfigureAwait(false)
+			var analyzers = project.AnalyzerReferences
+				.SelectMany(reference => AnalyzerLoading.GetShadowedAnalyzers(reference, project.Language))
+				.ToImmutableArray()
 			;
 			
-			builder.AddRange(analyzerDiagnostics.Where(d => d.Location.SourceTree == tree));
+			if(!analyzers.IsEmpty) {
+				
+				var withAnalyzers = compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
+				var analyzerDiagnostics = await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken)
+					.ConfigureAwait(false)
+				;
+				
+				builder.AddRange(analyzerDiagnostics.Where(d => d.Location.SourceTree == tree));
+			}
 		}
-		
-		return builder.ToImmutable();
-	}
-	
-	private static async Task<ImmutableArray<DiagnosticAnalyzer>> GetAnalyzersAsync(Project project, CancellationToken cancellationToken)
-	{
-		var builder = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
-		
-		foreach(var reference in project.AnalyzerReferences) {
+		catch(Exception ex) when(ex is not OperationCanceledException) {
 			
-			builder.AddRange(reference.GetAnalyzers(project.Language));
+			logger.LogError("PreviewCodeFix", $"Analyzer run failed for '{document.FilePath}': {ex.GetType().Name}: {ex.Message}");
 		}
 		
 		return builder.ToImmutable();

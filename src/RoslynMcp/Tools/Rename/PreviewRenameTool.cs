@@ -116,7 +116,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		
 		var newSolution  = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions { RenameFile = false }, newName, cancellationToken);
 		var diff         = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
-		var token        = approvals.Register(solution, newSolution, diff, symbolKey, fileRename);
+		var token        = approvals.Register(solution, newSolution, diff, symbolKey, ApprovalWorkflow.Rename, fileRename);
 		var preConfirmed = approvals.IsSessionApproved(symbolKey);
 		
 		return scope.Outcome("preview ready", new PreviewRenameResult(token, diff,

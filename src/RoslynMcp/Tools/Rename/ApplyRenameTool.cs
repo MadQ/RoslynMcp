@@ -35,7 +35,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			
-			approvals.Reject(token);
+			approvals.Reject(token, ApprovalWorkflow.Rename);
 			
 			return scope.Outcome("cancelled", new ApplyRenameResult("Rename cancelled. No files were changed.", null, null, null, null));
 		}
@@ -45,7 +45,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			return scope.Failed("invalid approval", new ApplyRenameResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, null, "invalid approval", null));
 		
 		var forSession = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-		var operation  = approvals.Peek(token);
+		var operation  = approvals.Peek(token, ApprovalWorkflow.Rename);
 		
 		if(operation is null)
 			
@@ -112,7 +112,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		}
 		
 		// Backups saved — now consume the token (point of no return).
-		approvals.Consume(token, forSession);
+		approvals.Consume(token, ApprovalWorkflow.Rename, forSession);
 		
 		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
 		if(!workspace.IsAdhoc(projectPath)) {
