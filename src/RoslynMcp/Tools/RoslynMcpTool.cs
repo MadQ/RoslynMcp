@@ -378,10 +378,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			rootPath = workspace.GetRootPath(projectPath);
+			var (rPath, isMSBuild, _) = workspace.GetWorkspaceInfo(projectPath);
+			rootPath = rPath;
 			boundary = workspace.GetSecurityBoundary(projectPath);
 			
-			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+			activeScope.Value?.SetWorkspaceMode(isMSBuild);
 			
 			return true;
 		}
@@ -434,7 +435,18 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			workspace.ApplyChanges(projectPath, newSolution);
+			if(!workspace.ApplyChanges(projectPath, newSolution)) {
+				
+				logger.LogError("TryApplyEdit", "ApplyChanges returned false — workspace rejected the solution change.");
+				
+				error = new TransientWorkspaceError("ApplyChanges returned false")
+				{
+					Error = "Workspace rejected the solution change — likely reloading after a prior edit.",
+					Hint  = "Transient: retry the call in a moment. If it persists, the workspace may need roslyn_respawn."
+				};
+				
+				return false;
+			}
 			
 			return true;
 		}
