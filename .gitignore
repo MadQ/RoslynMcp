@@ -425,3 +425,6 @@ src/RoslynMcp.LogViewer/drLoop.cmd
 # Release artifacts
 RoslynMcp-v*.zip
 x.mcp.json
+
+# Local-only launch profile for manually testing the setup-project CLI command
+src/RoslynMcp/Properties/launchSettings.json
