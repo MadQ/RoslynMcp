@@ -182,7 +182,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			var originalPath = projectPath;
 			
-			compilation = workspace.GetCompilation(projectPath);
+			compilation = ResolveWithRetry("TryGetCompilation", () => workspace.GetCompilation(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
@@ -289,7 +289,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			project = workspace.GetProject(projectPath);
+			project = ResolveWithRetry("TryGetProject", () => workspace.GetProject(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
@@ -356,6 +356,53 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		}
 	}
 	
+	// Bounded auto-retry for transient mid-reload workspace faults. A prior edit can trigger an MSBuild
+	// reload whose contended design-time build briefly fails resolution; a short backoff is usually enough
+	// for the next attempt to land on the settled workspace. Deterministic path failures are excluded — a
+	// retry cannot change their outcome — so the budget is never spent on a certain failure. Writes are
+	// never routed through here: retrying a partially-applied write could double-apply or corrupt, so
+	// TryApplyEdit deliberately does not use it.
+	private const int WorkspaceResolveAttempts = 3;
+	private const int MaxResolveRetryDelayMs   = 1_000;
+	
+	/// <summary>
+	///     Invokes a workspace resolution/read operation, transparently waiting out a transient mid-reload
+	///     fault: on a retryable exception it backs off and retries up to <see cref="WorkspaceResolveAttempts"/>
+	///     times, then rethrows the last fault so the caller's existing catch/mapping produces the structured
+	///     error. Deterministic path-resolution failures rethrow immediately. Read-only — never wrap a write.
+	/// </summary>
+	private T ResolveWithRetry<T>(string op, Func<T> resolve)
+	{
+		for(var attempt = 0; ; attempt++) {
+			
+			try {
+				
+				return resolve();
+			}
+			catch(Exception ex) when(attempt < WorkspaceResolveAttempts - 1 && IsRetryableWorkspaceFault(ex)) {
+				
+				var delayMs = Backoff.DelayMs(attempt, Backoff.DefaultSeedMs, MaxResolveRetryDelayMs);
+				
+				logger.LogInfo(op, $"Transient workspace fault ({ex.GetType().Name}) — waiting {delayMs} ms, retry {attempt + 2}/{WorkspaceResolveAttempts}.");
+				
+				Thread.Sleep(delayMs);
+			}
+		}
+	}
+	
+	/// <summary>
+	///     True when a fault is one a bounded retry can plausibly clear — anything that is not a deterministic
+	///     path-resolution failure. Path errors are configuration problems a retry cannot fix, so they are
+	///     excluded to keep the budget for genuinely transient faults.
+	/// </summary>
+	private static bool IsRetryableWorkspaceFault(Exception ex)
+		=> ex is not (ProjectNotFoundException
+			or MultipleProjectsFoundException
+			or InvalidProjectPathException
+			or AmbiguousFileException
+			or ArgumentException);
+	
+
 	/// <summary>
 	///     Resolves the workspace root path and security boundary for an editing tool, guarding against
 	///     transient mid-reload failures and deterministic path-resolution errors. Editing tools call the
@@ -378,9 +425,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			var (rPath, isMSBuild, _) = workspace.GetWorkspaceInfo(projectPath);
+			var (rPath, isMSBuild, _) = ResolveWithRetry("TryResolveEditContext", () => workspace.GetWorkspaceInfo(projectPath));
 			rootPath = rPath;
-			boundary = workspace.GetSecurityBoundary(projectPath);
+			boundary = ResolveWithRetry("TryResolveEditContext", () => workspace.GetSecurityBoundary(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(isMSBuild);
 			
@@ -408,7 +455,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			solution = workspace.GetSolution(projectPath);
+			solution = ResolveWithRetry("TryGetEditSolution", () => workspace.GetSolution(projectPath));
 			
 			return true;
 		}
