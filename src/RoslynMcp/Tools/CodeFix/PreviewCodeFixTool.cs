@@ -47,7 +47,8 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			return scope.Error(error!);
 		
 		var rootPath = workspace.GetRootPath(projectPath);
-		var fullPath = ResolveFilePath(filePath, rootPath);
+		var boundary = workspace.GetSecurityBoundary(projectPath);
+		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
 		
 		if(fullPath is null)
 			return scope.Failed("file not found", new PreviewCodeFixResult(
