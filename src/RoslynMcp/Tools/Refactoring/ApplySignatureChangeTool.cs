@@ -33,7 +33,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		
 		if(approval.Equals("n", StringComparison.OrdinalIgnoreCase)) {
 			
-			approvals.Reject(token);
+			approvals.Reject(token, ApprovalWorkflow.SignatureChange);
 			
 			return scope.Outcome("cancelled", new ApplySignatureChangeResult("Signature change cancelled. No files were changed.", null, null));
 		}
@@ -43,7 +43,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			return scope.Failed("invalid approval", new ApplySignatureChangeResult("Invalid approval value. Use 'y', 'session', or 'n'.", null, "invalid approval"));
 		
 		var forSession        = approval.Equals("session", StringComparison.OrdinalIgnoreCase);
-		var operation         = approvals.Peek(token);
+		var operation         = approvals.Peek(token, ApprovalWorkflow.SignatureChange);
 		
 		if(operation is null)
 			
@@ -89,7 +89,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		}
 		
 		// Backups saved — now consume the token (point of no return).
-		approvals.Consume(token, forSession);
+		approvals.Consume(token, ApprovalWorkflow.SignatureChange, forSession);
 		
 		// MSBuildWorkspace.TryApplyChanges writes to disk; AdhocWorkspace does not.
 		if(!workspace.IsAdhoc(projectPath)) {

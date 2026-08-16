@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.ComponentModel;
 using System.Text.Json;
@@ -233,25 +232,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		);
 	}
 	
-	// Analyzer sets keyed by (path, mtime): rebuilt analyzers reload fresh, unchanged ones are
-	// reused across calls without touching the original file again.
-	private static readonly ConcurrentDictionary<(string Path, long MtimeTicks), ImmutableArray<DiagnosticAnalyzer>> shadowedAnalyzers = new();
-	
-	/// <summary>
-	///     Materializes an analyzer reference through <see cref="ShadowCopyAnalyzerLoader"/> so the
-	///     original assembly is never locked by this server. Pathless (in-memory) references load as-is.
-	/// </summary>
-	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference)
-	{
-		if(reference.FullPath is not { } path || !File.Exists(path))
-			
-			return reference.GetAnalyzers(LanguageNames.CSharp);
-		
-		return shadowedAnalyzers.GetOrAdd(
-			(path, File.GetLastWriteTimeUtc(path).Ticks),
-			key => new AnalyzerFileReference(key.Path, ShadowCopyAnalyzerLoader.Instance).GetAnalyzers(LanguageNames.CSharp));
-	}
-	
+
 	/// <summary>
 	///     Runs the project's analyzer references over the compilation via
 	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.
@@ -266,7 +247,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			
 			var project   = workspace.GetProject(projectPath);
 			var analyzers = project.AnalyzerReferences
-				.SelectMany(r => GetShadowedAnalyzers(r))
+				.SelectMany(r => AnalyzerLoading.GetShadowedAnalyzers(r, LanguageNames.CSharp))
 				.ToImmutableArray()
 			;
 			

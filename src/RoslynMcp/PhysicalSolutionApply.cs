@@ -110,7 +110,6 @@ internal sealed class PhysicalSolutionApplyPlan
 			
 			var writeCandidates = pathCandidates
 				.Where(candidate => candidate.IntendedBytes is not null)
-				.ToArray()
 			;
 			var hasDelete = pathCandidates.Any(candidate => candidate.IntendedBytes is null);
 			
@@ -328,20 +327,24 @@ internal sealed class PhysicalSolutionApplier
 	
 	public async Task<PhysicalApplyReport> ApplyAsync(
 		PhysicalSolutionApplyPlan plan,
-		string projectPath)
+		string projectPath,
+		CancellationToken cancellationToken = default)
 	{
-		await applyGate.WaitAsync();
+		await applyGate.WaitAsync(cancellationToken);
 		
 		try {
+			
+			// First of the layered stale checks: guard the whole plan up front, before touching any
+			// file, so an apply against a preview that no longer matches disk fails fast and clean.
 			var executionError = plan.ValidateCurrentState();
 			
 			if(executionError is null) {
 				
 				try {
 					
-					await ApplyWritesAsync(plan, projectPath);
+					await ApplyWritesAsync(plan, projectPath, cancellationToken);
 				}
-				catch(Exception ex) when(ex is not OutOfMemoryException) {
+				catch(Exception ex) when(ex is not OutOfMemoryException and not OperationCanceledException) {
 					
 					executionError = ex.Message;
 				}
@@ -351,9 +354,9 @@ internal sealed class PhysicalSolutionApplier
 				
 				try {
 					
-					ApplyDeletes(plan, projectPath);
+					ApplyDeletes(plan, projectPath, cancellationToken);
 				}
-				catch(Exception ex) when(ex is not OutOfMemoryException) {
+				catch(Exception ex) when(ex is not OutOfMemoryException and not OperationCanceledException) {
 					
 					executionError = ex.Message;
 				}
@@ -367,12 +370,18 @@ internal sealed class PhysicalSolutionApplier
 		}
 	}
 	
-	async Task ApplyWritesAsync(PhysicalSolutionApplyPlan plan, string projectPath)
+	async Task ApplyWritesAsync(PhysicalSolutionApplyPlan plan, string projectPath, CancellationToken cancellationToken)
 	{
 		foreach(var file in plan.Files) {
 			
 			if(file.Operation == PhysicalFileOperation.Delete)
 				continue;
+			
+			// Only safe cancellation boundary: between whole files, before this file's temp write and
+			// atomic swap. Never mid-swap — a half-replaced file is worse than an honest partial apply.
+			// Already-swapped files remain; not-yet-started files stay untouched (same as any per-file
+			// failure, which the report already models as partial).
+			cancellationToken.ThrowIfCancellationRequested();
 			
 			var directory = Path.GetDirectoryName(file.Path)
 				?? throw new IOException($"File '{file.Path}' has no parent directory.");
@@ -387,6 +396,9 @@ internal sealed class PhysicalSolutionApplier
 				if(!OperatingSystem.IsWindows() && file.Operation == PhysicalFileOperation.Write)
 					File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(file.Path));
 				
+				// Innermost stale check: re-verify this one file immediately before the swap. Backups and
+				// the temp write take real wall-clock time during which the target could change on disk;
+				// this is the last TOCTOU gate that still lets us abort without corrupting the file.
 				if(PhysicalSolutionApplyPlan.ValidateCurrentState(file) is { } staleError)
 					throw new IOException(staleError);
 				
@@ -412,12 +424,14 @@ internal sealed class PhysicalSolutionApplier
 		}
 	}
 	
-	void ApplyDeletes(PhysicalSolutionApplyPlan plan, string projectPath)
+	void ApplyDeletes(PhysicalSolutionApplyPlan plan, string projectPath, CancellationToken cancellationToken)
 	{
 		foreach(var file in plan.Files) {
 			
 			if(file.Operation != PhysicalFileOperation.Delete)
 				continue;
+			
+			cancellationToken.ThrowIfCancellationRequested();
 			
 			if(File.Exists(file.Path))
 				File.Delete(file.Path);
