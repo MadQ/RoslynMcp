@@ -16,6 +16,7 @@ static class EditingTests
 		var tempTextFile   = Path.Combine(ctx.TargetPath, ".test_replace_temp.cs");
 		var tempCodeFile   = Path.Combine(ctx.TargetPath, ".test_code_temp.cs");
 		var tempInsertFile = Path.Combine(ctx.TargetPath, ".test_insert_temp.txt");
+		var tempVerbatimFile = Path.Combine(ctx.TargetPath, ".test_verbatim_temp.cs");
 		
 		File.WriteAllText(tempTextFile,   "// Test line 1\nvar handle = IntPtr.Zero;\n// Test line 3\n");
 		File.WriteAllText(tempCodeFile,   "class TestClass { private int oldField = 42; }");
@@ -40,6 +41,75 @@ static class EditingTests
 					"roslyn_replace_in_file",
 					new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = ctx.TargetPath },
 					data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_lines"]?.AsArray()[0]?.GetValue<int>() == 2)),
+			
+			// ── Regression: unified match-mode enum (#253) ──
+			// mode:"regex" is the new preferred form of the old useRegex=true. '\w+' is a regex
+			// metacharacter sequence: in the DEFAULT literal mode it would be sought verbatim and match
+			// nothing; under mode:"regex" it matches word runs, so match_count>0 proves the mode was
+			// honored (not silently treated as literal). Dry run — does not mutate the shared temp file.
+			new("roslyn_replace_in_file: mode=regex is honored (dry run)",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_file",
+					new { filePath = ".test_replace_temp.cs", pattern = @"\w+", replacement = "X", mode = "regex", dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["match_count"]?.GetValue<int>() > 0 && data?["applied"]?.GetValue<bool>() == false)),
+			
+			// The deprecated useRegex alias must still work AND surface a _caution steering callers to
+			// mode. Asserts TryResolveMatchMode wired the deprecation notice onto the result. Dry run.
+			new("roslyn_replace_in_file: deprecated useRegex emits _caution (dry run)",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_file",
+					new { filePath = ".test_replace_temp.cs", pattern = @"\w+", replacement = "X", useRegex = true, dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["_caution"]?.GetValue<string>()?.Contains("deprecated") == true)),
+			
+			// ── Regression: literal/glob replacement inserted VERBATIM (#254 review) ──
+			// Regex.Replace interprets '$' substitution tokens in the replacement ('$&' = whole match,
+			// '$$' = literal '$', '${name}', etc.) — correct for regex mode, but WRONG for literal/glob
+			// where the replacement must be inserted as-is (and where '$'-tokens over a capture-less
+			// pattern can even throw). The fix routes literal/glob through a MatchEvaluator. This applies
+			// a LITERAL replacement whose text contains '$&' and reads the file back: '$&' must survive
+			// verbatim, NOT expand to the matched text ("AAA"). Fails against the pre-fix Regex.Replace.
+			new("roslyn_replace_in_file: literal mode inserts replacement verbatim ($ not substituted)",
+				async () => {
+					
+					File.WriteAllText(tempVerbatimFile, "// AAA marker\n");
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_file",
+						new { filePath = ".test_verbatim_temp.cs", pattern = "AAA", replacement = "$&X", mode = "literal", projectPath = ctx.TargetPath },
+						data => data?["applied"]?.GetValue<bool>() == true && data?["match_count"]?.GetValue<int>() == 1);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempVerbatimFile);
+					
+					return content.Contains("$&X") && !content.Contains("AAAX")
+						? (true,  "PASS  (verbatim)")
+						: (false, $"FAIL  (replacement not verbatim: '{content.Trim()}')");
+				}),
+			
+			// Companion: regex mode MUST still perform '$' substitution — the same '$&X' replacement
+			// expands to the matched text plus 'X'. Guards against the fix over-reaching and disabling
+			// backreferences for the mode that is supposed to keep them.
+			new("roslyn_replace_in_file: regex mode still substitutes $& in replacement",
+				async () => {
+					
+					File.WriteAllText(tempVerbatimFile, "// AAA marker\n");
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_file",
+						new { filePath = ".test_verbatim_temp.cs", pattern = "AAA", replacement = "$&X", mode = "regex", projectPath = ctx.TargetPath },
+						data => data?["applied"]?.GetValue<bool>() == true && data?["match_count"]?.GetValue<int>() == 1);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempVerbatimFile);
+					
+					return content.Contains("AAAX") && !content.Contains("$&X")
+						? (true,  "PASS  (substituted)")
+						: (false, $"FAIL  (regex substitution not applied: '{content.Trim()}')");
+				}),
 			
 			new("roslyn_replace_in_code: dry run identifier replacement",
 				() => ctx.RunTestAsync(
@@ -131,6 +201,7 @@ static class EditingTests
 			try { File.Delete(tempTextFile);   } catch { }
 			try { File.Delete(tempCodeFile);   } catch { }
 			try { File.Delete(tempInsertFile); } catch { }
+			try { File.Delete(tempVerbatimFile); } catch { }
 			try { File.Delete(Path.Combine(ctx.TargetPath, ".test_code_debug.cs")); } catch { }
 			
 			return Task.CompletedTask;

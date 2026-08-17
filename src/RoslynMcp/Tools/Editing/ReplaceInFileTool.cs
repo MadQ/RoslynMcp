@@ -17,8 +17,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		"Use for text-level find/replace in any file type — JSON, XML, .csproj, Markdown, plain text, or source code. " +
 		"For C# files, prefer roslyn_replace_in_code instead — it is semantically aware, validates syntax, and preserves formatting. " +
 		"For inserting new lines without replacing existing content, use roslyn_insert_lines instead. " +
-		"Supports literal string patterns (default) or regular expressions when useRegex=true; " +
-		"regex replacements support $1/$2 backreferences. Replaces ALL occurrences of the pattern in the file. " +
+		"Interpretation of the pattern is controlled by 'mode' (default literal); regex replacements support $1/$2 backreferences. " +
+		"Glob mode ('*'/'?') is match-only — the replacement text is always inserted literally. Replaces ALL occurrences of the pattern in the file. " +
 		"Returns the number of replacements made and the 1-based line numbers that were changed. " +
 		"Literal patterns are matched case-sensitively and whitespace-exactly — verify the exact text with " +
 		"roslyn_read_file or roslyn_search_files before attempting a replacement if unsure of the content. " +
@@ -28,9 +28,10 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	public async Task<object> ReplaceInFile(
 		[Description("Relative path to the file from the workspace root.")                                                ] string  filePath,
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("The pattern to find. Interpreted as a literal string by default; treated as a regular expression when useRegex=true.")                         ] string  pattern,
-		[Description("The replacement text. Literal string by default. Supports $1/$2 backreferences when useRegex=true.")                           ] string  replacement,
-		[Description("Treat pattern as a regular expression. Default: false.")                                            ] bool    useRegex  = false,
+		[Description("The pattern to find in file CONTENT. Interpretation is controlled by 'mode' (default literal). This is not a filename filter.")               ] string  pattern,
+		[Description("The replacement text. Supports $1/$2 backreferences when mode is 'regex'; inserted literally for 'literal' and 'glob' modes.")                ] string  replacement,
+		[Description(MatchModeDescription + "Default: 'literal'.")                                                        ] string? mode      = null,
+		[Description("DEPRECATED — use mode:\"regex\" instead. Treat pattern as a regular expression. Ignored when 'mode' is set.")                                 ] bool    useRegex  = false,
 		[Description("Preview replacements without writing the file. Returns what would change. Default: false.")         ] bool    dryRun    = false,
 		[Description("Case-sensitive matching. Default: true.")                                                           ] bool    caseSensitive = true,
 		[Description(
@@ -40,7 +41,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		)] bool normalizeLineEndings = true
 	)
 	{
-		using var scope = BeginTool("roslyn_replace_in_file", filePath, new { pattern, useRegex, caseSensitive, dryRun, normalizeLineEndings });
+		using var scope = BeginTool("roslyn_replace_in_file", filePath, new { pattern, mode, useRegex, caseSensitive, dryRun, normalizeLineEndings });
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			
@@ -52,22 +53,14 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
+		if(!TryResolveMatchMode(mode, useRegex, "useRegex", MatchMode.Regex, MatchMode.Literal, out var matchMode, out var modeCaution, out var modeError))
+			
+			return scope.Error(new ErrorResult(modeError));
+		
 		Regex regex;
 		
 		try {
-			
-			if(!useRegex)
-				regex = BuildLiteralRegex(pattern, caseSensitive);
-			
-			else {
-				
-				var options = RegexOptions.Compiled;
-				
-				if(!caseSensitive)
-					options |= RegexOptions.IgnoreCase;
-				
-				regex = new Regex(pattern, options);
-			}
+			regex = BuildContentRegex(pattern, matchMode, caseSensitive);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
@@ -96,15 +89,23 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		if(matches.Count == 0)
 			
-			return scope.Failed("No matches found.", new ReplaceInFileResult(false, 0, [], "No matches found."));
+			return scope.Failed("No matches found.", new ReplaceInFileResult(false, 0, [], "No matches found.") { Caution = modeCaution });
 		
 		if(dryRun)
 			
-			return scope.Outcome("dry run", new ReplaceInFileResult(false, matches.Count, changedLines, Message: $"Dry run: {matches.Count} replacement(s) would be made."));
+			return scope.Outcome("dry run", new ReplaceInFileResult(false, matches.Count, changedLines, Message: $"Dry run: {matches.Count} replacement(s) would be made.") { Caution = modeCaution });
 		
 		
 		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
-		var newContent = regex.Replace(originalContent, effectiveReplacement);
+		
+		// Regex mode honors $1/$&/${name} substitution in the replacement text; literal and glob modes
+		// insert the replacement VERBATIM. A MatchEvaluator bypasses Regex substitution entirely, so a
+		// '$' (or '$1', '$&', '$$') in the replacement stays literal in those modes — and can never throw
+		// on a capture-less pattern, unlike the substitution overload. Matches the parameter docs.
+		var newContent = matchMode is MatchMode.Regex
+			? regex.Replace(originalContent, effectiveReplacement)
+			: regex.Replace(originalContent, _ => effectiveReplacement)
+		;
 		
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newContent);
 		
@@ -143,7 +144,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			
 			return scope.Error(truncErr);
 		
-		return scope.Outcome($"{matches.Count} replacement(s)", new ReplaceInFileResult(true, matches.Count, changedLines));
+		return scope.Outcome($"{matches.Count} replacement(s)", new ReplaceInFileResult(true, matches.Count, changedLines) { Caution = modeCaution });
 	}
 	
 	// Builds a sorted array of character offsets where each line starts.

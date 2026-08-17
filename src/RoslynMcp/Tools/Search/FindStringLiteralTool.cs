@@ -25,7 +25,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> FindStringLiteral(
-		[Description("Pattern to search for. Regex by default; set useGlob: true for glob matching (* = any chars, ? = one char).")]
+		[Description("Pattern to match against string-literal tokens. Interpretation is controlled by 'mode' (default regex). Matches the decoded value unless matchRaw is set. This is not a filename filter — use filePattern to restrict which files are searched.")]
 		string pattern,
 
 		[Description(ProjectPathDescription)]
@@ -33,7 +33,10 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 
 		CancellationToken cancellationToken,
 
-		[Description("When true, treat pattern as a glob (*, ?). Default: false (regex).")]
+		[Description(MatchModeDescription + "Default: 'regex'.")]
+		string? mode = null,
+
+		[Description("DEPRECATED — use mode:\"glob\" instead. When true, treat pattern as a glob (*, ?). Ignored when 'mode' is set.")]
 		bool useGlob = false,
 
 		[Description("When true, match against raw source text including quotes and unresolved escapes (e.g. \\\"\\\\n\\\"). Default: false — matches against the decoded value (quotes stripped, escapes resolved).")]
@@ -42,7 +45,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		[Description("Case-sensitive matching. Default: false (case-insensitive).")]
 		bool caseSensitive = false,
 
-		[Description("Filename glob filter applied to workspace C# files. Default: '*.cs'.")]
+		[Description("Filename glob filter selecting WHICH workspace C# files are searched (matches the file name, not content). Default: '*.cs'.")]
 		string? filePattern = null,
 
 		[Description("Number of results to skip. Default: 0.")]
@@ -55,7 +58,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_find_string_literal", pattern, new { useGlob, matchRaw, caseSensitive, filePattern, skip, take });
+		using var scope = BeginTool("roslyn_find_string_literal", pattern, new { mode, useGlob, matchRaw, caseSensitive, filePattern, skip, take });
 
 		filePattern ??= "*.cs";
 
@@ -63,18 +66,14 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 
 			return scope.Outcome("cached page", cached);
 
-		var opts = RegexOptions.Compiled;
-
-		if(!caseSensitive)
-			opts |= RegexOptions.IgnoreCase;
-
+		if(!TryResolveMatchMode(mode, useGlob, "useGlob", MatchMode.Glob, MatchMode.Regex, out var matchMode, out var modeCaution, out var modeError))
+			
+			return scope.Error(new ErrorResult(modeError));
+		
 		Regex regex;
 
 		try {
-			regex = useGlob
-				? new Regex(BuildGlobRegex(pattern), opts)
-				: new Regex(pattern, opts)
-			;
+			regex = BuildContentRegex(pattern, matchMode, caseSensitive);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid pattern: {ex.Message}"));
@@ -104,10 +103,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 				Regex? strippedRegex = null;
 
 				try {
-					strippedRegex = useGlob
-						? new Regex(BuildGlobRegex(stripped), opts)
-						: new Regex(stripped, opts)
-					;
+					strippedRegex = BuildContentRegex(stripped, matchMode, caseSensitive);
 				}
 				catch(ArgumentException) { }
 
@@ -133,7 +129,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			result.PageToken,
 			result.HasMore)
 		{
-			Caution = ComposeCautions(fallbackCaution, AdhocCaution(projectPath)),
+			Caution = ComposeCautions(modeCaution, fallbackCaution, AdhocCaution(projectPath)),
 			Hint    = fallbackHint
 		});
 
@@ -193,11 +189,6 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			return matches;
 		}
 	}
-
-	// ** is not supported here — this is value-content matching, not path matching.
-	static string BuildGlobRegex(string glob)
-		=> "^" + Regex.Escape(glob).Replace(@"\*", ".*").Replace(@"\?", ".") + "$"
-	;
 }
 
 sealed record StringLiteralMatch(
