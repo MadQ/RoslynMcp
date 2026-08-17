@@ -1518,14 +1518,23 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static string ChatRefBothTriedHint(string original, string stripped) =>
 		$"0 matches for '{original}' (also tried '{stripped}' in case the pattern was a VS Code chat symbol reference).";
 	
-	/// <summary>Joins any number of optional caution strings with a space, or null when all are null/empty.</summary>
-	protected static string? ComposeCautions(params string?[] cautions)
+	/// <summary>Joins two optional caution strings with a space, skipping null/empty; null when both are absent.</summary>
+	protected static string? ComposeCautions(string? first, string? second)
 	{
-		var present = cautions.Where(c => c is { Length: > 0 })
-		;
+		if(string.IsNullOrEmpty(first))
+			
+			return string.IsNullOrEmpty(second) ? null : second;
 		
-		return present.Any() ? string.Join(' ', present) : null;
+		return string.IsNullOrEmpty(second) ? first : $"{first} {second}";
 	}
+	
+	/// <summary>
+	///     Joins three optional caution strings with a space, skipping null/empty. Fixed arity (no params
+	///     array, no LINQ) because this runs on most tool responses — keeps the hot path allocation-free
+	///     beyond the single result string.
+	/// </summary>
+	protected static string? ComposeCautions(string? first, string? second, string? third) =>
+		ComposeCautions(ComposeCautions(first, second), third);
 	
 	/// <summary>
 	///     Saves pre- and post-change backup snapshots, returning the pre-change token on success

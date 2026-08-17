@@ -95,7 +95,7 @@ static class FindStringLiteralTests
 			// asterisk), so literal mode finds NOTHING. filePattern scopes to *Tool.cs to exclude this
 			// test file, which itself contains the pattern as a string literal. The paired glob test
 			// below runs the SAME pattern over the SAME files and DOES match the "roslyn_search_files"
-			// tool-name literal — the 0-vs->0 contrast proves literal and glob are honored distinctly.
+			// tool-name literal — the "0 vs >0" contrast proves literal and glob are honored distinctly.
 			new("roslyn_find_string_literal: mode=literal treats '*' as a literal character (no match)",
 				() => ctx.RunTestAsync(
 					"roslyn_find_string_literal",

@@ -97,7 +97,15 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		
 		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
-		var newContent = regex.Replace(originalContent, effectiveReplacement);
+		
+		// Regex mode honors $1/$&/${name} substitution in the replacement text; literal and glob modes
+		// insert the replacement VERBATIM. A MatchEvaluator bypasses Regex substitution entirely, so a
+		// '$' (or '$1', '$&', '$$') in the replacement stays literal in those modes — and can never throw
+		// on a capture-less pattern, unlike the substitution overload. Matches the parameter docs.
+		var newContent = matchMode is MatchMode.Regex
+			? regex.Replace(originalContent, effectiveReplacement)
+			: regex.Replace(originalContent, _ => effectiveReplacement)
+		;
 		
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newContent);
 		
