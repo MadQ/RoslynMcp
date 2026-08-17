@@ -31,7 +31,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> SemanticSearch(
-		[Description("Regex pattern to search for (e.g., 'TODO.*performance', 'UserName').")]
+		[Description("Pattern to match against source CONTENT within the chosen syntax context. Interpretation is controlled by 'mode' (default regex). This is not a filename filter — use filePattern to restrict which files are searched.")]
 		string pattern,
 		
 		[Description(ProjectPathDescription)]
@@ -48,8 +48,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		[Description("Case-sensitive matching. Default: false (case-insensitive).")]
 		bool caseSensitive = false,
 		
-		[Description("File type filter (e.g., '*.cs'). Default: '*.cs'. Only C# files are processed — non-.cs files are skipped even if matched.")]
+		[Description("Filename glob filter selecting WHICH files are searched (matches the file name/path, not content): e.g. '*.cs'. Default: '*.cs'. Only C# files are processed — non-.cs files are skipped even if matched.")]
 		string? filePattern = null,
+		
+		[Description(MatchModeDescription + "Default: 'regex'.")]
+		string? mode = null,
 		
 		[Description("Only match within nodes of this syntax kind (e.g., 'MethodDeclaration', 'ClassDeclaration', 'IfStatement'). Omit to search everywhere. Unknown kind values are silently ignored.")]
 		string? containingKind = null,
@@ -64,7 +67,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_semantic_search", pattern, new { context, caseSensitive, excludeGenerated, filePattern, containingKind, skip, take });
+		using var scope = BeginTool("roslyn_semantic_search", pattern, new { context, caseSensitive, excludeGenerated, filePattern, mode, containingKind, skip, take });
 		
 		context     ??= "all";
 		filePattern ??= "*.cs";
@@ -86,16 +89,16 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		
 		context = context.ToLowerInvariant();
 		
-		// Compile regex
-		var options = RegexOptions.Compiled;
+		var matchMode = MatchMode.Regex;
 		
-		if(!caseSensitive)
-			options |= RegexOptions.IgnoreCase;
+		if(mode is not null && !TryParseMatchMode(mode, out matchMode, out var modeError))
+			
+			return scope.Error(new ErrorResult(modeError));
 		
 		Regex regex;
 		
 		try {
-			regex = new Regex(pattern, options);
+			regex = BuildContentRegex(pattern, matchMode, caseSensitive);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
@@ -125,7 +128,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				Regex? strippedRegex = null;
 				
 				try {
-					strippedRegex = new Regex(stripped, options);
+					strippedRegex = BuildContentRegex(stripped, matchMode, caseSensitive);
 				}
 				catch(ArgumentException) { }
 				

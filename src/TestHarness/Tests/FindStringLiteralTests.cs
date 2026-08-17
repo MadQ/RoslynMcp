@@ -74,6 +74,40 @@ static class FindStringLiteralTests
 					new { pattern = "roslyn_*", useGlob = true, take = 10, projectPath = ctx.TargetPath },
 					data => data?["total_matches"]?.GetValue<int>() > 30)),
 
+			// ── Regression: unified match-mode enum (#253) ──
+			// mode:"glob" is the preferred replacement for useGlob=true and must produce the SAME
+			// wildcard behavior. Mirrors the useGlob star test above; equal result count proves parity.
+			new("roslyn_find_string_literal: mode=glob — star wildcard matches (parity with useGlob)",
+				() => ctx.RunTestAsync(
+					"roslyn_find_string_literal",
+					new { pattern = "roslyn_*", mode = "glob", take = 10, projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["total_matches"]?.GetValue<int>() > 30)),
+
+			// The deprecated useGlob alias still works but must surface a _caution pointing to mode.
+			new("roslyn_find_string_literal: deprecated useGlob emits _caution",
+				() => ctx.RunTestAsync(
+					"roslyn_find_string_literal",
+					new { pattern = "roslyn_*", useGlob = true, take = 5, projectPath = ctx.TargetPath },
+					data => data?["_caution"]?.GetValue<string>()?.Contains("deprecated") == true)),
+
+			// mode:"literal" seeks the pattern verbatim — the trailing '*' is a real character, not a
+			// wildcard. No tool source string literal is literally "roslyn_search_files*" (with an
+			// asterisk), so literal mode finds NOTHING. filePattern scopes to *Tool.cs to exclude this
+			// test file, which itself contains the pattern as a string literal. The paired glob test
+			// below runs the SAME pattern over the SAME files and DOES match the "roslyn_search_files"
+			// tool-name literal — the 0-vs->0 contrast proves literal and glob are honored distinctly.
+			new("roslyn_find_string_literal: mode=literal treats '*' as a literal character (no match)",
+				() => ctx.RunTestAsync(
+					"roslyn_find_string_literal",
+					new { pattern = "roslyn_search_files*", mode = "literal", filePattern = "*Tool.cs", take = 50, projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["total_matches"]?.GetValue<int>() == 0)),
+
+			new("roslyn_find_string_literal: mode=glob wildcard matches where literal did not",
+				() => ctx.RunTestAsync(
+					"roslyn_find_string_literal",
+					new { pattern = "roslyn_search_files*", mode = "glob", filePattern = "*Tool.cs", take = 50, projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["total_matches"]?.GetValue<int>() > 0)),
+
 			new("roslyn_find_string_literal: useGlob=true — question-mark wildcard",
 				() => ctx.RunTestAsync(
 					"roslyn_find_string_literal",

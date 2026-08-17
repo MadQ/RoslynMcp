@@ -19,7 +19,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		"For filename/path matching with no content search, this is the right tool.")]
 	public object ListFiles(
 		[Description(ProjectPathDescription)] string projectPath,
-		[Description("Glob pattern (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). Default: '**/*'.")] string? pattern = null,
+		[Description("Glob pattern matching file NAMES/PATHS, not file content (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). Default: '**/*'.")] string? pattern = null,
 		[Description("Include subdirectories. Default: true.")] bool recursive = true,
 		[Description("Number of files to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of results. Default: 100, max: 500.")] int take = 100,

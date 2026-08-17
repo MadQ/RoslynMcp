@@ -23,17 +23,18 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		"For searching non-C# files by content, use roslyn_list_files to enumerate paths and roslyn_read_file to inspect them. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page.")]
 	public async Task<object> SearchFiles(
-		[Description("Regex pattern to search for (e.g., 'class.*Tool', 'TODO.*performance').")] string pattern,
+		[Description("Pattern to match against the CONTENT of each source line. Interpretation is controlled by 'mode' (default regex). This is not a filename filter — use filePattern to restrict which files are searched.")] string pattern,
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
-		[Description("Filename glob filter applied within Roslyn workspace documents (e.g., '*.cs', '*Test.cs'). Default: '*.cs'. Non-C# files are never searched regardless of this filter.")] string? filePattern = null,
+		[Description("Filename glob filter selecting WHICH files are searched (matches the file name/path, not content): e.g. '*.cs', '*Test.cs'. Default: '*.cs'. Non-C# files are never searched regardless of this filter.")] string? filePattern = null,
 		[Description("Case-sensitive matching. Default: false (case-insensitive).")] bool caseSensitive = false,
+		[Description(MatchModeDescription + "Default: 'regex'.")] string? mode = null,
 		[Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of results to return. Default: 50, max: 200.")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, skip, take });
+		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, mode, skip, take });
 		
 		filePattern ??= "*.cs";
 		
@@ -41,15 +42,16 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		var options = RegexOptions.Compiled;
+		var matchMode = MatchMode.Regex;
 		
-		if(!caseSensitive)
-			options |= RegexOptions.IgnoreCase;
+		if(mode is not null && !TryParseMatchMode(mode, out matchMode, out var modeError))
+			
+			return scope.Error(new ErrorResult(modeError));
 		
 		Regex regex;
 		
 		try {
-			regex = new Regex(pattern, options);
+			regex = BuildContentRegex(pattern, matchMode, caseSensitive);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
@@ -79,7 +81,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				Regex? strippedRegex = null;
 				
 				try {
-					strippedRegex = new Regex(stripped, options);
+					strippedRegex = BuildContentRegex(stripped, matchMode, caseSensitive);
 				}
 				catch(ArgumentException) { }
 				

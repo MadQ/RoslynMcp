@@ -725,6 +725,94 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	;
 	
 	/// <summary>
+	///     How a content/value <c>pattern</c> is interpreted. The <em>target</em> (a source line, a decoded
+	///     string-literal value, etc.) is fixed per tool — the mode only changes interpretation, never the
+	///     target. Filename/path matching is a separate axis and is not governed by this enum.
+	/// </summary>
+	protected enum MatchMode { Literal, Regex, Glob }
+	
+	/// <summary>
+	///     Canonical description of the <c>mode</c> parameter — single source of truth so the wording cannot
+	///     drift between tools. Each tool appends its own default (e.g. <c>MatchModeDescription + "Default: 'regex'."</c>),
+	///     which is a compile-time constant concatenation and therefore valid in a <c>[Description]</c> attribute.
+	/// </summary>
+	protected const string MatchModeDescription =
+		"How the content pattern is interpreted: " +
+		"'literal' = exact substring (regex/glob metacharacters have no special meaning); " +
+		"'regex' = .NET regular expression, matched anywhere within the target line/value; " +
+		"'glob' = wildcards only ('*' = any characters, '?' = one character), anchored to the WHOLE target line/value. " +
+		"Glob has no capture groups (so replacements cannot backreference). This selects how the content is matched — " +
+		"it never turns a content search into a filename search. "
+	;
+	
+	/// <summary>
+	///     Parses a <c>mode</c> string into a <see cref="MatchMode"/>. Case-insensitive. Returns <see langword="false"/>
+	///     with a structured, user-facing <paramref name="error"/> listing the valid values when the input is unrecognized.
+	/// </summary>
+	protected static bool TryParseMatchMode(string mode, out MatchMode parsed, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
+	{
+		switch(mode.Trim().ToLowerInvariant()) {
+			
+			case "literal": parsed = MatchMode.Literal; error = null; return true;
+			case "regex":   parsed = MatchMode.Regex;   error = null; return true;
+			case "glob":    parsed = MatchMode.Glob;    error = null; return true;
+			
+			default:
+				parsed = MatchMode.Literal;
+				error  = $"Invalid mode '{mode}'. Must be one of: literal, regex, glob.";
+				
+				return false;
+		}
+	}
+	
+	/// <summary>
+	///     Resolves the effective <see cref="MatchMode"/> for a tool, folding in a deprecated boolean alias
+	///     (<c>useRegex</c> / <c>useGlob</c>). Precedence: an explicit <paramref name="mode"/> string wins; otherwise
+	///     a set <paramref name="legacyFlag"/> selects <paramref name="legacyMode"/>; otherwise <paramref name="defaultMode"/>.
+	///     <paramref name="caution"/> is set (for the result's <c>_caution</c>) whenever the deprecated flag was supplied,
+	///     including the case where it was overridden by an explicit mode. Returns <see langword="false"/> with
+	///     <paramref name="error"/> when <paramref name="mode"/> is non-null but invalid.
+	/// </summary>
+	protected static bool TryResolveMatchMode(
+		string? mode,
+		bool legacyFlag,
+		string legacyName,
+		MatchMode legacyMode,
+		MatchMode defaultMode,
+		out MatchMode resolved,
+		out string? caution,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
+	{
+		caution = null;
+		
+		if(mode is not null) {
+			
+			if(!TryParseMatchMode(mode, out resolved, out error))
+				
+				return false;
+			
+			if(legacyFlag)
+				caution = $"The '{legacyName}' parameter is deprecated and was ignored because 'mode' was supplied. Use mode instead.";
+			
+			return true;
+		}
+		
+		error = null;
+		
+		if(legacyFlag) {
+			
+			resolved = legacyMode;
+			caution  = $"The '{legacyName}' parameter is deprecated. Use mode:\"{legacyMode.ToString().ToLowerInvariant()}\" instead.";
+			
+			return true;
+		}
+		
+		resolved = defaultMode;
+		
+		return true;
+	}
+	
+	/// <summary>
 	///     Returns a safe page slice from an array. Clamps <paramref name="skip"/> to
 	///     <c>[0, items.Length]</c> so callers never hit <see cref="ArgumentOutOfRangeException"/>.
 	/// </summary>
@@ -1017,6 +1105,39 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		return new Regex(escaped, options);
 	}
+	
+	/// <summary>
+	///     Compiles a content/value <c>pattern</c> into a <see cref="Regex"/> according to <paramref name="mode"/>:
+	///     <see cref="MatchMode.Literal"/> escapes the whole pattern (CRLF-agnostic via <see cref="BuildLiteralRegex"/>),
+	///     <see cref="MatchMode.Regex"/> compiles it as-is, and <see cref="MatchMode.Glob"/> lowers <c>*</c>/<c>?</c> to an
+	///     anchored simple-glob regex (see <see cref="BuildSimpleGlobRegex"/>). Regex and glob modes may throw
+	///     <see cref="ArgumentException"/> on a malformed pattern — callers wrap this call and surface a structured error.
+	/// </summary>
+	protected static Regex BuildContentRegex(string pattern, MatchMode mode, bool caseSensitive)
+	{
+		if(mode is MatchMode.Literal)
+			
+			return BuildLiteralRegex(pattern, caseSensitive);
+		
+		var options = RegexOptions.Compiled;
+		
+		if(!caseSensitive)
+			options |= RegexOptions.IgnoreCase;
+		
+		var effective = mode is MatchMode.Glob ? BuildSimpleGlobRegex(pattern) : pattern;
+		
+		return new Regex(effective, options);
+	}
+	
+	/// <summary>
+	///     Lowers a simple content/value glob (<c>*</c> = any characters, <c>?</c> = one character) to an anchored
+	///     regex pattern (<c>^…$</c>) — a whole-target match. This is the <em>simple</em> glob dialect: it has no path
+	///     segments and <c>**</c> is not special (that is the path dialect, handled by <see cref="GlobMatcher"/> and
+	///     the filename-glob tools). All other characters are regex-escaped.
+	/// </summary>
+	protected static string BuildSimpleGlobRegex(string glob)
+		=> "^" + Regex.Escape(glob).Replace(@"\*", ".*").Replace(@"\?", ".") + "$"
+	;
 	
 	/// <summary>
 	///     Detects the dominant line ending in a string and normalizes the replacement text to match.
@@ -1397,9 +1518,14 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static string ChatRefBothTriedHint(string original, string stripped) =>
 		$"0 matches for '{original}' (also tried '{stripped}' in case the pattern was a VS Code chat symbol reference).";
 	
-	/// <summary>Joins two optional caution strings, or null when both are null.</summary>
-	protected static string? ComposeCautions(string? first, string? second) =>
-		first is null ? second : second is null ? first : $"{first} {second}";
+	/// <summary>Joins any number of optional caution strings with a space, or null when all are null/empty.</summary>
+	protected static string? ComposeCautions(params string?[] cautions)
+	{
+		var present = cautions.Where(c => c is { Length: > 0 })
+		;
+		
+		return present.Any() ? string.Join(' ', present) : null;
+	}
 	
 	/// <summary>
 	///     Saves pre- and post-change backup snapshots, returning the pre-change token on success

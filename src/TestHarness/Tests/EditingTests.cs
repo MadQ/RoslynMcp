@@ -41,6 +41,25 @@ static class EditingTests
 					new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = ctx.TargetPath },
 					data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_lines"]?.AsArray()[0]?.GetValue<int>() == 2)),
 			
+			// ── Regression: unified match-mode enum (#253) ──
+			// mode:"regex" is the new preferred form of the old useRegex=true. '\w+' is a regex
+			// metacharacter sequence: in the DEFAULT literal mode it would be sought verbatim and match
+			// nothing; under mode:"regex" it matches word runs, so match_count>0 proves the mode was
+			// honored (not silently treated as literal). Dry run — does not mutate the shared temp file.
+			new("roslyn_replace_in_file: mode=regex is honored (dry run)",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_file",
+					new { filePath = ".test_replace_temp.cs", pattern = @"\w+", replacement = "X", mode = "regex", dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["match_count"]?.GetValue<int>() > 0 && data?["applied"]?.GetValue<bool>() == false)),
+			
+			// The deprecated useRegex alias must still work AND surface a _caution steering callers to
+			// mode. Asserts TryResolveMatchMode wired the deprecation notice onto the result. Dry run.
+			new("roslyn_replace_in_file: deprecated useRegex emits _caution (dry run)",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_file",
+					new { filePath = ".test_replace_temp.cs", pattern = @"\w+", replacement = "X", useRegex = true, dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["_caution"]?.GetValue<string>()?.Contains("deprecated") == true)),
+			
 			new("roslyn_replace_in_code: dry run identifier replacement",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
