@@ -131,7 +131,11 @@ internal static class MSBuildBootstrap
 
 					if(TryRegisterPath(overridePath)) {
 
-						discoveryMethod = $"resolved via --msbuild-path / ROSLYNMCP_MSBUILD_PATH ({overridePath})";
+						// No-op unless the override points at a VS MSBuild\...\Bin dir (SDK dirs return null).
+						var pinnedRoot = TryPinVisualStudioInstance(overridePath);
+
+						discoveryMethod = $"resolved via --msbuild-path / ROSLYNMCP_MSBUILD_PATH ({overridePath})"
+							+ PinSuffix(pinnedRoot);
 
 						return null;
 					}
@@ -157,7 +161,10 @@ internal static class MSBuildBootstrap
 						PrependToPath(msbuildDir);
 						if(TryRegister()) {
 							
-							discoveryMethod = $"resolved via vswhere — VS mode ({msbuildDir})";
+							var pinnedRoot = TryPinVisualStudioInstance(msbuildDir);
+							
+							discoveryMethod = $"resolved via vswhere — VS mode ({msbuildDir})"
+								+ PinSuffix(pinnedRoot);
 							
 							return null;
 						}
@@ -214,7 +221,10 @@ internal static class MSBuildBootstrap
 						
 						if(TryRegister()) {
 							
-							discoveryMethod = $"resolved via vswhere ({msbuildDir})";
+							var pinnedRoot = TryPinVisualStudioInstance(msbuildDir);
+							
+							discoveryMethod = $"resolved via vswhere ({msbuildDir})"
+								+ PinSuffix(pinnedRoot);
 							
 							return null;
 						}
@@ -597,6 +607,56 @@ internal static class MSBuildBootstrap
 		return null;
 	}
 	
+	/// <summary>
+	///     Pins the out-of-process Roslyn BuildHost to a specific Visual Studio MSBuild instance.
+	///     The .NET Framework BuildHost runs its own discovery and picks the highest-versioned VS
+	///     install (prerelease included), ignoring the path this process resolved — so on a machine
+	///     with a newer/preview VS it can load incompatible MSBuild assemblies that crash
+	///     (TypeInitializationException in Microsoft.Build.Shared.XMakeElements). The BuildHost is a
+	///     child process that inherits this process's environment, and MSBuildLocator synthesizes a
+	///     "Developer Console" instance from VSINSTALLDIR + VSCMD_VER. Setting those to the VS root
+	///     derived from <paramref name="msbuildBinDir"/> — with a deliberately high synthetic version
+	///     so it outranks the BuildHost's OrderByDescending(Version) pick — forces the child onto the
+	///     instance this process already chose. No supported API pins the BuildHost's MSBuild path;
+	///     this is the only mechanism (MSBUILD_EXE_PATH is stripped from the child, and PATH is not
+	///     consulted for VS instance selection).
+	///     Returns the pinned VS root, or null when pinning is disabled, the path is not a VS bin
+	///     layout (e.g. a dotnet SDK directory), or the root cannot be derived.
+	/// </summary>
+	static string? TryPinVisualStudioInstance(string msbuildBinDir)
+	{
+		if(ServerArgs.Current.NoBuildHostPin)
+			
+			return null;
+		
+		// Expect a VS layout: <root>\MSBuild\<Current|x.y>\Bin. Walk three levels up to the root
+		// and confirm the "MSBuild" segment so this never fires for a dotnet SDK directory.
+		var bin        = msbuildBinDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		var versionDir = Path.GetDirectoryName(bin);        // ...\MSBuild\Current
+		var msbuildDir = Path.GetDirectoryName(versionDir); // ...\MSBuild
+		var vsRoot     = Path.GetDirectoryName(msbuildDir); // ...\<root>
+		
+		if(vsRoot is null || msbuildDir is null ||
+		   !string.Equals(Path.GetFileName(msbuildDir), "MSBuild", StringComparison.OrdinalIgnoreCase))
+			
+			return null;
+		
+		// VSINSTALLDIR is the VS root — MSBuildLocator appends MSBuild\Current\Bin itself. The
+		// synthetic version needs major >= 16 (for the Current\Bin layout) and must outrank any
+		// real install, including an 18.x preview — 9999.0 satisfies both.
+		Environment.SetEnvironmentVariable("VSINSTALLDIR", vsRoot + Path.DirectorySeparatorChar);
+		Environment.SetEnvironmentVariable("VSCMD_VER",    "9999.0");
+		
+		return vsRoot;
+	}
+	
+	/// <summary>Formats the discovery-method suffix noting a BuildHost pin, or empty when none.</summary>
+	static string PinSuffix(string? pinnedRoot) =>
+		pinnedRoot is not null ? $" (BuildHost pinned to {pinnedRoot})" : ""
+	;
+	
+	
+
 	static void PrependToPath(string directory)
 	{
 		var current = Environment.GetEnvironmentVariable("PATH") ?? "";
