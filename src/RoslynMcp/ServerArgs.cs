@@ -94,7 +94,7 @@ internal sealed class ServerArgs
     ///     Disables pinning the out-of-process Roslyn BuildHost to the Visual Studio MSBuild
     ///     instance the server resolved. CLI: <c>--no-buildhost-pin</c> (bare flag).
     ///     Env: <c>ROSLYNMCP_NO_BUILDHOST_PIN</c> = <c>true</c>. Default: <c>false</c> (pinning on).
-    ///     When on, <see cref="MSBuildBootstrap"/> sets <c>VSINSTALLDIR</c>/<c>VSCMD_VER</c> so the
+    ///     When off (default), <see cref="MSBuildBootstrap"/> sets <c>VSINSTALLDIR</c>/<c>VSCMD_VER</c> so the
     ///     BuildHost selects the same VS instance the server chose, instead of the newest installed
     ///     one — which may be an incompatible preview that crashes on load.
     /// </summary>
