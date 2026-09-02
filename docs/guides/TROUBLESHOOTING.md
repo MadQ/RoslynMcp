@@ -202,6 +202,40 @@ whether an episode happened earlier in the session.
 
 ---
 
+### Non-SDK .NET Framework project fails with `XMakeElements` type-initializer error
+
+**Symptom:** Loading a legacy (non-SDK) .NET Framework `.csproj` fails with:
+
+```
+Failed to load MSBuildWorkspace ... System.TypeInitializationException:
+The type initializer for 'Microsoft.Build.Shared.XMakeElements' threw an exception.
+```
+
+The server log shows Roslyn's out-of-process BuildHost registered a **different** (usually newer)
+MSBuild than the one the server resolved, e.g.:
+
+```
+info: Registered MSBuild 18.9.x instance at <some other VS install>\MSBuild\Current\Bin
+```
+
+**Cause:** These projects load via Roslyn's out-of-process **.NET Framework BuildHost**, which runs
+its own MSBuild discovery and selects the **highest-versioned** Visual Studio install on the machine —
+**including prereleases** — regardless of the instance RoslynMcp resolved. If that newest instance is
+an incompatible/preview MSBuild, its assemblies crash when loaded in-process and the whole load fails.
+
+**Solution:** By default RoslynMcp now **pins the BuildHost** to the VS instance it resolved (it sets
+`VSINSTALLDIR`/`VSCMD_VER` so the BuildHost selects that instance instead of the newest one). If the
+server still picks the wrong instance, force the one you want and keep the pin enabled:
+
+```bash
+RoslynMcp.exe --workspace vs --msbuild-path "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin"
+```
+
+To opt out of pinning entirely (let the BuildHost choose on its own), pass `--no-buildhost-pin`
+(or set `ROSLYNMCP_NO_BUILDHOST_PIN=true`).
+
+---
+
 ### No type resolution (AdhocWorkspace fallback)
 
 **Symptom:** NuGet types like `List<T>`, `HttpClient`, etc. don't resolve correctly.

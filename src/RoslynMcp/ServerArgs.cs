@@ -91,6 +91,16 @@ internal sealed class ServerArgs
     public string? MsBuildPath { get; }
 
     /// <summary>
+    ///     Disables pinning the out-of-process Roslyn BuildHost to the Visual Studio MSBuild
+    ///     instance the server resolved. CLI: <c>--no-buildhost-pin</c> (bare flag).
+    ///     Env: <c>ROSLYNMCP_NO_BUILDHOST_PIN</c> = <c>true</c>. Default: <c>false</c> (pinning on).
+    ///     When off (default), <see cref="MSBuildBootstrap"/> sets <c>VSINSTALLDIR</c>/<c>VSCMD_VER</c> so the
+    ///     BuildHost selects the same VS instance the server chose, instead of the newest installed
+    ///     one — which may be an incompatible preview that crashes on load.
+    /// </summary>
+    public bool NoBuildHostPin { get; }
+
+    /// <summary>
     ///     Enables live MCP elicitation on ambiguous symbol matches (interactive picker) instead
     ///     of the default structured candidate-list failure that agents recover from on their own.
     ///     CLI: <c>--elicit</c> (bare flag, or explicit <c>true</c>/<c>false</c> value).
@@ -148,6 +158,7 @@ internal sealed class ServerArgs
         string? logPathFlag   = null;
         string? msBuildFlag   = null;
         string? elicitFlag    = null; // "true"/"false" from CLI; null = flag absent
+        var     noBuildHostPin = false;
         var     preload       = new List<string>();
 		
 		var length = args.Length;
@@ -187,6 +198,11 @@ internal sealed class ServerArgs
                 case "--elicit":
                     // Bare flag means enabled; an explicit true/false value is also accepted.
                     elicitFlag = value ?? "true";
+                    break;
+
+                case "--no-buildhost-pin":
+                    // Bare on/off flag; presence disables the BuildHost pin. Any value is ignored.
+                    noBuildHostPin = true;
                     break;
             }
         }
@@ -261,6 +277,9 @@ internal sealed class ServerArgs
         }
 
         DisablePathCache = EnvTrue("ROSLYNMCP_DISABLE_PATH_CACHE");
+
+        // CLI flag OR env var disables the pin. A plain on/off flag — no tri-state needed.
+        NoBuildHostPin = noBuildHostPin || EnvTrue("ROSLYNMCP_NO_BUILDHOST_PIN");
 
         MaxCachedWorkspaces = EnvInt("ROSLYNMCP_MAX_CACHED_WORKSPACES", 1, 5);
 

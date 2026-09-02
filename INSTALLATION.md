@@ -456,6 +456,7 @@ RoslynMcp.exe [options]
 | `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
 | `--msbuild-path` | Override the MSBuild installation path used for workspace loading — a dotnet SDK directory or a Visual Studio `MSBuild\Current\Bin` directory. Honored in `auto`, `sdk`, and `vs` modes; ignored in `adhoc`, which skips MSBuild entirely. If the path is invalid, the server falls through to normal discovery. |
 | `--elicit` | On an ambiguous symbol match, ask the user to pick interactively (MCP elicitation) instead of returning a structured candidate list. Opt-in; requires client elicitation support. Default: off. |
+| `--no-buildhost-pin` | Disable pinning Roslyn's out-of-process MSBuild BuildHost to the Visual Studio instance the server resolved. By default, when a VS instance is used, the server sets `VSINSTALLDIR`/`VSCMD_VER` so the BuildHost selects that same instance instead of the newest installed one (which may be an incompatible preview that crashes on load). Pass this flag to let the BuildHost pick on its own. |
 | `-v`, `--version` | Print the server version and exit. |
 | `-h`, `--help` | Show CLI help and exit. |
 
@@ -477,6 +478,7 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 | `ROSLYNMCP_LOAD_TIMEOUT_SECONDS` | `300` | Timeout for MSBuild workspace loads. Values 1–9 clamp to 10; `0` or negative disables the timeout. |
 | `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
 | `ROSLYNMCP_ELICIT` | `false` | Set to `true` to enable interactive elicitation on ambiguous symbol matches (same as `--elicit`). Not all MCP clients support elicitation; unsupported clients fall back to the structured candidate list. |
+| `ROSLYNMCP_NO_BUILDHOST_PIN` | `false` | Set to `true` to disable pinning the MSBuild BuildHost to the resolved Visual Studio instance (same as `--no-buildhost-pin`). |
 
 **Ambiguous symbol handling.** By default, when a name in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the tool returns a structured `candidates` list and the agent retries with a `containingType` (or `filePath`+`line`) on its own — no interruption. Enabling `--elicit` (or `ROSLYNMCP_ELICIT=true`) instead prompts you to pick interactively via MCP elicitation, in clients that support it (Claude Code/Desktop do; many others don't and fall back to the candidate list). The `madq-roslynmcp setup` wizard offers this as an opt-in prompt; you can also add it by hand to the server entry's args: `"args": ["--elicit"]`. A committed project file can also enable it per repo — see the next section.
 
