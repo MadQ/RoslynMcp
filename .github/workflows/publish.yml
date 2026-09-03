@@ -2,6 +2,7 @@ name: Publish NuGet Package
 permissions:
   id-token: write   # required for NuGet.org Trusted Publishing (OIDC token exchange)
   contents: read
+  packages: write   # required to publish to GitHub Packages with GITHUB_TOKEN
 
 on:
   workflow_dispatch:
@@ -73,6 +74,17 @@ jobs:
           if(-not $pkg) { throw "No .nupkg found in artifacts/" }
           Write-Host "Pushing $($pkg.Name)"
           dotnet nuget push $pkg.FullName --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Push to GitHub Packages
+        if: ${{ !inputs.dry_run }}
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $pkg = Get-ChildItem artifacts/*.nupkg | Select-Object -First 1
+          if(-not $pkg) { throw "No .nupkg found in artifacts/" }
+          Write-Host "Pushing $($pkg.Name) to GitHub Packages"
+          dotnet nuget push $pkg.FullName --api-key "$env:GITHUB_TOKEN" --source https://nuget.pkg.github.com/MadQ/index.json --skip-duplicate
 
       - name: Dry run — push skipped
         if: ${{ inputs.dry_run }}
