@@ -80,11 +80,13 @@ Download the latest release from the [Releases page](https://github.com/MadQ/Ros
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg --include-symbols -c Debug
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg -c PackDebug
 dotnet tool install --global MadQ.RoslynMcp --add-source ./nupkg --version 0.8.1-beta
 ```
 
 This installs your local build as `madq-roslynmcp` on PATH — exactly like Option A, so use the **Option A / C** config below. After making code changes and re-packing, run `dotnet tool uninstall --global MadQ.RoslynMcp` before reinstalling — a stale global install otherwise keeps serving the old build.
+
+> **Pack config matters.** Only `-c PackDebug` (debug build) and `-c Pack` (release, used for published releases) produce the `MadQ.RoslynMcp` tool package. A plain `dotnet pack -c Debug` / `-c Release` now fails with a guard error, rather than silently emitting a non-tool `MadQ.RoslynMcp` package that `dotnet tool install` cannot use.
 
 ### Step 2: Configure Your MCP Client
 

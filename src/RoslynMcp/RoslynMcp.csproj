@@ -1,15 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <!-- True for the tool-package configurations (Pack = canonical/publish, PackDebug = local debug
+       tool). All dotnet-tool packaging (PackAsTool, PublishSingleFile=false, RID exclusion) keys off
+       this so a plain -c Debug/Release pack can never silently emit a non-tool package. Defined first
+       so later property conditions can read it. -->
+  <PropertyGroup>
+    <_ToolPack Condition="'$(Configuration)' == 'Pack' or '$(Configuration)' == 'PackDebug'">true</_ToolPack>
+  </PropertyGroup>
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <!-- .NET 10 is the minimum runtime (GA LTS); net11.0 auto-added below when its SDK is present -->
     <TargetFrameworks>net10.0</TargetFrameworks>
     <!-- Declares the CI matrix RIDs so every restore resolves all of them and packages.lock.json
          stays multi-RID on any host — a plain local restore can't trim it to the host RID, and
-         locked-mode CI passes on every platform. Excluded from the Pack config, where it would
+         locked-mode CI passes on every platform. Excluded from the tool-pack configs, where it would
          otherwise make dotnet pack emit RID-specific tool packages. A plain build stays
          framework-dependent (a RID build needs an explicit -r). -->
-    <RuntimeIdentifiers Condition="'$(Configuration)' != 'Pack'">win-x64;linux-x64;osx-arm64</RuntimeIdentifiers>
+    <RuntimeIdentifiers Condition="'$(_ToolPack)' != 'true'">win-x64;linux-x64;osx-arm64</RuntimeIdentifiers>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -17,6 +25,12 @@
     <LangVersion>preview</LangVersion>
 
     <!-- Package metadata -->
+    <!-- Identity is unconditional so the package can never be emitted under a different id by config.
+         PackageId and ToolCommandName are namespaced under MadQ to avoid a hard collision with the
+         unrelated `RoslynMcp` package (chrismo80) already published on NuGet. The actual tool-packaging
+         switches (PackAsTool etc.) stay gated on _ToolPack below. -->
+    <PackageId>MadQ.RoslynMcp</PackageId>
+    <ToolCommandName>madq-roslynmcp</ToolCommandName>
     <Authors>Quinten Martens</Authors>
     <Description>Model Context Protocol server exposing Roslyn-powered code intelligence tools to AI coding agents</Description>
     <PackageProjectUrl>https://github.com/MadQ/RoslynMcp</PackageProjectUrl>
@@ -42,16 +56,24 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
 
-  <!-- dotnet tool packaging — only active when building with -c Pack -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Pack'">
+  <!-- dotnet tool packaging — only active for the tool-pack configurations (-c Pack / -c PackDebug).
+       Identity (PackageId/ToolCommandName) is hoisted to the main PropertyGroup above so it can never
+       diverge by config; the props below only make sense when actually packing the tool. -->
+  <PropertyGroup Condition="'$(_ToolPack)' == 'true'">
     <PackAsTool>true</PackAsTool>
-    <!-- PackageId and ToolCommandName are namespaced under MadQ to avoid a hard collision
-         with the unrelated `RoslynMcp` package (chrismo80) already published on NuGet. -->
-    <ToolCommandName>madq-roslynmcp</ToolCommandName>
-    <PackageId>MadQ.RoslynMcp</PackageId>
     <PackageReadmeFile>NUGET.md</PackageReadmeFile>
     <!-- Tool assemblies must be loose on disk — BuildHost requires it -->
     <PublishSingleFile>false</PublishSingleFile>
+    <NoWarn>1701;1702;NETSDK1209</NoWarn>
+  </PropertyGroup>
+
+  <!-- PackDebug = pack the tool from a debug build (Optimize off, DEBUG defined). Custom config
+       strings don't inherit the SDK's Debug defaults, so set them explicitly. Pack stays the
+       canonical publish config (see docs/process/RELEASE_CHECKLIST.md). -->
+  <PropertyGroup Condition="'$(Configuration)' == 'PackDebug'">
+    <Optimize>false</Optimize>
+    <DefineConstants>$(DefineConstants);DEBUG;TRACE</DefineConstants>
+    <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
 
   <!-- Detect if .NET 11 SDK is available and add it to TargetFrameworks -->
@@ -79,6 +101,15 @@
   <PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|net11.0|AnyCPU'">
     <NoWarn>1701;1702;NETSDK1209</NoWarn>
   </PropertyGroup>
+
+  <!-- Fail loudly if someone packs under a non-tool config (e.g. -c Debug/Release): that would emit a
+       plain, non-tool 'MadQ.RoslynMcp' package instead of the 'MadQ.RoslynMcp' tool. Hooked on
+       GenerateNuspec (not Pack) because that dependency target is what actually writes the .nupkg —
+       BeforeTargets="Pack" runs too late to prevent the file. GenerateNuspec only runs during pack, so
+       a plain 'dotnet build' is unaffected. -->
+  <Target Name="EnsureToolPackConfiguration" BeforeTargets="GenerateNuspec" Condition="'$(PackAsTool)' != 'true'">
+    <Error Text="Pack this tool with -c Pack (release) or -c PackDebug (debug). A plain 'dotnet pack -c Debug/Release' would emit a non-tool 'MadQ.RoslynMcp' package. See INSTALLATION.md." />
+  </Target>
 
   <ItemGroup>
     <None Include="..\..\NUGET.md" Pack="true" PackagePath="\" />

@@ -74,7 +74,7 @@ Download the latest release from the [Releases page](https://github.com/MadQ/Ros
 ```bash
 git clone https://github.com/MadQ/RoslynMcp.git
 cd RoslynMcp
-dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg --include-symbols -c Debug
+dotnet pack src/RoslynMcp/RoslynMcp.csproj -o nupkg -c PackDebug
 dotnet tool install --global MadQ.RoslynMcp --add-source ./nupkg --version 0.8.1-beta
 ```
 
