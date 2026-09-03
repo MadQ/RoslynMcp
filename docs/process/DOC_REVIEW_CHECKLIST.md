@@ -78,8 +78,8 @@ rg "RoslynMcp/RoslynMcp\.csproj" --type md --glob "!HANDOFF*.md"
 # 2. Check for dotnet run in MCP configs (should use published executable)
 rg "dotnet.*run.*--project.*\.mcp\.json" --type md -A 3 -B 3
 
-# 3. Verify tool count is consistent (should be 43 tools = 41 public + 2 debug-only)
-rg "42 tools|40 public|39 tools|37 public|37 tools|38 tools|36 tools|23 tools|22 tools|21 tools" --type md
+# 3. Verify tool count is consistent (should be 45 tools = 43 public + 2 debug-only)
+rg "45 tools|43 public|42 tools|40 public|39 tools|37 public|37 tools|38 tools|36 tools|23 tools|22 tools|21 tools" --type md
 
 # 4. Check for stale "deferred" or "planned" features that shipped
 rg -i "deferred|planned feature|TODO:" --type md --glob "README.md" --glob "AGENTS.md" --glob "INSTALLATION.md"
@@ -108,7 +108,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
   - [ ] AGENTS.md
   - [ ] `docs/sessions/HANDOFF.md` header
   - [ ] TestHarness header comment
-- [ ] Architecture tables list all 41 public tools consistently
+- [ ] Architecture tables list all 43 public tools consistently
 - [ ] New tools added to all relevant docs
 
 ### Code Examples
@@ -156,7 +156,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] Examples are copy-paste ready
 
 ### AGENTS.md
-- [ ] Architecture table has all 43 tools (41 public + 2 debug-only)
+- [ ] Architecture table has all 45 tools (43 public + 2 debug-only)
 - [ ] Code style rules are current
 - [ ] MCP/Roslyn patterns are accurate
 - [ ] Testing section references correct paths
@@ -169,7 +169,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] Links to reference docs work
 
 ### AGENTS.md
-- [ ] Architecture section has correct tool/component count
+- [ ] Architecture table has all 45 tools (43 public + 2 debug-only)
 - [ ] Links to docs/reference/ work
 - [ ] Workspace modes summary is current
 
@@ -193,7 +193,7 @@ rg "TestHarness/TestHarness\.csproj" --type md | rg -v "src/TestHarness"
 - [ ] Adding a new tool instructions work
 
 ### `docs/sessions/HANDOFF.md`
-- [ ] Tool count in header is current
+- [ ] Tool count in header is current (45 total / 43 public / 2 debug-only)
 - [ ] Test status is current
 - [ ] Last commit message matches reality
 - [ ] Commands Reference paths include src/

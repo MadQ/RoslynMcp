@@ -1,7 +1,7 @@
 # Roslyn MCP Tools: Honest Assessment
 
 > Updated against source as of v0.8.1-beta.  
-> Public tool count: **41 shipped tools**. Debug-only tools excluded from the inventory below: `roslyn_respawn`, `roslyn_debug_attach`.
+> Public tool count: **43 shipped tools**. Debug-only tools excluded from the inventory below: `roslyn_respawn`, `roslyn_debug_attach`.
 
 ## Public tool inventory (complete)
 
@@ -61,6 +61,11 @@
 - `roslyn_info`
 - `roslyn_restore_packages`
 
+### Code fixes (2)
+
+- `roslyn_apply_code_fix`
+- `roslyn_preview_code_fix`
+
 ## Highlighted strengths
 
 **`roslyn_get_type_members`** — still one of the clearest wins. It gives resolved signatures, member kinds, and summaries without forcing a full-file read.
@@ -104,4 +109,4 @@ Where normal tools still win:
 
 The core value proposition is still correct: Roslyn-backed semantics are genuinely better than text search for C# navigation and analysis. The tool surface is now broad enough to cover most C# exploration, search, editing, rename/refactoring, and build workflows without leaving the MCP layer.
 
-This file is now **inventory-complete** for the 41 public tools, but the qualitative commentary remains intentionally selective rather than giving every tool a score.
+This file is now **inventory-complete** for the 43 public tools, but the qualitative commentary remains intentionally selective rather than giving every tool a score.

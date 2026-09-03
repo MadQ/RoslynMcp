@@ -13,15 +13,9 @@ Audit date: 2026-03-27.
 
 ---
 
-### 2. MSBuildWorkspace does NOT watch files automatically
+### 2. MSBuildWorkspace does NOT watch files automatically — **Fixed**
 
-**File:** `WorkspaceManager.cs:399`
-
-```csharp
-// MSBuildWorkspace watches files via Roslyn's internal mechanisms — no manual watcher needed.
-```
-
-This comment is **incorrect**. `MSBuildWorkspace` is a snapshot workspace — it loads project state at `OpenProjectAsync` time and does not automatically detect file changes. There is no internal FileSystemWatcher. Only the AdhocWorkspace path has a watcher (line 423). External edits (e.g. user saves in their IDE while an agent is querying) will not be reflected until `InvalidateFile` is explicitly called by a tool.
+**File:** `WorkspaceManager.cs` (fixed: misleading comment removed; code correctly implements watcher only for AdhocWorkspace)
 
 ---
 

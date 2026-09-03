@@ -185,8 +185,45 @@ By default RoslynMcp auto-detects the best mode. To override:
 |--------|--------|
 | **CLI flag** | `RoslynMcp.exe --workspace sdk\|vs\|adhoc\|auto <path>` |
 | **Environment variable** | `ROSLYNMCP_WORKSPACE=sdk\|vs\|adhoc\|auto` |
+| **Project file** | `.madq_roslynmcp.json` at repo root: `{ "workspace": "sdk\|vs\|adhoc" }` |
 
-Priority: CLI flag → env var → auto-detect.
+Priority: CLI flag → env var → project file → auto-detect.
+
+### Additional Configuration Flags
+
+**MSBuild path override** (force a specific MSBuild location):
+
+| Method | Syntax |
+|--------|--------|
+| **CLI flag** | `RoslynMcp.exe --msbuild-path <dir>` |
+| **Environment variable** | `ROSLYNMCP_MSBUILD_PATH=<dir>` |
+
+Pass a .NET SDK directory or a VS `MSBuild\Current\Bin` directory. Honored in `auto`, `sdk`, and `vs` modes; ignored in `adhoc`. An invalid path is not fatal — the server logs it and falls through to normal discovery.
+
+Priority: CLI flag → env var.
+
+**BuildHost pinning control** (pin Roslyn's out-of-process .NET Framework BuildHost to a specific VS instance):
+
+| Method | Syntax |
+|--------|--------|
+| **CLI flag** | `RoslynMcp.exe --no-buildhost-pin` |
+| **Environment variable** | `ROSLYNMCP_NO_BUILDHOST_PIN=true` |
+
+By default, RoslynMcp pins the BuildHost to the VS instance it resolved, fixing a bug where .NET Framework projects failed with a `TypeInitializationException` when multiple VS installs exist. Pass `--no-buildhost-pin` to disable pinning (let the BuildHost choose on its own).
+
+Priority: CLI flag → env var (default: pinning enabled).
+
+**Symbol ambiguity handling** (enable interactive picker for ambiguous symbol matches):
+
+| Method | Syntax |
+|--------|--------|
+| **CLI flag** | `RoslynMcp.exe --elicit` |
+| **Environment variable** | `ROSLYNMCP_ELICIT=true` |
+| **Project file** | `.madq_roslynmcp.json` at repo root: `{ "elicit": true }` |
+
+By default, tools like `roslyn_preview_rename` return a structured list of candidate symbols when the name is ambiguous, so agents can self-recover via containingType or file location. Pass `--elicit` to instead prompt the user interactively (requires an MCP client that supports elicitation). The project file can pin a default for the repo.
+
+Priority: CLI flag → env var → project file (default: interactive prompts disabled).
 
 ---
 
@@ -340,6 +377,32 @@ Subsequent calls are instant because the workspace is cached.
 ### Q: What happens if I have both .csproj and loose .cs files?
 
 **A:** MSBuildWorkspace takes precedence. The `.cs` files included in the `.csproj` via `<Compile Include="...">` (or implicitly via SDK glob patterns) will be loaded. Loose `.cs` files not referenced by the project are ignored.
+
+### Q: What's the precedence order for workspace configuration?
+
+**A:** When multiple sources specify a workspace mode or MSBuild path:
+
+1. **CLI arguments** — `--workspace`, `--msbuild-path`, `--no-buildhost-pin` (highest precedence)
+2. **Environment variables** — `ROSLYNMCP_WORKSPACE`, `ROSLYNMCP_MSBUILD_PATH`, `ROSLYNMCP_NO_BUILDHOST_PIN`
+3. **Project file** — `.madq_roslynmcp.json` at repo root (only for workspace mode and elicit flag; see below)
+4. **Auto-detection** — RoslynMcp chooses the best mode based on `.csproj` structure (lowest precedence)
+
+**Example:** If `.madq_roslynmcp.json` specifies `"workspace": "adhoc"` but you start the server with `--workspace sdk`, the CLI flag wins.
+
+### Q: Can I use a project file to pin workspace settings?
+
+**A:** Yes — create a `.madq_roslynmcp.json` file at the repository root:
+
+```json
+{
+  "workspace": "sdk|vs|adhoc",
+  "elicit": true|false
+}
+```
+
+**Note:** Only `workspace` and `elicit` can be set in the project file. MSBuild-related settings (`msbuild-path`, `no-buildhost-pin`) must be passed via CLI args or environment variables, so they can be overridden at startup time.
+
+Priority: CLI arg > env var > project file > default.
 
 ---
 

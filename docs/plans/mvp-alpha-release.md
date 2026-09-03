@@ -1,6 +1,6 @@
 # MVP Alpha Release Plan
 
-> **Historical note:** This plan was written before v0.7.0. Phases 1–3 are largely complete. Phase 5 maps to the v0.8.0-beta milestone. Kept for reference.
+> **Historical note:** This plan was written before v0.7.0. Phases 1–3 were completed. Phase 5 maps to the v0.8.0-beta milestone. Kept for reference. The unchecked boxes below reflect the original plan state; see CHANGELOG.md for actual completion status.
 
 **Goal:** Ship a binary release that makes people say "I can't go back to grep."
 

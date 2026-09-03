@@ -115,7 +115,7 @@ Capabilities that text search fundamentally cannot provide — the tools that ju
 | ✅ | feature | `roslyn_get_type_dependencies` | Return direct type dependencies from a type declaration and member signatures — shipped in v0.8.0-beta | #33 |
 | ✅ | feature | `roslyn_find_overloads` | List all ordinary overloads declared on a containing type — shipped in v0.8.0-beta | #33 |
 | ✅ | feature | `roslyn_check_syntax` | Validate arbitrary C# snippet syntax without a full compilation — shipped in v0.8.0-beta | — |
-| — | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID | #86 |
+| ✅ | feature | `roslyn_apply_code_fix` | Apply a Roslyn code fix by diagnostic ID (Phase 1) — shipped in Unreleased | #86, #110, #242 |
 | — | investigation | LogViewer rework | `RoslynMcp.LogViewer` has active usability/correctness work; evaluate whether it should remain dev-only or become a broader supported surface | #118 |
 | — | investigation | Audit Roslyn workspace events | Evaluate `DocumentChanged` / `WorkspaceChanged` events for simplification opportunities | #142 |
 | ✅ | enhancement | Surface persistent prune/log failures | `roslyn_info` now exposes `prune_errors` for persistent backup/log pruning failures — shipped in v0.8.0-beta | #176 |
