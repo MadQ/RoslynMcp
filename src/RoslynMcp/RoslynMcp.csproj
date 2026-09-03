@@ -103,12 +103,12 @@
   </PropertyGroup>
 
   <!-- Fail loudly if someone packs under a non-tool config (e.g. -c Debug/Release): that would emit a
-       plain, wrong-id 'RoslynMcp' library package instead of the 'MadQ.RoslynMcp' tool. Hooked on
+       plain, non-tool 'MadQ.RoslynMcp' package instead of the 'MadQ.RoslynMcp' tool. Hooked on
        GenerateNuspec (not Pack) because that dependency target is what actually writes the .nupkg —
        BeforeTargets="Pack" runs too late to prevent the file. GenerateNuspec only runs during pack, so
        a plain 'dotnet build' is unaffected. -->
   <Target Name="EnsureToolPackConfiguration" BeforeTargets="GenerateNuspec" Condition="'$(PackAsTool)' != 'true'">
-    <Error Text="Pack this tool with -c Pack (release) or -c PackDebug (debug). A plain 'dotnet pack -c Debug/Release' would emit a non-tool 'RoslynMcp' package. See INSTALLATION.md." />
+    <Error Text="Pack this tool with -c Pack (release) or -c PackDebug (debug). A plain 'dotnet pack -c Debug/Release' would emit a non-tool 'MadQ.RoslynMcp' package. See INSTALLATION.md." />
   </Target>
 
   <ItemGroup>
