@@ -91,6 +91,28 @@ internal sealed class ServerArgs
     public string? MsBuildPath { get; }
 
     /// <summary>
+    ///     Visual Studio version pin, normalized to a vswhere <c>-version</c> range such as
+    ///     <c>[17.0,18.0)</c>. CLI: <c>--vs-version</c> (<c>17</c>, <c>17.14</c>, or a raw range).
+    ///     Env: <c>ROSLYNMCP_VS_VERSION</c>. <c>null</c> when neither source supplied a valid value —
+    ///     the project file may then fill it in (see <see cref="ProjectConfig.EffectiveVsVersion"/>).
+    ///     Consumed by <see cref="MSBuildBootstrap.EnsureReady"/>: in VS mode it narrows vswhere's
+    ///     search; in every other mode but adhoc it pins the out-of-process .NET Framework BuildHost,
+    ///     which otherwise picks the newest installed Visual Studio regardless of what this process
+    ///     registered. <see cref="MsBuildPath"/>, being more specific, wins when both are set.
+    /// </summary>
+    public string? VsVersion { get; }
+
+    /// <summary>Whether <see cref="VsVersion"/> came from a CLI arg or env var, blocking the project file's value.</summary>
+    public bool VsVersionSpecified => VsVersion is not null;
+
+    /// <summary>
+    ///     The raw <c>--vs-version</c> / <c>ROSLYNMCP_VS_VERSION</c> value that failed to normalize,
+    ///     or <c>null</c>. Logged once at startup — a silently ignored pin would reproduce the exact
+    ///     failure the pin exists to prevent.
+    /// </summary>
+    public string? VsVersionRejected { get; }
+
+    /// <summary>
     ///     Disables pinning the out-of-process Roslyn BuildHost to the Visual Studio MSBuild
     ///     instance the server resolved. CLI: <c>--no-buildhost-pin</c> (bare flag).
     ///     Env: <c>ROSLYNMCP_NO_BUILDHOST_PIN</c> = <c>true</c>. Default: <c>false</c> (pinning on).
@@ -157,6 +179,7 @@ internal sealed class ServerArgs
 ;
         string? logPathFlag   = null;
         string? msBuildFlag   = null;
+        string? vsVersionFlag = null;
         string? elicitFlag    = null; // "true"/"false" from CLI; null = flag absent
         var     noBuildHostPin = false;
         var     preload       = new List<string>();
@@ -195,6 +218,10 @@ internal sealed class ServerArgs
                     msBuildFlag = value;
                     break;
 
+                case "--vs-version":
+                    vsVersionFlag = value;
+                    break;
+
                 case "--elicit":
                     // Bare flag means enabled; an explicit true/false value is also accepted.
                     elicitFlag = value ?? "true";
@@ -229,6 +256,23 @@ internal sealed class ServerArgs
         // auto-discovery, the same inverted precedence this property was fixed for (issue #231).
         LogPath     = logPathFlag ?? Env("ROSLYNMCP_LOG_PATH");
         MsBuildPath = NullIfEmpty(msBuildFlag) ?? NullIfEmpty(Env("ROSLYNMCP_MSBUILD_PATH"));
+
+        // Per-value precedence, as for --elicit: a source binds only when it normalizes to a valid
+        // vswhere range, so a typo'd --vs-version cannot mask a valid ROSLYNMCP_VS_VERSION. The
+        // first rejected raw value is kept for a startup warning — a silently dropped pin would
+        // reproduce the exact failure the pin exists to prevent.
+        var envVsVersion = Env("ROSLYNMCP_VS_VERSION");
+
+        var cliVsVersionValid = VsVersionPin.TryNormalize(vsVersionFlag, out var cliVsVersion);
+        var envVsVersionValid = VsVersionPin.TryNormalize(envVsVersion,  out var envVsVersionRange);
+
+        VsVersion = cliVsVersionValid ? cliVsVersion
+            : envVsVersionValid ? envVsVersionRange
+            : null;
+
+        VsVersionRejected = !cliVsVersionValid && !string.IsNullOrWhiteSpace(vsVersionFlag) ? vsVersionFlag
+            : !envVsVersionValid && !string.IsNullOrWhiteSpace(envVsVersion) ? envVsVersion
+            : null;
 
         // Per-value precedence: the CLI flag binds only when it parses to a valid bool;
         // otherwise the env var is consulted. An unparseable --elicit value must not

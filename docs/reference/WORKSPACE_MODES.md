@@ -108,6 +108,21 @@ $env:ROSLYNMCP_WORKSPACE = "vs"
 RoslynMcp.exe .
 ```
 
+### Pinning the Visual Studio Version
+
+Legacy projects load through Roslyn's out-of-process **.NET Framework BuildHost**, which picks the highest-versioned Visual Studio it can find — on its own, regardless of what the server resolved. When that newest install is one the BuildHost cannot load (a VS 2026 / 18.x install has been observed to fail with a `Microsoft.Build.Shared.XMakeElements` type-initializer error), pin the version instead of uninstalling:
+
+| Source | Example |
+|--------|---------|
+| CLI | `--vs-version 17` |
+| Environment | `ROSLYNMCP_VS_VERSION=17` |
+| Project file | `"vsVersion": "17"` in `.madq_roslynmcp.json` |
+
+Accepted forms: a major (`17` → `[17.0,18.0)`), a major.minor (`17.14` → `[17.14,17.15)`), an exact three- or four-part version, or a raw [vswhere `-version` range](https://github.com/microsoft/vswhere/wiki/Examples) such as `[17.0,18.0)`. vswhere picks the newest install inside the range.
+
+The pin applies in every mode except `adhoc`. In `vs` mode it selects the instance the server resolves and fails with a clear message when nothing matches. In `auto`/`sdk` mode the server keeps the .NET SDK for itself and only steers the BuildHost — the part that actually loads legacy projects. `--msbuild-path`, being more specific, still wins over the version pin. A version is portable across machines, which is why — unlike `msbuildPath` — it is honored from the committed project file. Precedence: CLI arg > env var > project file > newest installed.
+
+
 ---
 
 ## AdhocWorkspace (Fast, Source-Only)

@@ -457,6 +457,7 @@ RoslynMcp.exe [options]
 | `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
 | `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
 | `--msbuild-path` | Override the MSBuild installation path used for workspace loading — a dotnet SDK directory or a Visual Studio `MSBuild\Current\Bin` directory. Honored in `auto`, `sdk`, and `vs` modes; ignored in `adhoc`, which skips MSBuild entirely. If the path is invalid, the server falls through to normal discovery. |
+| `--vs-version` | Pin the Visual Studio version used to load legacy (.NET Framework) projects: `17`, `17.14`, or a vswhere range like `[17.0,18.0)`. Steers Roslyn's MSBuild BuildHost in every mode except `adhoc`; `--msbuild-path` still wins. Also settable per project as `vsVersion` in `.madq_roslynmcp.json`. See [Pinning the Visual Studio Version](docs/reference/WORKSPACE_MODES.md#pinning-the-visual-studio-version). |
 | `--elicit` | On an ambiguous symbol match, ask the user to pick interactively (MCP elicitation) instead of returning a structured candidate list. Opt-in; requires client elicitation support. Default: off. |
 | `--no-buildhost-pin` | Disable pinning Roslyn's out-of-process MSBuild BuildHost to the Visual Studio instance the server resolved. By default, when a VS instance is used, the server sets `VSINSTALLDIR`/`VSCMD_VER` so the BuildHost selects that same instance instead of the newest installed one (which may be an incompatible preview that crashes on load). Pass this flag to let the BuildHost pick on its own. |
 | `-v`, `--version` | Print the server version and exit. |
@@ -477,6 +478,7 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 | `ROSLYNMCP_PRUNE_MIN_RUNS` | `3` | Minimum server starts before log/backup pruning runs. |
 | `ROSLYNMCP_MAX_CACHED_WORKSPACES` | `5` | LRU workspace cache size. Increase for large multi-project workflows. |
 | `ROSLYNMCP_MSBUILD_PATH` | *(auto-detected)* | Same as `--msbuild-path` (which takes precedence) — force a specific MSBuild installation path. |
+| `ROSLYNMCP_VS_VERSION` | *(newest installed)* | Same as `--vs-version` (which takes precedence) — pin the Visual Studio version (`17`, `17.14`, or a vswhere range like `[17.0,18.0)`) used to load legacy .NET Framework projects. Also settable per project as `vsVersion` in `.madq_roslynmcp.json`. |
 | `ROSLYNMCP_LOAD_TIMEOUT_SECONDS` | `300` | Timeout for MSBuild workspace loads. Values 1–9 clamp to 10; `0` or negative disables the timeout. |
 | `ROSLYNMCP_DISABLE_PATH_CACHE` | `false` | Set to `true` to disable the path resolution cache (useful for debugging workspace issues). |
 | `ROSLYNMCP_ELICIT` | `false` | Set to `true` to enable interactive elicitation on ambiguous symbol matches (same as `--elicit`). Not all MCP clients support elicitation; unsupported clients fall back to the structured candidate list. |

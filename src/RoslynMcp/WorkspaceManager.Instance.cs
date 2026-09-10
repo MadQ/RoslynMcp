@@ -610,6 +610,13 @@ internal sealed partial class WorkspaceManager
 			if(mode != ServerArgs.Current.WorkspaceMode)
 				logger.LogInfo("Workspace", $"mode={mode} (from {ProjectConfig.FileName})");
 			
+			// Same precedence for the Visual Studio version pin. It steers the .NET Framework
+			// BuildHost in every mode but adhoc — see MSBuildBootstrap.EnsureReady.
+			var vsVersion = ProjectConfig.EffectiveVsVersion(path, logger);
+			
+			if(vsVersion is not null && !ServerArgs.Current.VsVersionSpecified)
+				logger.LogInfo("Workspace", $"vsVersion={vsVersion} (from {ProjectConfig.FileName})");
+			
 			if(mode == WorkspaceMode.Auto) {
 				
 				// Find a .csproj to peek at — either the path itself, or first .csproj in the directory.
@@ -629,7 +636,7 @@ internal sealed partial class WorkspaceManager
 			
 			WarnIfLargeSolution(path, mode, logger);
 			
-			var bootstrapFailure = MSBuildBootstrap.EnsureReady(mode);
+			var bootstrapFailure = MSBuildBootstrap.EnsureReady(mode, vsVersion);
 			
 			if(bootstrapFailure is not null)
 				throw new InvalidOperationException($"MSBuild initialization failed: {bootstrapFailure}");

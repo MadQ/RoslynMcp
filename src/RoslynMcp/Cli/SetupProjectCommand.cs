@@ -8,7 +8,7 @@ namespace RoslynMcp.Cli;
 ///     per-project files to the nearest git repository root: a hook file under <c>.github/</c>
 ///     enabling per-agent tool guidance for .cs file operations, and (opt-in) a
 ///     <c>.madq_roslynmcp.json</c> server config holding commit-worthy server settings
-///     (<c>elicit</c>, <c>workspace</c>) that the server folds in where no CLI arg or env var
+///     (<c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>) that the server folds in where no CLI arg or env var
 ///     was given — see <see cref="ProjectConfig"/>.
 /// </summary>
 internal class SetupProjectCommand : CliCommand
@@ -80,7 +80,7 @@ internal class SetupProjectCommand : CliCommand
 		if(wroteConfig) {
 			
 			Console.WriteLine();
-			Console.WriteLine("  Note: --elicit/--workspace args in an agent's global MCP config (written by");
+			Console.WriteLine("  Note: --elicit/--workspace/--vs-version args in an agent's global MCP config (written by");
 			Console.WriteLine("  '" + ToolCommand.Name + " setup') override the project file. Precedence:");
 			Console.WriteLine("  CLI arg > env var > project file > default. Running servers pick up changes");
 			Console.WriteLine("  on restart.");
@@ -168,6 +168,17 @@ internal class SetupProjectCommand : CliCommand
 		if(currentWorkspace is not ("sdk" or "vs" or "adhoc"))
 			currentWorkspace = "auto";
 		
+		// A bare number (17) is valid JSON for a major version too — accept both spellings
+		// from an existing file, and drop anything the server would refuse to load.
+		var currentVsVersion = root["vsVersion"] is JsonValue vsVersionNode
+			? vsVersionNode.TryGetValue<string>(out var existingVsVersion)
+				? existingVsVersion.Trim()
+				: vsVersionNode.ToJsonString()
+			: "";
+		
+		if(!VsVersionPin.TryNormalize(currentVsVersion, out _))
+			currentVsVersion = "";
+		
 		// Same explanation as the global setup wizard's --elicit prompt, scoped per-project.
 		Console.WriteLine();
 		Console.WriteLine("  On an ambiguous symbol match, roslyn_preview_rename / roslyn_change_signature");
@@ -224,8 +235,41 @@ internal class SetupProjectCommand : CliCommand
 				break;
 		}
 		
+		// Only offer the Visual Studio version pin where it can matter: VS-mode loads, or a pin
+		// already committed that the user may want to change or clear.
+		var vsVersion = currentVsVersion;
+		
+		if(workspace == "vs" || currentVsVersion.Length > 0) {
+			
+			var currentVsVersionLabel = currentVsVersion.Length > 0 ? currentVsVersion : "none";
+			
+			Console.WriteLine();
+			Console.WriteLine("  Pin the Visual Studio version used to load legacy (.NET Framework) projects:");
+			Console.WriteLine("  a major like 17 (VS 2022), a major.minor like 17.14, or a vswhere range like");
+			Console.WriteLine("  [17.0,18.0). Use this when the newest installed Visual Studio breaks the load.");
+			Console.WriteLine("  Enter keeps the current value; 'none' clears the pin (newest VS wins).");
+			Console.Write($"  Visual Studio version pin [{currentVsVersionLabel}]: ");
+			
+			var vsVersionAnswer = Console.ReadLine()?.Trim() ?? "";
+			
+			if(vsVersionAnswer.Equals("none", StringComparison.OrdinalIgnoreCase))
+				vsVersion = "";
+			
+			else if(vsVersionAnswer.Length > 0) {
+				
+				// Stored as typed — "17" reads better in a committed file than "[17.0,18.0)";
+				// the server normalizes on load.
+				if(VsVersionPin.TryNormalize(vsVersionAnswer, out _))
+					vsVersion = vsVersionAnswer;
+				else
+					Console.WriteLine($"    Unrecognized version '{vsVersionAnswer}' — keeping '{currentVsVersionLabel}'.");
+			}
+		}
+		
+		var nothingChosen = !elicit && workspace == "auto" && vsVersion.Length == 0;
+		
 		// Nothing meaningful chosen and nothing to preserve — don't create the file at all.
-		if(!exists && !elicit && workspace == "auto") {
+		if(!exists && nothingChosen) {
 			
 			Console.WriteLine();
 			Console.WriteLine($"  No project server settings selected — {ProjectConfig.FileName} not written.");
@@ -233,15 +277,15 @@ internal class SetupProjectCommand : CliCommand
 			return false;
 		}
 		
-		// If parsing failed and the user kept defaults (Enter through both prompts), abort rather
+		// If parsing failed and the user kept defaults (Enter through every prompt), abort rather
 		// than silently overwriting their broken-but-maybe-recoverable config with a stub. Require
 		// explicit non-default choices to proceed.
-		if(parseFailed && !elicit && workspace == "auto") {
+		if(parseFailed && nothingChosen) {
 			
 			Console.WriteLine();
 			Console.WriteLine($"  ⚠ Existing {ProjectConfig.FileName} is unreadable and no explicit settings were chosen.");
-			Console.WriteLine("    Not overwriting to avoid data loss. To proceed, rerun and select elicit=yes or");
-			Console.WriteLine("    a specific workspace mode, or manually fix/delete the file.");
+			Console.WriteLine("    Not overwriting to avoid data loss. To proceed, rerun and select elicit=yes,");
+			Console.WriteLine("    a specific workspace mode, or a Visual Studio version pin — or manually fix/delete the file.");
 			
 			return false;
 		}
@@ -255,6 +299,11 @@ internal class SetupProjectCommand : CliCommand
 			root.Remove("workspace");
 		else
 			root["workspace"] = workspace;
+		
+		if(vsVersion.Length == 0)
+			root.Remove("vsVersion");
+		else
+			root["vsVersion"] = vsVersion;
 		
 		string? backupPath = null;
 		

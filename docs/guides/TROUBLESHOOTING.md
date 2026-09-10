@@ -234,6 +234,26 @@ RoslynMcp.exe --workspace vs --msbuild-path "C:\Program Files\Microsoft Visual S
 To opt out of pinning entirely (let the BuildHost choose on its own), pass `--no-buildhost-pin`
 (or set `ROSLYNMCP_NO_BUILDHOST_PIN=true`).
 
+**Newest install is the broken one (e.g. VS 2026 / 18.x):** the pin above cannot help on its own —
+`vswhere -latest` and the BuildHost agree on "newest", so the server pins the BuildHost to the very
+instance that crashes (the log then shows `Registered MSBuild 9999.0 instance at <newest VS>`). Pin
+the Visual Studio **version** instead. A version is portable across machines, so it can also be
+committed per project:
+
+```bash
+RoslynMcp.exe --workspace vs --vs-version 17     # CLI
+$env:ROSLYNMCP_VS_VERSION = "17"                 # env var
+```
+
+```json
+// .madq_roslynmcp.json at the repo root (written by `madq-roslynmcp setup-project`)
+{ "version": 1, "workspace": "vs", "vsVersion": "17" }
+```
+
+Accepts `17`, `17.14`, or a vswhere range like `[17.0,18.0)`. The version pin also works in
+`auto`/`sdk` mode, where it steers only the BuildHost. See
+[Pinning the Visual Studio Version](../reference/WORKSPACE_MODES.md#pinning-the-visual-studio-version).
+
 ---
 
 ### No type resolution (AdhocWorkspace fallback)
