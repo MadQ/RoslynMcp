@@ -29,7 +29,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"Specify nodeKind (e.g., MethodDeclaration, ConstructorDeclaration, PropertyDeclaration, ClassDeclaration) and an optional textPattern " +
 		"that filters by the declared name of the node — not body content. " +
 		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors. " +
-		"The replacement must be exactly one node of the matched kind — a type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
+		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern or set force=true to proceed. " +
 		"Supports dryRun=true to preview which nodes would be replaced without writing; the replacement is parsed and validated exactly as for a real write, so a passing dry run reflects the same syntax checks the write would run. " +
 		"Set verbose=true to also include each matched node's original_text in the response (omitted by default to save tokens; always included on error)."
@@ -154,21 +154,28 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		else {
 			
-			// Parse the replacement in the grammatical position of the node it replaces — a type
+			// Parse the replacement in the grammatical position of EACH node it replaces — a type
 			// member inside a type of the same name so constructors, destructors, and operators
 			// parse as themselves; a statement as a statement; anything else as an expression.
-			var (replacementNode, parseError) = ParseReplacement(matchedNodes[0], replacement);
+			var replacementNodes = new Dictionary<SyntaxNode, SyntaxNode>(matchedNodes.Length);
 			
-			if(replacementNode is null)
+			foreach(var matchedNode in matchedNodes) {
 				
-				return scope.Error(new ReplaceInCodeSyntaxError(parseError ?? "Failed to parse replacement text — parser returned null")
-				{
-					Error = "Replacement text contains syntax errors"
-				});
+				var (replacementNode, parseError) = ParseReplacement(matchedNode, replacement);
+
+				if(replacementNode is null)
+
+					return scope.Error(new ReplaceInCodeSyntaxError(parseError ?? "Failed to parse replacement text — parser returned null", BuildNodeInfo(true))
+					{
+						Error = "Replacement text contains syntax errors"
+					});
+
+				replacementNodes[matchedNode] = replacementNode;
+			}
 			
 			newRoot = root.ReplaceNodes(
 				matchedNodes,
-				(originalNode, _) => replacementNode.WithTriviaFrom(originalNode)
+				(originalNode, _) => replacementNodes[originalNode].WithTriviaFrom(originalNode)
 			);
 		}
 		
@@ -261,14 +268,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	
 	/// <summary>
 	///     Parses <paramref name="replacement"/> in the grammatical position of
-	///     <paramref name="original"/>, so validation asks the right question of the parser. A type
-	///     member is parsed inside a dummy type that borrows the enclosing type's name (and kind,
-	///     for enum members) — <c>SyntaxFactory.ParseMemberDeclaration</c> alone has no enclosing
-	///     type, so it reads <c>Widget(int size) { }</c> as a method missing its return type, and
-	///     dispatching on a fixed list of node kinds sent constructors to <c>ParseExpression</c>
-	///     outright (#267). Statements parse as statements, a using directive as a compilation unit,
-	///     everything else as an expression. Exactly one node must come out: a replacement that
-	///     smuggles in a second member, or closes the wrapper type early, is refused.
+	///     <paramref name="original"/>, so validation asks the right question of the parser. Each
+	///     type member is parsed inside a dummy type that borrows THAT member's enclosing type name
+	///     (and kind, for enum members) — <c>SyntaxFactory.ParseMemberDeclaration</c> alone has no
+	///     enclosing type, so it reads <c>Widget(int size) { }</c> as a method missing its return
+	///     type, and dispatching on a fixed list of node kinds sent constructors to
+	///     <c>ParseExpression</c> outright (#267). Statements parse as statements, a using directive
+	///     as a compilation unit, everything else as an expression. Exactly one node must come out:
+	///     a replacement that smuggles in a second member, or closes the wrapper type early, is
+	///     refused.
 	///     Returns the node, or null plus the joined parser error messages.
 	/// </summary>
 	private static (SyntaxNode? Node, string? Error) ParseReplacement(SyntaxNode original, string replacement)

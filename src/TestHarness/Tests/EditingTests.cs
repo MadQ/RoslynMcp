@@ -28,6 +28,10 @@ static class EditingTests
 		
 		File.WriteAllText(tempCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } }");
 		
+		var tempMultiCtorFile = Path.Combine(ctx.TargetPath, ".test_multi_ctor_temp.cs");
+
+		File.WriteAllText(tempMultiCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } } class Gadget { int size; Gadget(int size) { this.size = size; } }");
+
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
@@ -167,6 +171,15 @@ static class EditingTests
 					new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int { ", dryRun = true, projectPath = ctx.TargetPath },
 					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
 			
+			// A forced batch that spans constructors from differently named enclosing types must parse
+			// the replacement in each match's own wrapper type. Reusing the first parsed constructor
+			// would let this dry run pass, then write an invalid constructor into Gadget.
+			new("roslyn_replace_in_code: dry run rejects forced constructor batch across different types",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = ".test_multi_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "g", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, force = true, projectPath = ctx.TargetPath },
+					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
+
 			// A replacement that smuggles in a second member (or closes the type early) must be
 			// refused — the tool replaces exactly one node.
 			new("roslyn_replace_in_code: replacement must be exactly one member",
@@ -255,6 +268,7 @@ static class EditingTests
 			try { File.Delete(tempInsertFile); } catch { }
 			try { File.Delete(tempVerbatimFile); } catch { }
 			try { File.Delete(tempCtorFile);     } catch { }
+			try { File.Delete(tempMultiCtorFile); } catch { }
 			try { File.Delete(Path.Combine(ctx.TargetPath, ".test_code_debug.cs")); } catch { }
 			
 			return Task.CompletedTask;
