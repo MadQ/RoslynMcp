@@ -100,7 +100,12 @@ internal static partial class MSBuildBootstrap
 			
 			// Not a solution, or one that references nothing readable — scan the directory instead,
 			// nearest files first and skipping build output, where stale project copies tend to live.
-			projects = FindCsprojCandidates(Path.GetDirectoryName(path) ?? path);
+			var scanRoot = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
+			
+			if(string.IsNullOrEmpty(scanRoot))
+				scanRoot = ".";
+			
+			projects = FindCsprojCandidates(scanRoot);
 			source   = "directory scan";
 		}
 		
@@ -179,7 +184,12 @@ internal static partial class MSBuildBootstrap
 			
 			try {
 				
-				result.AddRange(Directory.EnumerateFiles(dir, "*.csproj"));
+				var remaining = maxCandidates - result.Count;
+				
+				result.AddRange(Directory.EnumerateFiles(dir, "*.csproj").Take(remaining));
+				
+				if(result.Count >= maxCandidates)
+					break;
 				
 				foreach(var sub in Directory.EnumerateDirectories(dir)) {
 					
@@ -219,7 +229,7 @@ internal static partial class MSBuildBootstrap
 	{
 		if(completed)
 			
-			return failureReason ?? ReportVsVersionConflict(mode, vsVersionRange);
+			return failureReason ?? ReportBootstrapConflict(mode, vsVersionRange);
 		
 		gate.Wait();
 		
@@ -227,7 +237,7 @@ internal static partial class MSBuildBootstrap
 			
 			if(completed)
 				
-				return failureReason ?? ReportVsVersionConflict(mode, vsVersionRange);
+				return failureReason ?? ReportBootstrapConflict(mode, vsVersionRange);
 			
 			resolvedMode = mode;
 			resolvedVsVersionRange = vsVersionRange;
@@ -403,10 +413,21 @@ internal static partial class MSBuildBootstrap
 		}
 	}
 
-	static string? ReportVsVersionConflict(WorkspaceMode requestedMode, string? requestedVsVersionRange)
+	static string? ReportBootstrapConflict(WorkspaceMode requestedMode, string? requestedVsVersionRange)
 	{
-		if(requestedMode == WorkspaceMode.Adhoc
-			|| string.Equals(requestedVsVersionRange, resolvedVsVersionRange, StringComparison.Ordinal))
+		if(requestedMode == WorkspaceMode.Adhoc)
+			
+			return null;
+		
+		if(requestedMode != WorkspaceMode.Auto
+			&& requestedMode != resolvedMode)
+			
+			return "MSBuild is already initialized for this server process in "
+				+ $"{resolvedMode} workspace mode, so the later request for {requestedMode} cannot apply. "
+				+ "Restart the server or keep workspace mode consistent across projects loaded by this server."
+			;
+		
+		if(string.Equals(requestedVsVersionRange, resolvedVsVersionRange, StringComparison.Ordinal))
 			
 			return null;
 

@@ -55,6 +55,21 @@ static class ProjectStyleDetectionTests
 			new("ProjectStyle: directory fallback skips bin/obj",
 				() => Task.FromResult(AssertDirectoryFallbackSkipsBuildOutput(ctx))),
 			
+			// A relative solution path used to hand FindCsprojCandidates an empty dirname, which
+			// threw instead of scanning the current directory.
+			new("ProjectStyle: relative solution paths scan the current directory",
+				() => Task.FromResult(AssertRelativeSolutionPathUsesCurrentDirectory(ctx))),
+			
+			// A directory load must inspect that directory, not its parent, or a legacy sibling can
+			// flip the decision to Vs even when the requested directory is SDK-only.
+			new("ProjectStyle: directory paths scan themselves, not the parent",
+				() => Task.FromResult(AssertDirectoryPathScansItself(ctx))),
+			
+			// EnsureReady is process-global; once one mode wins, a conflicting later mode must fail
+			// explicitly rather than pretending the new request was applied.
+			new("ProjectStyle: conflicting bootstrap modes require restart",
+				() => Task.FromResult(AssertConflictingBootstrapModeRequiresRestart(ctx))),
+			
 			// A direct .csproj path bypasses solution parsing entirely.
 			new("ProjectStyle: direct legacy csproj detects Vs",
 				() => Task.FromResult(AssertDirectCsproj(ctx))),
@@ -157,6 +172,101 @@ static class ProjectStyleDetectionTests
 			
 			return (true, $"PASS  ({detail})");
 		});
+	}
+	
+	static (bool pass, string message) AssertRelativeSolutionPathUsesCurrentDirectory(TestContext ctx)
+	{
+		
+		return WithScratchTree(ctx, "relative-sln", root => {
+			
+			WriteFile(root, "Old.csproj", LegacyCsproj);
+			WriteFile(root, "App.sln",    Sln());
+			
+			var priorCurrentDirectory = Environment.CurrentDirectory;
+			
+			try {
+				
+				Environment.CurrentDirectory = root;
+				var (mode, detail) = Detect(ctx, "App.sln");
+				
+				if(mode != "Vs" || !detail.Contains("directory scan"))
+					return (false, $"FAIL  (expected relative fallback to scan the current directory, got {mode}: {detail})");
+				
+				return (true, $"PASS  ({detail})");
+			}
+			finally {
+				
+				Environment.CurrentDirectory = priorCurrentDirectory;
+			}
+		});
+	}
+	
+	static (bool pass, string message) AssertDirectoryPathScansItself(TestContext ctx)
+	{
+		
+		return WithScratchTree(ctx, "dir-path", root => {
+			
+			WriteFile(root, "ScanMe/App.csproj",       SdkCsproj);
+			WriteFile(root, "LegacySibling/Old.csproj", LegacyCsproj);
+			
+			var (mode, detail) = Detect(ctx, Path.Combine(root, "ScanMe"));
+			
+			if(mode != "Sdk" || !detail.Contains("all 1 projects"))
+				return (false, $"FAIL  (expected only the requested directory to be scanned, got {mode}: {detail})");
+			
+			return (true, $"PASS  ({detail})");
+		});
+	}
+	
+	static (bool pass, string message) AssertConflictingBootstrapModeRequiresRestart(TestContext ctx)
+	{
+		
+		try {
+			
+			var assembly              = LoadServerAssembly(ctx);
+			var bootstrapType         = assembly.GetType("RoslynMcp.MSBuildBootstrap", throwOnError: true)!;
+			var workspaceModeType     = assembly.GetType("RoslynMcp.WorkspaceMode", throwOnError: true)!;
+			var ensureReady           = bootstrapType.GetMethod("EnsureReady", BindingFlags.Public | BindingFlags.Static)!;
+			var completedField        = bootstrapType.GetField("completed", BindingFlags.Static | BindingFlags.NonPublic)!;
+			var failureReasonField    = bootstrapType.GetField("failureReason", BindingFlags.Static | BindingFlags.NonPublic)!;
+			var discoveryMethodField  = bootstrapType.GetField("discoveryMethod", BindingFlags.Static | BindingFlags.NonPublic)!;
+			var resolvedModeField     = bootstrapType.GetField("resolvedMode", BindingFlags.Static | BindingFlags.NonPublic)!;
+			var resolvedVsRangeField  = bootstrapType.GetField("resolvedVsVersionRange", BindingFlags.Static | BindingFlags.NonPublic)!;
+			var sdkMode               = Enum.Parse(workspaceModeType, "Sdk");
+			var vsMode                = Enum.Parse(workspaceModeType, "Vs");
+			var priorCompleted        = completedField.GetValue(null);
+			var priorFailureReason    = failureReasonField.GetValue(null);
+			var priorDiscoveryMethod  = discoveryMethodField.GetValue(null);
+			var priorResolvedMode     = resolvedModeField.GetValue(null);
+			var priorResolvedVsRange  = resolvedVsRangeField.GetValue(null);
+			
+			try {
+				
+				completedField.SetValue(null, true);
+				failureReasonField.SetValue(null, null);
+				discoveryMethodField.SetValue(null, "resolved via test");
+				resolvedModeField.SetValue(null, sdkMode);
+				resolvedVsRangeField.SetValue(null, null);
+				
+				var failure = (string?) ensureReady.Invoke(null, [vsMode, null]);
+				
+				if(failure is null || !failure.Contains("Sdk workspace mode") || !failure.Contains("later request for Vs"))
+					return (false, $"FAIL  (expected conflicting mode restart error, got '{failure ?? "null"}')");
+				
+				return (true, "PASS  (conflicting modes now fail explicitly)");
+			}
+			finally {
+				
+				completedField.SetValue(null, priorCompleted);
+				failureReasonField.SetValue(null, priorFailureReason);
+				discoveryMethodField.SetValue(null, priorDiscoveryMethod);
+				resolvedModeField.SetValue(null, priorResolvedMode);
+				resolvedVsRangeField.SetValue(null, priorResolvedVsRange);
+			}
+		}
+		catch(Exception ex) {
+			return (false, $"FAIL  ({ex.GetType().Name}: {ex.Message})");
+		}
 	}
 	
 	// ── helpers ──────────────────────────────────────────────────────────────
