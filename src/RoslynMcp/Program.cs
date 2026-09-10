@@ -81,6 +81,10 @@ static int PrintHelp()
               --msbuild-path <path>   Override MSBuild installation path — a dotnet SDK
                                       directory or a VS MSBuild\Current\Bin directory.
                                       Applies to all modes except adhoc.
+              --vs-version   <ver>    Pin the Visual Studio used to load legacy (.NET
+                                      Framework) projects: 17, 17.14, or a vswhere range
+                                      like [17.0,18.0). Steers the MSBuild BuildHost in
+                                      all modes except adhoc. Default: newest installed.
               --elicit                On an ambiguous symbol match, ask the user to pick
                                       interactively (MCP elicitation) instead of returning a
                                       structured candidate list. Opt-in; needs client
@@ -92,6 +96,7 @@ static int PrintHelp()
           ROSLYNMCP_WORKSPACE             Workspace mode (same as --workspace)
           ROSLYNMCP_LOG_PATH              Log file base path (same as --log-path)
           ROSLYNMCP_MSBUILD_PATH          MSBuild installation path (same as --msbuild-path)
+          ROSLYNMCP_VS_VERSION            Visual Studio version pin (same as --vs-version)
           ROSLYNMCP_ELICIT                Set to true to enable --elicit (see Options)
           ROSLYNMCP_BACKUP_PATH           Backup storage path (empty string = disable backups)
           ROSLYNMCP_LOG_MAX_AGE_DAYS      Log retention in days (default: 30)
@@ -103,7 +108,7 @@ static int PrintHelp()
 
         Project config:
           A committed .madq_roslynmcp.json at the repo root (written by 'setup-project')
-          can set elicit and workspace per project. Explicit settings always win:
+          can set elicit, workspace, and vsVersion per project. Explicit settings always win:
           CLI arg > env var > project file > built-in default.
 
         Documentation: https://github.com/MadQ/RoslynMcp
@@ -204,6 +209,14 @@ lifetime.ApplicationStarted.Register(() => {
 	
 	logger.LogStart();
 	logger.LogInfo("Workspace", $"mode={ServerArgs.Current.WorkspaceMode}");
+	
+	if(ServerArgs.Current.VsVersion is not null)
+		logger.LogInfo("Workspace", $"vsVersion={ServerArgs.Current.VsVersion}");
+	
+	// A malformed pin is the one misconfiguration that recreates the failure the pin exists to
+	// prevent, so it is called out here rather than silently ignored.
+	if(ServerArgs.Current.VsVersionRejected is not null)
+		logger.LogInfo("Workspace", $"WARN: --vs-version / ROSLYNMCP_VS_VERSION value '{ServerArgs.Current.VsVersionRejected}' is not a major (17), major.minor (17.14), or vswhere range ([17.0,18.0)) — ignored");
 	
 	ServerHeartbeat.Initialize();
 	

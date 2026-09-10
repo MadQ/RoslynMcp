@@ -89,7 +89,14 @@ internal static class MSBuildBootstrap
 	///     is complete. Subsequent calls return immediately. If discovery failed,
 	///     returns the failure reason (does not throw — callers decide how to handle).
 	/// </summary>
-	public static string? EnsureReady(WorkspaceMode mode = WorkspaceMode.Auto)
+	/// <param name="mode">The workspace mode to resolve MSBuild for; adhoc skips MSBuild entirely.</param>
+	/// <param name="vsVersionRange">
+	///     Optional Visual Studio version pin in vswhere <c>-version</c> syntax (see
+	///     <see cref="VsVersionPin"/>). In VS mode it narrows which instance is registered; in
+	///     SDK/auto mode it only pins the out-of-process .NET Framework BuildHost, which otherwise
+	///     picks the newest installed Visual Studio on its own. Ignored in adhoc mode.
+	/// </param>
+	public static string? EnsureReady(WorkspaceMode mode = WorkspaceMode.Auto, string? vsVersionRange = null)
 	{
 		if(completed)
 			
@@ -132,10 +139,12 @@ internal static class MSBuildBootstrap
 					if(TryRegisterPath(overridePath)) {
 
 						// No-op unless the override points at a VS MSBuild\...\Bin dir (SDK dirs return null).
+						// A VS path is the more specific pin and wins; an SDK path leaves the BuildHost to
+						// the version pin, if one is configured.
 						var pinnedRoot = TryPinVisualStudioInstance(overridePath);
 
 						discoveryMethod = $"resolved via --msbuild-path / ROSLYNMCP_MSBUILD_PATH ({overridePath})"
-							+ PinSuffix(pinnedRoot);
+							+ (pinnedRoot is not null ? PinSuffix(pinnedRoot) : BuildHostPinSuffix(vsVersionRange));
 
 						return null;
 					}
@@ -154,7 +163,7 @@ internal static class MSBuildBootstrap
 						return failureReason;
 					}
 					
-					var msbuildDir = TryVsWhere();
+					var msbuildDir = TryVsWhere(vsVersionRange);
 					
 					if(msbuildDir is not null) {
 						
@@ -164,25 +173,37 @@ internal static class MSBuildBootstrap
 							var pinnedRoot = TryPinVisualStudioInstance(msbuildDir);
 							
 							discoveryMethod = $"resolved via vswhere — VS mode ({msbuildDir})"
+								+ VersionPinNote(vsVersionRange)
 								+ PinSuffix(pinnedRoot);
 							
 							return null;
 						}
 					}
 					
-					failureReason = "Visual Studio MSBuild not found. Install Visual Studio or Build Tools, "
-						+ "or pass --msbuild-path (or set ROSLYNMCP_MSBUILD_PATH) to a VS MSBuild\\Current\\Bin directory.";
+					// A pinned range that matches nothing is a configuration problem, not a missing
+					// install — say so, rather than pointing the user at the installer.
+					failureReason = vsVersionRange is null
+						? "Visual Studio MSBuild not found. Install Visual Studio or Build Tools, "
+							+ "or pass --msbuild-path (or set ROSLYNMCP_MSBUILD_PATH) to a VS MSBuild\\Current\\Bin directory."
+						: $"No Visual Studio MSBuild matches the version pin {vsVersionRange} (--vs-version, "
+							+ $"ROSLYNMCP_VS_VERSION, or vsVersion in {ProjectConfig.FileName}). Install a matching "
+							+ "Visual Studio or Build Tools, widen the pin, or pass --msbuild-path (or set "
+							+ "ROSLYNMCP_MSBUILD_PATH) to a VS MSBuild\\Current\\Bin directory."
+					;
 					discoveryMethod = "not found — " + failureReason;
 					
 					return failureReason;
 				}
 				
-				// SDK mode (or Auto): standard discovery chain.
+				// SDK mode (or Auto): standard discovery chain. Every success path also applies the
+				// BuildHost version pin, if one is configured — a legacy project's .NET Framework
+				// BuildHost never consults the SDK registered here and would otherwise pick the
+				// newest Visual Studio on its own.
 
 				// 1. Try MSBuildLocator directly — works when .NET SDK is on PATH.
 				if(TryRegister()) {
 					
-					discoveryMethod = "resolved via PATH (.NET SDK found on PATH)";
+					discoveryMethod = "resolved via PATH (.NET SDK found on PATH)" + BuildHostPinSuffix(vsVersionRange);
 					
 					return null;
 				}
@@ -194,7 +215,7 @@ internal static class MSBuildBootstrap
 					
 					if(TryRegister()) {
 						
-						discoveryMethod = source;
+						discoveryMethod = source + BuildHostPinSuffix(vsVersionRange);
 						
 						return null;
 					}
@@ -204,7 +225,7 @@ internal static class MSBuildBootstrap
 					// which calls RegisterMSBuildPath() and bypasses hostfxr entirely.
 					if(TryRegisterFromDotnetSDK(dotnetDir, out var sdkPath)) {
 						
-						discoveryMethod = $"{source} (direct SDK path: {sdkPath})";
+						discoveryMethod = $"{source} (direct SDK path: {sdkPath})" + BuildHostPinSuffix(vsVersionRange);
 						
 						return null;
 					}
@@ -213,7 +234,7 @@ internal static class MSBuildBootstrap
 				// 3. Windows only: try vswhere.exe to find Visual Studio MSBuild.
 				if(OperatingSystem.IsWindows()) {
 					
-					var msbuildDir = TryVsWhere();
+					var msbuildDir = TryVsWhere(vsVersionRange);
 					
 					if(msbuildDir is not null) {
 						
@@ -224,6 +245,7 @@ internal static class MSBuildBootstrap
 							var pinnedRoot = TryPinVisualStudioInstance(msbuildDir);
 							
 							discoveryMethod = $"resolved via vswhere ({msbuildDir})"
+								+ VersionPinNote(vsVersionRange)
 								+ PinSuffix(pinnedRoot);
 							
 							return null;
@@ -493,11 +515,12 @@ internal static class MSBuildBootstrap
 	}
 	
 	/// <summary>
-	///     Runs vswhere.exe to find the latest Visual Studio installation with MSBuild.
+	///     Runs vswhere.exe to find the latest Visual Studio installation with MSBuild — within
+	///     <paramref name="versionRange"/> (vswhere <c>-version</c> syntax) when one is given.
 	///     Windows-only — returns null on Linux/macOS (vswhere doesn't exist; .NET SDK
 	///     installs are discovered by MSBuildLocator.RegisterDefaults directly).
 	/// </summary>
-	static string? TryVsWhere()
+	static string? TryVsWhere(string? versionRange = null)
 	{
 		// vswhere.exe lives at a well-known path under the VS Installer.
 		// No registry key for vswhere itself — the installer path is predictable.
@@ -511,9 +534,16 @@ internal static class MSBuildBootstrap
 		
 		try {
 			
+			// -version narrows -latest to the pinned range. Without it "latest" is the newest install
+			// on the machine — the same pick the BuildHost makes on its own, which defeats the pin
+			// when that newest install is the one that crashes. The range is validated by
+			// VsVersionPin (digits, dots, brackets, comma only), so splicing it verbatim is safe.
+			var versionFilter = versionRange is not null ? $" -version \"{versionRange}\"" : ""
+			;
+			
 			var psi = new ProcessStartInfo(vsWherePath) {
 				// -products * is required to discover standalone Build Tools installs (not just IDE editions).
-				Arguments              = "-latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\\**\\Bin\\MSBuild.exe",
+				Arguments              = "-latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\\**\\Bin\\MSBuild.exe" + versionFilter,
 				RedirectStandardOutput = true,
 				RedirectStandardError  = true,
 				UseShellExecute        = false,
@@ -650,6 +680,39 @@ internal static class MSBuildBootstrap
 		return vsRoot;
 	}
 	
+	/// <summary>
+	///     Applies the Visual Studio version pin on an SDK-resolution path and returns the
+	///     discovery-method suffix describing the outcome. This process keeps the SDK MSBuild it
+	///     registered — only the out-of-process .NET Framework BuildHost, which legacy projects load
+	///     through, is steered. Empty when no pin is configured or not on Windows; the "unpinned"
+	///     note when nothing matches the range, since an SDK-mode load may never need Visual Studio.
+	/// </summary>
+	static string BuildHostPinSuffix(string? vsVersionRange)
+	{
+		if(vsVersionRange is null || !OperatingSystem.IsWindows())
+			
+			return "";
+		
+		var msbuildDir = TryVsWhere(vsVersionRange);
+		
+		if(msbuildDir is null)
+			
+			return $" (VS version pin {vsVersionRange}: no matching Visual Studio — BuildHost unpinned)";
+		
+		var pinnedRoot = TryPinVisualStudioInstance(msbuildDir);
+		
+		return pinnedRoot is null
+			? $" (VS version pin {vsVersionRange}: BuildHost pinning disabled)"
+			: VersionPinNote(vsVersionRange) + PinSuffix(pinnedRoot)
+		;
+	}
+	
+	/// <summary>Formats the discovery-method note naming an active version pin, or empty when none.</summary>
+	static string VersionPinNote(string? vsVersionRange) =>
+		vsVersionRange is not null ? $" (VS version pin {vsVersionRange})" : ""
+	;
+	
+
 	/// <summary>Formats the discovery-method suffix noting a BuildHost pin, or empty when none.</summary>
 	static string PinSuffix(string? pinnedRoot) =>
 		pinnedRoot is not null ? $" (BuildHost pinned to {pinnedRoot})" : ""

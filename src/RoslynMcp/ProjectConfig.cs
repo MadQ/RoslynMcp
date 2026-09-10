@@ -19,9 +19,11 @@ namespace RoslynMcp;
 ///     </para>
 ///     <para>
 ///         Security: this is a committed, potentially untrusted repo file. Only the
-///         commit-worthy keys <c>elicit</c> and <c>workspace</c> are honored. Machine-specific
-///         settings (log, MSBuild, and backup paths) and <c>preload</c> are never read from it,
-///         so a hostile repo cannot point the server at arbitrary local paths.
+///         commit-worthy keys <c>elicit</c>, <c>workspace</c>, and <c>vsVersion</c> are honored.
+///         Machine-specific settings (log, MSBuild, and backup paths) and <c>preload</c> are never
+///         read from it, so a hostile repo cannot point the server at arbitrary local paths. A
+///         Visual Studio <em>version</em> is the exception that proves the rule: it selects among
+///         installs vswhere already knows about and never names a path, so it is portable and safe.
 ///     </para>
 /// </remarks>
 internal sealed class ProjectConfig
@@ -51,7 +53,7 @@ internal sealed class ProjectConfig
 #endif
 	
 	/// <summary>Sentinel for "no usable project file found" — all <c>*Specified</c> flags false.</summary>
-	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, "");
+	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, null, "");
 	
 	/// <summary>Whether the file supplied a valid boolean <c>elicit</c> value.</summary>
 	public bool ElicitSpecified { get; }
@@ -65,15 +67,22 @@ internal sealed class ProjectConfig
 	/// <summary>The file's <c>workspace</c> mode; meaningful only when <see cref="WorkspaceSpecified"/> is true.</summary>
 	public WorkspaceMode Workspace { get; }
 	
+	/// <summary>
+	///     The file's <c>vsVersion</c> pin, normalized to a vswhere <c>-version</c> range (see
+	///     <see cref="VsVersionPin"/>); <c>null</c> when absent or invalid.
+	/// </summary>
+	public string? VsVersion { get; }
+	
 	/// <summary>Full path of the file this config was loaded from; empty for <see cref="Empty"/>.</summary>
 	public string SourcePath { get; }
 	
-	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string sourcePath)
+	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string? vsVersion, string sourcePath)
 	{
 		ElicitSpecified    = elicitSpecified;
 		Elicit             = elicit;
 		WorkspaceSpecified = workspaceSpecified;
 		Workspace          = workspace;
+		VsVersion          = vsVersion;
 		SourcePath         = sourcePath;
 	}
 	
@@ -109,6 +118,23 @@ internal sealed class ProjectConfig
 		var config = ForPath(pathInProject, logger);
 		
 		return config.WorkspaceSpecified ? config.Workspace : WorkspaceMode.Auto;
+	}
+	
+	/// <summary>
+	///     The effective Visual Studio version pin for a load of <paramref name="pathInProject"/>,
+	///     as a vswhere <c>-version</c> range: an explicit CLI arg or env var
+	///     (<see cref="ServerArgs.VsVersionSpecified"/>) always wins; otherwise the project file's
+	///     <c>vsVersion</c>; otherwise <c>null</c> (newest installed Visual Studio). Honored from
+	///     the committed file because a version — unlike an MSBuild path — is portable across
+	///     machines and cannot point the server at an arbitrary local directory.
+	/// </summary>
+	public static string? EffectiveVsVersion(string pathInProject, FileLogger logger)
+	{
+		if(ServerArgs.Current.VsVersionSpecified)
+			
+			return ServerArgs.Current.VsVersion;
+		
+		return ForPath(pathInProject, logger).VsVersion;
 	}
 	
 	/// <summary>
@@ -240,6 +266,7 @@ internal sealed class ProjectConfig
 			var elicit             = false;
 			var workspaceSpecified = false;
 			var workspace          = WorkspaceMode.Auto;
+			var vsVersion          = (string?) null;
 			
 			foreach(var property in doc.RootElement.EnumerateObject()) {
 				
@@ -276,6 +303,25 @@ internal sealed class ProjectConfig
 						
 						break;
 					
+					case "vsVersion":
+						
+						// A bare number (17) is the natural JSON spelling of a major version — accept
+						// it alongside the string forms. Normalized here so no consumer ever sees raw
+						// user input; the range is passed to vswhere verbatim.
+						var vsVersionText = property.Value.ValueKind switch {
+							
+							JsonValueKind.String => property.Value.GetString(),
+							JsonValueKind.Number => property.Value.GetRawText(),
+							_                    => null,
+						};
+						
+						if(VsVersionPin.TryNormalize(vsVersionText, out var vsVersionRange))
+							vsVersion = vsVersionRange;
+						else
+							logger.LogInfo("ProjectConfig", $"WARN: 'vsVersion' in '{filePath}' must be a major (17), major.minor (17.14), or vswhere range ([17.0,18.0)) — ignored");
+						
+						break;
+					
 					case "version":
 						// Schema version — tolerated but not interpreted in v1.
 						break;
@@ -293,11 +339,12 @@ internal sealed class ProjectConfig
 				}
 			}
 			
-			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, filePath);
+			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, filePath);
 			
 			logger.LogInfo("ProjectConfig",
 				$"loaded '{filePath}': elicit={(elicitSpecified ? elicit.ToString() : "unset")}, " +
-				$"workspace={(workspaceSpecified ? workspace.ToString() : "unset")}");
+				$"workspace={(workspaceSpecified ? workspace.ToString() : "unset")}, " +
+				$"vsVersion={vsVersion ?? "unset"}");
 			
 			return config;
 		}
