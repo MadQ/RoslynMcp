@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
+using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.Build.Locator;
 using Microsoft.Win32;
 
@@ -12,7 +15,7 @@ namespace RoslynMcp;
 ///     Visual Studio installations. Thread-safe — blocks concurrent callers
 ///     via semaphore until discovery is complete.
 /// </summary>
-internal static class MSBuildBootstrap
+internal static partial class MSBuildBootstrap
 {
 	static readonly SemaphoreSlim gate = new(1, 1);
 	// volatile: the fast-path DCL check (if(completed) return failureReason) runs without the
@@ -70,20 +73,135 @@ internal static class MSBuildBootstrap
 	}
 	
 	/// <summary>
-	///     Finds the first .csproj under a directory for project style detection.
+	///     Determines the workspace mode for an auto-mode load of <paramref name="path"/> — a
+	///     .csproj, .sln, or .slnx. A solution is judged by the projects it actually references:
+	///     one legacy project is enough for <see cref="WorkspaceMode.Vs"/>, because Roslyn loads it
+	///     through the .NET Framework BuildHost regardless of how modern its siblings are. Peeking
+	///     at whichever .csproj the file system enumerates first is what #266 fixed — that file may
+	///     be a stale copy the solution never references. Returns the mode plus a short description
+	///     of what decided it, for the log.
 	/// </summary>
-	public static string? FindFirstCsproj(string directory)
+	public static (WorkspaceMode Mode, string Detail) DetectLoadStyle(string path)
+	{
+		if(path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
+			
+			var style = DetectProjectStyle(path);
+			
+			return (style, $"{Path.GetFileName(path)} is {(style == WorkspaceMode.Vs ? "legacy" : "SDK")}-style");
+		}
+		
+		var isSolution = path.EndsWith(".sln",  StringComparison.OrdinalIgnoreCase)
+		              || path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase);
+		
+		var projects = isSolution ? ReadSolutionProjects(path) : [];
+		var source   = Path.GetFileName(path);
+		
+		if(projects.Length == 0) {
+			
+			// Not a solution, or one that references nothing readable — scan the directory instead,
+			// nearest files first and skipping build output, where stale project copies tend to live.
+			projects = FindCsprojCandidates(Path.GetDirectoryName(path) ?? path);
+			source   = "directory scan";
+		}
+		
+		if(projects.Length == 0)
+			
+			return (WorkspaceMode.Sdk, "no .csproj found — defaulting to Sdk");
+		
+		foreach(var csproj in projects) {
+			
+			if(DetectProjectStyle(csproj) == WorkspaceMode.Vs)
+				
+				return (WorkspaceMode.Vs, $"{Path.GetFileName(csproj)} is legacy-style ({source}, {projects.Length} projects)");
+		}
+		
+		return (WorkspaceMode.Sdk, $"all {projects.Length} projects SDK-style ({source})");
+	}
+	
+	/// <summary>
+	///     Lists the .csproj files a .sln or .slnx references, as full paths, limited to those that
+	///     exist on disk. Text-level parsing on purpose: this runs before MSBuild is registered, so
+	///     Microsoft.Build.Construction.SolutionFile is not available yet. Non-C# projects and
+	///     solution folders are skipped. Returns empty on any read or parse failure.
+	/// </summary>
+	public static string[] ReadSolutionProjects(string solutionPath)
 	{
 		try {
 			
-			return Directory.EnumerateFiles(directory, "*.csproj", SearchOption.AllDirectories)
-				.FirstOrDefault()
-			;
+			var solutionDir = Path.GetDirectoryName(solutionPath) ?? "";
+			
+			var relativePaths = solutionPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
+				? XDocument.Load(solutionPath).Descendants("Project").Select(p => (string?) p.Attribute("Path")).OfType<string>()
+				: File.ReadLines(solutionPath).Select(line => SlnProjectLine().Match(line)).Where(m => m.Success).Select(m => m.Groups[1].Value);
+			
+			var result = new List<string>();
+			
+			foreach(var relative in relativePaths) {
+				
+				if(!relative.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
+					continue;
+				
+				var full = Path.GetFullPath(Path.Combine(solutionDir, relative.Replace('\\', Path.DirectorySeparatorChar)));
+				
+				if(File.Exists(full))
+					result.Add(full);
+			}
+			
+			return [..result];
 		}
-		catch { return null; }
+		catch(Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or ArgumentException) {
+			return [];
+		}
 	}
 	
+	// Project("{GUID}") = "Name", "rel\path.csproj", "{GUID}" — the second quoted value is the path.
+	[GeneratedRegex(@"^\s*Project\(""\{[0-9A-Fa-f-]+\}""\)\s*=\s*""[^""]*""\s*,\s*""([^""]+)""", RegexOptions.CultureInvariant)]
+	private static partial Regex SlnProjectLine();
 	
+	/// <summary>
+	///     Finds .csproj files under <paramref name="directory"/> for style detection when no
+	///     solution lists them: files in the directory itself first, then one level at a time,
+	///     skipping build output and tooling folders (bin, obj, packages, node_modules, dot-folders)
+	///     where stale or copied project files live. Bounded so a huge tree cannot stall a load.
+	/// </summary>
+	public static string[] FindCsprojCandidates(string directory)
+	{
+		const int maxCandidates = 32;
+		
+		var result = new List<string>();
+		var queue  = new Queue<string>();
+		
+		queue.Enqueue(directory);
+		
+		while(queue.Count > 0 && result.Count < maxCandidates) {
+			
+			var dir = queue.Dequeue();
+			
+			try {
+				
+				result.AddRange(Directory.EnumerateFiles(dir, "*.csproj"));
+				
+				foreach(var sub in Directory.EnumerateDirectories(dir)) {
+					
+					if(!IsSkippedFolder(Path.GetFileName(sub)))
+						queue.Enqueue(sub);
+				}
+			}
+			catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+				// Unreadable directory — skip it; detection is best-effort.
+			}
+		}
+		
+		return [..result.Take(maxCandidates)];
+	}
+	
+	static bool IsSkippedFolder(string name) =>
+		name.StartsWith('.')
+		|| name.Equals("bin",          StringComparison.OrdinalIgnoreCase)
+		|| name.Equals("obj",          StringComparison.OrdinalIgnoreCase)
+		|| name.Equals("packages",     StringComparison.OrdinalIgnoreCase)
+		|| name.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
+	;
 	
 	/// <summary>
 	///     Ensures MSBuild is registered for the process. Blocks until discovery
