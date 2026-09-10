@@ -21,6 +21,7 @@ internal static class MSBuildBootstrap
 	;
 	static volatile string? failureReason;
 	static volatile string  discoveryMethod = "not attempted";
+	static volatile string? resolvedVsVersionRange;
 	
 	/// <summary>How MSBuild was discovered. Always non-null — describes the method or the failure.</summary>
 	public static string DiscoveryMethod => discoveryMethod;
@@ -100,7 +101,7 @@ internal static class MSBuildBootstrap
 	{
 		if(completed)
 			
-			return failureReason;
+			return failureReason ?? ReportVsVersionConflict(mode, vsVersionRange);
 		
 		gate.Wait();
 		
@@ -108,9 +109,10 @@ internal static class MSBuildBootstrap
 			
 			if(completed)
 				
-				return failureReason;
+				return failureReason ?? ReportVsVersionConflict(mode, vsVersionRange);
 			
 			resolvedMode = mode;
+			resolvedVsVersionRange = vsVersionRange;
 			
 			try {
 				
@@ -282,6 +284,24 @@ internal static class MSBuildBootstrap
 			gate.Release();
 		}
 	}
+
+	static string? ReportVsVersionConflict(WorkspaceMode requestedMode, string? requestedVsVersionRange)
+	{
+		if(requestedMode == WorkspaceMode.Adhoc
+			|| string.Equals(requestedVsVersionRange, resolvedVsVersionRange, StringComparison.Ordinal))
+			
+			return null;
+
+		return "MSBuild is already initialized for this server process with "
+			+ $"{DescribeVsVersionRange(resolvedVsVersionRange)}, so the later request for "
+			+ $"{DescribeVsVersionRange(requestedVsVersionRange)} from a different project cannot apply. "
+			+ $"Restart the server, set --vs-version / ROSLYNMCP_VS_VERSION for the whole process, or keep {ProjectConfig.FileName} "
+			+ "vsVersion consistent across projects loaded by this server."
+		;
+	}
+
+	static string DescribeVsVersionRange(string? vsVersionRange) =>
+		vsVersionRange is null ? "no Visual Studio version pin" : $"Visual Studio version pin {vsVersionRange}";
 	
 	/// <summary>
 	///     Discovers the dotnet SDK directory via env vars, registry, or
