@@ -63,6 +63,11 @@ internal static partial class VsVersionPin
 				return false;
 		}
 		
+		if((parts.Length == 1 && numbers[0] == int.MaxValue)
+			|| (parts.Length == 2 && numbers[1] == int.MaxValue))
+			
+			return false;
+		
 		range = parts.Length switch {
 			
 			1 => $"[{numbers[0]}.0,{numbers[0] + 1}.0)",
