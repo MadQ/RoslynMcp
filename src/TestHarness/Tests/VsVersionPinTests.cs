@@ -20,6 +20,9 @@ static class VsVersionPinTests
 			
 			new("VsVersionPin: invalid input is rejected",
 				() => Task.FromResult(AssertNormalization(ctx, "foo", false, ""))),
+
+			new("VsVersionPin: int.MaxValue boundaries are rejected",
+				() => Task.FromResult(AssertOverflowBoundariesRejected(ctx))),
 			
 			new("VsVersionPin: CLI valid beats env and project",
 				() => Task.FromResult(AssertEffectiveVsVersion(ctx,
@@ -78,6 +81,17 @@ static class VsVersionPinTests
 			return exact;
 		
 		return AssertNormalization(ctx, " [17.0, 18.0) ", true, "[17.0,18.0)");
+	}
+
+	static (bool pass, string message) AssertOverflowBoundariesRejected(TestContext ctx)
+	{
+		
+		var major = AssertNormalization(ctx, int.MaxValue.ToString(), false, "");
+		
+		if(!major.pass)
+			return major;
+		
+		return AssertNormalization(ctx, $"17.{int.MaxValue}", false, "");
 	}
 	
 	static (bool pass, string message) AssertEffectiveVsVersion(
