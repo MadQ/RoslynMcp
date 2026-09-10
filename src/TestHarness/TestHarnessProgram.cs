@@ -113,6 +113,7 @@ class Program
 			
 			groups.Add(DiscoveryTests.Build(ctx));
 			groups.Add(VsVersionPinTests.Build(ctx));
+			groups.Add(ProjectStyleDetectionTests.Build(ctx));
 			groups.Add(FindStringLiteralTests.Build(ctx));
 			groups.Add(FindUnusedTests.Build(ctx));
 			groups.Add(MemberBodyTests.Build(ctx));

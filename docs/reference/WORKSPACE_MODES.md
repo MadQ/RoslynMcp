@@ -78,7 +78,7 @@ roslyn_restore_packages --projectPath src/YourProject
 
 ### When Used
 
-Activated via `--workspace vs` / `ROSLYNMCP_WORKSPACE=vs`, or auto-detected when `DetectProjectStyle()` sees legacy project markers such as `ToolsVersion=` or `TargetFrameworkVersion`. Uses the Visual Studio MSBuild instance located via `vswhere`.
+Activated via `--workspace vs` / `ROSLYNMCP_WORKSPACE=vs`, or auto-detected when `DetectLoadStyle()` sees legacy project markers such as `ToolsVersion=` or `TargetFrameworkVersion` in the loaded `.csproj` — or, for a `.sln`/`.slnx`, in **any** project the solution references (one legacy project is enough, since Roslyn loads it through the .NET Framework BuildHost regardless of its siblings). Projects are read from the solution file itself; only when it lists nothing readable does detection fall back to a nearest-first directory scan that skips `bin/`, `obj/`, `packages/`, `node_modules/`, and dot-folders. Uses the Visual Studio MSBuild instance located via `vswhere`.
 
 ### Capabilities
 

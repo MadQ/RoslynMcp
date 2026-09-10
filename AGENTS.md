@@ -113,7 +113,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `ToolResult` | Abstract base record for all tool results — success and error alike; nullable `Error`, `Hint`, and `Caution` properties are omitted from serialized JSON when null |
 | `ErrorResult` | Standard error response record (`ToolResult, IToolError`); used by all tools for consistent JSON error shape; serializes as `{ "error": "...", "hint": "..." }` |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
-| `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
+| `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectLoadStyle()` (solution-aware: reads the `.sln`/`.slnx` project list, any legacy project ⇒ VS), `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
 | `PaginationCache` | Generic TTL-based token cache for paginated tool results; shared across all tools via DI |
 | `SymbolFormatter` | Static helpers to format Roslyn `ISymbol` instances into human-readable signatures (method, property, field, event, type) |
 | `SymbolVisitors.cs` | Roslyn symbol tree visitors (`SimpleNameFinder`, `AllSymbolsFinder`, `AnySymbolFinder`) used by reference and rename tools |

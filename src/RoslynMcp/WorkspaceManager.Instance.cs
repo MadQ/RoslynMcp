@@ -619,19 +619,13 @@ internal sealed partial class WorkspaceManager
 			
 			if(mode == WorkspaceMode.Auto) {
 				
-				// Find a .csproj to peek at — either the path itself, or first .csproj in the directory.
-				var csprojToCheck = path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
-					? path
-					: MSBuildBootstrap.FindFirstCsproj(Path.GetDirectoryName(path) ?? path);
+				// A solution is judged by the projects it references — the first .csproj the file
+				// system happens to enumerate may be a stale copy that is not even in the solution.
+				var (detected, detail) = MSBuildBootstrap.DetectLoadStyle(path);
 				
-				if(csprojToCheck is not null) {
-					
-					var detected = MSBuildBootstrap.DetectProjectStyle(csprojToCheck);
-					
-					logger.LogInfo("Workspace", $"auto-detected {detected} from {Path.GetFileName(csprojToCheck)}");
-					
-					mode = detected;
-				}
+				logger.LogInfo("Workspace", $"auto-detected {detected}: {detail}");
+				
+				mode = detected;
 			}
 			
 			WarnIfLargeSolution(path, mode, logger);
