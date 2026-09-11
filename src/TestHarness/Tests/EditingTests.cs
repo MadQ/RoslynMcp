@@ -24,9 +24,11 @@ static class EditingTests
 		
 		// Constructor-replacement fixture (#267): a type whose constructor shares its name, so the
 		// "no return type" misparse has something to trip on.
-		var tempCtorFile = Path.Combine(ctx.TargetPath, ".test_ctor_temp.cs");
+		var tempCtorFile        = Path.Combine(ctx.TargetPath, ".test_ctor_temp.cs");
+		var tempEscapedCtorFile = Path.Combine(ctx.TargetPath, ".test_escaped_ctor_temp.cs");
 		
 		File.WriteAllText(tempCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } }");
+		File.WriteAllText(tempEscapedCtorFile, "class @Widget { int size; @Widget(int size) { this.size = size; } }");
 		
 		var tempMultiCtorFile = Path.Combine(ctx.TargetPath, ".test_multi_ctor_temp.cs");
 
@@ -34,11 +36,13 @@ static class EditingTests
 
 		// Line-ending fixtures (#268): one CRLF file and one LF file. A multi-line replacement
 		// arrives from MCP clients with LF; the write must adopt the file's style either way.
-		var tempCrlfFile = Path.Combine(ctx.TargetPath, ".test_crlf_temp.cs");
-		var tempLfFile   = Path.Combine(ctx.TargetPath, ".test_lf_temp.cs");
+		var tempCrlfFile         = Path.Combine(ctx.TargetPath, ".test_crlf_temp.cs");
+		var tempLfFile           = Path.Combine(ctx.TargetPath, ".test_lf_temp.cs");
+		var tempMostlyLfMixedFile = Path.Combine(ctx.TargetPath, ".test_mostly_lf_mixed_temp.cs");
 		
 		File.WriteAllText(tempCrlfFile, "class Crlf\r\n{\r\n\tvoid M()\r\n\t{\r\n\t}\r\n}\r\n");
 		File.WriteAllText(tempLfFile,   "class Lf\n{\n\tvoid M()\n\t{\n\t}\n}\n");
+		File.WriteAllText(tempMostlyLfMixedFile, "class Mixed\n{\n\tvoid M()\r\n\t{\n\t}\n}\n");
 
 		var tests = new List<TestCase> {
 			
@@ -179,6 +183,14 @@ static class EditingTests
 					new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int { ", dryRun = true, projectPath = ctx.TargetPath },
 					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
 			
+			// Escaped identifiers are semantically compared by ValueText, so a constructor spelled
+			// without '@' still matches an enclosing type declared as '@Widget'.
+			new("roslyn_replace_in_code: escaped constructor name matches enclosing escaped type",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = ".test_escaped_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 1)),
+			
 			// A forced batch that spans constructors from differently named enclosing types must parse
 			// the replacement in each match's own wrapper type. Reusing the first parsed constructor
 			// would let this dry run pass, then write an invalid constructor into Gadget.
@@ -236,6 +248,28 @@ static class EditingTests
 					return !content.Contains('\r') && content.Contains("var y = x;")
 						? (true,  "PASS  (no carriage returns introduced)")
 						: (false, $"FAIL  ({content.Count(c => c == '\r')} stray CR in LF file)");
+				}),
+			
+			// Mixed files still need a deterministic dominant-style choice: one stray CRLF must not
+			// flip a mostly-LF file to CRLF when the replacement is normalized.
+			new("roslyn_replace_in_code: mostly-LF mixed file keeps LF as the dominant style",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = ".test_mostly_lf_mixed_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n\tvar x = 1;\r\n\tvar y = x;\r\n}", projectPath = ctx.TargetPath },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content   = File.ReadAllText(tempMostlyLfMixedFile);
+					var lfCount   = content.Count(c => c == '\n');
+					var crlfCount = content.Split("\r\n").Length - 1;
+					
+					return !content.Contains("\r\n\tvar y = x;\r\n") && crlfCount < lfCount
+						? (true,  $"PASS  ({crlfCount} CRLF vs {lfCount - crlfCount} bare LF)")
+						: (false, $"FAIL  (dominant LF not preserved: {crlfCount} CRLF vs {lfCount - crlfCount} bare LF)");
 				}),
 			
 			// The opt-out must be honored: with normalizeLineEndings=false the replacement's own

@@ -322,14 +322,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				// Gadget with a clean syntax check.
 				var declaredTypeName = node switch {
 					
-					ConstructorDeclarationSyntax c => c.Identifier.Text,
-					DestructorDeclarationSyntax  d => d.Identifier.Text,
+					ConstructorDeclarationSyntax c => c.Identifier.ValueText,
+					DestructorDeclarationSyntax  d => d.Identifier.ValueText,
 					_                              => null,
 				};
 				
-				if(declaredTypeName is not null && declaredTypeName != enclosingType.Identifier.Text)
+				var enclosingTypeName = enclosingType.Identifier.ValueText;
+				
+				if(declaredTypeName is not null && declaredTypeName != enclosingTypeName)
 					
-					return (null, $"Constructor or destructor name '{declaredTypeName}' must match the enclosing type '{enclosingType.Identifier.Text}'.");
+					return (null, $"Constructor or destructor name '{declaredTypeName}' must match the enclosing type '{enclosingTypeName}'.");
 				break;
 			}
 			
