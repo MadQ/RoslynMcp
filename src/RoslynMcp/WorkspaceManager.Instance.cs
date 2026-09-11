@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
 using System.Text;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace RoslynMcp;
 
@@ -525,6 +526,8 @@ internal sealed partial class WorkspaceManager
 		
 		public void Dispose()
 		{
+			var started = Stopwatch.GetTimestamp();
+			
 			// Signal FlushPendingChanges to bail early on any in-flight or pending callbacks.
 			disposed = true
 			;
@@ -543,12 +546,9 @@ internal sealed partial class WorkspaceManager
 				rmOwnedWriteSizes.Clear();
 			}
 			
-			if(timerToQuiesce is not null) {
+			if(!QuiesceTimer(timerToQuiesce, "Debounce callback"))
 				
-				using var done = new ManualResetEventSlim(false);
-				timerToQuiesce.Dispose(done.WaitHandle);
-				done.Wait();
-			}
+				return;
 
 			// Same treatment for the deferred reload retry — its callback touches @lock and
 			// workspace, so it must be off the thread before either is torn down.
@@ -561,12 +561,9 @@ internal sealed partial class WorkspaceManager
 				deferredRetryTimer = null;
 			}
 
-			if(deferToQuiesce is not null) {
-
-				using var deferDone = new ManualResetEventSlim(false);
-				deferToQuiesce.Dispose(deferDone.WaitHandle);
-				deferDone.Wait();
-			}
+			if(!QuiesceTimer(deferToQuiesce, "Deferred reload retry"))
+				
+				return;
 
 			// Wait out an in-flight reload rather than pulling @lock and workspace from under it.
 			// Bounded so a pathological load cannot wedge cache eviction or shutdown.
@@ -592,6 +589,53 @@ internal sealed partial class WorkspaceManager
 
 			@lock.Dispose();
 			workspace.Dispose();
+			
+			// One line per teardown — eviction is rare — and the line a stalled watcher.Dispose()
+			// or workspace.Dispose() would be missing from the log (#277).
+			logger.LogInfo("Dispose", $"Released '{loadPath}' in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms");
+		}
+		
+		/// <summary>
+		///     Disposes <paramref name="timer"/> and waits, bounded by <see cref="ReloadQuiesceTimeout"/>,
+		///     for an in-flight callback to leave. Returns false when it did not — the caller must
+		///     then skip teardown, for the same reason as the reload branch in <see cref="Dispose"/>:
+		///     the callback still holds @lock and workspace. Both waits used to be unbounded and ran
+		///     under WorkspaceManager.cacheLock, so one wedged callback stopped every tool call in
+		///     the process (#277).
+		/// </summary>
+		bool QuiesceTimer(Timer? timer, string what)
+		{
+			if(timer is null)
+				
+				return true;
+			
+			var done = new ManualResetEvent(false);
+			
+			// False means the timer was already disposed: nothing will ever signal the handle.
+			if(!timer.Dispose(done)) {
+				
+				done.Dispose();
+				
+				return true;
+			}
+			
+			if(done.WaitOne(ReloadQuiesceTimeout)) {
+				
+				done.Dispose();
+				
+				return true;
+			}
+			
+			// Deliberately leaked on this path: the timer signals the handle when the callback
+			// finally leaves, and a disposed handle would turn that into an ObjectDisposedException
+			// on a pool thread.
+			logger.LogError(
+				"Dispose",
+				$"{what} still running after {ReloadQuiesceTimeout.TotalSeconds:0}s for '{loadPath}' — "
+				+ "skipping teardown rather than disposing state it is still using."
+			);
+			
+			return false;
 		}
 		
 		// ── Workspace loading ────────────────────────────────────────────────
