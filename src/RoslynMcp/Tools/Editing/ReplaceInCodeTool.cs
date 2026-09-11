@@ -23,7 +23,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_replace_in_code", Destructive = true, Title = "Replace In Code", OpenWorld = false)]
 		[Description(
 		"Prefer this tool for all C# edits — uses Roslyn syntax tree parsing to find, validate, and replace " +
-		"C# syntax nodes by kind, preserving surrounding formatting trivia. " +
+		"C# syntax nodes by kind, preserving surrounding formatting trivia and the file's line-ending style " +
+		"(replacement text is normalized to CRLF or LF to match the file — normalizeLineEndings=true by default). " +
 		"Works on C# files only; for non-C# files or literal text replacement, use roslyn_replace_in_file instead; " +
 		"for inserting new lines without replacing existing content, use roslyn_insert_lines instead. " +
 		"Specify nodeKind (e.g., MethodDeclaration, ConstructorDeclaration, PropertyDeclaration, ClassDeclaration) and an optional textPattern " +
@@ -43,10 +44,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Replacement text for the matched node. Must be valid C# syntax for the target node kind. Default: empty string — omitting this deletes the matched node.")] string replacement = "",
 		[Description("Preview changes without writing. Returns what would change, after the same parse and validation a real write performs. Default: false.")] bool dryRun = false,
 		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false,
-		[Description("When false (default), omits original node text from the response on success to reduce token usage. Set true to include the full original text of each matched node in changed_nodes[].original_text. Error responses always include the text regardless of this flag.")] bool verbose = false
+		[Description("When false (default), omits original node text from the response on success to reduce token usage. Set true to include the full original text of each matched node in changed_nodes[].original_text. Error responses always include the text regardless of this flag.")] bool verbose = false,
+		[Description("Match line endings in the replacement text to the file's existing style (CRLF or LF). Default: true — prevents mixed line endings in the file. Set false only if your replacement text already has the correct line endings.")] bool normalizeLineEndings = true
 	)
 	{
-		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force });
+		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force, normalizeLineEndings });
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			
@@ -149,6 +151,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		var        isDeletion = string.IsNullOrWhiteSpace(replacement);
 		SyntaxNode newRoot;
 		
+		// Adopt the file's line-ending style before parsing, so the newlines inside the new node
+		// (WithTriviaFrom only swaps the leading/trailing trivia) match the rest of the file (#268).
+		var effectiveReplacement = normalizeLineEndings
+			? NormalizeLineEndings(replacement, sourceText.ToString())
+			: replacement
+		;
+		
 		if(isDeletion)
 			newRoot = root.RemoveNodes(matchedNodes, SyntaxRemoveOptions.KeepNoTrivia)!;
 		
@@ -161,7 +170,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			foreach(var matchedNode in matchedNodes) {
 				
-				var (replacementNode, parseError) = ParseReplacement(matchedNode, replacement);
+				var (replacementNode, parseError) = ParseReplacement(matchedNode, effectiveReplacement);
 
 				if(replacementNode is null)
 
@@ -306,6 +315,23 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				node        = members[0];
 				diagnostics = unit.GetDiagnostics();
+				
+				// The parser accepts any Identifier(...) { } inside a type as a constructor; only the
+				// compiler objects later (CS1520) when the name differs from the type. Catch it here,
+				// or a forced batch across differently named types writes a Widget constructor into
+				// Gadget with a clean syntax check.
+				var declaredTypeName = node switch {
+					
+					ConstructorDeclarationSyntax c => c.Identifier.ValueText,
+					DestructorDeclarationSyntax  d => d.Identifier.ValueText,
+					_                              => null,
+				};
+				
+				var enclosingTypeName = enclosingType.Identifier.ValueText;
+				
+				if(declaredTypeName is not null && declaredTypeName != enclosingTypeName)
+					
+					return (null, $"Constructor or destructor name '{declaredTypeName}' must match the enclosing type '{enclosingTypeName}'.");
 				break;
 			}
 			
