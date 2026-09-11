@@ -1140,16 +1140,21 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	;
 	
 	/// <summary>
-	///     Detects the dominant line ending in a string and normalizes the replacement text to match.
-	///     Returns the replacement unchanged if the file uses LF or the replacement already matches.
+	///     Detects the dominant line ending in <paramref name="fileContent"/> and rewrites every line
+	///     ending in <paramref name="replacement"/> to match — CRLF if the file contains any CRLF,
+	///     LF otherwise. Shared by the editing tools so a spliced-in edit never leaves a file mixed.
 	/// </summary>
 	protected static string NormalizeLineEndings(string replacement, string fileContent)
 	{
+		// Symmetric on purpose: MCP clients send LF, but a replacement pasted from a Windows editor
+		// carries CRLF, and an LF file must not pick up stray carriage returns either (#268).
+		// Collapse to LF first so an already-mixed replacement comes out uniform.
 		var hasCrlf = fileContent.Contains("\r\n");
+		var lf      = replacement.Replace("\r\n", "\n");
 		
-		return hasCrlf && !replacement.Contains("\r\n")
-			? replacement.Replace("\n", "\r\n")
-			: replacement
+		return hasCrlf
+			? lf.Replace("\n", "\r\n")
+			: lf
 		;
 	}
 	

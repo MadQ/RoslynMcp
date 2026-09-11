@@ -32,6 +32,14 @@ static class EditingTests
 
 		File.WriteAllText(tempMultiCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } } class Gadget { int size; Gadget(int size) { this.size = size; } }");
 
+		// Line-ending fixtures (#268): one CRLF file and one LF file. A multi-line replacement
+		// arrives from MCP clients with LF; the write must adopt the file's style either way.
+		var tempCrlfFile = Path.Combine(ctx.TargetPath, ".test_crlf_temp.cs");
+		var tempLfFile   = Path.Combine(ctx.TargetPath, ".test_lf_temp.cs");
+		
+		File.WriteAllText(tempCrlfFile, "class Crlf\r\n{\r\n\tvoid M()\r\n\t{\r\n\t}\r\n}\r\n");
+		File.WriteAllText(tempLfFile,   "class Lf\n{\n\tvoid M()\n\t{\n\t}\n}\n");
+
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
@@ -188,6 +196,68 @@ static class EditingTests
 					new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } void Extra() { }", dryRun = true, projectPath = ctx.TargetPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one") == true)),
 			
+			// ── Regression: line endings (#268) ──
+			// The replacement node used to be spliced in with the replacement text's own newlines
+			// (LF from MCP clients), leaving a CRLF file mixed. Both directions are checked: the
+			// file's style must win over the replacement's, whichever way they disagree.
+			new("roslyn_replace_in_code: LF replacement adopts CRLF file's line endings",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = ".test_crlf_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\n{\n\tvar x = 1;\n\tvar y = x;\n}", projectPath = ctx.TargetPath },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempCrlfFile);
+					var lfCount = content.Count(c => c == '\n');
+					var crCount = content.Count(c => c == '\r');
+					
+					return crCount == lfCount && content.Contains("var y = x;")
+						? (true,  $"PASS  (all {lfCount} line endings CRLF)")
+						: (false, $"FAIL  (mixed endings: {crCount} CR vs {lfCount} LF)");
+				}),
+			
+			new("roslyn_replace_in_code: CRLF replacement adopts LF file's line endings",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = ".test_lf_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n\tvar x = 1;\r\n\tvar y = x;\r\n}", projectPath = ctx.TargetPath },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempLfFile);
+					
+					return !content.Contains('\r') && content.Contains("var y = x;")
+						? (true,  "PASS  (no carriage returns introduced)")
+						: (false, $"FAIL  ({content.Count(c => c == '\r')} stray CR in LF file)");
+				}),
+			
+			// The opt-out must be honored: with normalizeLineEndings=false the replacement's own
+			// endings are written verbatim, mixed or not — that is the caller's explicit choice.
+			new("roslyn_replace_in_code: normalizeLineEndings=false writes replacement verbatim",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = ".test_lf_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n}", normalizeLineEndings = false, projectPath = ctx.TargetPath },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempLfFile);
+					
+					return content.Contains("M()\r\n{\r\n}")
+						? (true,  "PASS  (CRLF kept as supplied)")
+						: (false, "FAIL  (opt-out ignored — replacement was normalized)");
+				}),
+			
 			new("roslyn_insert_lines: dry run insertAfter",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
@@ -269,6 +339,8 @@ static class EditingTests
 			try { File.Delete(tempVerbatimFile); } catch { }
 			try { File.Delete(tempCtorFile);     } catch { }
 			try { File.Delete(tempMultiCtorFile); } catch { }
+			try { File.Delete(tempCrlfFile);     } catch { }
+			try { File.Delete(tempLfFile);       } catch { }
 			try { File.Delete(Path.Combine(ctx.TargetPath, ".test_code_debug.cs")); } catch { }
 			
 			return Task.CompletedTask;
