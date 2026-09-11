@@ -315,7 +315,7 @@ static class ProjectStyleDetectionTests
 	static (bool pass, string message) WithScratchTree(TestContext ctx, string label, Func<string, (bool pass, string message)> body)
 	{
 		
-		var root = Path.Combine(Path.GetTempPath(), "RoslynMcp.TestHarness", $"ProjectStyle.{label}.{Guid.NewGuid():N}");
+		var root = Path.Combine(TestFixtures.TempRoot, $"ProjectStyle.{label}.{Guid.NewGuid():N}");
 		
 		try {
 			

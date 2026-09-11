@@ -4,7 +4,31 @@ static class TypeTests
 {
 	internal static TestGroup Build(TestContext ctx)
 	{
-		var fixturePath = Path.Combine(ctx.TargetPath, "_TypeDependenciesOperatorFixture_.cs");
+		// The dependency fixtures live in a temp project (#274) with stand-ins for the RoslynMcp and
+		// Roslyn types they reference, so the exact type_name assertions below hold verbatim without
+		// compiling anything into the dogfood assembly. Stand-ins go in their own file: this one uses
+		// a file-scoped namespace, which cannot share a file with other namespaces.
+		var fx          = TestFixtures.NewMsBuildProject("TypeDeps");
+		var fixturePath = fx.PathOf("_TypeDependenciesOperatorFixture_.cs");
+		
+		fx.Write("_TypeDependenciesStandIns_.cs", """
+		namespace RoslynMcp.Tools
+		{
+			internal class ToolResult { }
+			internal sealed class ErrorResult : ToolResult { }
+		}
+		
+		namespace RoslynMcp
+		{
+			internal sealed class FileLogger { }
+		}
+		
+		namespace Microsoft.CodeAnalysis
+		{
+			internal sealed class Project { }
+			internal sealed class Compilation { }
+		}
+		""");
 		
 		File.WriteAllText(fixturePath, """
 		namespace RoslynMcp;
@@ -116,7 +140,7 @@ static class TypeTests
 			new("roslyn_get_type_dependencies: direct member dependency categories",
 				() => ctx.RunTestAsync(
 					"roslyn_get_type_dependencies",
-					new { typeName = "_TypeDependenciesMemberFixture_", projectPath = ctx.TargetPath },
+					new { typeName = "_TypeDependenciesMemberFixture_", projectPath = fx.Csproj },
 					data => data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("_TypeDependenciesDirectInterface_") == true
 						&& d?["dependency_kind"]?.GetValue<string>() == "interface") == true
 						&& data?["dependencies"]?.AsArray().Any(d => d?["type_name"]?.GetValue<string>().Contains("FileLogger") == true
@@ -148,7 +172,7 @@ static class TypeTests
 			new("roslyn_get_type_dependencies: operators and conversions are direct dependencies",
 				() => ctx.RunTestAsync(
 					"roslyn_get_type_dependencies",
-					new { typeName = "_TypeDependenciesOperatorFixture_", projectPath = ctx.TargetPath },
+					new { typeName = "_TypeDependenciesOperatorFixture_", projectPath = fx.Csproj },
 					data => data?["dependencies"]?.AsArray().Any(d => d?["member"]?.GetValue<string>() == "op_Addition"
 						&& d?["dependency_kind"]?.GetValue<string>() == "method_return"
 						&& d?["type_name"]?.GetValue<string>().Contains("_TypeDependenciesOperatorFixture_") == true) == true
@@ -169,7 +193,7 @@ static class TypeTests
 		
 		return new TestGroup($"Type Understanding Tools ({tests.Count} tests)", tests, Teardown: () =>
 		{
-			try { File.Delete(fixturePath); } catch { }
+			fx.Dispose();
 			
 			return Task.CompletedTask;
 		});

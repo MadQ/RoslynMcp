@@ -23,12 +23,10 @@ class Program
 		Console.WriteLine($"Target:  {targetPath}");
 		Console.WriteLine();
 		
-		// Clean up any scratch files left over from a previous aborted run before attempting build.
-		// ValidationTests creates _BuildDiagnosticsTest_.cs and deletes it in teardown, but if the
-		// harness is killed before teardown the file persists and breaks the next build.
-		var diagnosticsScratch = Path.Combine(repoRoot, "src", "RoslynMcp", "_BuildDiagnosticsTest_.cs")
-		;
-		if(File.Exists(diagnosticsScratch)) File.Delete(diagnosticsScratch);
+		// Sweep what a killed run left behind before building: stale fixture trees under %TEMP%, and
+		// the scratch .cs files older harness binaries wrote into src/RoslynMcp, which would break the
+		// server build (#274). Fixtures now live in per-group temp projects — see TestFixtures.
+		TestFixtures.SweepStale(repoRoot, TimeSpan.FromHours(1));
 		
 		// Build the server first -- dotnet run's build output goes to stdout and breaks the MCP stdio protocol.
 		Console.Write("Building server... ")
@@ -50,6 +48,14 @@ class Program
 		
 		Console.WriteLine("done.");
 		
+		// The harness server logs to its own per-run file under the fixture root, not the shared
+		// %LOCALAPPDATA% log. The server inserts its PID before the extension, hence the glob;
+		// WorkspaceHygieneTests reads the file at the end of the run (#274).
+		var serverLogDir  = Path.Combine(TestFixtures.TempRoot, "logs");
+		var serverLogStem = $"harness-{Guid.NewGuid():N}";
+		// Trailing '*' so the glob also matches FileLogger's rotation siblings ("<stem>.<pid>.log.1").
+		var serverLogGlob = $"{serverLogStem}.*.log*";
+		
 		var psi = new ProcessStartInfo("dotnet")
 		{
 			
@@ -60,6 +66,7 @@ class Program
 			UseShellExecute        = false,
 		};
 		psi.Environment["ROSLYNMCP_TEST_CODE_FIXES"] = "1";
+		psi.Environment["ROSLYNMCP_LOG_PATH"]        = Path.Combine(serverLogDir, $"{serverLogStem}.log");
 		
 		using var proc = Process.Start(psi)!;
 		
@@ -133,6 +140,9 @@ class Program
 			groups.Add(EditingTests.Build(ctx));
 			groups.Add(await ReloadFlaggingTests.BuildAsync(ctx));
 			groups.Add(await LocalHistoryTests.BuildAsync(ctx));
+			
+			// Last on purpose: it reads the server log written by everything above.
+			groups.Add(WorkspaceHygieneTests.Build(ctx, serverLogDir, serverLogGlob));
 		}
 		
 		var total   = groups.Sum(g => g.Tests.Count);
