@@ -5,6 +5,7 @@ using Microsoft.CodeAnalysis.Text;
 using System.Text;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Collections.Frozen;
 
 namespace RoslynMcp;
 
@@ -503,19 +504,30 @@ internal sealed partial class WorkspaceManager
 						
 						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
 						// flag for full reload so the next GetCompilation picks up the new content.
-						if(!ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
+						if(!ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws)) {
+							
+							logger.LogInfo("Reload", $"Flagged (incremental apply failed): {fullPath}");
 							Interlocked.Increment(ref reloadVersion);
+						}
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
 					{ }
 				}
-				else {
+				else if(RequiresReload(currentSolution, fullPath, out var reason)) {
 					
+					// Unconditional bump, unlike FlagReload's == 0 guard: a genuinely new input must move
+					// the generation so an in-flight reload that predates it is discarded.
+					logger.LogInfo("Reload", $"Flagged ({reason}): {fullPath}");
 					Interlocked.Increment(ref reloadVersion);
 					InvalidateCompilation();
 				}
+				
+				// Otherwise not a compilation input (CHANGELOG.md, a .txt, an unrelated .json) — the
+				// workspace has nothing to invalidate. WorkspaceResolver still clears the pagination cache.
 			}
 			
+			// Adhoc needs no classification: AddOrUpdateDocument returns for non-.cs paths, and
+			// ReloadIfNeeded clears any flag without loading in adhoc mode.
 			else if(ws is AdhocWorkspace adhoc)
 				try {
 					AddOrUpdateDocument(adhoc, adhocProjectId, fullPath);
@@ -1005,8 +1017,11 @@ internal sealed partial class WorkspaceManager
 		
 		// Triggers a full workspace reload on the next GetCompilation call. Used by
 		// callers (WorkspaceManager.ApplyChanges) that cannot retry the apply themselves.
-		internal void MarkReloadNeeded() => Interlocked.Increment(ref reloadVersion)
-		;
+		internal void MarkReloadNeeded()
+		{
+			logger.LogInfo("Reload", "Flagged (ApplyChanges failed)");
+			Interlocked.Increment(ref reloadVersion);
+		}
 		
 		
 		
@@ -1157,7 +1172,7 @@ internal sealed partial class WorkspaceManager
 		//
 		// ⚠ THIS CODE IS THE RESULT OF EXTENSIVE STAGED ANALYSIS (issue #179, Stages 1–5).
 		//   DO NOT CHANGE WriteAndInvalidate, ScheduleDebounced, ownedDeletePaths, or
-		//   the InvalidateFile placement without first reading:
+		//   the InvalidateFile placement, or the RequiresReload classification, without first reading:
 		//   docs/development/WORKSPACE_SYNC.md
 		//
 		//   The ordering of InvalidateFile vs the finally-decrement is not arbitrary.
@@ -1202,9 +1217,10 @@ internal sealed partial class WorkspaceManager
 		///             Adhoc enumeration skips them entirely when discovering source files.
 		///         </item>
 		///         <item>
-		///             The MSBuild flush uses it only to decide that an <em>unknown</em>
-		///             <c>.cs</c> under one of them is a build artifact, not new source, and so
-		///             must not force a full reload. Generated files under <c>obj</c> that really
+		///             <see cref="RequiresReload"/> consults it first, so an <em>unknown</em> file
+		///             under one of them — a <c>.cs</c> build artifact, NuGet's generated
+		///             <c>.props</c>/<c>.editorconfig</c> under <c>obj</c> — never forces a full
+		///             reload, from the MSBuild flush or from <see cref="InvalidateFile"/>. Generated files under <c>obj</c> that really
 		///             are compilation inputs (<c>*.AssemblyInfo.cs</c>,
 		///             <c>*.GlobalUsings.g.cs</c>) already have document IDs, never reach that
 		///             branch, and keep receiving ordinary text updates.
@@ -1226,6 +1242,98 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		static bool IsNeverCompilationInput(string name) =>
 			name is "node_modules" or ".git" or ".vs" or "packages";
+
+		// Reason literals double as the log vocabulary for "Reload — Flagged (<reason>)".
+		const string ReasonNewDocument     = "new document";
+		const string ReasonEvaluationInput = "evaluation input";
+		const string ReasonAdditionalDoc   = "additional document";
+		const string ReasonAnalyzerConfig  = "analyzer config document";
+		
+		// Files MSBuild reads while evaluating a project — a change to any of them can alter the
+		// compilation even though Roslyn never sees them as documents. Directory.Build.props,
+		// Directory.Build.targets and Directory.Packages.props are covered by extension.
+		static readonly FrozenSet<string> EvaluationInputExtensions = new[] {
+			".csproj", ".props", ".targets", ".sln", ".slnx", ".slnf",
+			".editorconfig", ".globalconfig", ".ruleset", ".resx",
+		}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+		
+		static readonly FrozenSet<string> EvaluationInputNames = new[] {
+			"global.json", "nuget.config", "packages.lock.json", "packages.config",
+		}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+		
+		/// <summary>
+		///     For a path that is <em>not</em> a tracked source document: does a change to it alter the
+		///     compilation, or the MSBuild evaluation that produced it? Shared by
+		///     <see cref="InvalidateFile"/> (RM-owned writes) and <see cref="FlushMSBuild"/> (watcher
+		///     batches) so both apply one rule (#273). Before this predicate existed, InvalidateFile
+		///     treated every untracked path as a new compilation input, so editing CHANGELOG.md cost a
+		///     full MSBuild reload on the next compilation-needing call.
+		///     <para>
+		///         Order matters: build output is dropped first, because <c>obj/</c> holds generated
+		///         <c>*.nuget.g.props</c> and <c>*.GeneratedMSBuildEditorConfig.editorconfig</c> files
+		///         that would otherwise match the evaluation-input rule. Then a new <c>.cs</c>, then
+		///         evaluation inputs by extension or name, then anything the loaded projects list as an
+		///         additional or analyzer-config document. Everything else — a <c>.md</c>, a <c>.txt</c>,
+		///         an unrelated <c>.json</c> — is a no-op for the workspace.
+		///     </para>
+		///     <para>
+		///         Known limitation: MSBuild <c>EmbeddedResource</c> items are not exposed by
+		///         <see cref="Project"/>, and MSBuildWorkspace discards the project instance after the
+		///         design-time build, so a resource of arbitrary type cannot be recognized. Resources do
+		///         not affect any Roslyn-served result — only <c>dotnet build</c>, which reads disk.
+		///         <c>.resx</c> is matched by extension as the common case.
+		///     </para>
+		///     Paths outside <see cref="rootPath"/> are still classified — Directory.Build.props above a
+		///     csproj-mode root is a legitimate input; only the excluded-directory walk is root-relative.
+		/// </summary>
+		bool RequiresReload(Solution solution, string fullPath, out string reason)
+		{
+			reason = "";
+			
+			// A .cs under bin/ or obj/ that is not already a document is a compiler artifact, and a
+			// .props there is NuGet's. Neither is source.
+			if(IsUnderExcludedDirectory(fullPath, IsExcludedDirectoryName))
+				
+				return false;
+			
+			var extension = Path.GetExtension(fullPath);
+			
+			if(extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)) {
+				
+				reason = ReasonNewDocument;
+				
+				return true;
+			}
+			
+			if(EvaluationInputExtensions.Contains(extension) || EvaluationInputNames.Contains(Path.GetFileName(fullPath))) {
+				
+				reason = ReasonEvaluationInput;
+				
+				return true;
+			}
+			
+			foreach(var project in solution.Projects) {
+				
+				if(project.AdditionalDocuments.Any(d => PathEquals(d.FilePath, fullPath))) {
+					
+					reason = ReasonAdditionalDoc;
+					
+					return true;
+				}
+				
+				if(project.AnalyzerConfigDocuments.Any(d => PathEquals(d.FilePath, fullPath))) {
+					
+					reason = ReasonAnalyzerConfig;
+					
+					return true;
+				}
+			}
+			
+			return false;
+		}
+		
+		static bool PathEquals(string? candidate, string fullPath) =>
+			candidate is not null && string.Equals(candidate, fullPath, StringComparison.OrdinalIgnoreCase);
 
 		/// <summary>
 		///     True when any directory segment of <paramref name="fullPath"/> below
@@ -1408,13 +1516,17 @@ internal sealed partial class WorkspaceManager
 			// so deleting several documents used to throw away a full load per extra file.
 			// The inner guard is pre-existing: InvalidateFile may already have flagged this same
 			// change, and re-flagging it would discard the reload that is servicing it.
-			void FlagReload()
+			void FlagReload(string reason, string? path)
 			{
 				if(reloadFlagged)
 
 					return;
 
 				reloadFlagged = true;
+
+				// Logged even when the version guard below skips the bump — the path that caused a
+				// reload was otherwise invisible in the log (#273).
+				logger.LogInfo("Reload", path is null ? $"Flagged ({reason})" : $"Flagged ({reason}): {path}");
 
 				#pragma warning disable CS0420 // A reference to a volatile field will not be treated as volatile
 				if(Volatile.Read(ref reloadVersion) == 0)
@@ -1451,7 +1563,7 @@ internal sealed partial class WorkspaceManager
 				if(newSolution.GetDocumentIdsWithFilePath(path).Length == 0)
 					continue;
 
-				FlagReload();
+				FlagReload("tracked document deleted", path);
 
 				break;
 			}
@@ -1488,15 +1600,17 @@ internal sealed partial class WorkspaceManager
 					// Flag for full workspace reload on next tool call.
 					if(docIds.Length == 0) {
 
-						// ...unless it is build output. A .cs under bin/ or obj/ that is not
-						// already a document is a compiler artifact, not source: reloading the
-						// whole workspace for it is pure cost. Generated documents that ARE
-						// compilation inputs (*.AssemblyInfo.cs, *.GlobalUsings.g.cs) have
-						// docIds and never reach this branch, so they keep updating normally.
-						if(IsUnderExcludedDirectory(path, IsExcludedDirectoryName))
+						// ...unless RequiresReload says it is not a compilation input. Its first rule drops
+						// build output: a .cs under bin/ or obj/ that is not already a document is a
+						// compiler artifact, not source, and reloading the whole workspace for it is pure
+						// cost. Generated documents that ARE compilation inputs (*.AssemblyInfo.cs,
+						// *.GlobalUsings.g.cs) have docIds and never reach this branch, so they keep
+						// updating normally. Today the watcher only delivers .cs paths here; the shared
+						// predicate is what lets #275 widen it without a second rule.
+						if(!RequiresReload(newSolution, path, out var reason))
 							continue;
 
-						FlagReload();
+						FlagReload(reason, path);
 
 						continue;
 					}
@@ -1525,7 +1639,7 @@ internal sealed partial class WorkspaceManager
 			}
 			
 			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
-				FlagReload();
+				FlagReload("incremental apply failed", null);
 
 			return reloadFlagged;
 		}
