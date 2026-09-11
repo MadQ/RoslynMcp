@@ -104,7 +104,7 @@ static class VsVersionPinTests
 	)
 	{
 		
-		var tempRoot          = Path.Combine(Path.GetTempPath(), "RoslynMcp.TestHarness", $"VsVersionPin.{Guid.NewGuid():N}");
+		var tempRoot          = Path.Combine(TestFixtures.TempRoot, $"VsVersionPin.{Guid.NewGuid():N}");
 		var configRoot        = Path.Combine(tempRoot, "project");
 		var projectDir        = Path.Combine(configRoot, "src");
 		var probePath         = Path.Combine(projectDir, "Probe.cs");

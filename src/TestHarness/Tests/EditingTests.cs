@@ -13,55 +13,50 @@ static class EditingTests
 		// (writeBytes.Length > 4 && new FileInfo(fullPath).Length <= 4) is covered implicitly:
 		// every successful write test below confirms the check does not false-positive on real files.
 		
-		var tempTextFile   = Path.Combine(ctx.TargetPath, ".test_replace_temp.cs");
-		var tempCodeFile   = Path.Combine(ctx.TargetPath, ".test_code_temp.cs");
-		var tempInsertFile = Path.Combine(ctx.TargetPath, ".test_insert_temp.txt");
-		var tempVerbatimFile = Path.Combine(ctx.TargetPath, ".test_verbatim_temp.cs");
+		// All fixtures live in a temp MSBuild project (#274) — never in src/RoslynMcp, where each
+		// scratch .cs compiled into the dogfood assembly and forced a workspace reload in every
+		// server watching the repo. MSBuild rather than adhoc keeps the production write path
+		// (TryApplyChanges, backups) under test. Written before the first tool call.
+		var fx = TestFixtures.NewMsBuildProject("Editing");
 		
-		File.WriteAllText(tempTextFile,   "// Test line 1\nvar handle = IntPtr.Zero;\n// Test line 3\n");
-		File.WriteAllText(tempCodeFile,   "class TestClass { private int oldField = 42; }");
-		File.WriteAllText(tempInsertFile, "line one\nline two\nline three\n");
+		var tempTextFile     = fx.Write("replace.cs",  "// Test line 1\nvar handle = IntPtr.Zero;\n// Test line 3\n");
+		var tempCodeFile     = fx.Write("code.cs",     "class TestClass { private int oldField = 42; }");
+		var tempInsertFile   = fx.Write("insert.txt",  "line one\nline two\nline three\n");
+		var tempVerbatimFile = fx.PathOf("verbatim.cs");
 		
 		// Constructor-replacement fixture (#267): a type whose constructor shares its name, so the
-		// "no return type" misparse has something to trip on.
-		var tempCtorFile        = Path.Combine(ctx.TargetPath, ".test_ctor_temp.cs");
-		var tempEscapedCtorFile = Path.Combine(ctx.TargetPath, ".test_escaped_ctor_temp.cs");
-		
-		File.WriteAllText(tempCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } }");
-		File.WriteAllText(tempEscapedCtorFile, "class @Widget { int size; @Widget(int size) { this.size = size; } }");
-		
-		var tempMultiCtorFile = Path.Combine(ctx.TargetPath, ".test_multi_ctor_temp.cs");
-
-		File.WriteAllText(tempMultiCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } } class Gadget { int size; Gadget(int size) { this.size = size; } }");
+		// "no return type" misparse has something to trip on. Note that three of these files declare
+		// a type called Widget, so this fixture project deliberately does NOT compile — every test in
+		// this group is syntax-level (roslyn_replace_in_code parses the file it edits). Give any test
+		// that needs clean diagnostics its own fixture project rather than fixing the duplicates.
+		var tempCtorFile        = fx.Write("ctor.cs",         "class Widget { int size; Widget(int size) { this.size = size; } }");
+		var tempEscapedCtorFile = fx.Write("escaped_ctor.cs", "class @Widget { int size; @Widget(int size) { this.size = size; } }");
+		var tempMultiCtorFile   = fx.Write("multi_ctor.cs",   "class Widget { int size; Widget(int size) { this.size = size; } } class Gadget { int size; Gadget(int size) { this.size = size; } }");
 
 		// Line-ending fixtures (#268): one CRLF file and one LF file. A multi-line replacement
 		// arrives from MCP clients with LF; the write must adopt the file's style either way.
-		var tempCrlfFile         = Path.Combine(ctx.TargetPath, ".test_crlf_temp.cs");
-		var tempLfFile           = Path.Combine(ctx.TargetPath, ".test_lf_temp.cs");
-		var tempMostlyLfMixedFile = Path.Combine(ctx.TargetPath, ".test_mostly_lf_mixed_temp.cs");
-		
-		File.WriteAllText(tempCrlfFile, "class Crlf\r\n{\r\n\tvoid M()\r\n\t{\r\n\t}\r\n}\r\n");
-		File.WriteAllText(tempLfFile,   "class Lf\n{\n\tvoid M()\n\t{\n\t}\n}\n");
-		File.WriteAllText(tempMostlyLfMixedFile, "class Mixed\n{\n\tvoid M()\r\n\t{\n\t}\n}\n");
+		var tempCrlfFile          = fx.Write("crlf.cs",            "class Crlf\r\n{\r\n\tvoid M()\r\n\t{\r\n\t}\r\n}\r\n");
+		var tempLfFile            = fx.Write("lf.cs",              "class Lf\n{\n\tvoid M()\n\t{\n\t}\n}\n");
+		var tempMostlyLfMixedFile = fx.Write("mostly_lf_mixed.cs", "class Mixed\n{\n\tvoid M()\r\n\t{\n\t}\n}\n");
 
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
-					new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "replace.cs", pattern = "IntPtr", replacement = "nint", dryRun = true, projectPath = fx.Csproj },
 					data => data?["match_count"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == false)),
 			
 			new("roslyn_replace_in_file: apply literal replacement",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
-					new { filePath = ".test_replace_temp.cs", pattern = "IntPtr", replacement = "nint", dryRun = false, projectPath = ctx.TargetPath },
+					new { filePath = "replace.cs", pattern = "IntPtr", replacement = "nint", dryRun = false, projectPath = fx.Csproj },
 					data => data?["match_count"]?.GetValue<int>() == 1 && data?["applied"]?.GetValue<bool>() == true)),
 			
 			new("roslyn_replace_in_file: regex replacement with capture groups",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
-					new { filePath = ".test_replace_temp.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = ctx.TargetPath },
+					new { filePath = "replace.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = fx.Csproj },
 					data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_lines"]?.AsArray()[0]?.GetValue<int>() == 2)),
 			
 			// ── Regression: unified match-mode enum (#253) ──
@@ -72,7 +67,7 @@ static class EditingTests
 			new("roslyn_replace_in_file: mode=regex is honored (dry run)",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
-					new { filePath = ".test_replace_temp.cs", pattern = @"\w+", replacement = "X", mode = "regex", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "replace.cs", pattern = @"\w+", replacement = "X", mode = "regex", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"] is null && data?["match_count"]?.GetValue<int>() > 0 && data?["applied"]?.GetValue<bool>() == false)),
 			
 			// The deprecated useRegex alias must still work AND surface a _caution steering callers to
@@ -80,7 +75,7 @@ static class EditingTests
 			new("roslyn_replace_in_file: deprecated useRegex emits _caution (dry run)",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
-					new { filePath = ".test_replace_temp.cs", pattern = @"\w+", replacement = "X", useRegex = true, dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "replace.cs", pattern = @"\w+", replacement = "X", useRegex = true, dryRun = true, projectPath = fx.Csproj },
 					data => data?["_caution"]?.GetValue<string>()?.Contains("deprecated") == true)),
 			
 			// ── Regression: literal/glob replacement inserted VERBATIM (#254 review) ──
@@ -97,7 +92,7 @@ static class EditingTests
 					
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_replace_in_file",
-						new { filePath = ".test_verbatim_temp.cs", pattern = "AAA", replacement = "$&X", mode = "literal", projectPath = ctx.TargetPath },
+						new { filePath = "verbatim.cs", pattern = "AAA", replacement = "$&X", mode = "literal", projectPath = fx.Csproj },
 						data => data?["applied"]?.GetValue<bool>() == true && data?["match_count"]?.GetValue<int>() == 1);
 					
 					if(!pass)
@@ -120,7 +115,7 @@ static class EditingTests
 					
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_replace_in_file",
-						new { filePath = ".test_verbatim_temp.cs", pattern = "AAA", replacement = "$&X", mode = "regex", projectPath = ctx.TargetPath },
+						new { filePath = "verbatim.cs", pattern = "AAA", replacement = "$&X", mode = "regex", projectPath = fx.Csproj },
 						data => data?["applied"]?.GetValue<bool>() == true && data?["match_count"]?.GetValue<int>() == 1);
 					
 					if(!pass)
@@ -136,13 +131,13 @@ static class EditingTests
 			new("roslyn_replace_in_code: dry run identifier replacement",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "code.cs", nodeKind = "IdentifierName", textPattern = "oldField", replacement = "newField", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"] is null && data?["change_count"] is not null)),
 			
 			new("roslyn_replace_in_code: apply identifier replacement",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "newField", replacement = "finalField", dryRun = false, projectPath = ctx.TargetPath },
+					new { filePath = "code.cs", nodeKind = "IdentifierName", textPattern = "newField", replacement = "finalField", dryRun = false, projectPath = fx.Csproj },
 					data => data?["error"] is null && data?["applied"] is not null)),
 			
 			// ── Regression: constructor replacement (#267) ──
@@ -155,7 +150,7 @@ static class EditingTests
 					
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_replace_in_code",
-						new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int size) { this.size = size * 2; }", projectPath = ctx.TargetPath },
+						new { filePath = "ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int size) { this.size = size * 2; }", projectPath = fx.Csproj },
 						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true && data?["change_count"]?.GetValue<int>() == 1);
 					
 					if(!pass)
@@ -172,7 +167,7 @@ static class EditingTests
 			new("roslyn_replace_in_code: 'ctor' alias resolves to ConstructorDeclaration",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_ctor_temp.cs", nodeKind = "ctor", textPattern = "Widget", replacement = "Widget() { }", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "ctor.cs", nodeKind = "ctor", textPattern = "Widget", replacement = "Widget() { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 1)),
 			
 			// dryRun used to return before any parsing, so it reported a would-be-fine replacement
@@ -180,7 +175,7 @@ static class EditingTests
 			new("roslyn_replace_in_code: dry run rejects invalid replacement text",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int { ", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int { ", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
 			
 			// Escaped identifiers are semantically compared by ValueText, so a constructor spelled
@@ -188,7 +183,7 @@ static class EditingTests
 			new("roslyn_replace_in_code: escaped constructor name matches enclosing escaped type",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_escaped_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "escaped_ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 1)),
 			
 			// A forced batch that spans constructors from differently named enclosing types must parse
@@ -197,7 +192,7 @@ static class EditingTests
 			new("roslyn_replace_in_code: dry run rejects forced constructor batch across different types",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_multi_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "g", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, force = true, projectPath = ctx.TargetPath },
+					new { filePath = "multi_ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "g", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, force = true, projectPath = fx.Csproj },
 					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
 
 			// A replacement that smuggles in a second member (or closes the type early) must be
@@ -205,7 +200,7 @@ static class EditingTests
 			new("roslyn_replace_in_code: replacement must be exactly one member",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } void Extra() { }", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } void Extra() { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one") == true)),
 			
 			// ── Regression: line endings (#268) ──
@@ -217,7 +212,7 @@ static class EditingTests
 					
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_replace_in_code",
-						new { filePath = ".test_crlf_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\n{\n\tvar x = 1;\n\tvar y = x;\n}", projectPath = ctx.TargetPath },
+						new { filePath = "crlf.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\n{\n\tvar x = 1;\n\tvar y = x;\n}", projectPath = fx.Csproj },
 						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
 					
 					if(!pass)
@@ -237,7 +232,7 @@ static class EditingTests
 					
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_replace_in_code",
-						new { filePath = ".test_lf_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n\tvar x = 1;\r\n\tvar y = x;\r\n}", projectPath = ctx.TargetPath },
+						new { filePath = "lf.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n\tvar x = 1;\r\n\tvar y = x;\r\n}", projectPath = fx.Csproj },
 						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
 					
 					if(!pass)
@@ -257,7 +252,7 @@ static class EditingTests
 					
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_replace_in_code",
-						new { filePath = ".test_mostly_lf_mixed_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n\tvar x = 1;\r\n\tvar y = x;\r\n}", projectPath = ctx.TargetPath },
+						new { filePath = "mostly_lf_mixed.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n\tvar x = 1;\r\n\tvar y = x;\r\n}", projectPath = fx.Csproj },
 						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
 					
 					if(!pass)
@@ -279,7 +274,7 @@ static class EditingTests
 					
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_replace_in_code",
-						new { filePath = ".test_lf_temp.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n}", normalizeLineEndings = false, projectPath = ctx.TargetPath },
+						new { filePath = "lf.cs", nodeKind = "MethodDeclaration", textPattern = "M", replacement = "void M()\r\n{\r\n}", normalizeLineEndings = false, projectPath = fx.Csproj },
 						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
 					
 					if(!pass)
@@ -295,31 +290,31 @@ static class EditingTests
 			new("roslyn_insert_lines: dry run insertAfter",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = ".test_insert_temp.txt", text = "inserted line", insertAfter = "line one", dryRun = true, projectPath = ctx.TargetPath },
+					new { filePath = "insert.txt", text = "inserted line", insertAfter = "line one", dryRun = true, projectPath = fx.Csproj },
 					data => data?["applied"]?.GetValue<bool>() == false && data?["inserted_at"]?.GetValue<int>() == 2 && data?["line_count"]?.GetValue<int>() == 1)),
 			
 			new("roslyn_insert_lines: apply insertAfter",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = ".test_insert_temp.txt", text = "after one", insertAfter = "line one", projectPath = ctx.TargetPath },
+					new { filePath = "insert.txt", text = "after one", insertAfter = "line one", projectPath = fx.Csproj },
 					data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 2)),
 			
 			new("roslyn_insert_lines: apply insertBefore",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = ".test_insert_temp.txt", text = "before three", insertBefore = "line three", projectPath = ctx.TargetPath },
+					new { filePath = "insert.txt", text = "before three", insertBefore = "line three", projectPath = fx.Csproj },
 					data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 4)),
 			
 			new("roslyn_insert_lines: apply atLine",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = ".test_insert_temp.txt", text = "at line 1", atLine = 1, projectPath = ctx.TargetPath },
+					new { filePath = "insert.txt", text = "at line 1", atLine = 1, projectPath = fx.Csproj },
 					data => data?["applied"]?.GetValue<bool>() == true && data?["inserted_at"]?.GetValue<int>() == 1)),
 			
 			new("roslyn_insert_lines: error when no location specified",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = ".test_insert_temp.txt", text = "oops", projectPath = ctx.TargetPath },
+					new { filePath = "insert.txt", text = "oops", projectPath = fx.Csproj },
 					data => data?["error"]?.GetValue<string>().Contains("exactly one") == true)),
 			
 			// ── Regression: guarded workspace resolution (transient mid-reload hardening) ──
@@ -336,46 +331,38 @@ static class EditingTests
 			new("roslyn_replace_in_code: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "x", replacement = "y", projectPath = "" },
+					new { filePath = "code.cs", nodeKind = "IdentifierName", textPattern = "x", replacement = "y", projectPath = "" },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_replace_in_file: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
-					new { filePath = ".test_replace_temp.cs", pattern = "x", replacement = "y", dryRun = true, projectPath = "" },
+					new { filePath = "replace.cs", pattern = "x", replacement = "y", dryRun = true, projectPath = "" },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_insert_lines: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = ".test_insert_temp.txt", text = "x", atLine = 1, projectPath = "" },
+					new { filePath = "insert.txt", text = "x", atLine = 1, projectPath = "" },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_write_file: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_write_file",
-					new { filePath = ".test_write_temp.cs", content = "x", createNew = true, dryRun = true, projectPath = "" },
+					new { filePath = "write.cs", content = "x", createNew = true, dryRun = true, projectPath = "" },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_local_history: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_local_history",
-					new { action = "list", filePath = ".test_code_temp.cs", projectPath = "" },
+					new { action = "list", filePath = "code.cs", projectPath = "" },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 		};
 		
 		return new TestGroup($"File Editing Tools ({tests.Count} tests)", tests, Teardown: () =>
 		{
 			
-			try { File.Delete(tempTextFile);   } catch { }
-			try { File.Delete(tempCodeFile);   } catch { }
-			try { File.Delete(tempInsertFile); } catch { }
-			try { File.Delete(tempVerbatimFile); } catch { }
-			try { File.Delete(tempCtorFile);     } catch { }
-			try { File.Delete(tempMultiCtorFile); } catch { }
-			try { File.Delete(tempCrlfFile);     } catch { }
-			try { File.Delete(tempLfFile);       } catch { }
-			try { File.Delete(Path.Combine(ctx.TargetPath, ".test_code_debug.cs")); } catch { }
+			fx.Dispose();
 			
 			return Task.CompletedTask;
 		});
