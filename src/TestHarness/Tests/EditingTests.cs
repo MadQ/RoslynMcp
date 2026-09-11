@@ -22,6 +22,16 @@ static class EditingTests
 		File.WriteAllText(tempCodeFile,   "class TestClass { private int oldField = 42; }");
 		File.WriteAllText(tempInsertFile, "line one\nline two\nline three\n");
 		
+		// Constructor-replacement fixture (#267): a type whose constructor shares its name, so the
+		// "no return type" misparse has something to trip on.
+		var tempCtorFile = Path.Combine(ctx.TargetPath, ".test_ctor_temp.cs");
+		
+		File.WriteAllText(tempCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } }");
+		
+		var tempMultiCtorFile = Path.Combine(ctx.TargetPath, ".test_multi_ctor_temp.cs");
+
+		File.WriteAllText(tempMultiCtorFile, "class Widget { int size; Widget(int size) { this.size = size; } } class Gadget { int size; Gadget(int size) { this.size = size; } }");
+
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
@@ -123,6 +133,61 @@ static class EditingTests
 					new { filePath = ".test_code_temp.cs", nodeKind = "IdentifierName", textPattern = "newField", replacement = "finalField", dryRun = false, projectPath = ctx.TargetPath },
 					data => data?["error"] is null && data?["applied"] is not null)),
 			
+			// ── Regression: constructor replacement (#267) ──
+			// The validator used to route ConstructorDeclaration through ParseExpression, so a
+			// byte-for-byte valid constructor was rejected with "Invalid expression term 'int'".
+			// A constructor is now parsed inside a dummy type of the same name. This asserts the
+			// write succeeds AND lands: the file must contain the new body afterwards.
+			new("roslyn_replace_in_code: constructor replacement is accepted and applied",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int size) { this.size = size * 2; }", projectPath = ctx.TargetPath },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true && data?["change_count"]?.GetValue<int>() == 1);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempCtorFile);
+					
+					return content.Contains("size * 2")
+						? (true,  "PASS  (constructor body replaced)")
+						: (false, $"FAIL  (constructor not written: '{content.Trim()}')");
+				}),
+			
+			// The 'ctor' alias must resolve to ConstructorDeclaration (dry run — no write).
+			new("roslyn_replace_in_code: 'ctor' alias resolves to ConstructorDeclaration",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = ".test_ctor_temp.cs", nodeKind = "ctor", textPattern = "Widget", replacement = "Widget() { }", dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 1)),
+			
+			// dryRun used to return before any parsing, so it reported a would-be-fine replacement
+			// for text the real write then rejected. It must now fail on the same invalid input.
+			new("roslyn_replace_in_code: dry run rejects invalid replacement text",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget(int { ", dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
+			
+			// A forced batch that spans constructors from differently named enclosing types must parse
+			// the replacement in each match's own wrapper type. Reusing the first parsed constructor
+			// would let this dry run pass, then write an invalid constructor into Gadget.
+			new("roslyn_replace_in_code: dry run rejects forced constructor batch across different types",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = ".test_multi_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "g", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, force = true, projectPath = ctx.TargetPath },
+					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
+
+			// A replacement that smuggles in a second member (or closes the type early) must be
+			// refused — the tool replaces exactly one node.
+			new("roslyn_replace_in_code: replacement must be exactly one member",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = ".test_ctor_temp.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } void Extra() { }", dryRun = true, projectPath = ctx.TargetPath },
+					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one") == true)),
+			
 			new("roslyn_insert_lines: dry run insertAfter",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
@@ -202,6 +267,8 @@ static class EditingTests
 			try { File.Delete(tempCodeFile);   } catch { }
 			try { File.Delete(tempInsertFile); } catch { }
 			try { File.Delete(tempVerbatimFile); } catch { }
+			try { File.Delete(tempCtorFile);     } catch { }
+			try { File.Delete(tempMultiCtorFile); } catch { }
 			try { File.Delete(Path.Combine(ctx.TargetPath, ".test_code_debug.cs")); } catch { }
 			
 			return Task.CompletedTask;
