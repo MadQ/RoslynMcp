@@ -158,7 +158,8 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		}
 		
 		// For .cs files: single write via workspace API with FSW suppression + self-healing recovery.
-		// For all other types: direct FileWriter write, then InvalidateFile.
+		// For all other types: direct FileWriter write, then InvalidateFile — which classifies the
+		// path, so only a compilation/evaluation input flags a reload and a .md or .txt is a no-op (#273).
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
 			
 			try {
