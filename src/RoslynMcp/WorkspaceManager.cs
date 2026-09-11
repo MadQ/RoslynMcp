@@ -152,68 +152,83 @@ internal sealed partial class WorkspaceManager : IDisposable
 			cacheKey = normalizedPath;
 		}
 		
-		// Re-acquire lock to insert. Another thread may have loaded the same workspace.
-		lock(cacheLock) {
+		// Instances this insert must tear down: the one just loaded when another thread won the
+		// race, or retired instances whose grace period has expired. Collected under cacheLock,
+		// disposed after it (#277): WorkspaceInstance.Dispose waits on timer callbacks and
+		// in-flight reloads, and every tool call resolves its workspace through cacheLock — one
+		// teardown that stalled inside the lock stopped the whole server answering.
+		List<WorkspaceInstance>? doomed = null;
+		
+		try {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var raceKey)
-				&& cache.TryGetValue(raceKey, out var raceEntry)) {
+			// Re-acquire lock to insert. Another thread may have loaded the same workspace.
+			lock(cacheLock) {
 				
-				instance.Dispose();
-				cache[raceKey] = raceEntry with { LastAccess = DateTime.UtcNow };
+				if(projectToCacheKey.TryGetValue(normalizedPath, out var raceKey)
+					&& cache.TryGetValue(raceKey, out var raceEntry)) {
+					
+					doomed         = [instance];
+					cache[raceKey] = raceEntry with { LastAccess = DateTime.UtcNow };
+					
+					return raceEntry.Instance;
+				}
 				
-				return raceEntry.Instance;
-			}
-			
-			if(cache.TryGetValue(cacheKey, out var existing)) {
+				if(cache.TryGetValue(cacheKey, out var existing)) {
+					
+					doomed          = [instance];
+					cache[cacheKey] = existing with { LastAccess = DateTime.UtcNow };
+					
+					// Record the alias even on a lost race, or the next call for this path would
+					// slow-path load-and-discard again (see below).
+					if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+						projectToCacheKey[normalizedPath] = cacheKey;
+					
+					return existing.Instance;
+				}
 				
-				instance.Dispose();
-				cache[cacheKey] = existing with { LastAccess = DateTime.UtcNow };
+				foreach(var csproj in instance.ProjectPaths)
+					projectToCacheKey[csproj] = cacheKey;
 				
-				// Record the alias even on a lost race, or the next call for this path would
-				// slow-path load-and-discard again (see below).
+				// Adhoc instances are keyed by RootPath (the containing directory) but don't populate
+				// ProjectPaths, so a .csproj-resolving request in adhoc mode would miss both fast-path
+				// lookups on every call — re-loading and discarding a full AdhocWorkspace each time,
+				// and bypassing the keyed lookups in WriteAndInvalidate/ApplyChanges/InvalidateFile
+				// (losing FSW suppression). Alias the requested path to the cache key it landed on.
 				if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
 					projectToCacheKey[normalizedPath] = cacheKey;
 				
-				return existing.Instance;
+				if(cache.Count >= maxCachedWorkspaces) {
+					
+					var lru = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
+					
+					cache.Remove(lru.Key);
+					
+					var staleKeys = projectToCacheKey
+						.Where(kvp => string.Equals(kvp.Value, lru.Key, StringComparison.OrdinalIgnoreCase))
+						.Select(kvp => kvp.Key)
+						.ToArray()
+					;
+					
+					foreach(var k in staleKeys)
+						projectToCacheKey.Remove(k);
+					
+					// Defer disposal — concurrent callers may still hold a reference.
+					retired.Add((lru.Value.Instance, DateTime.UtcNow))
+					;
+					doomed = SweepRetired();
+				}
+				
+				var boundary = new SecurityBoundary(instance.RootPath);
+				
+				cache[cacheKey] = new CacheEntry(cacheKey, instance, boundary, DateTime.UtcNow);
+				
+				return instance;
 			}
+		}
+		finally {
 			
-			foreach(var csproj in instance.ProjectPaths)
-				projectToCacheKey[csproj] = cacheKey;
-			
-			// Adhoc instances are keyed by RootPath (the containing directory) but don't populate
-			// ProjectPaths, so a .csproj-resolving request in adhoc mode would miss both fast-path
-			// lookups on every call — re-loading and discarding a full AdhocWorkspace each time,
-			// and bypassing the keyed lookups in WriteAndInvalidate/ApplyChanges/InvalidateFile
-			// (losing FSW suppression). Alias the requested path to the cache key it landed on.
-			if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
-				projectToCacheKey[normalizedPath] = cacheKey;
-			
-			if(cache.Count >= maxCachedWorkspaces) {
-				
-				var lru = cache.OrderBy(kvp => kvp.Value.LastAccess).First();
-				
-				cache.Remove(lru.Key);
-				
-				var staleKeys = projectToCacheKey
-					.Where(kvp => string.Equals(kvp.Value, lru.Key, StringComparison.OrdinalIgnoreCase))
-					.Select(kvp => kvp.Key)
-					.ToArray()
-				;
-				
-				foreach(var k in staleKeys)
-					projectToCacheKey.Remove(k);
-				
-				// Defer disposal — concurrent callers may still hold a reference.
-				retired.Add((lru.Value.Instance, DateTime.UtcNow))
-				;
-				SweepRetired();
-			}
-			
-			var boundary = new SecurityBoundary(instance.RootPath);
-			
-			cache[cacheKey] = new CacheEntry(cacheKey, instance, boundary, DateTime.UtcNow);
-			
-			return instance;
+			if(doomed is { Count: > 0 })
+				DisposeDetached(doomed);
 		}
 	}
 	
@@ -419,33 +434,71 @@ internal sealed partial class WorkspaceManager : IDisposable
 	///     Disposes retired instances whose grace period has elapsed.
 	///     Must be called under <see cref="cacheLock"/>.
 	/// </summary>
-	void SweepRetired()
+	List<WorkspaceInstance> SweepRetired()
 	{
-		var cutoff = DateTime.UtcNow.AddSeconds(-RetiredGraceSeconds);
+		var cutoff  = DateTime.UtcNow.AddSeconds(-RetiredGraceSeconds);
+		var expired = new List<WorkspaceInstance>();
 		
 		for(var i = retired.Count - 1; i >= 0; i--) {
 			
 			if(retired[i].EvictedAt < cutoff) {
 				
-				retired[i].Instance.Dispose();
+				expired.Add(retired[i].Instance);
 				retired.RemoveAt(i);
 			}
 		}
+		
+		return expired;
+	}
+	
+	/// <summary>
+	///     Disposes evicted instances on the thread pool, never under <see cref="cacheLock"/>.
+	///     <see cref="WorkspaceInstance.Dispose"/> bounds each of its waits, so a stalled teardown
+	///     costs one pool thread for a few quiesce timeouts, logs, and leaks that one instance —
+	///     it can no longer block tool calls for unrelated workspaces (#277).
+	/// </summary>
+	void DisposeDetached(List<WorkspaceInstance> instances)
+	{
+		_ = Task.Run(() => {
+			
+			foreach(var instance in instances) {
+				
+				try {
+					instance.Dispose();
+				}
+				catch(Exception ex) {
+					// Nothing above this on a pool thread — an escape would take the process down.
+					logger.LogError("Dispose", $"Evicted workspace teardown failed: {ex.GetType().Name}: {ex.Message}");
+				}
+			}
+		});
 	}
 	
 	public void Dispose()
 	{
+		// Snapshot under the lock, tear down outside it — the same rule as eviction (#277).
+		// Shutdown stays synchronous so the host waits for the teardown, which
+		// WorkspaceInstance.Dispose bounds per instance.
+		List<WorkspaceInstance> all;
+		
 		lock(cacheLock) {
 			
-			foreach(var entry in cache.Values)
-				entry.Instance.Dispose();
-			
-			foreach(var (instance, _) in retired)
-				instance.Dispose();
+			all = [.. cache.Values.Select(entry => entry.Instance), .. retired.Select(r => r.Instance)];
 			
 			cache.Clear();
 			projectToCacheKey.Clear();
 			retired.Clear();
+		}
+		
+		foreach(var instance in all) {
+			
+			try {
+				instance.Dispose();
+			}
+			catch(Exception ex) {
+				// One failed teardown must not skip the rest on shutdown.
+				logger.LogError("Dispose", $"Workspace teardown failed on shutdown: {ex.GetType().Name}: {ex.Message}");
+			}
 		}
 	}
 
