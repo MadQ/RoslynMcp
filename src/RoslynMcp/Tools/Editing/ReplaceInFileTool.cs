@@ -118,7 +118,9 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		// For .cs files: single write via workspace API (MSBuild-tracked goes through
 		// TryApplyChanges; untracked/Adhoc goes through FileWriter with FSW suppressed).
-		// For all other types: direct FileWriter write, then InvalidateFile.
+		// For all other types: direct FileWriter write, then InvalidateFile — which classifies the
+		// path, so only a compilation/evaluation input (a .csproj, .editorconfig, …) flags a reload
+		// and a .md or .txt is a workspace no-op (#273).
 		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
 			
 			try {

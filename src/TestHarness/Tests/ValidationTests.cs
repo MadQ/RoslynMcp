@@ -5,7 +5,14 @@ static class ValidationTests
 	internal static TestGroup Build(TestContext ctx)
 	{
 		
-		var scratchPath = Path.Combine(ctx.RepoRoot, "src", "RoslynMcp", "_BuildDiagnosticsTest_.cs");
+		// Build-diagnostics and drift fixtures live in a temp project (#274). The plural
+		// <TargetFrameworks> element is deliberate: it makes dotnet build emit
+		// [proj::TargetFramework=net10.0] contexts even for a single framework, which the
+		// target_frameworks test below depends on. Probe.cs is a clean tracked document for the
+		// drift probe; the broken scratch file is written by the forceBuild test itself.
+		var fx          = TestFixtures.NewMsBuildProject("BuildDiag", targetFrameworks: "net10.0");
+		var scratchPath = fx.PathOf("_BuildDiagnosticsTest_.cs");
+		var probePath   = fx.Write("Probe.cs", "class Probe { }\n");
 		
 		var tests = new List<TestCase> {
 			
@@ -62,8 +69,8 @@ static class ValidationTests
 					new { projectPath = ctx.TargetPath },
 					data => data?["succeeded"] is not null && data?["source"] is not null)),
 			
-			// Creates the scratch file on first use, so tests 1 & 2 run against a clean project.
-			// Dynamic scratch file: create → forceBuild → validate → teardown deletes it.
+			// Dynamic scratch file in the fixture project: create → forceBuild → validate; the
+			// group's teardown drops the whole fixture tree.
 			new("roslyn_build_project: forceBuild reports CS errors from scratch file",
 				async () => {
 					
@@ -88,7 +95,7 @@ static class ValidationTests
 					
 					return await ctx.RunTestAsync(
 						"roslyn_build_project",
-						new { projectPath = ctx.ServerProj, forceBuild = true },
+						new { projectPath = fx.Csproj, forceBuild = true },
 						data => {
 							
 							var errors   = data?["errors"]?.AsArray();
@@ -109,17 +116,17 @@ static class ValidationTests
 			new("roslyn_build_project: forceBuild succeeded=false for scratch file",
 				() => ctx.RunTestAsync(
 					"roslyn_build_project",
-					new { projectPath = ctx.ServerProj, forceBuild = true },
+					new { projectPath = fx.Csproj, forceBuild = true },
 					data => data?["succeeded"]?.GetValue<bool>() == false)),
 			
-			// The server project is multi-targeted (net8.0 + net10.0), so dotnet build
-			// emits TFM-suffixed bracket contexts like [proj::TargetFramework=net10.0].
-			// This test verifies ParseMSBuildDiagnostics populates target_frameworks on
+			// The fixture declares the plural <TargetFrameworks> element, so dotnet build emits
+			// TFM-suffixed bracket contexts like [proj::TargetFramework=net10.0] even for its single
+			// framework. This test verifies ParseMSBuildDiagnostics populates target_frameworks on
 			// at least one diagnostic item.
 			new("roslyn_build_project: forceBuild populates target_frameworks on CS diagnostics",
 				() => ctx.RunTestAsync(
 					"roslyn_build_project",
-					new { projectPath = ctx.ServerProj, forceBuild = true },
+					new { projectPath = fx.Csproj, forceBuild = true },
 					data => {
 						
 						var errors   = data?["errors"]?.AsArray();
@@ -139,11 +146,12 @@ static class ValidationTests
 			// Drift probe: bump an existing file's mtime WITHOUT changing content (no source
 			// mutation risk). The probe must report drift before the FSW debounce flush lands,
 			// and self-heal after it. The probe reads a non-reloading snapshot, so it can
-			// observe the pre-flush staleness window.
+			// observe the pre-flush staleness window. Probe.cs is a tracked document of the
+			// fixture project, loaded by the forceBuild tests above.
 			new("roslyn_check_drift: detects out-of-band mtime change, then self-heals",
 				async () => {
 					
-					var touchPath = Path.Combine(ctx.RepoRoot, "src", "RoslynMcp", "Program.cs");
+					var touchPath = probePath;
 					
 					// Let any recent sync age past the 2s drift tolerance, then touch.
 					await Task.Delay(2500);
@@ -151,9 +159,9 @@ static class ValidationTests
 					
 					var (driftSeen, msg1) = await ctx.RunTestAsync(
 						"roslyn_check_drift",
-						new { projectPath = ctx.TargetPath },
+						new { projectPath = fx.Csproj },
 						data => data?["drifted"]?.GetValue<bool>() == true
-							&& data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Program.cs") == true) == true);
+							&& data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Probe.cs") == true) == true);
 					
 					if(!driftSeen)
 						return (false, $"FAIL  (mtime touch not reported as drift) {msg1}");
@@ -163,8 +171,8 @@ static class ValidationTests
 					
 					var (healed, msg2) = await ctx.RunTestAsync(
 						"roslyn_check_drift",
-						new { projectPath = ctx.TargetPath },
-						data => data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Program.cs") == true) is not true);
+						new { projectPath = fx.Csproj },
+						data => data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Probe.cs") == true) is not true);
 					
 					return healed
 						? (true, "PASS  (drift detected, then healed)")
@@ -233,8 +241,7 @@ static class ValidationTests
 		return new TestGroup($"Validation Tools ({tests.Count} tests)", tests, Teardown: () =>
 		{
 			
-			if(File.Exists(scratchPath))
-				File.Delete(scratchPath);
+			fx.Dispose();
 			
 			return Task.CompletedTask;
 		});

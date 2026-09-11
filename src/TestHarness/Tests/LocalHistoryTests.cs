@@ -5,12 +5,13 @@ static class LocalHistoryTests
 	internal static async Task<TestGroup> BuildAsync(TestContext ctx)
 	{
 		
-		// Create a temp file with original content, then overwrite via the server
-		// to produce a backup token before tests run.
-		var tempHistoryFile = ".test_local_history_temp.txt"
+		// The fixture lives in a temp project (#274): original content on disk, then overwritten
+		// via the server to produce a backup token before tests run.
+		var fx              = TestFixtures.NewMsBuildProject("LocalHistory");
+		var tempHistoryFile = "history.txt"
 		;
-		var tempHistoryAbs  = Path.Combine(ctx.TargetPath, tempHistoryFile);
-		File.WriteAllText(tempHistoryAbs, "// original content\n");
+		
+		fx.Write(tempHistoryFile, "// original content\n");
 		
 		// Write new content via the server — this triggers BackupStore.Save and returns backup_token.
 		string? historyToken = null
@@ -27,7 +28,7 @@ static class LocalHistoryTests
 				arguments = new {
 					
 					filePath    = tempHistoryFile,
-					projectPath = ctx.TargetPath,
+					projectPath = fx.Csproj,
 					content     = "// modified content\n"
 				}
 			}
@@ -43,26 +44,26 @@ static class LocalHistoryTests
 			new("roslyn_local_history: list backups for temp file",
 				() => ctx.RunTestAsync(
 					"roslyn_local_history",
-					new { action = "list", filePath = tempHistoryFile, projectPath = ctx.TargetPath },
+					new { action = "list", filePath = tempHistoryFile, projectPath = fx.Csproj },
 					data => data?["items"]?.AsArray().Count > 0 && data?["count"]?.GetValue<int>() > 0)),
 			
 			new("roslyn_local_history: preview backup token",
 				() => ctx.RunTestAsync(
 					"roslyn_local_history",
-					new { action = "preview", token = historyToken ?? "invalid", projectPath = ctx.TargetPath },
+					new { action = "preview", token = historyToken ?? "invalid", projectPath = fx.Csproj },
 					data => data?["token"] is not null && data?["absolutePath"] is not null)),
 			
 			new("roslyn_local_history: apply restores original content",
 				() => ctx.RunTestAsync(
 					"roslyn_local_history",
-					new { action = "apply", token = historyToken ?? "invalid", projectPath = ctx.TargetPath },
+					new { action = "apply", token = historyToken ?? "invalid", projectPath = fx.Csproj },
 					data => data?["restored"]?.GetValue<bool>() == true && data?["absolutePath"] is not null)),
 		};
 		
 		return new TestGroup($"Local History Tools ({tests.Count} tests)", tests, Teardown: () =>
 		{
 			
-			try { File.Delete(tempHistoryAbs); } catch { }
+			fx.Dispose();
 			
 			return Task.CompletedTask;
 		});

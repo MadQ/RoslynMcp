@@ -236,6 +236,8 @@ Code style enforcement (indented blank lines, spacing, etc.) is handled by `.\sc
 .\scripts\Test-CodeStyle.ps1 -Fix
 ```
 
+> **Note:** `scripts/Test-CodeStyle.ps1` is not in the repository (it never has been — check `git log`). Until it lands, apply the Code Style rules below by hand; `docs/development/CODE_STYLE_ENFORCEMENT.md` describes what the script is meant to check.
+
 This is a **pragmatic exception** to the dogfooding rule. Not every problem needs semantic analysis. For understanding trivia *context* (e.g., "what's the indentation level here?"), see `roslyn_get_trivia` (experimental).
 
 ---
@@ -260,7 +262,7 @@ This is a **pragmatic exception** to the dogfooding rule. Not every problem need
 > ```powershell
 > .\scripts\Test-CodeStyle.ps1 -Fix
 > ```
-> This catches quirky rules (like indented blank lines) that you can't easily spot. See [docs/development/CODE_STYLE_ENFORCEMENT.md](docs/development/CODE_STYLE_ENFORCEMENT.md) for details.
+> This catches quirky rules (like indented blank lines) that you can't easily spot. See [docs/development/CODE_STYLE_ENFORCEMENT.md](docs/development/CODE_STYLE_ENFORCEMENT.md) for details. (The script is not in the repository yet — see the note under *Exception: Style Enforcement*; apply the rules by hand.)
 >
 > **Human contributors:** These guidelines are strong recommendations but not strict requirements. Local style preferences are fine as long as they don't clash with project-wide patterns. See the "Consistency is overrated" note at the end of this section.
 
@@ -578,7 +580,7 @@ await File.WriteAllTextAsync(fullPath, newContent);
 workspace.InvalidateFile(projectPath, fullPath);
 ```
 
-Without this, subsequent Roslyn tools see the stale in-memory source tree, not the updated file. `InvalidateFile` evicts the cached workspace entry so the next access forces a reload.
+Without this, subsequent Roslyn tools see the stale in-memory source tree, not the updated file. `InvalidateFile` classifies the path: a tracked `.cs` document is updated incrementally; a new `.cs` or an MSBuild evaluation input (`.csproj`, `.props`, `.targets`, `Directory.Build.*`, `global.json`, `nuget.config`, `packages.lock.json`, `.editorconfig`, `.globalconfig`, `.resx`, or anything in a project's `AdditionalDocuments`/`AnalyzerConfigDocuments`) flags a full reload on the next compilation-needing call, logged as `Reload — Flagged (<reason>): <path>`; anything else (`.md`, `.txt`, an unrelated `.json`) is a no-op for the workspace, so calling it is always cheap and always correct. See `docs/development/WORKSPACE_SYNC.md`.
 
 #### Key Points (Summary)
 
@@ -755,22 +757,17 @@ dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
 dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --only-build-diag
 ```
 
-The `--only-<section>` pattern uses a `goto` to jump directly to the labelled section and skip the summary at the end. More section switches will be added in issue #167 when TestHarness is split into per-file sections.
+`--only-build-diag` runs just the `ValidationTests` group (the build-diagnostics tests); each group is its own file under `src/TestHarness/Tests/`.
 
-**Scratch-file pattern:** Tests that require real compilable code with specific diagnostics create a temporary `.cs` file, call the tool, assert the results, then delete the file — always in a `try/finally` to guarantee cleanup even on assertion failure. Example:
+**Fixture pattern (#274):** a test that needs real compilable code, or any file to edit, gets a throwaway project under `%TEMP%\RoslynMcp.TestHarness\<label>.<guid>` from `TestFixtures.NewMsBuildProject(label)` (or `NewAdhocDir` for an AdhocWorkspace) and passes `fx.Csproj` as `projectPath`. **Never write a fixture into `src/RoslynMcp`:** a directory target resolves to the repo's `.slnx`, so the FileSystemWatcher of every server with the repo open — the harness's own *and* the developer's live one — covers the whole tree; the SDK glob compiles the file into `RoslynMcp.dll`; and each create/delete forces a full solution reload. A checked-in fixture project elsewhere in the repo, or `<Compile Remove>`, does not help — the file is still an unknown document under the watched root. Example:
 ```csharp
-var scratchPath = Path.Combine(repoRoot, "src", "RoslynMcp", "_BuildDiagnosticsTest_.cs");
-try {
-    await File.WriteAllTextAsync(scratchPath, "class Broken { void M() { return 42; } }");
-    // ... call tool, assert results ...
-}
-finally {
-    if(File.Exists(scratchPath))
-        File.Delete(scratchPath);
-}
+var fx = TestFixtures.NewMsBuildProject("BuildDiag", targetFrameworks: "net10.0");
+fx.Write("Probe.cs", "class Probe { }\n");   // before the first tool call — the initial load includes it
+// ... call tools with projectPath = fx.Csproj, assert ...
+return new TestGroup(header, tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });
 ```
 
-Scratch files are gitignored (see `.gitignore`) — `_Scratch_.cs` and `_BuildDiagnosticsTest_.cs` will never accidentally appear in commits. Roslyn's workspace may keep a 0-byte ghost of a deleted scratch file in memory; this is harmless since the files are gitignored.
+Write every fixture before the group's first tool call, so no test depends on the 300 ms watcher debounce, and dispose the fixture in the group's `Teardown`. `TestFixtures.SweepStale` runs at startup and removes trees a killed run left behind (plus scratch files an old harness binary wrote into `src/RoslynMcp`). The last group, `WorkspaceHygieneTests`, reads the harness server's log and fails if any reload was flagged for a path inside the repo — the log line names the file, so the offending test is one grep away. Only read-only tests run against the dogfood project.
 
 **Live testing:** configure in `.mcp.json` and test via GitHub Copilot or any MCP client.
 

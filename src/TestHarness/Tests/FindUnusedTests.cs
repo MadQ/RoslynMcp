@@ -4,10 +4,15 @@ static class FindUnusedTests
 {
 	internal static TestGroup Build(TestContext ctx)
 	{
-		var fixturePath = Path.Combine(ctx.TargetPath, "0_FindUnusedFixture_.cs");
-		var generatedFixturePath = Path.Combine(ctx.TargetPath, "0_FindUnusedFixture_.generated.cs");
-		var generatedSuffixPath = Path.Combine(ctx.TargetPath, "0_FindUnusedSuffixFixture.g.cs");
-		var designerSuffixPath = Path.Combine(ctx.TargetPath, "0_FindUnusedDesignerFixture.designer.cs");
+		// Self-contained fixture in a temp project (#274): the assertions only concern these types, so
+		// nothing is gained by compiling them into the dogfood assembly — and a lot was lost (a full
+		// solution reload per file in every server watching the repo). The .generated/.g/.designer
+		// suffixes are what is under test and stay as they are.
+		var fx                   = TestFixtures.NewMsBuildProject("FindUnused");
+		var fixturePath          = fx.PathOf("_FindUnusedFixture_.cs");
+		var generatedFixturePath = fx.PathOf("_FindUnusedFixture_.generated.cs");
+		var generatedSuffixPath  = fx.PathOf("_FindUnusedSuffixFixture.g.cs");
+		var designerSuffixPath   = fx.PathOf("_FindUnusedDesignerFixture.designer.cs");
 		
 		File.WriteAllText(fixturePath, """
 		using System.Runtime.CompilerServices;
@@ -224,7 +229,7 @@ static class FindUnusedTests
 			new("roslyn_find_unused: reports conservative candidates with confidence metadata",
 				() => ctx.RunTestAsync(
 					"roslyn_find_unused",
-					new { projectPath = ctx.TargetPath, take = 200 },
+					new { projectPath = fx.Csproj, take = 200 },
 					data => {
 						var unused = data?["unused"]?.AsArray();
 						
@@ -239,7 +244,7 @@ static class FindUnusedTests
 			new("roslyn_find_unused: skips reflection, generated, partial, protected, and interface-risky symbols",
 				() => ctx.RunTestAsync(
 					"roslyn_find_unused",
-					new { projectPath = ctx.TargetPath, take = 200 },
+					new { projectPath = fx.Csproj, take = 200 },
 					data => {
 						var unused = data?["unused"]?.AsArray();
 						
@@ -266,10 +271,7 @@ static class FindUnusedTests
 		
 		return new TestGroup($"Unused Symbol Analysis ({tests.Count} tests)", tests, Teardown: () =>
 		{
-			try { File.Delete(fixturePath); } catch { }
-			try { File.Delete(generatedFixturePath); } catch { }
-			try { File.Delete(generatedSuffixPath); } catch { }
-			try { File.Delete(designerSuffixPath); } catch { }
+			fx.Dispose();
 			
 			return Task.CompletedTask;
 		});

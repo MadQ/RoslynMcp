@@ -27,19 +27,10 @@ internal static class CodeFixTests
 		
 		static string Fixture(string marker) => $"class CodeFixFixture {{ {marker} value; }}\n";
 		
-		static string NewAdhocWorkspace()
-		{
-			var path = Path.Combine(Path.GetTempPath(), $"RoslynMcp_CodeFix_{Guid.NewGuid():N}");
-			Directory.CreateDirectory(path);
-			
-			return path;
-		}
+		// Under TestFixtures.TempRoot, so a killed run's leftovers are swept by the next run (#274).
+		static string NewAdhocWorkspace() => TestFixtures.NewAdhocDir("CodeFix").Dir;
 		
-		static void DeleteWorkspace(string path)
-		{
-			if(Directory.Exists(path))
-				Directory.Delete(path, recursive: true);
-		}
+		static void DeleteWorkspace(string path) => TestFixtures.DeleteTree(path);
 		
 		async Task<(JsonNode? Data, string Text)> PreviewAdhoc(
 			string workspacePath,
