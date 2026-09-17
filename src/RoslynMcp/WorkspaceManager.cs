@@ -431,8 +431,8 @@ internal sealed partial class WorkspaceManager : IDisposable
 	// ── Retired instance management ──────────────────────────────────────
 	
 	/// <summary>
-	///     Disposes retired instances whose grace period has elapsed.
-	///     Must be called under <see cref="cacheLock"/>.
+	///     Collects retired instances whose grace period has elapsed for disposal after the lock is released.
+	///     Must be called under <see cref="cacheLock"/> while mutating <see cref="retired"/>.
 	/// </summary>
 	List<WorkspaceInstance> SweepRetired()
 	{
