@@ -15,26 +15,17 @@ static class ReloadFlaggingTests
 	internal static async Task<TestGroup> BuildAsync(TestContext ctx)
 	{
 		
-		var root   = Path.Combine(Path.GetTempPath(), "RoslynMcp.TestHarness", $"ReloadFlagging.{Guid.NewGuid():N}");
-		var csproj = Path.Combine(root, "ReloadProbe.csproj");
-		
-		Directory.CreateDirectory(root);
+		var fx     = TestFixtures.NewMsBuildProject("ReloadFlagging");
+		var csproj = fx.Csproj!;
 		
 		// Written before the first tool call so the initial load includes Probe.cs — no FSW timing
 		// involved. Probe.editorconfig and Probe.props are inert for MSBuild (only a file literally
 		// named .editorconfig is honored; nothing imports the .props) but carry the extensions the
 		// classifier keys on.
-		File.WriteAllText(csproj, """
-			<Project Sdk="Microsoft.NET.Sdk">
-			  <PropertyGroup>
-			    <TargetFramework>net10.0</TargetFramework>
-			  </PropertyGroup>
-			</Project>
-			""");
-		File.WriteAllText(Path.Combine(root, "Probe.cs"),           "class Probe { }\n");
-		File.WriteAllText(Path.Combine(root, "Probe.md"),           "# probe\n");
-		File.WriteAllText(Path.Combine(root, "Probe.editorconfig"), "probe = 1\n");
-		File.WriteAllText(Path.Combine(root, "Probe.props"),        "<Project><PropertyGroup><Probe>1</Probe></PropertyGroup></Project>\n");
+		fx.Write("Probe.cs",           "class Probe { }\n");
+		fx.Write("Probe.md",           "# probe\n");
+		fx.Write("Probe.editorconfig", "probe = 1\n");
+		fx.Write("Probe.props",        "<Project><PropertyGroup><Probe>1</Probe></PropertyGroup></Project>\n");
 		
 		// Calls a tool and returns (no-protocol-error, parsed JSON data).
 		async Task<(bool ok, JsonNode? data)> Call(string tool, object args)
@@ -118,7 +109,7 @@ static class ReloadFlaggingTests
 		}
 		
 		// Pay the MSBuild load now so the first test measures the flag, not the load.
-		await Call("roslyn_get_project_info", new { projectPath = csproj });
+		await fx.WarmAsync(ctx);
 		
 		var tests = new List<TestCase> {
 			
@@ -164,14 +155,7 @@ static class ReloadFlaggingTests
 			// Leave the server settled for the next group, then drop the temp project.
 			await SettleAsync();
 			
-			try {
-				
-				if(Directory.Exists(root))
-					Directory.Delete(root, recursive: true);
-			}
-			catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {
-				// Best-effort cleanup of a temp tree; a leftover folder must not fail the run.
-			}
+			fx.Dispose();
 		});
 	}
 }
