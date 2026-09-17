@@ -59,9 +59,37 @@ static class TestFixtures
 	/// <summary>Every fixture tree lives under here, so one sweep covers them all.</summary>
 	public static string TempRoot { get; } = Path.Combine(Path.GetTempPath(), "RoslynMcp.TestHarness");
 	
-	// Scratch names older harness binaries wrote into the dogfood project. Swept so a run of an old
-	// build, or a killed run, cannot leave a broken .cs that fails the next server build.
-	static readonly string[] LegacyDogfoodScratchPatterns = ["_*_.cs", ".test_*", "0_FindUnused*"];
+	// Exact scratch names older harness binaries wrote into the dogfood project. Swept so a run of an
+	// old build, or a killed run, cannot leave a broken .cs that fails the next server build.
+	static readonly HashSet<string> LegacyDogfoodScratchFiles = new(StringComparer.OrdinalIgnoreCase) {
+		"_BuildDiagnosticsTest_.cs",
+		"_CodeFixCreated_.cs",
+		"_CodeFixFixture_.cs",
+		"_CodeFixFixture_.g.cs",
+		"_CodeFixRemoved_.cs",
+		"_CodeFixSecond_.cs",
+		"_FileRenameFixture_.cs",
+		"_FileRenameRenamed_.cs",
+		"_Other_.cs",
+		"_ReloadProbe_.cs",
+		"_RenameFixture_.cs",
+		"_TypeDependenciesOperatorFixture_.cs",
+		".test_code_debug.cs",
+		".test_code_temp.cs",
+		".test_crlf_temp.cs",
+		".test_ctor_temp.cs",
+		".test_escaped_ctor_temp.cs",
+		".test_lf_temp.cs",
+		".test_mostly_lf_mixed_temp.cs",
+		".test_multi_ctor_temp.cs",
+		".test_replace_temp.cs",
+		".test_verbatim_temp.cs",
+		".test_write_temp.cs",
+		"0_FindUnusedDesignerFixture.designer.cs",
+		"0_FindUnusedFixture_.cs",
+		"0_FindUnusedFixture_.generated.cs",
+		"0_FindUnusedSuffixFixture.g.cs",
+	};
 	
 	/// <summary>
 	///     A minimal SDK-style project. <paramref name="targetFrameworks"/> null gives a singular
@@ -111,15 +139,14 @@ static class TestFixtures
 		
 		var dogfood = Path.Combine(repoRoot, "src", "RoslynMcp");
 		
-		foreach(var pattern in LegacyDogfoodScratchPatterns) {
+		foreach(var file in Directory.EnumerateFiles(dogfood, "*.cs", SearchOption.TopDirectoryOnly)) {
 			
-			foreach(var file in Directory.EnumerateFiles(dogfood, pattern, SearchOption.TopDirectoryOnly)) {
+			try {
 				
-				try {
+				if(IsLegacyDogfoodScratch(file, cutoff))
 					File.Delete(file);
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		}
 	}
 	
@@ -145,7 +172,8 @@ static class TestFixtures
 		try {
 			
 			if(Directory.Exists(TempRoot))
-				candidates.AddRange(Directory.EnumerateDirectories(TempRoot));
+				candidates.AddRange(Directory.EnumerateDirectories(TempRoot)
+					.Where(static dir => !Path.GetFileName(dir).Equals("logs", StringComparison.OrdinalIgnoreCase)));
 			
 			candidates.AddRange(Directory.EnumerateDirectories(Path.GetTempPath(), "RoslynMcp_CodeFix_*"));
 		}
@@ -165,6 +193,25 @@ static class TestFixtures
 			if(created < cutoff)
 				yield return dir;
 		}
+	}
+
+	static bool IsLegacyDogfoodScratch(string path, DateTime cutoff)
+	{
+		var fileName = Path.GetFileName(path);
+		
+		if(!LegacyDogfoodScratchFiles.Contains(fileName))
+			return false;
+		
+		DateTime written;
+		
+		try {
+			written = File.GetLastWriteTimeUtc(path);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			return false;
+		}
+		
+		return written < cutoff;
 	}
 	
 	static string NewDir(string label)
