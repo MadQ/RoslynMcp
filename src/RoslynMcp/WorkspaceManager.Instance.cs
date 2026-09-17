@@ -1017,9 +1017,9 @@ internal sealed partial class WorkspaceManager
 		
 		// Triggers a full workspace reload on the next GetCompilation call. Used by
 		// callers (WorkspaceManager.ApplyChanges) that cannot retry the apply themselves.
-		internal void MarkReloadNeeded()
+		internal void MarkReloadNeeded(string? path = null)
 		{
-			logger.LogInfo("Reload", "Flagged (ApplyChanges failed)");
+			logger.LogInfo("Reload", path is null ? "Flagged (ApplyChanges failed)" : $"Flagged (ApplyChanges failed): {path}");
 			Interlocked.Increment(ref reloadVersion);
 		}
 		
@@ -1229,8 +1229,12 @@ internal sealed partial class WorkspaceManager
 		///     For the watcher's pre-queue filter — which must not suppress those generated
 		///     documents — see <see cref="IsNeverCompilationInput"/>.
 		/// </summary>
+		static readonly FrozenSet<string> ExcludedDirectoryNames = new[] {
+			"node_modules", "bin", "obj", ".git", ".vs", "packages",
+		}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+		
 		static bool IsExcludedDirectoryName(string name) =>
-			name is "node_modules" or "bin" or "obj" or ".git" or ".vs" or "packages";
+			ExcludedDirectoryNames.Contains(name);
 
 		/// <summary>
 		///     Directories that can never hold a compilation document, so a change under one is
@@ -1548,8 +1552,9 @@ internal sealed partial class WorkspaceManager
 				@lock.ExitReadLock();
 			}
 			
-			var newSolution = currentSolution;
-			var modified    = false;
+			var newSolution     = currentSolution;
+			var modified        = false;
+			string? applyFailed = null;
 			
 			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument, and clearing
 			// document text then calling TryApplyChanges writes an empty file back to disk,
@@ -1633,13 +1638,14 @@ internal sealed partial class WorkspaceManager
 					foreach(var id in docIds)
 						newSolution = newSolution.WithDocumentText(id, text);
 
+					applyFailed ??= path;
 					modified = true;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			}
 			
 			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
-				FlagReload("incremental apply failed", null);
+				FlagReload("incremental apply failed", applyFailed);
 
 			return reloadFlagged;
 		}
