@@ -358,7 +358,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 					
 					return true;
 				
-				entry.Instance.MarkReloadNeeded();
+				entry.Instance.MarkReloadNeeded(normalizedPath);
 				
 				return false;
 			}
@@ -369,7 +369,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 					
 					return true;
 				
-				directEntry.Instance.MarkReloadNeeded();
+				directEntry.Instance.MarkReloadNeeded(normalizedPath);
 				
 				return false;
 			}

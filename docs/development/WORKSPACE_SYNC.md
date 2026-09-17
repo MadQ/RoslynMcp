@@ -41,9 +41,12 @@ Every mutation of a `.cs` file in the workspace flows through one of these paths
 Paths 1–5 are **owned writes**: the tool knows it is writing. For `.cs` files, all paths
 suppress spurious FSW events using the `ignoredPaths` counter (directly via `WriteAndInvalidate`
 or `ApplyChangesWithFswSuppressed`). For non-`.cs` files (paths 2, 4, 5), the write goes
-directly to disk and `InvalidateFile` marks the cached workspace stale — no FSW suppression
-is needed since the FSW only triggers `.cs` reloads. Path 6 is an **external write**: the
-FSW fires normally and triggers a reload.
+directly to disk and `InvalidateFile` classifies the path with `RequiresReload` (see
+[What flags a reload](#what-flags-a-reload)): an evaluation input such as a `.csproj`,
+`Directory.Build.props`, or `.editorconfig` flags a full reload; anything else — `CHANGELOG.md`,
+a `.txt`, an unrelated `.json` — is a no-op for the workspace, and only the pagination cache is
+cleared. No FSW suppression is needed for these writes because the watcher's filter is `*.cs`.
+Path 6 is an **external write**: the FSW fires normally and triggers a reload.
 
 ---
 
@@ -157,12 +160,54 @@ All `ApplyRenameTool` and `ApplySignatureChangeTool` write calls go through this
 
 ## `InvalidateFile` Contract
 
-`InvalidateFile(projectPath, fullPath)` marks a specific file as stale in the workspace
-cache. On the next tool call that needs a compilation for that project, the workspace is
-reloaded from disk.
+`InvalidateFile(projectPath, fullPath)` syncs the workspace with a file RoslynMcp has just
+written. It classifies the path (issue #273):
+
+1. **Tracked source document** (`GetDocumentIdsWithFilePath` non-empty) → the new text is applied
+   incrementally via `WithDocumentText` + `ApplyChangesWithFswSuppressed`. No reload. If the apply
+   fails, a reload is flagged (logged `Reload — Flagged (incremental apply failed): <path>`).
+2. **Otherwise `RequiresReload(solution, path)`** decides — see [What flags a reload](#what-flags-a-reload).
+   A compilation or evaluation input bumps `reloadVersion` (logged with path and reason) and the
+   next compilation-needing call reloads from disk.
+3. **Anything else** (`CHANGELOG.md`, a `.txt`, an unrelated `.json`) is a no-op for the workspace.
+   `WorkspaceResolver.InvalidateFile` still clears the pagination cache, since search/list pages
+   may have changed.
 
 **Always call after writing to disk** from any path not going through `WriteAndInvalidate`.
-Failure to call it leaves the Roslyn workspace serving stale content.
+It is cheap for irrelevant files and the only way a new `.cs` or a changed `.csproj` written by
+RoslynMcp itself reaches the workspace — the FileSystemWatcher filter is `*.cs`, so *external*
+edits to evaluation inputs are not detected today (issue #275).
+
+---
+
+## What flags a reload
+
+`RequiresReload` is consulted only for paths that are **not** tracked source documents, by both
+`InvalidateFile` (RM-owned writes) and `FlushMSBuild` (watcher batches). First hit wins:
+
+| # | Test | Result |
+|---|------|--------|
+| 1 | under `bin`/`obj`/`.git`/`.vs`/`node_modules`/`packages` (`IsExcludedDirectoryName`) | no-op — runs first because `obj/` holds NuGet's generated `*.nuget.g.props` and `*.GeneratedMSBuildEditorConfig.editorconfig` |
+| 2 | extension `.cs` | reload — `new document` |
+| 3 | extension `.csproj` `.props` `.targets` `.sln` `.slnx` `.slnf` `.editorconfig` `.globalconfig` `.ruleset` `.resx`, or file name `global.json` `nuget.config` `packages.lock.json` `packages.config` | reload — `evaluation input` |
+| 4 | path in any `Project.AdditionalDocuments` | reload — `additional document` |
+| 5 | path in any `Project.AnalyzerConfigDocuments` | reload — `analyzer config document` |
+| 6 | everything else | **no-op** |
+
+Comparisons are case-insensitive. Paths outside the workspace root are still classified
+(`Directory.Build.props` above a csproj-mode root is a legitimate input); only the
+excluded-directory walk is root-relative. Adhoc workspaces need no predicate —
+`AddOrUpdateDocument` already ignores non-`.cs` paths, and `ReloadIfNeeded` clears any flag
+without loading.
+
+**Known limitation:** MSBuild `EmbeddedResource` items are not exposed by Roslyn's `Project`, and
+`MSBuildWorkspace` discards the project instance after the design-time build, so a resource of
+arbitrary type cannot be recognized. Resources do not affect any Roslyn-served result — only
+`dotnet build`, which reads disk. `.resx` is matched by extension as the common case. A `.cs`
+excluded via `<Compile Remove>` still flags a reload (it is an unknown document) — pre-existing.
+
+Every flag is logged once under the `Reload` category as `Flagged (<reason>): <path>`, so a log
+always shows which file caused a reload, not just that one happened.
 
 ---
 
@@ -175,10 +220,18 @@ FSW fires (Changed/Created/Deleted/Renamed)
   │
   └─ otherwise → ScheduleDebounced(300ms)
        │
-       └─ on debounce timer fire:
-            reloadVersion++
-            → lazy reload on next GetCompilation() call
+       └─ on debounce timer fire (FlushMSBuild):
+            ├─ deleted tracked document      → FlagReload("tracked document deleted")
+            ├─ changed tracked document      → WithDocumentText, incremental — no reload
+            └─ changed unknown path          → RequiresReload?
+                 ├─ yes (new .cs, evaluation input, additional/analyzer-config doc)
+                 │     → FlagReload(reason, path)   [logged: Reload — Flagged (<reason>): <path>]
+                 └─ no (build output, anything non-compilation) → dropped
+            → any flag: lazy reload on next GetCompilation() call
 ```
+
+The watcher's filter is `*.cs`, so today only `.cs` paths reach this flow; the classifier is
+shared with `InvalidateFile` so widening the filter (issue #275) needs no second rule.
 
 The debounce window (300ms) prevents rapid successive FSW events from triggering multiple
 reloads during a batch write operation.
@@ -192,6 +245,7 @@ reloads during a batch write operation.
 3. **`ownedDeletePaths` is consumed by `ScheduleDebounced` for rename old-path deletes** — it is not cleared in `WriteAndInvalidate`'s `finally` block.
 4. **`CurrentSolution` is always consistent** — Roslyn's `ApplyChanges` is synchronous; the in-memory tree is never stale after a successful apply.
 5. **`TryRecoverTruncation` rewrites the intended bytes supplied by the caller** — not disk, and not by re-reading `CurrentSolution`.
+6. **A reload is flagged only for paths `RequiresReload` classifies as compilation or evaluation inputs** — `InvalidateFile` and `FlushMSBuild` share that one predicate, and every flag is logged with path and reason (#273).
 
 ---
 

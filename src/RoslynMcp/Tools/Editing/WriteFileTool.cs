@@ -120,7 +120,8 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			
 			// For .cs files: FSW suppression ensures the rename event is ignored, and
 			// InvalidateFile is called by WriteAndInvalidate to sync workspace state.
-			// For all other types: direct atomic write, then InvalidateFile.
+			// For all other types: direct atomic write, then InvalidateFile — which classifies the path,
+			// so only a compilation/evaluation input flags a reload and a .md or .txt is a no-op (#273).
 			if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
 				
 				await workspace.WriteAndInvalidate(projectPath, fullPath, async () => {

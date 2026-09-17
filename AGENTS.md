@@ -578,7 +578,7 @@ await File.WriteAllTextAsync(fullPath, newContent);
 workspace.InvalidateFile(projectPath, fullPath);
 ```
 
-Without this, subsequent Roslyn tools see the stale in-memory source tree, not the updated file. `InvalidateFile` evicts the cached workspace entry so the next access forces a reload.
+Without this, subsequent Roslyn tools see the stale in-memory source tree, not the updated file. `InvalidateFile` classifies the path: a tracked `.cs` document is updated incrementally; a new `.cs` or an MSBuild evaluation input (`.csproj`, `.props`, `.targets`, `Directory.Build.*`, `global.json`, `nuget.config`, `packages.lock.json`, `.editorconfig`, `.globalconfig`, `.resx`, or anything in a project's `AdditionalDocuments`/`AnalyzerConfigDocuments`) flags a full reload on the next compilation-needing call, logged as `Reload — Flagged (<reason>): <path>`; anything else (`.md`, `.txt`, an unrelated `.json`) is a no-op for the workspace, so calling it is always cheap and always correct. See `docs/development/WORKSPACE_SYNC.md`.
 
 #### Key Points (Summary)
 
