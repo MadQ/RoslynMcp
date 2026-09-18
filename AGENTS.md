@@ -130,7 +130,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - `Tools/Search/` — 4 file/content search tools (list files, text search, semantic search, string literal search)
 - `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
-- `Tools/CodeFix/` — 2 code-fix tools (`roslyn_preview_code_fix` → `roslyn_apply_code_fix`; bundled providers only, Phase 1 single-file scope)
+- `Tools/CodeFix/` — 2 code-fix tools (`roslyn_preview_code_fix` → `roslyn_apply_code_fix`; bundled providers only, Phase 1 restricted to modifying existing in-workspace `.cs` files — may span multiple files, but no adds/removes/renames or non-`.cs` changes)
 - `Tools/Refactoring/` — 2 signature-change tools (`roslyn_change_signature` → `roslyn_apply_signature_change`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
 - `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RoslynMcpTool.Discovery.cs`, `ToolResults.cs`, `ErrorResult.cs`, `InfoTool.cs`, `RespawnTool.cs` (debug-only), `DebugAttachTool.cs` (debug-only)

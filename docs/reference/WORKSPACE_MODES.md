@@ -384,7 +384,7 @@ Subsequent calls are instant because the workspace is cached.
 
 1. **CLI arguments** — `--workspace`, `--msbuild-path`, `--no-buildhost-pin` (highest precedence)
 2. **Environment variables** — `ROSLYNMCP_WORKSPACE`, `ROSLYNMCP_MSBUILD_PATH`, `ROSLYNMCP_NO_BUILDHOST_PIN`
-3. **Project file** — `.madq_roslynmcp.json` at repo root (only for workspace mode and elicit flag; see below)
+3. **Project file** — `.madq_roslynmcp.json` at repo root (only for `workspace` mode, the `elicit` flag, and the `vsVersion` pin; see below)
 4. **Auto-detection** — RoslynMcp chooses the best mode based on `.csproj` structure (lowest precedence)
 
 **Example:** If `.madq_roslynmcp.json` specifies `"workspace": "adhoc"` but you start the server with `--workspace sdk`, the CLI flag wins.
@@ -395,12 +395,13 @@ Subsequent calls are instant because the workspace is cached.
 
 ```json
 {
-  "workspace": "sdk|vs|adhoc",
-  "elicit": true|false
+  "workspace": "vs",
+  "elicit": true,
+  "vsVersion": "17"
 }
 ```
 
-**Note:** Only `workspace` and `elicit` can be set in the project file. MSBuild-related settings (`msbuild-path`, `no-buildhost-pin`) must be passed via CLI args or environment variables, so they can be overridden at startup time.
+**Note:** Only the portable keys `workspace`, `elicit`, and `vsVersion` can be set in the project file. Machine-specific settings — MSBuild path (`msbuild-path`) and `no-buildhost-pin` — are deliberately never read from a committed file (a hostile repo must not point the server at arbitrary local paths); pass them via CLI args or environment variables instead. A Visual Studio *version* is allowed because it selects among installs vswhere already knows about and never names a path.
 
 Priority: CLI arg > env var > project file > default.
 
