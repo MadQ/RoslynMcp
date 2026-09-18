@@ -6,7 +6,7 @@ labels: enhancement
 assignees: ''
 ---
 
-> **Before starting work on this issue:** `git checkout dev && git checkout -b feat/issue-NNN-short-title`
+> **Before starting work on this issue:** `git checkout dev && git checkout -b feat/issue-NNN-short-description`
 
 > **Before filing:** Check [ROADMAP.md](../../ROADMAP.md). If this idea is already listed there, link the relevant milestone or issue instead of duplicating it.
 

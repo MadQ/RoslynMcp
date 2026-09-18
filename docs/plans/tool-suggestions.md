@@ -45,14 +45,14 @@ Given a string of C#, parse it and return syntax/semantic errors. The "validate 
 
 ---
 
-## Priority Ranking
+## Priority Ranking (Historical — Most Items Shipped)
 
-Ranked by (token reduction × semantic value that grep can't match):
+Ranked by (token reduction × semantic value that grep can't match). **Note:** Items 1–3 shipped by v0.7.x; item 5 shipped in v0.8.0-beta. This ranking reflects the original prioritization when these were proposed.
 
-| Priority | Item | Reason |
-|----------|------|--------|
-| 1 | `roslyn_get_member_body` (new) | Biggest token reduction, used constantly |
-| 2 | `roslyn_find_callers` (new) | Semantically impossible with text search alone |
-| 3 | `roslyn_get_call_graph` (new) | Same; essential for impact analysis before edits |
-| 4 | Fix `roslyn_find_references` ambiguity | Correctness before new features |
-| 5 | `roslyn_find_unused` (new) | High value for refactoring, low output cost |
+| Priority | Item | Status | Reason |
+|----------|------|--------|--------|
+| 1 | `roslyn_get_member_body` | ✅ Shipped (v0.4.0) | Biggest token reduction, used constantly |
+| 2 | `roslyn_find_callers` | ✅ Shipped | Semantically impossible with text search alone |
+| 3 | `roslyn_get_call_graph` | ✅ Shipped (v0.7.6) | Same; essential for impact analysis before edits |
+| 4 | Fix `roslyn_find_references` ambiguity | (remaining) | Correctness before new features |
+| 5 | `roslyn_find_unused` | ✅ Shipped | High value for refactoring, low output cost |

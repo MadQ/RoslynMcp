@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.8.1-beta (pre-1.0) |
-| **Tool Count** | 43 MCP tools (41 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
+| **Tool Count** | 45 MCP tools (43 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -84,6 +84,8 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
 | `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token |
 | `ApplyRenameTool` | `roslyn_apply_rename` — approve/reject a pending rename by token |
+| `PreviewCodeFixTool` | `roslyn_preview_code_fix` — preview code fixes from bundled providers for a single diagnostic; returns available action choices or unified diff + token for a selected fix (ReadOnly — never writes) |
+| `ApplyCodeFixTool` | `roslyn_apply_code_fix` — apply or reject a previewed code fix using the approval token from `roslyn_preview_code_fix` |
 | `ChangeSignatureTool` | `roslyn_change_signature` — preview adding parameters with a non-breaking forwarding overload; returns unified diff + token (ReadOnly — never writes) |
 | `ApplySignatureChangeTool` | `roslyn_apply_signature_change` — apply or reject a previewed signature change |
 | `ProjectInfoTool` | `roslyn_get_project_info` — project metadata (TFM, language version, packages, etc.) |
@@ -128,6 +130,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - `Tools/Search/` — 4 file/content search tools (list files, text search, semantic search, string literal search)
 - `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
+- `Tools/CodeFix/` — 2 code-fix tools (`roslyn_preview_code_fix` → `roslyn_apply_code_fix`; bundled providers only, Phase 1 single-file scope)
 - `Tools/Refactoring/` — 2 signature-change tools (`roslyn_change_signature` → `roslyn_apply_signature_change`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
 - `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RoslynMcpTool.Discovery.cs`, `ToolResults.cs`, `ErrorResult.cs`, `InfoTool.cs`, `RespawnTool.cs` (debug-only), `DebugAttachTool.cs` (debug-only)

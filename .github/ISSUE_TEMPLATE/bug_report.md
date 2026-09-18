@@ -6,7 +6,7 @@ labels: bug
 assignees: ''
 ---
 
-> **Before starting work on this issue:** `git checkout dev && git checkout -b feat/issue-NNN-short-title`
+> **Before starting work on this issue:** `git checkout dev && git checkout -b feat/issue-NNN-short-description`
 
 ## Description
 

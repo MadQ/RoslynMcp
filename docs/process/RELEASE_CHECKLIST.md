@@ -232,7 +232,7 @@ Guidelines for what gets which bump:
 ## First Public Release (v1.0.0) Criteria
 
 Before declaring v1.0.0, ensure:
-- [ ] All 41 public tools stable and well-tested (43 total including 2 debug-only)
+- [ ] All 43 public tools stable and well-tested (45 total including 2 debug-only)
 - [ ] Comprehensive test coverage (>80%)
 - [ ] Documentation complete and polished
 - [ ] CI/CD pipeline operational
