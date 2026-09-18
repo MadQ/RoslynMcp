@@ -15,7 +15,7 @@ Audit date: 2026-03-27.
 
 ### 2. MSBuildWorkspace does NOT watch files automatically — **Fixed**
 
-**File:** `WorkspaceManager.cs` (fixed: misleading comment removed; code correctly implements watcher only for AdhocWorkspace)
+**File:** `WorkspaceManager.Instance.cs` (fixed: misleading comment removed; Roslyn does not watch automatically, while RoslynMcp's own `FileSystemWatcher` handles both MSBuild and Adhoc workspaces)
 
 ---
 

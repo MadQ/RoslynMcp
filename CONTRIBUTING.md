@@ -158,7 +158,7 @@ This document intentionally does **not** duplicate those rules. AGENTS.md is the
            using var scope = BeginTool("roslyn_my_tool", parameter);
 
            if(!TryGetCompilation(projectPath, out var compilation, out var error))
-               return error;
+return scope.Error(error!);
 
            // Use Roslyn APIs here
            // Typed result records are preferred over anonymous objects

@@ -187,7 +187,7 @@ By default RoslynMcp auto-detects the best mode. To override:
 | **Environment variable** | `ROSLYNMCP_WORKSPACE=sdk\|vs\|adhoc\|auto` |
 | **Project file** | `.madq_roslynmcp.json` at repo root: `{ "workspace": "sdk\|vs\|adhoc" }` |
 
-Priority: CLI flag → env var → project file → auto-detect.
+Priority for a concrete mode: CLI flag → env var → project file → auto-detect; an explicit `auto` leaves the project-file setting eligible.
 
 ### Additional Configuration Flags
 
@@ -209,7 +209,7 @@ Priority: CLI flag → env var.
 | **CLI flag** | `RoslynMcp.exe --no-buildhost-pin` |
 | **Environment variable** | `ROSLYNMCP_NO_BUILDHOST_PIN=true` |
 
-By default, RoslynMcp pins the BuildHost to the VS instance it resolved, fixing a bug where .NET Framework projects failed with a `TypeInitializationException` when multiple VS installs exist. Pass `--no-buildhost-pin` to disable pinning (let the BuildHost choose on its own).
+By default, RoslynMcp pins the BuildHost when a Visual Studio MSBuild instance is selected (or a `vsVersion` pin selects one in `auto`/`sdk`), fixing a bug where .NET Framework projects failed with a `TypeInitializationException` when multiple VS installs exist. Pass `--no-buildhost-pin` to disable pinning (let the BuildHost choose on its own).
 
 Priority: CLI flag → env var (default: pinning enabled).
 

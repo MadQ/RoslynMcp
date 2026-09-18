@@ -47,7 +47,7 @@ Given a string of C#, parse it and return syntax/semantic errors. The "validate 
 
 ## Priority Ranking (Historical — Most Items Shipped)
 
-Ranked by (token reduction × semantic value that grep can't match). **Note:** Items 1–3 and 5 have shipped as of v0.7.x; this ranking reflects the original prioritization when these were proposed.
+Ranked by (token reduction × semantic value that grep can't match). **Note:** Items 1–3 shipped by v0.7.x; item 5 shipped in v0.8.0-beta. This ranking reflects the original prioritization when these were proposed.
 
 | Priority | Item | Status | Reason |
 |----------|------|--------|--------|
