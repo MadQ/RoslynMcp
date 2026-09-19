@@ -59,7 +59,9 @@ class Program
 		var psi = new ProcessStartInfo("dotnet")
 		{
 			
-			Arguments              = $"run --no-build --project \"{serverProj}\" -f net10.0",
+			// MCP uses stdout exclusively for JSON-RPC. Do not let a local launch profile
+			// inject non-MCP command-line arguments before the initialize response.
+			Arguments              = $"run --no-build --no-launch-profile --project \"{serverProj}\" -f net10.0",
 			RedirectStandardInput  = true,
 			RedirectStandardOutput = true,
 			RedirectStandardError  = true,
