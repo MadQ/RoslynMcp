@@ -95,9 +95,12 @@ static class TestFixtures
 	///     A minimal SDK-style project. <paramref name="targetFrameworks"/> null gives a singular
 	///     <c>&lt;TargetFramework&gt;</c>; a value gives the plural element, which makes <c>dotnet build</c>
 	///     emit <c>[proj::TargetFramework=…]</c> contexts even for a single framework (BuildTool parses
-	///     those into <c>target_frameworks</c>).
+	///     those into <c>target_frameworks</c>). <paramref name="extraProjectXml"/> is inserted verbatim
+	///     between the <c>PropertyGroup</c> and the closing <c>Project</c> tag — e.g. an
+	///     <c>&lt;ItemGroup&gt;&lt;AdditionalFiles Include="Notes.txt" /&gt;&lt;/ItemGroup&gt;</c> for a
+	///     fixture that needs a tracked additional document.
 	/// </summary>
-	public static FixtureProject NewMsBuildProject(string label, string? targetFrameworks = null)
+	public static FixtureProject NewMsBuildProject(string label, string? targetFrameworks = null, string? extraProjectXml = null)
 	{
 		var dir    = NewDir(label);
 		var csproj = Path.Combine(dir, $"{label}Fixture.csproj");
@@ -110,6 +113,7 @@ static class TestFixtures
 			  <PropertyGroup>
 			    {tfm}
 			  </PropertyGroup>
+			  {extraProjectXml}
 			</Project>
 			""");
 		
