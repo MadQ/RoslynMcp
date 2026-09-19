@@ -12,6 +12,39 @@ internal interface IToolError { }
 /// </summary>
 internal abstract record ToolResult
 {
+	/// <summary>Compacts sorted, distinct 1-based line numbers into inclusive ranges.</summary>
+	protected static LineRange[] CompactLineRanges(IEnumerable<int> sortedDistinctLines)
+	{
+		using var enumerator = sortedDistinctLines.GetEnumerator();
+
+		if(!enumerator.MoveNext())
+			return [];
+
+		var ranges   = new List<LineRange>();
+		var start    = enumerator.Current;
+		var previous = start;
+
+		while(enumerator.MoveNext()) {
+
+			var current = enumerator.Current;
+
+			if(current == previous + 1) {
+
+				previous = current;
+
+				continue;
+			}
+
+			ranges.Add(new LineRange(start, previous));
+			start    = current;
+			previous = current;
+		}
+
+		ranges.Add(new LineRange(start, previous));
+
+		return [..ranges];
+	}
+
 	[JsonPropertyName("error")]
 	[JsonPropertyOrder(-10)]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

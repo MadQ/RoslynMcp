@@ -22,6 +22,7 @@ static class EditingTests
 		var tempTextFile     = fx.Write("replace.cs",  "// Test line 1\nvar handle = IntPtr.Zero;\n// Test line 3\n");
 		var tempCodeFile     = fx.Write("code.cs",     "class TestClass { private int oldField = 42; }");
 		var tempInsertFile   = fx.Write("insert.txt",  "line one\nline two\nline three\n");
+		var tempRangeFile    = fx.Write("ranges.txt",  "replace\nkeep\nreplace\n");
 		var tempVerbatimFile = fx.PathOf("verbatim.cs");
 		
 		// Constructor-replacement fixture (#267): a type whose constructor shares its name, so the
@@ -57,8 +58,16 @@ static class EditingTests
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
 					new { filePath = "replace.cs", pattern = @"var (\w+) = nint\.Zero", replacement = "nint $1 = 0", useRegex = true, projectPath = fx.Csproj },
-					data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_lines"]?.AsArray()[0]?.GetValue<int>() == 2)),
+					data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_line_ranges"]?.AsArray() is [var range] && range?["start"]?.GetValue<int>() == 2 && range?["end"]?.GetValue<int>() == 2)),
 			
+			// The result compactor must preserve non-contiguous changed lines as separate, ascending
+			// inclusive ranges. Two matches on lines 1 and 3 are deliberately separated by "keep".
+			new("roslyn_replace_in_file: reports discontiguous changed-line ranges",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_file",
+					new { filePath = "ranges.txt", pattern = "replace", replacement = "updated", dryRun = true, projectPath = fx.Csproj },
+					data => data?["match_count"]?.GetValue<int>() == 2 && data?["changed_line_ranges"]?.AsArray() is [var first, var second] && first?["start"]?.GetValue<int>() == 1 && first?["end"]?.GetValue<int>() == 1 && second?["start"]?.GetValue<int>() == 3 && second?["end"]?.GetValue<int>() == 3)),
+
 			// ── Regression: unified match-mode enum (#253) ──
 			// mode:"regex" is the new preferred form of the old useRegex=true. '\w+' is a regex
 			// metacharacter sequence: in the DEFAULT literal mode it would be sought verbatim and match
@@ -290,8 +299,8 @@ static class EditingTests
 			new("roslyn_insert_lines: dry run insertAfter",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = "insert.txt", text = "inserted line", insertAfter = "line one", dryRun = true, projectPath = fx.Csproj },
-					data => data?["applied"]?.GetValue<bool>() == false && data?["inserted_at"]?.GetValue<int>() == 2 && data?["line_count"]?.GetValue<int>() == 1)),
+					new { filePath = "insert.txt", text = "inserted line one\ninserted line two\ninserted line three", insertAfter = "line one", dryRun = true, projectPath = fx.Csproj },
+					data => data?["applied"]?.GetValue<bool>() == false && data?["inserted_at"]?.GetValue<int>() == 2 && data?["line_count"]?.GetValue<int>() == 3 && data?["message"]?.GetValue<string>()?.Contains("Dry run:") == true && data?["backup_token"] is null && data?["inserted_line_ranges"]?.AsArray() is [var range] && range?["start"]?.GetValue<int>() == 2 && range?["end"]?.GetValue<int>() == 4)),
 			
 			new("roslyn_insert_lines: apply insertAfter",
 				() => ctx.RunTestAsync(

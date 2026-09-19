@@ -19,7 +19,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		"For inserting new lines without replacing existing content, use roslyn_insert_lines instead. " +
 		"Interpretation of the pattern is controlled by 'mode' (default literal); regex replacements support $1/$2 backreferences. " +
 		"Glob mode ('*'/'?') is match-only — the replacement text is always inserted literally. Replaces ALL occurrences of the pattern in the file. " +
-		"Returns the number of replacements made and the 1-based line numbers that were changed. " +
+		"Returns the number of replacements made and changed_line_ranges as inclusive { start, end } 1-based line ranges; start equals end for a single changed line. " +
 		"Literal patterns are matched case-sensitively and whitespace-exactly — verify the exact text with " +
 		"roslyn_read_file or roslyn_search_files before attempting a replacement if unsure of the content. " +
 		"Line endings in the replacement text are normalized to match the file's existing style by default (normalizeLineEndings=true). " +

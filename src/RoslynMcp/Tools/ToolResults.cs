@@ -4,6 +4,12 @@ namespace RoslynMcp.Tools;
 
 // ── Shared ──────────────────────────────────────────────────────────────────
 
+/// <summary>A compact, inclusive range of 1-based line numbers.</summary>
+internal sealed record LineRange(
+	[property: JsonPropertyName("start")] int Start,
+	[property: JsonPropertyName("end")]   int End
+);
+
 /// <summary>A single compiler diagnostic item returned by <c>roslyn_get_diagnostics</c> and <c>roslyn_build_project</c>.</summary>
 /// <remarks>
 /// <c>target_frameworks</c> is populated by <c>roslyn_build_project</c> when MSBuild emits TFM context
@@ -546,21 +552,41 @@ internal sealed record TransientWorkspaceError(
 
 // ── Editing tools ────────────────────────────────────────────────────────────
 
-internal sealed record ReplaceInFileResult(
-	[property: JsonPropertyName("applied")]       bool    Applied,
-	[property: JsonPropertyName("match_count")]   int     MatchCount,
-	[property: JsonPropertyName("changed_lines")] int[]   ChangedLines,
-	[property: JsonPropertyName("message")]       string? Message = null
-) : ToolResult;
+internal sealed record ReplaceInFileResult : ToolResult
+{
+	public ReplaceInFileResult(bool applied, int matchCount, IEnumerable<int> changedLines, string? Message = null)
+	{
+		Applied           = applied;
+		MatchCount        = matchCount;
+		ChangedLineRanges = CompactLineRanges(changedLines);
+		this.Message      = Message;
+	}
 
-internal sealed record InsertLinesResult(
-	[property: JsonPropertyName("applied")]        bool    Applied,
-	[property: JsonPropertyName("inserted_at")]    int     InsertedAt,
-	[property: JsonPropertyName("line_count")]     int     LineCount,
-	[property: JsonPropertyName("inserted_lines")] int[]   InsertedLines,
-	[property: JsonPropertyName("backup_token")]   string? BackupToken = null,
-	[property: JsonPropertyName("message")]        string? Message = null
-) : ToolResult;
+	[property: JsonPropertyName("applied")]             public bool        Applied           { get; }
+	[property: JsonPropertyName("match_count")]         public int         MatchCount        { get; }
+	[property: JsonPropertyName("changed_line_ranges")] public LineRange[] ChangedLineRanges { get; }
+	[property: JsonPropertyName("message")]             public string?     Message           { get; }
+}
+
+internal sealed record InsertLinesResult : ToolResult
+{
+	public InsertLinesResult(bool applied, int insertedAt, int lineCount, IEnumerable<int> insertedLines, string? backupToken = null, string? message = null)
+	{
+		Applied            = applied;
+		InsertedAt         = insertedAt;
+		LineCount          = lineCount;
+		InsertedLineRanges = CompactLineRanges(insertedLines);
+		BackupToken        = backupToken;
+		Message            = message;
+	}
+
+	[property: JsonPropertyName("applied")]              public bool        Applied             { get; }
+	[property: JsonPropertyName("inserted_at")]          public int         InsertedAt          { get; }
+	[property: JsonPropertyName("line_count")]           public int         LineCount           { get; }
+	[property: JsonPropertyName("inserted_line_ranges")] public LineRange[] InsertedLineRanges  { get; }
+	[property: JsonPropertyName("backup_token")]         public string?     BackupToken         { get; }
+	[property: JsonPropertyName("message")]              public string?     Message             { get; }
+}
 
 // ── Refactoring tools ────────────────────────────────────────────────────────
 
