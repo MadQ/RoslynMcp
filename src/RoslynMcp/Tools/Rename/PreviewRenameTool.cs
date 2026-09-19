@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using System.Text.Json;
 using RoslynMcp;
 using Microsoft.CodeAnalysis;
@@ -116,9 +117,35 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		var symbolKey  = SymbolKey(symbol);
 		var fileRename = ComputeFileRename(symbol, newName);
 		
-		var newSolution  = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions { RenameFile = false }, newName, cancellationToken);
-		var diff         = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
-		var token        = approvals.Register(solution, newSolution, diff, symbolKey, ApprovalWorkflow.Rename, fileRename);
+		var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions { RenameFile = false }, newName, cancellationToken);
+		var diff        = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
+		
+		IReadOnlyDictionary<string, PreviewFileState> fileStates
+		;
+		
+		try {
+			
+			fileStates = await PreviewFileStateBuilder.BuildAsync(solution, newSolution, cancellationToken);
+		}
+		catch(Exception ex) when(ex is UnsupportedFileEncodingException or DecoderFallbackException or EncoderFallbackException) {
+			
+			return scope.Failed("unsupported file encoding", new PreviewRenameResult(
+				null, null, $"{ex.Message} No approval token was created.", false));
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
+			return scope.Failed("preview file state changed", new PreviewRenameResult(
+				null, null,
+				$"Could not capture a safe file state for this preview: {ex.Message} Re-run roslyn_preview_rename.",
+				false));
+		}
+		
+		if(!TryResolveWorkspaceInfo(projectPath, out var workspaceRoot, out var isMSBuild, out var csprojPath, out var wsInfoError))
+			
+			return scope.Error(wsInfoError);
+		
+		var workspaceBinding = WorkspaceBinding.Create(workspaceRoot, isMSBuild, csprojPath);
+		var token        = approvals.Register(solution, newSolution, diff, symbolKey, ApprovalWorkflow.Rename, fileRename, fileStates, workspaceBinding);
 		var preConfirmed = approvals.IsSessionApproved(symbolKey);
 		
 		return scope.Outcome("preview ready", new PreviewRenameResult(token, diff,

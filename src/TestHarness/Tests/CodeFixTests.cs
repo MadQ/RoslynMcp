@@ -463,10 +463,11 @@ internal static class CodeFixTests
 					return (false, $"FAIL  (code-fix preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
 				
 				// The opposite direction: a code-fix token must be refused by the rename apply path
-				// ("token not found") without being consumed, so the code-fix apply still completes.
+				// ("token unavailable" — #264 moved rename apply onto the same 3-state approval
+				// lifecycle as code fix) without being consumed, so the code-fix apply still completes.
 				var (rename, renameText) = await Call("roslyn_apply_rename", new { token, approval = "y", projectPath = workspacePath });
 				var afterReject = await File.ReadAllTextAsync(fixturePath);
-				var rejected = rename?["error"]?.GetValue<string>() == "token not found"
+				var rejected = rename?["error"]?.GetValue<string>() == "token unavailable"
 					&& afterReject == Fixture("TestSingleWrite");
 				
 				var (apply, applyText) = await Apply(token, workspacePath);

@@ -82,12 +82,12 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `FindCallersTool` | `roslyn_find_callers` — all methods that call a named symbol; filter by `isDirect` to exclude interface/delegate dispatch |
 | `GetCallGraphTool` | `roslyn_get_call_graph` — all methods invoked within a method body; walks the Roslyn IOperation tree for precise semantic results |
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
-| `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token |
-| `ApplyRenameTool` | `roslyn_apply_rename` — approve/reject a pending rename by token |
+| `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token; builds a `PreviewFileState` snapshot and `WorkspaceBinding` so `roslyn_apply_rename` can commit via `PhysicalSolutionApplier` |
+| `ApplyRenameTool` | `roslyn_apply_rename` — approve/reject a pending rename by token; applies via `PhysicalSolutionApplier` (crash-safe, TOCTOU-guarded); the type-matching file-rename step (including the case-only two-step move) runs as a separate post-apply phase after content writes are confirmed |
 | `PreviewCodeFixTool` | `roslyn_preview_code_fix` — preview code fixes from bundled providers for a single diagnostic; returns available action choices or unified diff + token for a selected fix (ReadOnly — never writes) |
-| `ApplyCodeFixTool` | `roslyn_apply_code_fix` — apply or reject a previewed code fix using the approval token from `roslyn_preview_code_fix` |
-| `ChangeSignatureTool` | `roslyn_change_signature` — preview adding parameters with a non-breaking forwarding overload; returns unified diff + token (ReadOnly — never writes) |
-| `ApplySignatureChangeTool` | `roslyn_apply_signature_change` — apply or reject a previewed signature change |
+| `ApplyCodeFixTool` | `roslyn_apply_code_fix` — apply or reject a previewed code fix using the approval token from `roslyn_preview_code_fix`; applies via `PhysicalSolutionApplier` |
+| `ChangeSignatureTool` | `roslyn_change_signature` — preview adding parameters with a non-breaking forwarding overload; returns unified diff + token (ReadOnly — never writes); builds a `PreviewFileState` snapshot and `WorkspaceBinding` so `roslyn_apply_signature_change` can commit via `PhysicalSolutionApplier` |
+| `ApplySignatureChangeTool` | `roslyn_apply_signature_change` — apply or reject a previewed signature change; applies via `PhysicalSolutionApplier` |
 | `ProjectInfoTool` | `roslyn_get_project_info` — project metadata (TFM, language version, packages, etc.) |
 | `BuildTool` | `roslyn_build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true`; diagnostic items include optional `target_frameworks` when MSBuild emits TFM context |
 | `CleanSolutionTool` | `roslyn_clean_solution` — remove all build artifacts (bin/obj directories) |
@@ -108,8 +108,11 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `InfoTool` | `roslyn_info` — server version, PID, uptime, MSBuild discovery method, log markers |
 | `DebugAttachTool` | `roslyn_debug_attach` (DEBUG only) — launches the JIT debugger dialog so Visual Studio can attach; blocks the server until dismissed or attached |
-| `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model) |
+| `ApprovalStore` | Session-scoped approval state (`y`, `n`, `session` model); every workflow (`Rename`, `SignatureChange`, `CodeFix`) shares the same 3-state `TryBeginApply`/`CompleteApply`/`ReturnToPending` lifecycle to prevent double-apply races during a physical write |
 | `BackupStore` | Crash-safe backup store for file write operations; stores pre- and post-write snapshots in `%LOCALAPPDATA%\RoslynMcp\backups\`; supports multi-level undo with token-based restore and conflict detection; async-safe via `SemaphoreSlim` |
+| `PreviewFileStateBuilder` | Builds `PreviewFileState` snapshots (content hashes + intended bytes, encoding/preamble preserved) from a Solution diff; shared by every two-step preview tool (`roslyn_preview_rename`, `roslyn_change_signature`, `roslyn_preview_code_fix`) so `PhysicalSolutionApplier` has what it needs to safely commit later |
+| `PhysicalSolutionApplier` | Crash-safe, TOCTOU-guarded physical apply mechanism shared by `roslyn_apply_rename`, `roslyn_apply_signature_change`, and `roslyn_apply_code_fix`: builds a content-hash-verified `PhysicalSolutionApplyPlan` (Write/Create/Delete operations), re-validates disk state at three layers around backup preparation, and commits via atomic temp-file + `File.Replace`/`File.Move` |
+| `PhysicalApplyResultMapper` | Maps a `PhysicalApplyReport` to the shared `ApplyFileResult[]` shape (per-file state, error, local-history recovery guidance) reused by all three apply tools' result records |
 | `RoslynMcpJson` | Shared `JsonSerializerOptions` with a custom `JavaScriptEncoder` — passes through Unicode characters without `\uXXXX` escaping; used by all tools for consistent serialization |
 | `IToolError` | Marker interface for error-bearing result types; paired with `ToolResult` in the `where T : ToolResult, IToolError` constraint on `ToolScope.Error<T>()` |
 | `ToolResult` | Abstract base record for all tool results — success and error alike; nullable `Error`, `Hint`, and `Caution` properties are omitted from serialized JSON when null |
