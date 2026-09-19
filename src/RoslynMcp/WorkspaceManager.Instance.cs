@@ -3,9 +3,11 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Collections.Frozen;
+using System.Xml.Linq;
 
 namespace RoslynMcp;
 
@@ -1296,8 +1298,10 @@ internal sealed partial class WorkspaceManager
 		///         <c>*.nuget.g.props</c> and <c>*.GeneratedMSBuildEditorConfig.editorconfig</c> files
 		///         that would otherwise match the evaluation-input rule. Then a new <c>.cs</c>, then
 		///         evaluation inputs by extension or name, then anything the loaded projects list as an
-		///         additional or analyzer-config document. Everything else — a <c>.md</c>, a <c>.txt</c>,
-		///         an unrelated <c>.json</c> — is a no-op for the workspace.
+		///         additional or analyzer-config document, then any path declared by an
+		///         <c>&lt;AdditionalFiles Include="..." /&gt;</c> item even if the file did not exist
+		///         when the workspace loaded. Everything else — a <c>.md</c>, a <c>.txt</c>, an
+		///         unrelated <c>.json</c> — is a no-op for the workspace.
 		///     </para>
 		///     <para>
 		///         Known limitation: MSBuild <c>EmbeddedResource</c> items are not exposed by
@@ -1350,6 +1354,13 @@ internal sealed partial class WorkspaceManager
 					
 					return true;
 				}
+				
+				if(MatchesDeclaredAdditionalFile(project, fullPath)) {
+					
+					reason = ReasonAdditionalDoc;
+					
+					return true;
+				}
 			}
 			
 			return false;
@@ -1357,6 +1368,95 @@ internal sealed partial class WorkspaceManager
 		
 		static bool PathEquals(string? candidate, string fullPath) =>
 			candidate is not null && string.Equals(candidate, fullPath, StringComparison.OrdinalIgnoreCase);
+		
+		bool MatchesDeclaredAdditionalFile(Project project, string fullPath)
+		{
+			if(project.FilePath is null)
+				
+				return false;
+			
+			try {
+				
+				var projectDir = Path.GetDirectoryName(project.FilePath);
+				
+				if(projectDir is null)
+					return false;
+				
+				var relativePath = NormalizeProjectRelativePath(Path.GetRelativePath(projectDir, fullPath));
+				var doc = XDocument.Load(project.FilePath);
+				
+				foreach(var include in doc
+					.Descendants()
+					.Where(e => e.Name.LocalName == "AdditionalFiles")
+					.SelectMany(e => SplitMsbuildIncludeList((string?) e.Attribute("Include")))) {
+					
+					if(include.Contains("$(", StringComparison.Ordinal))
+						continue;
+					
+					var normalizedInclude = NormalizeProjectRelativePath(include);
+					
+					if(normalizedInclude.IndexOfAny(['*', '?']) < 0) {
+						
+						var includePath = Path.GetFullPath(Path.Combine(projectDir, include));
+						
+						if(PathEquals(includePath, fullPath))
+							return true;
+						
+						continue;
+					}
+					
+					if(Regex.IsMatch(relativePath, BuildPathGlobRegex(normalizedInclude), RegexOptions.IgnoreCase))
+						return true;
+				}
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) { }
+			
+			return false;
+		}
+		
+		static IEnumerable<string> SplitMsbuildIncludeList(string? include) =>
+			(include ?? "")
+				.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		
+		static string NormalizeProjectRelativePath(string path) =>
+			path.Replace('\\', '/');
+		
+		static string BuildPathGlobRegex(string pattern)
+		{
+			var sb = new StringBuilder("^");
+			var i  = 0;
+			
+			while(i < pattern.Length) {
+				
+				if(pattern[i] == '*' && i + 1 < pattern.Length && pattern[i + 1] == '*') {
+					
+					sb.Append(".*");
+					i += 2;
+					
+					if(i < pattern.Length && (pattern[i] == '/' || pattern[i] == '\\'))
+						i++;
+				}
+				else if(pattern[i] == '*') {
+					
+					sb.Append(@"[^/\\]*");
+					i++;
+				}
+				else if(pattern[i] == '?') {
+					
+					sb.Append('.');
+					i++;
+				}
+				else {
+					
+					sb.Append(Regex.Escape(pattern[i].ToString()));
+					i++;
+				}
+			}
+			
+			sb.Append('$');
+			
+			return sb.ToString();
+		}
 
 		/// <summary>
 		///     What kind of tracked <see cref="TextDocument"/> a <see cref="DocumentId"/> from
@@ -1431,7 +1531,9 @@ internal sealed partial class WorkspaceManager
 
 		void StartWatcher()
 		{
-			watcher = new FileSystemWatcher(rootPath, "*.cs")
+			// Watch all files, not only .cs: MSBuild inputs such as AdditionalFiles, .editorconfig,
+			// props/targets, and global.json must all reach the shared reload classifier.
+			watcher = new FileSystemWatcher(rootPath)
 			{
 				IncludeSubdirectories = true,
 				NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
@@ -1662,8 +1764,9 @@ internal sealed partial class WorkspaceManager
 						// compiler artifact, not source, and reloading the whole workspace for it is pure
 						// cost. Generated documents that ARE compilation inputs (*.AssemblyInfo.cs,
 						// *.GlobalUsings.g.cs) have docIds and never reach this branch, so they keep
-						// updating normally. Today the watcher only delivers .cs paths here; the shared
-						// predicate is what lets #275 widen it without a second rule.
+						// updating normally. Non-.cs paths now arrive here too (AdditionalFiles,
+						// .editorconfig, props/targets, etc.), and the shared predicate decides which
+						// ones matter.
 						if(!RequiresReload(newSolution, path, out var reason))
 							continue;
 
