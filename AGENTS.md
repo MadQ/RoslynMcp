@@ -642,16 +642,15 @@ I trust you and I have git.
 
 For every GitHub issue, in order:
 
-1. `git checkout dev && git checkout -b feat/issue-NNN-short-description`
-2. Implement
-3. `roslyn_get_diagnostics(severity: "errors")` — must be zero before continuing
-4. **First critic pass** — apply "Right Code" filter (see below); fix real bugs inline, discard noise; re-check diagnostics if anything was changed
-5. **Second critic pass** — same filter; anything remaining goes to **todos** (not implemented inline), unless it's a real correctness bug — those always get fixed regardless of pass number
-6. Commit with descriptive message + `Co-authored-by` trailer
-7. `git checkout dev && git merge --no-ff feat/issue-NNN-...`
-8. `git push origin dev`
-9. `gh issue close NNN --comment "Fixed in <branch>, merged to dev (<sha>)."`
-10. Open follow-up issues for deferred todos; link them back to the original
+1. **Create a plan** — outline the approach before writing code; get it approved for anything non-trivial
+2. `git checkout dev && git checkout -b feat/issue-NNN-short-description`
+3. Implement
+4. `roslyn_get_diagnostics(severity: "errors")` — must be zero before continuing
+5. **First critic pass** — apply "Right Code" filter (see below); fix real bugs inline, discard noise; re-check diagnostics if anything was changed
+6. **Second critic pass** — same filter; anything remaining goes to **todos** (not implemented inline), unless it's a real correctness bug — those always get fixed regardless of pass number
+7. Commit with descriptive message + `Co-authored-by` trailer
+8. Push the feature branch and **submit a PR** targeting `dev` (`gh pr create`) — do not merge locally
+9. Reference the issue in the PR description (e.g. `Fixes #NNN`) so merging closes it automatically; open follow-up issues for deferred todos and link them back to the original
 
 ### Critic Integration
 
@@ -688,7 +687,8 @@ For every GitHub issue, in order:
 | Create / switch branch | ✅ Free |
 | Stage files | ✅ Free |
 | Commit | ✅ Free once user says "go for it" on an issue — no per-commit approval needed |
-| Push | ✅ Free as part of the per-issue loop close step |
+| Push | ✅ Free as part of the per-issue loop PR step |
+| Open a PR | ✅ Free as part of the per-issue loop — no local merge to `dev` |
 | Commit outside issue work | ❌ Ask first |
 
 **Shorthand:** `c/p` = commit and push now.
@@ -699,7 +699,7 @@ For every GitHub issue, in order:
 ```powershell
 git checkout dev && git checkout -b feat/issue-NNN-short-description
 ```
-Never commit implementation work directly to `dev`. Merge back with `git merge --no-ff feat/...` to preserve branch history.
+Never commit implementation work directly to `dev`. Push the feature branch and open a PR (`gh pr create`) targeting `dev` — do not merge locally with `git merge`.
 
 **⚠️ Zero-byte check — required before every commit.** A known working-tree rollback issue can silently empty `.cs` files on disk while the Roslyn in-memory workspace still shows the correct content. Always run this before `git commit`:
 ```powershell
