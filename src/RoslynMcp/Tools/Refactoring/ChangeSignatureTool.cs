@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Text;
 using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using ModelContextProtocol.Server;
@@ -110,9 +111,35 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			
 			return scope.Failed("change failed", new ErrorResult(result.Error!));
 		
+		IReadOnlyDictionary<string, PreviewFileState> fileStates
+		;
+		
+		try {
+			
+			fileStates = await PreviewFileStateBuilder.BuildAsync(result.BaseSolution, result.NewSolution, cancellationToken);
+		}
+		catch(Exception ex) when(ex is UnsupportedFileEncodingException or DecoderFallbackException or EncoderFallbackException) {
+			
+			return scope.Failed("unsupported file encoding", new ErrorResult(
+				$"{ex.Message} No approval token was created."));
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
+			return scope.Failed("preview file state changed", new ErrorResult(
+				$"Could not capture a safe file state for this preview: {ex.Message} Re-run roslyn_change_signature."));
+		}
+		
+		if(!TryResolveWorkspaceInfo(projectPath, out var workspaceRoot, out var isMSBuild, out var csprojPath, out var wsInfoError))
+			
+			return scope.Error(wsInfoError);
+		
+		var workspaceBinding = WorkspaceBinding.Create(workspaceRoot, isMSBuild, csprojPath);
 		var token = approvals.Register(result.BaseSolution, result.NewSolution, result.Diff!,
 			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})",
-			ApprovalWorkflow.SignatureChange
+			ApprovalWorkflow.SignatureChange,
+			null,
+			fileStates,
+			workspaceBinding
 		)
 		;
 		

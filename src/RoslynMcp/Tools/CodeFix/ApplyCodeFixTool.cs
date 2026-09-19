@@ -152,24 +152,27 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					null,
 					"stale preview"));
 			
-			physicalApplyStarted = true;
+			// ApplyAsync can throw OperationCanceledException before touching any file (e.g. the
+			// concurrency gate itself is canceled) — physicalApplyStarted is only latched to true once
+			// the call returns a report, so a cancellation that never wrote anything returns the token
+			// to pending instead of permanently consuming it.
+			PhysicalApplyReport report;
 			
-			var report = await physicalApplier.ApplyAsync(plan, boundProjectPath, cancellationToken);
-			var plannedFiles = plan.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
-			var files = report.Files
-				.Select(file => {
-					
-					var relativePath = TryMakeRelative(file.Path, rootPath) ?? file.Path;
-					var plannedFile  = plannedFiles[file.Path];
-					
-					return new CodeFixFileResult(
-						relativePath,
-						file.State.ToString().ToLowerInvariant(),
-						file.Error,
-						RecoveryGuidance(file.State, plannedFile.Operation, relativePath));
-				})
-				.ToArray()
-			;
+			try {
+				
+				report = await physicalApplier.ApplyAsync(plan, boundProjectPath, cancellationToken);
+				physicalApplyStarted = true;
+			}
+			catch(OperationCanceledException) {
+				
+				throw;
+			}
+			var files = PhysicalApplyResultMapper.MapFiles(
+				report,
+				plan,
+				path => TryMakeRelative(path, rootPath) ?? path,
+				backups.IsEnabled,
+				"fix");
 			
 			if(report.Succeeded)
 				return scope.Outcome($"{report.FilesWritten} file(s) written, {report.FilesDeleted} deleted", new ApplyCodeFixResult(
@@ -208,45 +211,6 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 				approvals.ReturnToPending(token, ApprovalWorkflow.CodeFix);
 		}
 	}
-	
-	private string RecoveryGuidance(
-		PhysicalApplyState state,
-		PhysicalFileOperation operation,
-		string filePath)
-	{
-		if(state == PhysicalApplyState.Untouched)
-			return "No recovery is needed; the file still matches its preview baseline.";
-		
-		if(!backups.IsEnabled)
-			return "Local history is disabled. Inspect the file and use source control or another backup to recover it.";
-		
-		var listStep = $"Use roslyn_local_history with action 'list' and filePath '{filePath}', " +
-			"then call action 'preview' with the selected backup token before applying it.";
-		
-		return (state, operation) switch {
-			
-			(PhysicalApplyState.Written, PhysicalFileOperation.Write) =>
-				$"{listStep} Apply the 'pre' snapshot to restore the original file.",
-			
-			(PhysicalApplyState.Written, PhysicalFileOperation.Create) =>
-				$"This file did not exist before the fix, so there is no 'pre' snapshot. " +
-				$"Delete it to roll back. To restore the intended content, {listStep} Apply the 'post' snapshot.",
-			
-			(PhysicalApplyState.Deleted, _) =>
-				$"{listStep} Apply the 'pre' snapshot to recreate the deleted original file.",
-			
-			(PhysicalApplyState.Truncated or PhysicalApplyState.Uncertain, PhysicalFileOperation.Create) =>
-				$"Inspect the file first. It had no original version, so delete it to roll back. " +
-				$"To complete the fix, {listStep} Apply the 'post' snapshot.",
-			
-			(PhysicalApplyState.Truncated or PhysicalApplyState.Uncertain, PhysicalFileOperation.Delete) =>
-				$"Inspect the file first. {listStep} Apply the 'pre' snapshot to restore the original content.",
-			
-			_ =>
-				$"Inspect the file first. {listStep} Apply the 'pre' snapshot to restore the original content, " +
-				"or the 'post' snapshot to complete the intended fix."
-		};
-	}
 }
 
 internal sealed record ApplyCodeFixResult : ToolResult, IToolError
@@ -256,7 +220,7 @@ internal sealed record ApplyCodeFixResult : ToolResult, IToolError
 		int? filesWritten,
 		string? error,
 		int? filesDeleted = null,
-		CodeFixFileResult[]? files = null)
+		ApplyFileResult[]? files = null)
 	{
 		Message      = message;
 		FilesWritten = filesWritten;
@@ -265,15 +229,8 @@ internal sealed record ApplyCodeFixResult : ToolResult, IToolError
 		Error        = error;
 	}
 	
-	public string               Message      { get; }
-	public int?                 FilesWritten { get; }
-	public int?                 FilesDeleted { get; }
-	public CodeFixFileResult[]? Files        { get; }
+	public string             Message      { get; }
+	public int?               FilesWritten { get; }
+	public int?               FilesDeleted { get; }
+	public ApplyFileResult[]? Files        { get; }
 }
-
-internal sealed record CodeFixFileResult(
-	string  Path,
-	string  State,
-	string? Error,
-	string  Recovery
-);

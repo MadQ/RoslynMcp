@@ -447,3 +447,89 @@ internal sealed class PhysicalApplyPlanException : Exception
 		: base(message)
 	{ }
 }
+
+/// <summary>
+///     Per-file outcome of a physical apply, shared across every apply tool built on
+///     <see cref="PhysicalSolutionApplier"/> (code fix, rename, signature change).
+/// </summary>
+internal sealed record ApplyFileResult(
+	string  Path,
+	string  State,
+	string? Error,
+	string  Recovery
+);
+
+/// <summary>
+///     Maps a <see cref="PhysicalApplyReport"/> to the shared <see cref="ApplyFileResult"/> shape
+///     and produces the local-history recovery guidance shown per file — one implementation reused
+///     by every apply tool built on <see cref="PhysicalSolutionApplier"/>, instead of triplicating
+///     this projection logic.
+/// </summary>
+internal static class PhysicalApplyResultMapper
+{
+	public static ApplyFileResult[] MapFiles(
+		PhysicalApplyReport report,
+		PhysicalSolutionApplyPlan plan,
+		Func<string, string> toRelativePath,
+		bool backupsEnabled,
+		string changeNoun)
+	{
+		var plannedFiles = plan.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
+		
+		return report.Files
+			.Select(file => {
+				
+				var relativePath = toRelativePath(file.Path);
+				var plannedFile  = plannedFiles[file.Path];
+				
+				return new ApplyFileResult(
+					relativePath,
+					file.State.ToString().ToLowerInvariant(),
+					file.Error,
+					RecoveryGuidance(file.State, plannedFile.Operation, relativePath, backupsEnabled, changeNoun));
+			})
+			.ToArray()
+		;
+	}
+	
+	public static string RecoveryGuidance(
+		PhysicalApplyState state,
+		PhysicalFileOperation operation,
+		string filePath,
+		bool backupsEnabled,
+		string changeNoun)
+	{
+		if(state == PhysicalApplyState.Untouched)
+			return "No recovery is needed; the file still matches its preview baseline.";
+		
+		if(!backupsEnabled)
+			return "Local history is disabled. Inspect the file and use source control or another backup to recover it.";
+		
+		var listStep = $"Use roslyn_local_history with action 'list' and filePath '{filePath}', " +
+			"then call action 'preview' with the selected backup token before applying it.";
+		
+		return (state, operation) switch {
+			
+			(PhysicalApplyState.Written, PhysicalFileOperation.Write) =>
+				$"{listStep} Apply the 'pre' snapshot to restore the original file.",
+			
+			(PhysicalApplyState.Written, PhysicalFileOperation.Create) =>
+				$"This file did not exist before the {changeNoun}, so there is no 'pre' snapshot. " +
+				$"Delete it to roll back. To restore the intended content, {listStep} Apply the 'post' snapshot.",
+			
+			(PhysicalApplyState.Deleted, _) =>
+				$"{listStep} Apply the 'pre' snapshot to recreate the deleted original file.",
+			
+			(PhysicalApplyState.Truncated or PhysicalApplyState.Uncertain, PhysicalFileOperation.Create) =>
+				$"Inspect the file first. It had no original version, so delete it to roll back. " +
+				$"To complete the {changeNoun}, {listStep} Apply the 'post' snapshot.",
+			
+			(PhysicalApplyState.Truncated or PhysicalApplyState.Uncertain, PhysicalFileOperation.Delete) =>
+				$"Inspect the file first. {listStep} Apply the 'pre' snapshot to restore the original content.",
+			
+			_ =>
+				$"Inspect the file first. {listStep} Apply the 'pre' snapshot to restore the original content, " +
+				$"or the 'post' snapshot to complete the intended {changeNoun}."
+		};
+	}
+}
