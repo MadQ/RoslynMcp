@@ -490,7 +490,12 @@ internal sealed partial class WorkspaceManager
 				
 				var docIds = currentSolution.GetDocumentIdsWithFilePath(fullPath);
 				
-				if(docIds.Length > 0) {
+				// GetDocumentIdsWithFilePath returns ids for additional and analyzer-config
+				// documents too, not only source — classify by the first id (all ids for one
+				// physical path share a kind) before deciding how to apply the edit (#276).
+				var kind = docIds.Length > 0 ? ClassifyTrackedDocument(currentSolution, docIds[0]) : TrackedDocumentKind.Unknown;
+				
+				if(kind is TrackedDocumentKind.Source or TrackedDocumentKind.Additional) {
 					
 					try {
 						
@@ -500,7 +505,9 @@ internal sealed partial class WorkspaceManager
 						;
 						
 						foreach(var id in docIds)
-							newSolution = newSolution.WithDocumentText(id, newText);
+							newSolution = kind == TrackedDocumentKind.Additional
+								? newSolution.WithAdditionalDocumentText(id, newText)
+								: newSolution.WithDocumentText(id, newText);
 						
 						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
 						// flag for full reload so the next GetCompilation picks up the new content.
@@ -512,11 +519,23 @@ internal sealed partial class WorkspaceManager
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
 					{ }
+					catch(InvalidOperationException ex) {
+						
+						// Defensive only — reachable if a path's ids ever span mixed kinds (e.g. a
+						// regular document in one project, additional in another) so the first id's
+						// kind does not describe every id. Flag a reload instead of letting Solution's
+						// kind-mismatch exception propagate out of the FSW debounce timer (#276).
+						logger.LogInfo("Reload", $"Flagged (incremental apply threw {ex.GetType().Name}): {fullPath}");
+						Interlocked.Increment(ref reloadVersion);
+					}
 				}
 				else if(RequiresReload(currentSolution, fullPath, out var reason)) {
 					
 					// Unconditional bump, unlike FlagReload's == 0 guard: a genuinely new input must move
-					// the generation so an in-flight reload that predates it is discarded.
+					// the generation so an in-flight reload that predates it is discarded. Also reached
+					// for an existing analyzer-config document (kind == AnalyzerConfig): TryApplyChanges
+					// throws for ChangeAnalyzerConfigDocument, so .editorconfig/.globalconfig edits
+					// always reload rather than apply incrementally (#276).
 					logger.LogInfo("Reload", $"Flagged ({reason}): {fullPath}");
 					Interlocked.Increment(ref reloadVersion);
 					InvalidateCompilation();
@@ -1340,6 +1359,39 @@ internal sealed partial class WorkspaceManager
 			candidate is not null && string.Equals(candidate, fullPath, StringComparison.OrdinalIgnoreCase);
 
 		/// <summary>
+		///     What kind of tracked <see cref="TextDocument"/> a <see cref="DocumentId"/> from
+		///     <see cref="Solution.GetDocumentIdsWithFilePath"/> identifies — that method returns ids
+		///     for regular source documents, <c>AdditionalFiles</c> items, and analyzer-config files
+		///     alike, but only <see cref="Solution.WithDocumentText"/> accepts a source-document id;
+		///     calling it with any other kind throws <see cref="InvalidOperationException"/> (#276).
+		/// </summary>
+		enum TrackedDocumentKind { Source, Additional, AnalyzerConfig, Unknown }
+
+		/// <summary>
+		///     Classifies <paramref name="id"/> per <see cref="TrackedDocumentKind"/>. Used by
+		///     <see cref="InvalidateFile"/> and <see cref="FlushMSBuild"/> to route an edit to
+		///     <see cref="Solution.WithDocumentText"/> or <see cref="Solution.WithAdditionalDocumentText"/>,
+		///     or — for an analyzer-config document, which <c>MSBuildWorkspace.CanApplyChange</c>
+		///     reports <c>false</c> for as of Roslyn 5.3.0 (verified) — to the full-reload path.
+		/// </summary>
+		static TrackedDocumentKind ClassifyTrackedDocument(Solution solution, DocumentId id)
+		{
+			if(solution.GetDocument(id) is not null)
+				
+				return TrackedDocumentKind.Source;
+			
+			if(solution.GetAdditionalDocument(id) is not null)
+				
+				return TrackedDocumentKind.Additional;
+			
+			if(solution.GetAnalyzerConfigDocument(id) is not null)
+				
+				return TrackedDocumentKind.AnalyzerConfig;
+			
+			return TrackedDocumentKind.Unknown;
+		}
+
+		/// <summary>
 		///     True when any directory segment of <paramref name="fullPath"/> below
 		///     <see cref="rootPath"/> matches <paramref name="excluded"/>. Name-based only — no
 		///     <c>FileInfo</c> stat, because this runs on every FileSystemWatcher event.
@@ -1620,6 +1672,26 @@ internal sealed partial class WorkspaceManager
 						continue;
 					}
 
+					// GetDocumentIdsWithFilePath returns ids for additional and analyzer-config
+					// documents too — classify before deciding how (or whether) to apply the
+					// edit incrementally (#276).
+					var kind = ClassifyTrackedDocument(newSolution, docIds[0]);
+
+					// Analyzer-config documents (.editorconfig, .globalconfig) are tracked here but
+					// MSBuildWorkspace.CanApplyChange(ChangeAnalyzerConfigDocument) is false as of
+					// Roslyn 5.3.0 (verified) — TryApplyChanges throws for them. Route to the same
+					// full-reload path used for a brand-new input rather than attempting
+					// WithDocumentText, which throws InvalidOperationException for a non-source id.
+					if(kind == TrackedDocumentKind.AnalyzerConfig) {
+
+						if(!RequiresReload(newSolution, path, out var reason))
+							continue;
+
+						FlagReload(reason, path);
+
+						continue;
+					}
+
 					using var stream = File.OpenRead(path);
 					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 
@@ -1629,19 +1701,35 @@ internal sealed partial class WorkspaceManager
 					// leaves the file the same length, and any write RM did not make itself.
 					// TryGetText deliberately: it reads already-materialized text rather than
 					// forcing a load, and falls through to apply when none is available.
-					if(newSolution.GetDocument(docIds[0]) is { } existingDoc
-					   && existingDoc.TryGetText(out var existingText)
-					   && existingText.ContentEquals(text))
+					var existingDoc = kind == TrackedDocumentKind.Additional
+						? newSolution.GetAdditionalDocument(docIds[0])
+						: newSolution.GetDocument(docIds[0]);
+
+					if(existingDoc is not null
+					   && existingDoc.TryGetText(out var currentText)
+					   && currentText.ContentEquals(text))
 
 						continue;
 
 					foreach(var id in docIds)
-						newSolution = newSolution.WithDocumentText(id, text);
+						newSolution = kind == TrackedDocumentKind.Additional
+							? newSolution.WithAdditionalDocumentText(id, text)
+							: newSolution.WithDocumentText(id, text);
 
 					applyFailed ??= path;
 					modified = true;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+				catch(InvalidOperationException) {
+					
+					// Defensive only — reachable if the same physical path is tracked with mixed
+					// kinds across projects (e.g. a source document in one, an AdditionalFiles item
+					// in another), so classifying by docIds[0] does not describe every id in the
+					// array. Without this, the exception would propagate out of the per-path try,
+					// abandoning the rest of `changed` unprocessed for this flush cycle — mirrors the
+					// same defensive catch in InvalidateFile (#276).
+					FlagReload("incremental apply threw InvalidOperationException", path);
+				}
 			}
 			
 			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
