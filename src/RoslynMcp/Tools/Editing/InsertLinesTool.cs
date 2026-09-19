@@ -22,7 +22,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		"Anchor patterns use case-sensitive, whitespace-exact substring matching against line content — " +
 		"tabs and spaces are NOT interchangeable. If an anchor fails, use roslyn_read_file to verify the exact content " +
 		"(including indentation characters) before retrying. " +
-		"Supports dryRun=true to preview the insertion without writing. " +
+		"Supports dryRun=true to preview the insertion without writing. Returns inserted_line_ranges as inclusive { start, end } 1-based line ranges; start equals end for a single inserted line. " +
 		"For replacing existing C# syntax nodes, prefer roslyn_replace_in_code; " +
 		"for text-level find/replace in any file type, use roslyn_replace_in_file."
 	)]
@@ -121,14 +121,11 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		resultLines.AddRange(newLines);
 		resultLines.AddRange(lines[insertIndex..]);
 		
-		// 1-based line numbers of inserted lines.
-		var insertedLines = Enumerable.Range(insertIndex + 1, newLines.Length).ToArray()
-		;
 		
 		if(dryRun)
 			
-			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, insertedLines,
-				$"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
+			return scope.Outcome("dry run", new InsertLinesResult(false, insertIndex + 1, newLines.Length, Enumerable.Range(insertIndex + 1, newLines.Length),
+				message: $"Dry run: {newLines.Length} line(s) would be inserted at line {insertIndex + 1}."));
 		
 		// Preserve the file's original line-ending style — computed once, used for backup,
 		// write, and post-write verification.
@@ -189,6 +186,6 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 				return scope.Error(truncErr);
 		}
 		
-		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, insertedLines, BackupToken: backupToken));
+		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, Enumerable.Range(insertIndex + 1, newLines.Length), backupToken: backupToken));
 	}
 }
