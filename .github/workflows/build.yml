@@ -10,16 +10,11 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     # RestoreLockedMode + ContinuousIntegrationBuild are enabled in CI via Directory.Build.props
     # (gated on GITHUB_ACTIONS). The lock is validated, not regenerated: the SDK is pinned by
     # global.json (10.0.302) and RuntimeIdentifiers in the csproj keeps packages.lock.json
-    # multi-RID and platform-independent, so one committed lock satisfies every matrix platform.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        dotnet-version: ['10.0.302']
+    # multi-RID and platform-independent. Cross-platform publishing is validated by publish.yml.
 
     steps:
     - uses: actions/checkout@v4
@@ -27,7 +22,7 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{ matrix.dotnet-version }}
+        dotnet-version: '10.0.302'
 
     - name: Restore dependencies
       run: dotnet restore src/RoslynMcp/RoslynMcp.csproj
@@ -40,7 +35,7 @@ jobs:
 
   # Dedicated guard: fails the PR if packages.lock.json is stale or not multi-RID, with an
   # actionable message. RuntimeIdentifiers makes the restore graph platform-independent, so one
-  # locked restore on Ubuntu validates every matrix RID (win-x64/linux-x64/osx-arm64) at once.
+  # locked restore on Ubuntu validates every RID (win-x64/linux-x64/osx-arm64) at once.
   # Mark this job's check ("lock-check") required in the branch ruleset to block such merges.
   lock-check:
     runs-on: ubuntu-latest

@@ -13,16 +13,32 @@ on:
         default: true
 
 jobs:
+  runtime-checks:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.302'
+
+      - name: Validate Windows, Linux, and macOS publishes
+        shell: bash
+        run: |
+          for rid in win-x64 linux-x64 osx-arm64; do
+            dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -r "$rid" -o "artifacts/runtime-checks/$rid"
+          done
+
   publish:
+    needs: runtime-checks
     # Gated on the `release` GitHub environment — this name must match exactly the
     # environment registered in the NuGet.org Trusted Publishing policy. Add a
     # required-reviewer protection rule to this environment (repo Settings →
     # Environments → release) for a manual approval gate before any OIDC token is minted.
     environment: release
-    # Windows runner for MSBuild/Roslyn compatibility — BuildHost discovery
-    # requires loose files on disk, which is handled by ExcludeBuildHostFromSingleFile
-    # and the Pack configuration's PublishSingleFile=false.
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -62,10 +78,8 @@ jobs:
           path: artifacts/*.nupkg
           if-no-files-found: error
 
-      # PowerShell (the default shell on windows-latest) does not expand the
-      # artifacts/*.nupkg wildcard for native commands, and dotnet nuget push treats the
-      # literal pattern as a filename ("File does not exist"). Resolve the real path
-      # first — the upload-artifact step above already proved a .nupkg exists.
+      # Resolve the package path explicitly so the push commands receive a real filename
+      # rather than a shell-dependent wildcard.
       - name: Push to NuGet
         if: ${{ !inputs.dry_run }}
         shell: pwsh
