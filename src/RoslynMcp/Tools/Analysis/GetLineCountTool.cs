@@ -15,8 +15,8 @@ internal sealed class GetLineCountTool : RoslynMcpTool
         "Returns the line count for one or more files — useful for gauging file size before deciding " +
         "whether to read the full content with roslyn_read_file. " +
         "Accepts a comma-separated list of paths for efficient batch queries in a single call. " +
-        "C# files (.cs) are counted from the in-memory Roslyn workspace; all other files are read " +
-        "from disk, so counts reflect the saved state for non-C# files. " +
+        "Tracked Roslyn text documents are counted from the in-memory workspace; untracked files are read " +
+        "from disk, so counts reflect the saved state for untracked files. " +
         "Files not found return a null count with a per-entry error message rather than failing the " +
         "whole request — safe to use on mixed lists where some files may be absent.")]
     public async Task<object> GetLineCount(
@@ -25,13 +25,13 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_line_count", filePaths);
 		
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return scope.Error(error!);
-		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			
 			return scope.Error(resolveError);
+		
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			
+			return scope.Error(solutionError);
 		var paths    = filePaths
 			.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
 		;
@@ -41,13 +41,41 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		foreach(var filePath in paths) {
 			
 			var normalized = NormalizePath(filePath);
-			var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+			var fullPath   = ResolveFilePath(filePath, rootPath, boundary);
 			
-			if(isCs) {
+			if(fullPath is not null) {
 				
-				var tree = compilation.SyntaxTrees
-					.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
-				;
+				if(!TryGetTextDocumentInfo(projectPath, fullPath, out var info, out var infoError))
+					return scope.Error(infoError);
+				
+				if(info.IsTracked && GetTextDocument(solution, info) is { } textDocument) {
+					
+					var text = await textDocument.GetTextAsync();
+					
+					results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, textDocument.FilePath ?? fullPath), text.Lines.Count, null));
+				}
+				else {
+					
+					try {
+						
+						var lineCount = await CountLinesAsync(fullPath);
+						results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, fullPath), lineCount, null));
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						results.Add(new LineCountEntry(filePath, null, ex.Message));
+					}
+				}
+				
+				continue;
+			}
+			
+			if(IsCSharpSourcePath(normalized)) {
+				
+				if(!TryGetCompilation(projectPath, out var compilation, out var error))
+					
+					return scope.Error(error!);
+				
+				var tree = FindSyntaxTree(compilation, filePath);
 				
 				if(tree is null) {
 					
@@ -58,27 +86,11 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 				var text = await tree.GetTextAsync();
 				
 				results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, tree.FilePath), text.Lines.Count, null));
+				
+				continue;
 			}
 			
-			else {
-				
-				var fullPath = ResolveFilePath(filePath, rootPath, boundary);
-				
-				if(fullPath is null) {
-					
-					results.Add(new LineCountEntry(filePath, null, "file not found on disk"));
-					continue;
-				}
-				
-				try {
-					
-					var lineCount = await CountLinesAsync(fullPath);
-					results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, fullPath), lineCount, null));
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					results.Add(new LineCountEntry(filePath, null, ex.Message));
-				}
-			}
+			results.Add(new LineCountEntry(filePath, null, "file not found on disk"));
 		}
 		
 		var total      = results.Count;

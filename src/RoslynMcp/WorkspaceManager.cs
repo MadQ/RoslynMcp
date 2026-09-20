@@ -397,6 +397,25 @@ internal sealed partial class WorkspaceManager : IDisposable
 		return false;
 	}
 	
+	public WorkspaceTextDocumentInfo GetTextDocumentInfo(string resolvedProjectPath, string fullPath)
+	{
+		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+				&& cache.TryGetValue(mappedKey, out var entry))
+				
+				return entry.Instance.GetTextDocumentInfo(fullPath);
+			
+			if(cache.TryGetValue(normalizedPath, out var directEntry))
+				
+				return directEntry.Instance.GetTextDocumentInfo(fullPath);
+		}
+		
+		return new WorkspaceTextDocumentInfo(fullPath, WorkspaceTextDocumentKind.None, []);
+	}
+	
 	public Task WriteAndInvalidate(string resolvedProjectPath, string fullPath, Func<Task> write)
 	=> WriteAndInvalidate(resolvedProjectPath, fullPath, null, write);
 	

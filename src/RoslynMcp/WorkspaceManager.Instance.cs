@@ -468,6 +468,36 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		public WorkspaceTextDocumentInfo GetTextDocumentInfo(string fullPath)
+		{
+			Solution currentSolution;
+			
+			@lock.EnterReadLock();
+			
+			try {
+				
+				currentSolution = workspace.CurrentSolution;
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
+			
+			var docIds = currentSolution.GetDocumentIdsWithFilePath(fullPath);
+			
+			if(docIds.Length == 0)
+				return new WorkspaceTextDocumentInfo(fullPath, WorkspaceTextDocumentKind.None, []);
+			
+			var kind = ClassifyTrackedDocument(currentSolution, docIds[0]) switch {
+				
+				TrackedDocumentKind.Source         => WorkspaceTextDocumentKind.Source,
+				TrackedDocumentKind.Additional     => WorkspaceTextDocumentKind.Additional,
+				TrackedDocumentKind.AnalyzerConfig => WorkspaceTextDocumentKind.AnalyzerConfig,
+				_                                  => WorkspaceTextDocumentKind.None
+			};
+			
+			return new WorkspaceTextDocumentInfo(fullPath, kind, [.. docIds]);
+		}
+
 		// ── File invalidation ────────────────────────────────────────────────
 		
 		public void InvalidateFile(string fullPath)
@@ -1148,7 +1178,7 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		
-		// For MSBuild-tracked .cs files: routes through TryApplyChanges as the single
+		// For MSBuild-tracked source/additional text documents: routes through TryApplyChanges as the single
 		// disk write (FSW-suppressed via ApplyChangesWithFswSuppressed). Returns false
 		// for Adhoc workspaces (TryApplyChanges is in-memory only) or for files not
 		// tracked by the workspace — callers fall back to WriteAndInvalidate.
@@ -1180,10 +1210,25 @@ internal sealed partial class WorkspaceManager
 				
 				return false;
 			
+			var kind = ClassifyTrackedDocument(currentSolution, docIds[0]);
+			
+			if(kind is not (TrackedDocumentKind.Source or TrackedDocumentKind.Additional))
+				
+				return false;
+			
 			var newSolution = currentSolution;
 			
-			foreach(var id in docIds)
-				newSolution = newSolution.WithDocumentText(id, newText);
+			try {
+				
+				foreach(var id in docIds)
+					newSolution = kind == TrackedDocumentKind.Additional
+						? newSolution.WithAdditionalDocumentText(id, newText)
+						: newSolution.WithDocumentText(id, newText);
+			}
+			catch(InvalidOperationException) {
+				
+				return false;
+			}
 			
 			return ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws);
 		}

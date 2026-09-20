@@ -46,6 +46,52 @@ internal static class PreviewFileStateBuilder
 					intendedBytes);
 			}
 			
+			foreach(var docId in projectChange.GetChangedAdditionalDocuments()) {
+				
+				var oldDocument = baseSolution.GetAdditionalDocument(docId);
+				var newDocument = newSolution.GetAdditionalDocument(docId);
+				
+				if(oldDocument?.FilePath is null || newDocument is null)
+					continue;
+				
+				if(!File.Exists(oldDocument.FilePath))
+					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
+				
+				var originalBytes = await File.ReadAllBytesAsync(oldDocument.FilePath, cancellationToken);
+				var intendedBytes = await EncodeChangedDocumentAsync(
+					oldDocument,
+					newDocument,
+					originalBytes,
+					cancellationToken);
+				states[oldDocument.FilePath] = new PreviewFileState(
+					ExpectedFileState.Exists,
+					ComputeHash(originalBytes),
+					intendedBytes);
+			}
+			
+			foreach(var docId in projectChange.GetChangedAnalyzerConfigDocuments()) {
+				
+				var oldDocument = baseSolution.GetAnalyzerConfigDocument(docId);
+				var newDocument = newSolution.GetAnalyzerConfigDocument(docId);
+				
+				if(oldDocument?.FilePath is null || newDocument is null)
+					continue;
+				
+				if(!File.Exists(oldDocument.FilePath))
+					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
+				
+				var originalBytes = await File.ReadAllBytesAsync(oldDocument.FilePath, cancellationToken);
+				var intendedBytes = await EncodeChangedDocumentAsync(
+					oldDocument,
+					newDocument,
+					originalBytes,
+					cancellationToken);
+				states[oldDocument.FilePath] = new PreviewFileState(
+					ExpectedFileState.Exists,
+					ComputeHash(originalBytes),
+					intendedBytes);
+			}
+			
 			foreach(var docId in projectChange.GetAddedDocuments()) {
 				
 				var doc = newSolution.GetDocument(docId);
@@ -98,8 +144,8 @@ internal static class PreviewFileStateBuilder
 	}
 	
 	static async Task<byte[]> EncodeChangedDocumentAsync(
-		Document oldDocument,
-		Document newDocument,
+		TextDocument oldDocument,
+		TextDocument newDocument,
 		byte[] originalBytes,
 		CancellationToken cancellationToken)
 	{
@@ -126,7 +172,7 @@ internal static class PreviewFileStateBuilder
 	}
 	
 	static async Task<byte[]> EncodeNewDocumentAsync(
-		Document document,
+		TextDocument document,
 		CancellationToken cancellationToken)
 	{
 		var text = await document.GetTextAsync(cancellationToken);

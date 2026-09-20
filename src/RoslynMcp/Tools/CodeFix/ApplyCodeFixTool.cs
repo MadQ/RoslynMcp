@@ -113,10 +113,9 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"invalid physical plan"));
 			}
 			
-			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write
-				|| !string.Equals(Path.GetExtension(file.Path), ".cs", StringComparison.OrdinalIgnoreCase)))
+			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write))
 				return scope.Failed("unsupported code-fix change", new ApplyCodeFixResult(
-					"Code-fix apply accepts modifications to existing C# files only; file creation and deletion are not supported.",
+					"Code-fix apply accepts modifications to existing text files only; file creation and deletion are not supported.",
 					null,
 					"unsupported code-fix change"));
 			

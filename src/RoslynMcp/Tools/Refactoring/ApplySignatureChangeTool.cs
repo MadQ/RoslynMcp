@@ -114,7 +114,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			// in-place edits to existing .cs files. Create/Delete would indicate a plan built from an
 			// unexpected solution diff.
 			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write
-				|| !string.Equals(Path.GetExtension(file.Path), ".cs", StringComparison.OrdinalIgnoreCase)))
+				|| !IsCSharpSourcePath(file.Path)))
 				return scope.Failed("unsupported signature change", new ApplySignatureChangeResult(
 					"Signature-change apply accepts modifications to existing C# files only; file creation and deletion are not supported.",
 					null, "unsupported signature change", null));

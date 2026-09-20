@@ -60,7 +60,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		
-		if(!fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+		if(!IsCSharpSourcePath(fullPath))
 			
 			return scope.Error(new ErrorResult("File must be a C# source file (.cs)"));
 		

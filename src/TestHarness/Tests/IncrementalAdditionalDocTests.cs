@@ -197,6 +197,38 @@ static class IncrementalAdditionalDocTests
 			return (true, $"PASS  ({what}: reload_pending={pending})");
 		}
 		
+		async Task<(bool pass, string message)> AssertTrackedTextReadCount()
+		{
+			if(!await SettleAsync())
+				return (false, "FAIL  (precondition: reload_pending never cleared before read/count)");
+			
+			var (readOk, readData) = await Call("roslyn_read_file", new {
+				filePath = "TrackedInputs/Notes.txt",
+				projectPath = csproj
+			});
+			
+			if(!readOk || readData?["error"] is not null)
+				return (false, $"FAIL  (roslyn_read_file failed: {readData?["error"]?.GetValue<string>() ?? "protocol error"})");
+			
+			if(readData?["source"]?.GetValue<string>() != "roslyn")
+				return (false, $"FAIL  (tracked AdditionalFiles read should be source='roslyn', got '{readData?["source"]?.GetValue<string>()}')");
+			
+			var (countOk, countData) = await Call("roslyn_get_line_count", new {
+				filePaths = "TrackedInputs/Notes.txt",
+				projectPath = csproj
+			});
+			
+			if(!countOk || countData?["error"] is not null)
+				return (false, $"FAIL  (roslyn_get_line_count failed: {countData?["error"]?.GetValue<string>() ?? "protocol error"})");
+			
+			var entries = countData?["files"] as JsonArray;
+			var count = entries?[0]?["line_count"]?.GetValue<int>();
+			
+			return count == 2
+				? (true, "PASS  (tracked AdditionalFiles read/count use Roslyn text)")
+				: (false, $"FAIL  (expected line_count=2 for tracked AdditionalFiles item, got {count?.ToString() ?? "null"})");
+		}
+		
 		// Pay the MSBuild load now so the first test measures the edit, not the load.
 		await fx.WarmAsync(ctx);
 		
@@ -250,6 +282,9 @@ static class IncrementalAdditionalDocTests
 				() => AssertFlag("roslyn_replace_in_file",
 					new { filePath = ".editorconfig", pattern = "probe = 1", replacement = "probe = 2", projectPath = csproj },
 					expectFlagged: true, what: ".editorconfig edit")),
+			
+			new("incremental additional doc: read/count use Roslyn text for tracked AdditionalFiles items",
+				AssertTrackedTextReadCount),
 		};
 		
 		return new TestGroup($"Incremental Additional/AnalyzerConfig Doc ({tests.Count} tests)", tests, Teardown: async () =>

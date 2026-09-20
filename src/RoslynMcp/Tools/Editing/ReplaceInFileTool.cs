@@ -116,30 +116,12 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			
 			return scope.Error(backupErr);
 		
-		// For .cs files: single write via workspace API (MSBuild-tracked goes through
-		// TryApplyChanges; untracked/Adhoc goes through FileWriter with FSW suppressed).
-		// For all other types: direct FileWriter write, then InvalidateFile — which classifies the
-		// path, so only a compilation/evaluation input (a .csproj, .editorconfig, …) flags a reload
-		// and a .md or .txt is a workspace no-op (#273).
-		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
+		try {
 			
-			try {
-				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(newContent, FileWriter.Utf8NoBom));
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
-			}
+			await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(newContent, FileWriter.Utf8NoBom));
 		}
-		else {
-			
-			try {
-				await FileWriter.WriteAllTextAsync(fullPath, newContent);
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
-			}
-			
-			workspace.InvalidateFile(projectPath, fullPath);
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 		}
 		
 		if(CheckForTruncation(filePath, fullPath, newContent.Length) is { } truncErr)

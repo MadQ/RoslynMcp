@@ -13,7 +13,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
     [McpServerTool(Name = "roslyn_read_file", ReadOnly = true, Title = "Read File", OpenWorld = false, Idempotent = true)]
     [Description(
         "Use this to read the raw content of any file in the project with 1-based line numbers. " +
-        "For .cs files, content is served from the in-memory Roslyn workspace — no disk I/O, always reflecting " +
+        "For tracked Roslyn text documents, content is served from the in-memory workspace — no disk I/O, always reflecting " +
         "the latest state of the compilation (including edits not yet written to disk). " +
         "For all other file types (.csproj, .json, .props, etc.), content is read from disk. " +
         "Always use startLine/endLine to narrow the range for large files — returning the full file of a large .cs " +
@@ -31,47 +31,59 @@ internal sealed class ReadFileTool : RoslynMcpTool
         if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 
             return scope.Error(resolveError);
-        var normalized = NormalizePath(filePath);
-        var isCs       = normalized.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
-
         SourceText sourceText;
         string     canonicalPath;
-
-        if(isCs) {
-
-            // .cs files: serve from in-memory compilation — no disk I/O, always reflects unsaved edits.
-            if(!TryGetCompilation(projectPath, out var compilation, out var error))
-
-                return scope.Error(error!);
-
-            var tree = compilation.SyntaxTrees
-                .FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
-            ;
-
-            if(tree is null)
-
-                return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
-
-            sourceText    = await tree.GetTextAsync();
-            canonicalPath = tree.FilePath;
-        }
-        else {
-
-            // Non-.cs: fall back to disk.
-            var fullPath = ResolveFilePath(filePath, rootPath, boundary)
-;
-
-            if(fullPath is null)
-
-                return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
-
-            // Stream directly - avoids the ReadAllTextAsync string SourceText double-buffer.
-            using var stream = File.OpenRead(fullPath)
-;
-            sourceText    = SourceText.From(stream);
-            canonicalPath = fullPath
-;
-        }
+		string     source;
+		var normalized = NormalizePath(filePath);
+		var fullPath   = ResolveFilePath(filePath, rootPath, boundary);
+		
+		if(fullPath is not null) {
+			
+			if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+				
+				return scope.Error(solutionError);
+			
+			if(!TryGetTextDocumentInfo(projectPath, fullPath, out var info, out var infoError))
+				
+				return scope.Error(infoError);
+			
+			if(info.IsTracked && GetTextDocument(solution, info) is { } textDocument) {
+				
+				sourceText    = await textDocument.GetTextAsync();
+				canonicalPath = textDocument.FilePath ?? fullPath;
+				source        = "roslyn";
+			}
+			else {
+				
+				// Stream directly - avoids the ReadAllTextAsync string SourceText double-buffer.
+				using var stream = File.OpenRead(fullPath);
+				
+				sourceText    = SourceText.From(stream);
+				canonicalPath = fullPath;
+				source        = "disk";
+			}
+		}
+		else if(IsCSharpSourcePath(normalized)) {
+			
+			// Source files can exist in Roslyn's workspace even when the direct disk lookup misses.
+			if(!TryGetCompilation(projectPath, out var compilation, out var error))
+				
+				return scope.Error(error!);
+			
+			var tree = FindSyntaxTree(compilation, filePath);
+			
+			if(tree is null)
+				
+				return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
+			
+			sourceText    = await tree.GetTextAsync();
+			canonicalPath = tree.FilePath;
+			source        = "roslyn";
+		}
+		else {
+			
+			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
+		}
 
         var lines      = sourceText.Lines;
         var totalLines = lines.Count;
@@ -94,7 +106,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 
         return scope.Outcome($"{result.Length}/{totalLines} line(s)", new ReadFileResult(
             File:       relative,
-            Source:     isCs ? "roslyn" : "disk",
+            Source:     source,
             TotalLines: totalLines,
             StartLine:  first,
             EndLine:    last,
