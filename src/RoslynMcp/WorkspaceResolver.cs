@@ -164,13 +164,6 @@ internal sealed class WorkspaceResolver
 		paginationCache.InvalidateAll();
 	}
 	
-	public WorkspaceTextDocumentInfo GetTextDocumentInfo(string projectPath, string fullPath)
-	{
-		var (resolved, _) = ResolveWithKind(projectPath);
-		
-		return manager.GetTextDocumentInfo(resolved, fullPath);
-	}
-	
 	/// <summary>
 	///     Writes a text change to a tracked text document via the workspace-managed path.
 	///     For MSBuild-tracked files: single write via TryApplyChanges (FSW-suppressed).

@@ -29,9 +29,11 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			
 			return scope.Error(resolveError);
 		
-		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
-			
-			return scope.Error(solutionError);
+		// Soft resolve: a file on disk counts correctly with no workspace at all, so a transient load
+		// failure must degrade to the disk path rather than failing the whole batch. Resolved once and
+		// reused for every path, so each entry is classified against one snapshot (#288).
+		var solution = TryResolveSolution(projectPath, out var resolved, out _) ? resolved : null;
+		
 		var paths    = filePaths
 			.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
 		;
@@ -45,10 +47,11 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			
 			if(fullPath is not null) {
 				
-				if(!TryGetTextDocumentInfo(projectPath, fullPath, out var info, out var infoError))
-					return scope.Error(infoError);
+				var textDocument = solution is not null
+					? WorkspaceTextDocumentInfo.Resolve(solution, fullPath).GetDocument(solution)
+					: null;
 				
-				if(info.IsTracked && GetTextDocument(solution, info) is { } textDocument) {
+				if(textDocument is not null) {
 					
 					var text = await textDocument.GetTextAsync();
 					

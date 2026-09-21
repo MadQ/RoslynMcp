@@ -21,8 +21,9 @@ built-in tools only if a roslyn tool fails.
 - `roslyn_get_member_body` — Read a single method, property, or type body.
   Use this INSTEAD OF reading the entire file. Returns only the code you need.
 - `roslyn_read_file` — Read a file from the Roslyn workspace (in-memory, always
-  up-to-date for `.cs` files). Use INSTEAD OF Read for .cs files. For non-.cs
-  files, it reads from disk.
+  up-to-date for tracked text documents: `.cs` source, declared `AdditionalFiles`
+  items, and `.editorconfig`). Use INSTEAD OF Read for .cs files. Everything else
+  is read from disk.
 - `roslyn_get_file_outline` — Get the structure of a file (types, members,
   signatures). Use INSTEAD OF reading a file to understand its layout.
 - `roslyn_get_line_count` — Get line counts for one or more files. Use INSTEAD

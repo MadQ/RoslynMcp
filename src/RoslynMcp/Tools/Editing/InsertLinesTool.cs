@@ -162,13 +162,12 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 		}
 		
+		// TryRecoverTruncation subsumes CheckForTruncation: it detects the same empty-file outcome
+		// and additionally self-heals before reporting. Running both would re-stat the file and, for a
+		// result of four bytes or fewer, report a truncation that recovery had already cleared.
 		if(await TryRecoverTruncation(filePath, fullPath, projectPath, resultBytes) is { } truncErr)
 			
 			return scope.Error(truncErr);
-		
-		if(CheckForTruncation(filePath, fullPath, resultText.Length) is { } diskTruncErr)
-			
-			return scope.Error(diskTruncErr);
 		
 		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, Enumerable.Range(insertIndex + 1, newLines.Length), backupToken: backupToken));
 	}

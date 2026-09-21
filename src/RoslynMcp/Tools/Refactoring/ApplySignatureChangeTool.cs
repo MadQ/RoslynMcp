@@ -113,6 +113,9 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 			// Signature changes only ever add a forwarding overload and update call sites — both are
 			// in-place edits to existing .cs files. Create/Delete would indicate a plan built from an
 			// unexpected solution diff.
+			// Stricter than apply_code_fix's guard, deliberately. Since #288 the shared plan builder also
+			// emits changed additional/analyzer-config documents, so a signature change that somehow
+			// touched one now fails loudly here instead of being dropped silently.
 			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write
 				|| !IsCSharpSourcePath(file.Path)))
 				return scope.Failed("unsupported signature change", new ApplySignatureChangeResult(

@@ -101,7 +101,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetSymbolDocumentationTool` | `roslyn_get_symbol_documentation` — XML doc comments for symbols |
 | `GetSymbolDefinitionTool` | `roslyn_get_symbol_definition` — find declaration location with signature |
 | `GetSymbolsInScopeTool` | `roslyn_get_symbols_in_scope` — enumerate accessible symbols at a location |
-| `ReadFileTool` | `roslyn_read_file` — file contents with line numbers (C# from in-memory workspace) |
+| `ReadFileTool` | `roslyn_read_file` — file contents with line numbers (tracked text documents from the in-memory workspace) |
 | `GetLineCountTool` | `roslyn_get_line_count` — line count for one or more files |
 | `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name; handles partial types |
 | `CheckSyntaxTool` | `roslyn_check_syntax` — validate a C# snippet for syntax (and optionally semantic) errors without writing to disk; fast pre-flight check before writing; returns `valid`, counts, and `DiagnosticItem[]` with 1-indexed lines mapped back to the original snippet |
@@ -133,7 +133,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - `Tools/Search/` — 4 file/content search tools (list files, text search, semantic search, string literal search)
 - `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
-- `Tools/CodeFix/` — 2 code-fix tools (`roslyn_preview_code_fix` → `roslyn_apply_code_fix`; bundled providers only, Phase 1 restricted to modifying existing in-workspace `.cs` files — may span multiple files, but no adds/removes/renames or non-`.cs` changes)
+- `Tools/CodeFix/` — 2 code-fix tools (`roslyn_preview_code_fix` → `roslyn_apply_code_fix`; bundled providers only, Phase 1 restricted to modifying existing in-workspace text documents — `.cs` source, declared `AdditionalFiles` items, and analyzer config — may span multiple files, but no adds/removes/renames)
 - `Tools/Refactoring/` — 2 signature-change tools (`roslyn_change_signature` → `roslyn_apply_signature_change`)
 - `Tools/Build/` — 3 MSBuild/dotnet CLI tools (build, clean, restore)
 - `Tools/` root — `RoslynMcpTool.cs`, `RoslynMcpTool.ToolScope.cs`, `RoslynMcpTool.Discovery.cs`, `ToolResults.cs`, `ErrorResult.cs`, `InfoTool.cs`, `RespawnTool.cs` (debug-only), `DebugAttachTool.cs` (debug-only)
