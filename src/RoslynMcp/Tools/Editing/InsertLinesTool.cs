@@ -154,37 +154,20 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 				hint));
 		}
 		
-		// For .cs files: single write via workspace API with FSW suppression + self-healing recovery.
-		// For all other types: direct FileWriter write, then InvalidateFile — which classifies the
-		// path, so only a compilation/evaluation input flags a reload and a .md or .txt is a no-op (#273).
-		if(fullPath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) {
+		try {
 			
-			try {
-				await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
-			}
-			
-			if(await TryRecoverTruncation(filePath, fullPath, projectPath, resultBytes) is { } truncErr)
-				
-				return scope.Error(truncErr);
+			await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
 		}
-		else {
-			
-			try {
-				FileWriter.WriteAllText(fullPath, resultText);
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
-			}
-			
-			workspace.InvalidateFile(projectPath, fullPath);
-			
-			if(CheckForTruncation(filePath, fullPath, resultText.Length) is { } truncErr)
-				
-				return scope.Error(truncErr);
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
+			return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
 		}
+		
+		// TryRecoverTruncation subsumes CheckForTruncation: it detects the same empty-file outcome
+		// and additionally self-heals before reporting. Running both would re-stat the file and, for a
+		// result of four bytes or fewer, report a truncation that recovery had already cleared.
+		if(await TryRecoverTruncation(filePath, fullPath, projectPath, resultBytes) is { } truncErr)
+			
+			return scope.Error(truncErr);
 		
 		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, Enumerable.Range(insertIndex + 1, newLines.Length), backupToken: backupToken));
 	}

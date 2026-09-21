@@ -490,26 +490,15 @@ internal sealed partial class WorkspaceManager
 			
 			if(isMSBuild) {
 				
-				var docIds = currentSolution.GetDocumentIdsWithFilePath(fullPath);
+				var impact = ClassifyEditImpact(currentSolution, fullPath, out var info, out var reason);
 				
-				// GetDocumentIdsWithFilePath returns ids for additional and analyzer-config
-				// documents too, not only source — classify by the first id (all ids for one
-				// physical path share a kind) before deciding how to apply the edit (#276).
-				var kind = docIds.Length > 0 ? ClassifyTrackedDocument(currentSolution, docIds[0]) : TrackedDocumentKind.Unknown;
-				
-				if(kind is TrackedDocumentKind.Source or TrackedDocumentKind.Additional) {
+				if(impact is WorkspaceEditImpact.Incremental) {
 					
 					try {
 						
 						using var stream = File.OpenRead(fullPath);
-						var newText = SourceText.From(stream, FileWriter.Utf8NoBom);
-						var newSolution = currentSolution
-						;
-						
-						foreach(var id in docIds)
-							newSolution = kind == TrackedDocumentKind.Additional
-								? newSolution.WithAdditionalDocumentText(id, newText)
-								: newSolution.WithDocumentText(id, newText);
+						var newText     = SourceText.From(stream, FileWriter.Utf8NoBom);
+						var newSolution = info.WithText(currentSolution, newText);
 						
 						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
 						// flag for full reload so the next GetCompilation picks up the new content.
@@ -523,28 +512,28 @@ internal sealed partial class WorkspaceManager
 					{ }
 					catch(InvalidOperationException ex) {
 						
-						// Defensive only — reachable if a path's ids ever span mixed kinds (e.g. a
-						// regular document in one project, additional in another) so the first id's
-						// kind does not describe every id. Flag a reload instead of letting Solution's
-						// kind-mismatch exception propagate out of the FSW debounce timer (#276).
+						// Defensive only — see WorkspaceTextDocumentInfo.WithText for the mixed-kind case.
+						// Flag a reload instead of letting Solution's kind-mismatch exception propagate out
+						// of the FSW debounce timer (#276).
 						logger.LogInfo("Reload", $"Flagged (incremental apply threw {ex.GetType().Name}): {fullPath}");
 						Interlocked.Increment(ref reloadVersion);
 					}
 				}
-				else if(RequiresReload(currentSolution, fullPath, out var reason)) {
+				else if(impact is WorkspaceEditImpact.Reload) {
 					
 					// Unconditional bump, unlike FlagReload's == 0 guard: a genuinely new input must move
-					// the generation so an in-flight reload that predates it is discarded. Also reached
-					// for an existing analyzer-config document (kind == AnalyzerConfig): TryApplyChanges
-					// throws for ChangeAnalyzerConfigDocument, so .editorconfig/.globalconfig edits
-					// always reload rather than apply incrementally (#276).
+					// the generation so an in-flight reload that predates it is discarded. Also reached for
+					// an existing analyzer-config document, which ClassifyEditImpact never reports as
+					// Incremental — TryApplyChanges throws for ChangeAnalyzerConfigDocument, so
+					// .editorconfig/.globalconfig edits always reload rather than apply incrementally (#276).
 					logger.LogInfo("Reload", $"Flagged ({reason}): {fullPath}");
 					Interlocked.Increment(ref reloadVersion);
 					InvalidateCompilation();
 				}
 				
-				// Otherwise not a compilation input (CHANGELOG.md, a .txt, an unrelated .json) — the
-				// workspace has nothing to invalidate. WorkspaceResolver still clears the pagination cache.
+				// Otherwise WorkspaceEditImpact.None — not a compilation input (CHANGELOG.md, a .txt, an
+				// unrelated .json). The workspace has nothing to invalidate; WorkspaceResolver still clears
+				// the pagination cache.
 			}
 			
 			// Adhoc needs no classification: AddOrUpdateDocument returns for non-.cs paths, and
@@ -1148,7 +1137,7 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		
-		// For MSBuild-tracked .cs files: routes through TryApplyChanges as the single
+		// For MSBuild-tracked source/additional text documents: routes through TryApplyChanges as the single
 		// disk write (FSW-suppressed via ApplyChangesWithFswSuppressed). Returns false
 		// for Adhoc workspaces (TryApplyChanges is in-memory only) or for files not
 		// tracked by the workspace — callers fall back to WriteAndInvalidate.
@@ -1174,16 +1163,22 @@ internal sealed partial class WorkspaceManager
 				@lock.ExitReadLock();
 			}
 			
-			var docIds = currentSolution.GetDocumentIdsWithFilePath(filePath);
+			var info = WorkspaceTextDocumentInfo.Resolve(currentSolution, filePath);
 			
-			if(docIds.IsEmpty)
+			if(!info.SupportsIncrementalTextChange)
 				
 				return false;
 			
-			var newSolution = currentSolution;
+			Solution newSolution;
 			
-			foreach(var id in docIds)
-				newSolution = newSolution.WithDocumentText(id, newText);
+			try {
+				
+				newSolution = info.WithText(currentSolution, newText);
+			}
+			catch(InvalidOperationException) {
+				
+				return false;
+			}
 			
 			return ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws);
 		}
@@ -1459,36 +1454,45 @@ internal sealed partial class WorkspaceManager
 		}
 
 		/// <summary>
-		///     What kind of tracked <see cref="TextDocument"/> a <see cref="DocumentId"/> from
-		///     <see cref="Solution.GetDocumentIdsWithFilePath"/> identifies — that method returns ids
-		///     for regular source documents, <c>AdditionalFiles</c> items, and analyzer-config files
-		///     alike, but only <see cref="Solution.WithDocumentText"/> accepts a source-document id;
-		///     calling it with any other kind throws <see cref="InvalidOperationException"/> (#276).
+		///     What an edit to a given path means for the workspace (#288). The single decision point
+		///     behind <see cref="InvalidateFile"/> and <see cref="FlushMSBuild"/>, which share the
+		///     classification but not the flagging mechanics — InvalidateFile bumps
+		///     <see cref="reloadVersion"/> unconditionally, FlushMSBuild goes through
+		///     <see cref="FlagReload"/> with its <c>== 0</c> guard.
 		/// </summary>
-		enum TrackedDocumentKind { Source, Additional, AnalyzerConfig, Unknown }
-
-		/// <summary>
-		///     Classifies <paramref name="id"/> per <see cref="TrackedDocumentKind"/>. Used by
-		///     <see cref="InvalidateFile"/> and <see cref="FlushMSBuild"/> to route an edit to
-		///     <see cref="Solution.WithDocumentText"/> or <see cref="Solution.WithAdditionalDocumentText"/>,
-		///     or — for an analyzer-config document, which <c>MSBuildWorkspace.CanApplyChange</c>
-		///     reports <c>false</c> for as of Roslyn 5.3.0 (verified) — to the full-reload path.
-		/// </summary>
-		static TrackedDocumentKind ClassifyTrackedDocument(Solution solution, DocumentId id)
+		enum WorkspaceEditImpact
 		{
-			if(solution.GetDocument(id) is not null)
-				
-				return TrackedDocumentKind.Source;
+			/// <summary>Not a compilation or evaluation input — the workspace has nothing to do.</summary>
+			None,
 			
-			if(solution.GetAdditionalDocument(id) is not null)
-				
-				return TrackedDocumentKind.Additional;
+			/// <summary>Tracked as a source or additional document; apply the new text in place.</summary>
+			Incremental,
 			
-			if(solution.GetAnalyzerConfigDocument(id) is not null)
-				
-				return TrackedDocumentKind.AnalyzerConfig;
+			/// <summary>A compilation/evaluation input that cannot be updated in place — reload.</summary>
+			Reload
+		}
+		
+		/// <summary>
+		///     Decides how <paramref name="fullPath"/> must be handled, and hands back the resolved
+		///     <paramref name="info"/> so the caller can apply text without re-classifying.
+		///     <paramref name="reason"/> is meaningful only for <see cref="WorkspaceEditImpact.Reload"/>.
+		/// </summary>
+		WorkspaceEditImpact ClassifyEditImpact(
+			Solution                      solution,
+			string                        fullPath,
+			out WorkspaceTextDocumentInfo info,
+			out string                    reason)
+		{
+			info   = WorkspaceTextDocumentInfo.Resolve(solution, fullPath);
+			reason = "";
 			
-			return TrackedDocumentKind.Unknown;
+			if(info.SupportsIncrementalTextChange)
+				
+				return WorkspaceEditImpact.Incremental;
+			
+			return RequiresReload(solution, fullPath, out reason)
+				? WorkspaceEditImpact.Reload
+				: WorkspaceEditImpact.None;
 		}
 
 		/// <summary>
@@ -1752,45 +1756,21 @@ internal sealed partial class WorkspaceManager
 				
 				try {
 					
-					var docIds = newSolution.GetDocumentIdsWithFilePath(path);
-					
-					// MSBuildWorkspace doesn't support AddDocument via TryApplyChanges —
-					// it modifies the .csproj, conflicting with SDK-style implicit includes.
-					// Flag for full workspace reload on next tool call.
-					if(docIds.Length == 0) {
+					var impact = ClassifyEditImpact(newSolution, path, out var info, out var reason);
 
-						// ...unless RequiresReload says it is not a compilation input. Its first rule drops
-						// build output: a .cs under bin/ or obj/ that is not already a document is a
-						// compiler artifact, not source, and reloading the whole workspace for it is pure
-						// cost. Generated documents that ARE compilation inputs (*.AssemblyInfo.cs,
-						// *.GlobalUsings.g.cs) have docIds and never reach this branch, so they keep
-						// updating normally. Non-.cs paths now arrive here too (AdditionalFiles,
-						// .editorconfig, props/targets, etc.), and the shared predicate decides which
-						// ones matter.
-						if(!RequiresReload(newSolution, path, out var reason))
-							continue;
+					// Not an incremental candidate — either no document tracks this path yet (MSBuildWorkspace
+					// doesn't support AddDocument via TryApplyChanges: it modifies the .csproj, conflicting with
+					// SDK-style implicit includes), or it is an analyzer-config document, which
+					// MSBuildWorkspace.CanApplyChange(ChangeAnalyzerConfigDocument) reports false for as of
+					// Roslyn 5.3.0 (verified). Both route to a full reload — unless RequiresReload says the path
+					// is not a compilation input at all. Its first rule drops build output: a .cs under bin/ or
+					// obj/ that is not already a document is a compiler artifact, not source, and reloading the
+					// whole workspace for it is pure cost. Generated documents that ARE compilation inputs
+					// (*.AssemblyInfo.cs, *.GlobalUsings.g.cs) are tracked and never reach this branch.
+					if(impact is not WorkspaceEditImpact.Incremental) {
 
-						FlagReload(reason, path);
-
-						continue;
-					}
-
-					// GetDocumentIdsWithFilePath returns ids for additional and analyzer-config
-					// documents too — classify before deciding how (or whether) to apply the
-					// edit incrementally (#276).
-					var kind = ClassifyTrackedDocument(newSolution, docIds[0]);
-
-					// Analyzer-config documents (.editorconfig, .globalconfig) are tracked here but
-					// MSBuildWorkspace.CanApplyChange(ChangeAnalyzerConfigDocument) is false as of
-					// Roslyn 5.3.0 (verified) — TryApplyChanges throws for them. Route to the same
-					// full-reload path used for a brand-new input rather than attempting
-					// WithDocumentText, which throws InvalidOperationException for a non-source id.
-					if(kind == TrackedDocumentKind.AnalyzerConfig) {
-
-						if(!RequiresReload(newSolution, path, out var reason))
-							continue;
-
-						FlagReload(reason, path);
+						if(impact is WorkspaceEditImpact.Reload)
+							FlagReload(reason, path);
 
 						continue;
 					}
@@ -1804,9 +1784,7 @@ internal sealed partial class WorkspaceManager
 					// leaves the file the same length, and any write RM did not make itself.
 					// TryGetText deliberately: it reads already-materialized text rather than
 					// forcing a load, and falls through to apply when none is available.
-					var existingDoc = kind == TrackedDocumentKind.Additional
-						? newSolution.GetAdditionalDocument(docIds[0])
-						: newSolution.GetDocument(docIds[0]);
+					var existingDoc = info.GetDocument(newSolution);
 
 					if(existingDoc is not null
 					   && existingDoc.TryGetText(out var currentText)
@@ -1814,10 +1792,7 @@ internal sealed partial class WorkspaceManager
 
 						continue;
 
-					foreach(var id in docIds)
-						newSolution = kind == TrackedDocumentKind.Additional
-							? newSolution.WithAdditionalDocumentText(id, text)
-							: newSolution.WithDocumentText(id, text);
+					newSolution = info.WithText(newSolution, text);
 
 					applyFailed ??= path;
 					modified = true;
@@ -1827,7 +1802,7 @@ internal sealed partial class WorkspaceManager
 					
 					// Defensive only — reachable if the same physical path is tracked with mixed
 					// kinds across projects (e.g. a source document in one, an AdditionalFiles item
-					// in another), so classifying by docIds[0] does not describe every id in the
+					// in another), so the kind of the first id does not describe every id in the
 					// array. Without this, the exception would propagate out of the per-path try,
 					// abandoning the rest of `changed` unprocessed for this flush cycle — mirrors the
 					// same defensive catch in InvalidateFile (#276).

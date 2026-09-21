@@ -1085,6 +1085,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     True when <paramref name="path"/> is a C# source file. The shared spelling of the
+	///     C#-only requirement for tools backed by <see cref="SyntaxTree"/>/<c>SemanticModel</c>,
+	///     which is a genuinely different question from "is this tracked by Roslyn" — see
+	///     <see cref="WorkspaceTextDocumentInfo"/> for that one (#288).
+	/// </summary>
+	protected static bool IsCSharpSourcePath(string path) =>
+		string.Equals(Path.GetExtension(path), ".cs", StringComparison.OrdinalIgnoreCase);
+	
+	/// <summary>
 	///     Normalizes a file path for cross-platform compatibility by converting forward slashes
 	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
 	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.

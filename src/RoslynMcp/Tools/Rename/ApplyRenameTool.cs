@@ -117,7 +117,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 			// non-.cs lifecycle changes slipping through would indicate a plan built from the wrong
 			// symbol or solution). Write is unrestricted to match prior rename behavior.
 			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write
-				&& !string.Equals(Path.GetExtension(file.Path), ".cs", StringComparison.OrdinalIgnoreCase)))
+				&& !IsCSharpSourcePath(file.Path)))
 				return scope.Failed("unsupported rename change", new ApplyRenameResult(
 					"Rename apply only supports creating or deleting .cs files; a non-C# file lifecycle change was detected.",
 					null, null, "unsupported rename change", null, null));

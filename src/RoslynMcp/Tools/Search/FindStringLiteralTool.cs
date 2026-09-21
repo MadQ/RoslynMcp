@@ -150,7 +150,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 					if(!GlobMatcher.Matches(fileName, filePattern))
 						continue;
 
-					if(!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+					if(!IsCSharpSourcePath(fileName))
 						continue;
 
 					var tree = await document.GetSyntaxTreeAsync(cancellationToken);

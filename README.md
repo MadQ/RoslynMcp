@@ -178,7 +178,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | `roslyn_get_symbol_documentation` | XML doc comments for any symbol |
 | `roslyn_get_usings` | Using directives + implicit global usings |
 | `roslyn_get_project_info` | Project metadata: TFM, packages, language version |
-| `roslyn_read_file` | File contents with line numbers (C# from in-memory workspace) |
+| `roslyn_read_file` | File contents with line numbers (tracked text documents from the in-memory workspace) |
 | `roslyn_get_line_count` | Line count for one or more files |
 | `roslyn_get_diagnostics` | Compiler errors and warnings without building |
 | `roslyn_get_trivia` | Whitespace, comments, formatting trivia (experimental) |

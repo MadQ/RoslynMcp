@@ -90,6 +90,36 @@ internal sealed class PhysicalSolutionApplyPlan
 				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
 			}
 			
+			foreach(var documentId in projectChange.GetChangedAdditionalDocuments()) {
+				
+				var document = newSolution.GetAdditionalDocument(documentId);
+				
+				if(document?.FilePath is null)
+					continue;
+				
+				if(!previewFileStates.TryGetValue(document.FilePath, out var previewState)
+					|| previewState.IntendedBytes is null)
+					throw new PhysicalApplyPlanException(
+						$"The preview does not contain intended bytes for '{document.FilePath}'.");
+				
+				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
+			}
+			
+			foreach(var documentId in projectChange.GetChangedAnalyzerConfigDocuments()) {
+				
+				var document = newSolution.GetAnalyzerConfigDocument(documentId);
+				
+				if(document?.FilePath is null)
+					continue;
+				
+				if(!previewFileStates.TryGetValue(document.FilePath, out var previewState)
+					|| previewState.IntendedBytes is null)
+					throw new PhysicalApplyPlanException(
+						$"The preview does not contain intended bytes for '{document.FilePath}'.");
+				
+				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
+			}
+			
 			foreach(var documentId in projectChange.GetRemovedDocuments()) {
 				
 				var document = baseSolution.GetDocument(documentId);

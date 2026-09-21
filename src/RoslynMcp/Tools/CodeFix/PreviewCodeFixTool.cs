@@ -267,12 +267,10 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			
 			if(projectChange.GetAddedAdditionalDocuments().Any()
 				|| projectChange.GetRemovedAdditionalDocuments().Any()
-				|| projectChange.GetChangedAdditionalDocuments().Any()
 				|| projectChange.GetAddedAnalyzerConfigDocuments().Any()
-				|| projectChange.GetRemovedAnalyzerConfigDocuments().Any()
-				|| projectChange.GetChangedAnalyzerConfigDocuments().Any())
+				|| projectChange.GetRemovedAnalyzerConfigDocuments().Any())
 				throw new UnsupportedCodeFixChangeException(
-					"Phase 1 code fixes cannot change additional documents or analyzer configuration files.");
+					"Phase 1 code fixes can modify existing text documents only; creating or deleting additional or analyzer configuration files is not supported.");
 			
 			if(projectChange.GetAddedProjectReferences().Any()
 				|| projectChange.GetRemovedProjectReferences().Any()
@@ -303,13 +301,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 					throw new UnsupportedCodeFixChangeException(
 						$"Phase 1 code fixes cannot move or rename source file '{oldDocument.FilePath}'.");
 				
-				if(!string.Equals(Path.GetExtension(oldDocument.FilePath), ".cs", StringComparison.OrdinalIgnoreCase))
-					throw new UnsupportedCodeFixChangeException(
-						$"Phase 1 code fixes can modify C# files only; '{oldDocument.FilePath}' is not a .cs file.");
-				
 				if(!File.Exists(oldDocument.FilePath))
 					throw new UnsupportedCodeFixChangeException(
-						$"Phase 1 code fixes can modify existing C# files only; '{oldDocument.FilePath}' does not exist.");
+						$"Phase 1 code fixes can modify existing text files only; '{oldDocument.FilePath}' does not exist.");
 				
 				if(baseSolution.GetDocumentIdsWithFilePath(oldDocument.FilePath).Skip(1).Any())
 					throw new UnsupportedCodeFixChangeException(
@@ -336,12 +330,83 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				
 				changedDocumentCount++;
 			}
+			
+			foreach(var documentId in projectChange.GetChangedAdditionalDocuments()) {
+				var oldDocument = baseSolution.GetAdditionalDocument(documentId);
+				var newDocument = newSolution.GetAdditionalDocument(documentId);
+				
+				if(oldDocument?.FilePath is null || newDocument?.FilePath is null)
+					throw new UnsupportedCodeFixChangeException(
+						"Phase 1 code fixes require every changed additional document to have a physical file path.");
+				
+				ValidateChangedPhysicalTextDocument(
+					baseSolution,
+					oldDocument,
+					newDocument,
+					canonicalRoot,
+					comparison,
+					"additional document");
+				
+				changedDocumentCount++;
+			}
+			
+			foreach(var documentId in projectChange.GetChangedAnalyzerConfigDocuments()) {
+				var oldDocument = baseSolution.GetAnalyzerConfigDocument(documentId);
+				var newDocument = newSolution.GetAnalyzerConfigDocument(documentId);
+				
+				if(oldDocument?.FilePath is null || newDocument?.FilePath is null)
+					throw new UnsupportedCodeFixChangeException(
+						"Phase 1 code fixes require every changed analyzer config document to have a physical file path.");
+				
+				ValidateChangedPhysicalTextDocument(
+					baseSolution,
+					oldDocument,
+					newDocument,
+					canonicalRoot,
+					comparison,
+					"analyzer config document");
+				
+				changedDocumentCount++;
+			}
 		}
 		
 		if(changedDocumentCount == 0)
-			throw new UnsupportedCodeFixChangeException("The selected code fix contains no supported C# file modifications.");
+			throw new UnsupportedCodeFixChangeException("The selected code fix contains no supported text document modifications.");
 	}
 	
+	private static void ValidateChangedPhysicalTextDocument(
+		Solution baseSolution,
+		TextDocument oldDocument,
+		TextDocument newDocument,
+		string canonicalRoot,
+		StringComparison comparison,
+		string documentKind)
+	{
+		if(!string.Equals(oldDocument.FilePath, newDocument.FilePath, comparison))
+			throw new UnsupportedCodeFixChangeException(
+				$"Phase 1 code fixes cannot move or rename {documentKind} '{oldDocument.FilePath}'.");
+		
+		if(!File.Exists(oldDocument.FilePath))
+			throw new UnsupportedCodeFixChangeException(
+				$"Phase 1 code fixes can modify existing text files only; '{oldDocument.FilePath}' does not exist.");
+		
+		if(baseSolution.GetDocumentIdsWithFilePath(oldDocument.FilePath).Skip(1).Any())
+			throw new UnsupportedCodeFixChangeException(
+				$"Phase 1 code fixes cannot modify linked {documentKind} '{oldDocument.FilePath}'.");
+		
+		var canonicalFile = ResolveCanonicalPath(oldDocument.FilePath);
+		var relativePath = Path.GetRelativePath(canonicalRoot, canonicalFile);
+		
+		if(Path.IsPathRooted(relativePath)
+			|| relativePath == ".."
+			|| relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+			|| relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+			throw new UnsupportedCodeFixChangeException(
+				$"Phase 1 code fixes cannot modify external or linked file '{oldDocument.FilePath}'.");
+		
+		EnsureFileWritable(oldDocument.FilePath);
+	}
+
 	private static bool IsGeneratedFile(string canonicalPath, string relativePath, SourceText text)
 	{
 		var segments = relativePath.Split(

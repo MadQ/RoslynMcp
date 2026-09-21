@@ -113,10 +113,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					"invalid physical plan"));
 			}
 			
-			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write
-				|| !string.Equals(Path.GetExtension(file.Path), ".cs", StringComparison.OrdinalIgnoreCase)))
+			// No extension guard here, unlike apply_signature_change: a Phase 1 fix may legitimately
+			// modify a tracked AdditionalFiles item or .editorconfig (#288). The kind restriction lives
+			// in PreviewCodeFixTool.ValidateSupportedChangesAsync, which this plan was built from; the
+			// operation check below stays as the apply-side guard against a plan that adds or deletes.
+			if(plan.Files.Any(file => file.Operation != PhysicalFileOperation.Write))
 				return scope.Failed("unsupported code-fix change", new ApplyCodeFixResult(
-					"Code-fix apply accepts modifications to existing C# files only; file creation and deletion are not supported.",
+					"Code-fix apply accepts modifications to existing text files only; file creation and deletion are not supported.",
 					null,
 					"unsupported code-fix change"));
 			
