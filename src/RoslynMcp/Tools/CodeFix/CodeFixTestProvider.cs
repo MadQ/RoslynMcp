@@ -96,6 +96,43 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 				
 				break;
 			
+			case "TestModifyAdditionalDocument":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Modify additional document",
+						ct => ModifyAdditionalDocumentAsync(context.Document, ct),
+						"test_modify_additional_document"),
+					diagnostic);
+				break;
+			
+			case "TestModifyAnalyzerConfig":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Modify analyzer config",
+						ct => ModifyAnalyzerConfigAsync(context.Document, ct),
+						"test_modify_analyzer_config"),
+					diagnostic);
+				break;
+			
+			case "TestDeleteAdditionalDocument":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Delete additional document",
+						ct => DeleteAdditionalDocumentAsync(context.Document, ct),
+						"test_delete_additional_document"),
+					diagnostic);
+				break;
+			
+			case "TestDeleteAnalyzerConfig":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Delete analyzer config",
+						ct => DeleteAnalyzerConfigAsync(context.Document, ct),
+						"test_delete_analyzer_config"),
+					diagnostic);
+				break;
+			
+
 			case "TestAddedProject":
 				context.RegisterCodeFix(
 					CodeAction.Create(
@@ -251,6 +288,57 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 		return Task.FromResult(solution);
 	}
 	
+	static async Task<Solution> ModifyAdditionalDocumentAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var additional = document.Project.AdditionalDocuments
+			.First(candidate => candidate.Name == "Tracked.txt");
+		var source = await document.GetTextAsync(cancellationToken);
+		var solution = document.Project.Solution.WithDocumentText(
+			document.Id,
+			SourceText.From(source.ToString().Replace("TestModifyAdditionalDocument", "object", StringComparison.Ordinal)));
+
+		return solution.WithAdditionalDocumentText(
+			additional.Id,
+			SourceText.From("probe = after\n"));
+	}
+	
+	static async Task<Solution> ModifyAnalyzerConfigAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var config = document.Project.AnalyzerConfigDocuments
+			.First(candidate => candidate.Name == ".editorconfig");
+		var source = await document.GetTextAsync(cancellationToken);
+		var solution = document.Project.Solution.WithDocumentText(
+			document.Id,
+			SourceText.From(source.ToString().Replace("TestModifyAnalyzerConfig", "object", StringComparison.Ordinal)));
+
+		return solution.WithAnalyzerConfigDocumentText(
+			config.Id,
+			SourceText.From("root = true\n# after\n"));
+	}
+	
+	static Task<Solution> DeleteAdditionalDocumentAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var additional = document.Project.AdditionalDocuments
+			.First(candidate => candidate.Name == "Tracked.txt");
+		return Task.FromResult(document.Project.Solution.RemoveAdditionalDocument(additional.Id));
+	}
+	
+	static Task<Solution> DeleteAnalyzerConfigAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var config = document.Project.AnalyzerConfigDocuments
+			.First(candidate => candidate.Name == ".editorconfig");
+		return Task.FromResult(document.Project.Solution.RemoveAnalyzerConfigDocument(config.Id));
+	}
+	
+
 	static Task<Solution> AddProjectAsync(
 		Document document,
 		CancellationToken cancellationToken)

@@ -537,6 +537,88 @@ internal static class CodeFixTests
 				DeleteWorkspace(workspacePath);
 			}
 		}
+
+		async Task<(bool pass, string msg)> RunTrackedNonCSharpDocuments()
+		{
+			var sw = Stopwatch.StartNew();
+
+			async Task<(bool pass, string message)> RunCase(
+				string marker,
+				string documentPath,
+				bool expectApply,
+				string expectedText)
+			{
+				using var fixture = TestFixtures.NewMsBuildProject(
+					$"CodeFixTracked_{marker}",
+					extraProjectXml: """
+						<ItemGroup>
+						  <AdditionalFiles Include="Tracked.txt" />
+						</ItemGroup>
+						""");
+
+				fixture.Write("Tracked.txt", "probe = before\n");
+				fixture.Write(".editorconfig", "root = true\n# before\n");
+				fixture.Write("Probe.cs", $"class CodeFixFixture {{ {marker} value; }}\n");
+				await fixture.WarmAsync(ctx);
+
+				var (preview, previewText) = await Call("roslyn_preview_code_fix", new {
+					projectPath = fixture.Csproj,
+					filePath = "Probe.cs",
+					line = 1,
+					column = 24,
+					diagnosticId = "CS0246"
+				});
+				var token = preview?["token"]?.GetValue<string>();
+
+				if(!expectApply) {
+					var rejected = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
+						&& token is null;
+
+					return (rejected,
+						rejected
+							? $"PASS  ({marker}: add/delete rejected)"
+							: $"FAIL  ({marker} preview: {previewText})");
+				}
+
+				if(token is null)
+					return (false, $"FAIL  ({marker} preview: {previewText})");
+
+				var (apply, applyText) = await Apply(token, fixture.Csproj!);
+				var actual = await File.ReadAllTextAsync(fixture.PathOf(documentPath));
+				var (read, readText) = await Call("roslyn_read_file", new {
+					projectPath = fixture.Csproj,
+					filePath = documentPath
+				});
+				var applied = apply?["error"] is null
+					&& HasFileState(apply, documentPath, "written")
+					&& actual == expectedText
+					&& read?["source"]?.GetValue<string>() == "roslyn"
+					&& readText.Contains(expectedText.Split('\n', StringSplitOptions.RemoveEmptyEntries)[0], StringComparison.Ordinal);
+
+				return (applied,
+					applied
+						? $"PASS  ({marker}: preview/apply/read verified)"
+						: $"FAIL  ({marker} apply: {applyText}; read: {readText})");
+			}
+
+			var cases = new[] {
+				("TestModifyAdditionalDocument", "Tracked.txt", true, "probe = after\n"),
+				("TestModifyAnalyzerConfig", ".editorconfig", true, "root = true\n# after\n"),
+				("TestAdditionalDocument", "Tracked.txt", false, "probe = before\n"),
+				("TestDeleteAdditionalDocument", "Tracked.txt", false, "probe = before\n"),
+				("TestAnalyzerConfig", ".editorconfig", false, "root = true\n# before\n"),
+				("TestDeleteAnalyzerConfig", ".editorconfig", false, "root = true\n# before\n")
+			};
+
+			foreach(var (marker, documentPath, expectApply, expectedText) in cases) {
+				var result = await RunCase(marker, documentPath, expectApply, expectedText);
+
+				if(!result.pass)
+					return (false, $"FAIL  ({result.message}) [{sw.ElapsedMilliseconds}ms]");
+			}
+
+			return (true, $"PASS  [{sw.ElapsedMilliseconds}ms]");
+		}
 		
 		async Task<(bool pass, string msg)> RunUnsupportedSolutionShapesRejected()
 		{
@@ -851,6 +933,7 @@ internal static class CodeFixTests
 			new("code-fix token is rejected by rename apply and survives", RunCodeFixTokenRejectedByRename),
 			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
 			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
+			new("tracked additional and analyzer-config documents support safe edits only", RunTrackedNonCSharpDocuments),
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),
 			new("external file changes are rejected during preview", RunExternalPathRejectedAtPreview),
