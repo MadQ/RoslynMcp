@@ -282,7 +282,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 					"Phase 1 code fixes cannot change project, metadata, or analyzer references.");
 			
 			// An analyzer-config edit changes CompilationOptions only through the SyntaxTreeOptionsProvider
-			// derived from it; stripping the provider keeps every explicit option change rejectable.
+			// derived from it; stripping the provider keeps every explicit option change rejectable. A code
+			// action cannot inject its own provider: ProjectState replaces it with a workspace-derived one on
+			// every CompilationOptions update, so a provider difference can only come from analyzer config.
 			if(!string.Equals(oldProject.Name, newProject.Name, StringComparison.Ordinal)
 				|| !string.Equals(oldProject.AssemblyName, newProject.AssemblyName, StringComparison.Ordinal)
 				|| !string.Equals(oldProject.FilePath, newProject.FilePath, comparison)
