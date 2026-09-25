@@ -281,14 +281,15 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				throw new UnsupportedCodeFixChangeException(
 					"Phase 1 code fixes cannot change project, metadata, or analyzer references.");
 			
-			var changedAnalyzerConfig = projectChange.GetChangedAnalyzerConfigDocuments().Any();
-
+			// An analyzer-config edit changes CompilationOptions only through the SyntaxTreeOptionsProvider
+			// derived from it; stripping the provider keeps every explicit option change rejectable.
 			if(!string.Equals(oldProject.Name, newProject.Name, StringComparison.Ordinal)
 				|| !string.Equals(oldProject.AssemblyName, newProject.AssemblyName, StringComparison.Ordinal)
 				|| !string.Equals(oldProject.FilePath, newProject.FilePath, comparison)
-				|| (!changedAnalyzerConfig
-					&& (!Equals(oldProject.CompilationOptions, newProject.CompilationOptions)
-						|| !Equals(oldProject.ParseOptions, newProject.ParseOptions))))
+				|| !Equals(
+					oldProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null),
+					newProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null))
+				|| !Equals(oldProject.ParseOptions, newProject.ParseOptions))
 				throw new UnsupportedCodeFixChangeException(
 					"Phase 1 code fixes cannot change project identity, compilation options, or parse options.");
 			

@@ -109,8 +109,17 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 				context.RegisterCodeFix(
 					CodeAction.Create(
 						"Modify analyzer config",
-						ct => ModifyAnalyzerConfigAsync(context.Document, ct),
+						ct => ModifyAnalyzerConfigAsync(context.Document, marker, false, ct),
 						"test_modify_analyzer_config"),
+					diagnostic);
+				break;
+			
+			case "TestAnalyzerConfigWithOptions":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Modify analyzer config and compilation options",
+						ct => ModifyAnalyzerConfigAsync(context.Document, marker, true, ct),
+						"test_analyzer_config_with_options"),
 					diagnostic);
 				break;
 			
@@ -306,6 +315,8 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 	
 	static async Task<Solution> ModifyAnalyzerConfigAsync(
 		Document document,
+		string marker,
+		bool changeCompilationOptions,
 		CancellationToken cancellationToken)
 	{
 		var config = document.Project.AnalyzerConfigDocuments
@@ -313,11 +324,23 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 		var source = await document.GetTextAsync(cancellationToken);
 		var solution = document.Project.Solution.WithDocumentText(
 			document.Id,
-			SourceText.From(source.ToString().Replace("TestModifyAnalyzerConfig", "object", StringComparison.Ordinal)));
-
-		return solution.WithAnalyzerConfigDocumentText(
+			SourceText.From(source.ToString().Replace(marker, "object", StringComparison.Ordinal)));
+		
+		// A real severity entry, so the derived SyntaxTreeOptionsProvider changes and the
+		// validator's analyzer-config exemption is actually exercised.
+		solution = solution.WithAnalyzerConfigDocumentText(
 			config.Id,
-			SourceText.From("root = true\n# after\n"));
+			SourceText.From("root = true\n[*.cs]\ndotnet_diagnostic.CS0168.severity = error\n"));
+		
+		if(!changeCompilationOptions)
+			return solution;
+		
+		var project = solution.GetProject(document.Project.Id)!;
+		
+		return solution.WithProjectCompilationOptions(
+			project.Id,
+			project.CompilationOptions!.WithGeneralDiagnosticOption(
+				project.CompilationOptions.GeneralDiagnosticOption == ReportDiagnostic.Error ? ReportDiagnostic.Default : ReportDiagnostic.Error));
 	}
 	
 	static Task<Solution> DeleteAdditionalDocumentAsync(

@@ -611,7 +611,8 @@ internal static class CodeFixTests
 
 			var cases = new[] {
 				("TestModifyAdditionalDocument", "Tracked.txt", true, "probe = after\n"),
-				("TestModifyAnalyzerConfig", ".editorconfig", true, "root = true\n# after\n"),
+				("TestModifyAnalyzerConfig", ".editorconfig", true, "root = true\n[*.cs]\ndotnet_diagnostic.CS0168.severity = error\n"),
+				("TestAnalyzerConfigWithOptions", ".editorconfig", false, "root = true\n# before\n"),
 				("TestAdditionalDocument", "Tracked.txt", false, "probe = before\n"),
 				("TestDeleteAdditionalDocument", "Tracked.txt", false, "probe = before\n"),
 				("TestAnalyzerConfig", ".editorconfig", false, "root = true\n# before\n"),
