@@ -583,6 +583,14 @@ internal static class CodeFixTests
 				if(token is null)
 					return (false, $"FAIL  ({marker} preview: {previewText})");
 
+				// The preview diff is what the user approves, so a non-C# write missing from it is a failure.
+				var diff = preview?["diff"]?.GetValue<string>() ?? string.Empty;
+				var expectedChangedLine = expectedText.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1];
+
+				if(!diff.Contains(documentPath, StringComparison.OrdinalIgnoreCase)
+					|| !diff.Contains($"+{expectedChangedLine}", StringComparison.Ordinal))
+					return (false, $"FAIL  ({marker} preview diff omits {documentPath}: {previewText})");
+
 				var (apply, applyText) = await Apply(token, fixture.Csproj!);
 				var actual = await File.ReadAllTextAsync(fixture.PathOf(documentPath));
 				var (read, readText) = await Call("roslyn_read_file", new {
