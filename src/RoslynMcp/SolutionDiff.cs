@@ -21,22 +21,16 @@ internal static class SolutionDiff
 		foreach(var projectChange in after.GetChanges(before).GetProjectChanges()) {
 			
 			// Changed documents: both files exist, content differs.
-			foreach(var docId in projectChange.GetChangedDocuments()) {
-				
-				var oldDoc = before.GetDocument(docId)!;
-				var newDoc = after.GetDocument(docId)!;
-				
-				var oldText = (await oldDoc.GetTextAsync(cancellationToken)).ToString();
-				var newText = (await newDoc.GetTextAsync(cancellationToken)).ToString();
-				
-				if(oldText == newText)
-					continue;
-				
-				var path = oldDoc.FilePath ?? oldDoc.Name;
-				sb.AppendLine($"--- {path}");
-				sb.AppendLine($"+++ {path}");
-				sb.Append(BuildHunks(oldText, newText));
-			}
+			foreach(var docId in projectChange.GetChangedDocuments())
+				await AppendChangedAsync(sb, before.GetDocument(docId)!, after.GetDocument(docId)!, cancellationToken);
+			
+			// Changed AdditionalFiles and analyzer-config documents are written by
+			// PhysicalSolutionApplier exactly like C# documents, so the preview must show them too.
+			foreach(var docId in projectChange.GetChangedAdditionalDocuments())
+				await AppendChangedAsync(sb, before.GetAdditionalDocument(docId)!, after.GetAdditionalDocument(docId)!, cancellationToken);
+			
+			foreach(var docId in projectChange.GetChangedAnalyzerConfigDocuments())
+				await AppendChangedAsync(sb, before.GetAnalyzerConfigDocument(docId)!, after.GetAnalyzerConfigDocument(docId)!, cancellationToken);
 			
 			// Added documents: new file, e.g., a type renamed to Bar.cs.
 			foreach(var docId in projectChange.GetAddedDocuments()) {
@@ -72,6 +66,20 @@ internal static class SolutionDiff
 		}
 		
 		return sb.Length > 0 ? sb.ToString() : "(no changes)";
+	}
+	
+	private static async Task AppendChangedAsync(System.Text.StringBuilder sb, TextDocument oldDoc, TextDocument newDoc, CancellationToken cancellationToken)
+	{
+		var oldText = (await oldDoc.GetTextAsync(cancellationToken)).ToString();
+		var newText = (await newDoc.GetTextAsync(cancellationToken)).ToString();
+		
+		if(oldText == newText)
+			return;
+		
+		var path = oldDoc.FilePath ?? oldDoc.Name;
+		sb.AppendLine($"--- {path}");
+		sb.AppendLine($"+++ {path}");
+		sb.Append(BuildHunks(oldText, newText));
 	}
 	
 	/// <summary>

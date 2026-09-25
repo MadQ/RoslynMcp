@@ -96,6 +96,52 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 				
 				break;
 			
+			case "TestModifyAdditionalDocument":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Modify additional document",
+						ct => ModifyAdditionalDocumentAsync(context.Document, ct),
+						"test_modify_additional_document"),
+					diagnostic);
+				break;
+			
+			case "TestModifyAnalyzerConfig":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Modify analyzer config",
+						ct => ModifyAnalyzerConfigAsync(context.Document, marker, false, ct),
+						"test_modify_analyzer_config"),
+					diagnostic);
+				break;
+			
+			case "TestAnalyzerConfigWithOptions":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Modify analyzer config and compilation options",
+						ct => ModifyAnalyzerConfigAsync(context.Document, marker, true, ct),
+						"test_analyzer_config_with_options"),
+					diagnostic);
+				break;
+			
+			case "TestDeleteAdditionalDocument":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Delete additional document",
+						ct => DeleteAdditionalDocumentAsync(context.Document, ct),
+						"test_delete_additional_document"),
+					diagnostic);
+				break;
+			
+			case "TestDeleteAnalyzerConfig":
+				context.RegisterCodeFix(
+					CodeAction.Create(
+						"Delete analyzer config",
+						ct => DeleteAnalyzerConfigAsync(context.Document, ct),
+						"test_delete_analyzer_config"),
+					diagnostic);
+				break;
+			
+
 			case "TestAddedProject":
 				context.RegisterCodeFix(
 					CodeAction.Create(
@@ -251,6 +297,71 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 		return Task.FromResult(solution);
 	}
 	
+	static async Task<Solution> ModifyAdditionalDocumentAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var additional = document.Project.AdditionalDocuments
+			.First(candidate => candidate.Name == "Tracked.txt");
+		var source = await document.GetTextAsync(cancellationToken);
+		var solution = document.Project.Solution.WithDocumentText(
+			document.Id,
+			SourceText.From(source.ToString().Replace("TestModifyAdditionalDocument", "object", StringComparison.Ordinal)));
+
+		return solution.WithAdditionalDocumentText(
+			additional.Id,
+			SourceText.From("probe = after\n"));
+	}
+	
+	static async Task<Solution> ModifyAnalyzerConfigAsync(
+		Document document,
+		string marker,
+		bool changeCompilationOptions,
+		CancellationToken cancellationToken)
+	{
+		var config = document.Project.AnalyzerConfigDocuments
+			.First(candidate => candidate.Name == ".editorconfig");
+		var source = await document.GetTextAsync(cancellationToken);
+		var solution = document.Project.Solution.WithDocumentText(
+			document.Id,
+			SourceText.From(source.ToString().Replace(marker, "object", StringComparison.Ordinal)));
+		
+		// A real severity entry, so the derived SyntaxTreeOptionsProvider changes and the
+		// validator's analyzer-config exemption is actually exercised.
+		solution = solution.WithAnalyzerConfigDocumentText(
+			config.Id,
+			SourceText.From("root = true\n[*.cs]\ndotnet_diagnostic.CS0168.severity = error\n"));
+		
+		if(!changeCompilationOptions)
+			return solution;
+		
+		var project = solution.GetProject(document.Project.Id)!;
+		
+		return solution.WithProjectCompilationOptions(
+			project.Id,
+			project.CompilationOptions!.WithGeneralDiagnosticOption(
+				project.CompilationOptions.GeneralDiagnosticOption == ReportDiagnostic.Error ? ReportDiagnostic.Default : ReportDiagnostic.Error));
+	}
+	
+	static Task<Solution> DeleteAdditionalDocumentAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var additional = document.Project.AdditionalDocuments
+			.First(candidate => candidate.Name == "Tracked.txt");
+		return Task.FromResult(document.Project.Solution.RemoveAdditionalDocument(additional.Id));
+	}
+	
+	static Task<Solution> DeleteAnalyzerConfigAsync(
+		Document document,
+		CancellationToken cancellationToken)
+	{
+		var config = document.Project.AnalyzerConfigDocuments
+			.First(candidate => candidate.Name == ".editorconfig");
+		return Task.FromResult(document.Project.Solution.RemoveAnalyzerConfigDocument(config.Id));
+	}
+	
+
 	static Task<Solution> AddProjectAsync(
 		Document document,
 		CancellationToken cancellationToken)

@@ -29,7 +29,8 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		"Preview actions from code-fix providers bundled with RoslynMcp for a single diagnostic at a file location. " +
 		"Returns available action choices when multiple fixes exist, or returns a unified diff plus token " +
 		"for the selected fix. This is step 1 of a two-step workflow; no files are written until " +
-		"roslyn_apply_code_fix is called. Phase 1 supports targeted modifications to existing in-workspace .cs files only; " +
+		"roslyn_apply_code_fix is called. Phase 1 supports targeted modifications to existing in-workspace text documents only — .cs source, " +
+		"declared AdditionalFiles items, and analyzer config (.editorconfig/.globalconfig); " +
 		"file creation, deletion, external linked files, project-system changes, and FixAll are rejected.")]
 	public async Task<object> PreviewCodeFix(
 		[Description(ProjectPathDescription)] string projectPath,
@@ -263,7 +264,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			
 			if(projectChange.GetAddedDocuments().Any() || projectChange.GetRemovedDocuments().Any())
 				throw new UnsupportedCodeFixChangeException(
-					"Phase 1 code fixes can modify existing C# files only; creating or deleting source files is not supported.");
+					"Phase 1 code fixes can modify existing text documents only; creating or deleting source files is not supported.");
 			
 			if(projectChange.GetAddedAdditionalDocuments().Any()
 				|| projectChange.GetRemovedAdditionalDocuments().Any()
@@ -281,10 +282,16 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				throw new UnsupportedCodeFixChangeException(
 					"Phase 1 code fixes cannot change project, metadata, or analyzer references.");
 			
+			// An analyzer-config edit changes CompilationOptions only through the SyntaxTreeOptionsProvider
+			// derived from it; stripping the provider keeps every explicit option change rejectable. A code
+			// action cannot inject its own provider: ProjectState replaces it with a workspace-derived one on
+			// every CompilationOptions update, so a provider difference can only come from analyzer config.
 			if(!string.Equals(oldProject.Name, newProject.Name, StringComparison.Ordinal)
 				|| !string.Equals(oldProject.AssemblyName, newProject.AssemblyName, StringComparison.Ordinal)
 				|| !string.Equals(oldProject.FilePath, newProject.FilePath, comparison)
-				|| !Equals(oldProject.CompilationOptions, newProject.CompilationOptions)
+				|| !Equals(
+					oldProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null),
+					newProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null))
 				|| !Equals(oldProject.ParseOptions, newProject.ParseOptions))
 				throw new UnsupportedCodeFixChangeException(
 					"Phase 1 code fixes cannot change project identity, compilation options, or parse options.");
