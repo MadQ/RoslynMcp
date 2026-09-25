@@ -24,7 +24,8 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		"Commits or cancels a code fix previewed by roslyn_preview_code_fix. " +
 		"Always call preview first to obtain a token. Pass approval 'y' to apply " +
 		"or 'n' to cancel without changing files. " +
-		"Phase 1 applies targeted modifications to existing in-workspace .cs files only, not file lifecycle or project-system changes.")]
+		"Phase 1 applies targeted modifications to existing in-workspace text documents only (.cs source, " +
+		"declared AdditionalFiles items, and analyzer config), not file lifecycle or project-system changes.")]
 	public async Task<ApplyCodeFixResult> ApplyCodeFix(
 		[Description("The confirmation token returned by roslyn_preview_code_fix.")] string token,
 		[Description("'y' to apply this code fix; 'n' to cancel without writing files.")] string approval,

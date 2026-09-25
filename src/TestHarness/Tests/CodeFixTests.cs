@@ -601,7 +601,7 @@ internal static class CodeFixTests
 					&& HasFileState(apply, documentPath, "written")
 					&& actual == expectedText
 					&& read?["source"]?.GetValue<string>() == "roslyn"
-					&& readText.Contains(expectedText.Split('\n', StringSplitOptions.RemoveEmptyEntries)[0], StringComparison.Ordinal);
+					&& readText.Contains(expectedChangedLine, StringComparison.Ordinal);
 
 				return (applied,
 					applied
