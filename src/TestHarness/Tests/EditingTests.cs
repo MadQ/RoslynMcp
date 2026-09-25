@@ -25,6 +25,10 @@ static class EditingTests
 		var tempRangeFile    = fx.Write("ranges.txt",  "replace\nkeep\nreplace\n");
 		var tempVerbatimFile = fx.PathOf("verbatim.cs");
 		
+		// Literal-escape fixture (#292): line 1 holds a backslash-n escape sequence as source text,
+		// and lines end in CRLF so a pattern with a real newline exercises the CRLF-agnostic path.
+		fx.Write("escapes.txt", "say(\"a\\nb\");\r\nnext\r\n");
+		
 		// Constructor-replacement fixture (#267): a type whose constructor shares its name, so the
 		// "no return type" misparse has something to trip on. Note that three of these files declare
 		// a type called Widget, so this fixture project deliberately does NOT compile — every test in
@@ -68,6 +72,24 @@ static class EditingTests
 					new { filePath = "ranges.txt", pattern = "replace", replacement = "updated", dryRun = true, projectPath = fx.Csproj },
 					data => data?["match_count"]?.GetValue<int>() == 2 && data?["changed_line_ranges"]?.AsArray() is [var first, var second] && first?["start"]?.GetValue<int>() == 1 && first?["end"]?.GetValue<int>() == 1 && second?["start"]?.GetValue<int>() == 3 && second?["end"]?.GetValue<int>() == 3)),
 
+			// ── Regression: literal backslash-n in literal mode (#292) ──
+			// Regex.Escape renders a real newline as \n but a literal backslash-n as \\n; the old
+			// post-escape Replace(@"\n", @"\r?\n") also rewrote the tail of \\n, so a pattern containing
+			// a backslash-n escape could never match its own text. Fails against the pre-fix builder.
+			new("roslyn_replace_in_file: literal mode matches a backslash-n escape sequence (dry run)",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_file",
+					new { filePath = "escapes.txt", pattern = @"say(""a\nb"");", replacement = "X", mode = "literal", dryRun = true, projectPath = fx.Csproj },
+					data => data?["match_count"]?.GetValue<int>() == 1 && data?["changed_line_ranges"]?.AsArray() is [var range] && range?["start"]?.GetValue<int>() == 1)),
+			
+			// The #292 fix splits on real newlines before escaping; a pattern with a real LF newline
+			// must still match the fixture's CRLF line break, preserving the CRLF-agnostic contract.
+			new("roslyn_replace_in_file: literal mode real newline still matches CRLF (dry run)",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_file",
+					new { filePath = "escapes.txt", pattern = "\");\nnext", replacement = "X", mode = "literal", dryRun = true, projectPath = fx.Csproj },
+					data => data?["match_count"]?.GetValue<int>() == 1)),
+			
 			// ── Regression: unified match-mode enum (#253) ──
 			// mode:"regex" is the new preferred form of the old useRegex=true. '\w+' is a regex
 			// metacharacter sequence: in the DEFAULT literal mode it would be sought verbatim and match

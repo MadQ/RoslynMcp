@@ -1106,7 +1106,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive = true)
 	{
-		var escaped = Regex.Escape(pattern).Replace(@"\n", @"\r?\n");
+		// Split on real newlines before escaping: Regex.Escape renders a newline as \n but a literal
+		// backslash-n as \\n, and a post-escape Replace cannot tell the two apart (#292).
+		var escaped = string.Join(@"\r?\n", pattern.Split('\n').Select(Regex.Escape));
 		var options = RegexOptions.Compiled;
 		
 		if(!caseSensitive)
