@@ -49,7 +49,8 @@ internal sealed class ServerArgs
 
     /// <summary>
     ///     Paths to preload on startup. CLI: <c>-p &lt;path&gt;</c> or <c>--preload &lt;path&gt;</c>
-    ///     (may repeat). Positional args are not supported — quote paths with spaces.
+    ///     (may repeat). Quote paths with spaces. A bare positional arg is the default-workspace
+    ///     <see cref="Root"/>, not a preload path.
     /// </summary>
     public string[] PreloadPaths { get; }
 
@@ -150,6 +151,16 @@ internal sealed class ServerArgs
     /// </summary>
     public bool WorkspaceModeSpecified { get; }
 
+    /// <summary>
+    ///     Directory (or .sln/.slnx/.csproj file) that seeds the session's default workspace — the one
+    ///     tools use when an agent omits <c>projectPath</c>. CLI: <c>--root &lt;path&gt;</c>, or the first
+    ///     bare positional argument (so the long-documented <c>"args": ["."]</c> finally means something).
+    ///     Env: <c>ROSLYNMCP_ROOT</c>. <c>null</c> when neither is given — the process CWD is used instead.
+    ///     Kept raw: resolution against the CWD, and the search for a solution, happen lazily in
+    ///     <see cref="WorkspaceManager"/> on the first call that needs a default.
+    /// </summary>
+    public string? Root { get; }
+
     // ── Env var only ─────────────────────────────────────────────────────────
 
     /// <summary>
@@ -181,6 +192,8 @@ internal sealed class ServerArgs
         string? msBuildFlag   = null;
         string? vsVersionFlag = null;
         string? elicitFlag    = null; // "true"/"false" from CLI; null = flag absent
+        string? rootFlag      = null;
+        string? rootPositional = null;
         var     noBuildHostPin = false;
         var     preload       = new List<string>();
 		
@@ -190,8 +203,12 @@ internal sealed class ServerArgs
 
             var arg = args[i];
 
-            if(!arg.StartsWith('-'))
+            // A bare token that is not a flag's value: the first one is the default-workspace root.
+            if(!arg.StartsWith('-')) {
+
+                rootPositional ??= arg;
                 continue;
+            }
 
             var value = i + 1 < length && !args[i + 1].StartsWith('-')
                 ? args[++i]
@@ -222,6 +239,10 @@ internal sealed class ServerArgs
                     vsVersionFlag = value;
                     break;
 
+                case "--root":
+                    rootFlag = value;
+                    break;
+
                 case "--elicit":
                     // Bare flag means enabled; an explicit true/false value is also accepted.
                     elicitFlag = value ?? "true";
@@ -248,6 +269,10 @@ internal sealed class ServerArgs
         WorkspaceModeSpecified = WorkspaceMode != WorkspaceMode.Auto;
 
         PreloadPaths = [..preload];
+
+        // Explicit flag beats the positional alias; either beats the env var. Empty means absent —
+        // an empty root carries no meaning, same reasoning as MsBuildPath below.
+        Root = NullIfEmpty(rootFlag) ?? NullIfEmpty(rootPositional) ?? NullIfEmpty(Env("ROSLYNMCP_ROOT"));
 
         // LogPath keeps a presence-based merge: its empty string is load-bearing (logging disabled),
         // so an explicit --log-path "" must mask ROSLYNMCP_LOG_PATH. MsBuildPath has no such

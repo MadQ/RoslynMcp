@@ -32,9 +32,19 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"Any of these is fixed by roslyn_respawn; drift alone can also be cleared by re-saving the files " +
 		"through roslyn editing tools. last_unhealthy_load is present when a dropped-reference load happened " +
 		"at any point, even if the workspace has since recovered.")]
-	public object CheckDrift([Description(ProjectPathDescription)] string projectPath)
+	public object CheckDrift([Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_check_drift", null);
+		
+		projectPath = ResolveProjectArg(projectPath);
+		
+		// Resolved before the peek so a bad or missing path — including an omitted projectPath with no
+		// default workspace — surfaces as the structured path error, not an exception the peek's
+		// filter below does not cover. GetWorkspaceInfo never runs a pending reload, so the peek
+		// still observes the workspace as-is.
+		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
+			
+			return scope.Error(wsError);
 		
 		// PeekSolution, not GetSolution: forcing the pending reload would re-sync the workspace
 		// and hide exactly the staleness this probe exists to measure.
@@ -48,9 +58,6 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			return scope.Error(new ErrorResult(ex.Message));
 		}
 		
-		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
-			
-			return scope.Error(wsError);
 		var lastSynced        = workspace.GetLastSyncedUtc(projectPath);
 		var cutoff            = lastSynced + DriftTolerance;
 		

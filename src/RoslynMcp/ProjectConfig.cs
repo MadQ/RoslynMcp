@@ -19,7 +19,8 @@ namespace RoslynMcp;
 ///     </para>
 ///     <para>
 ///         Security: this is a committed, potentially untrusted repo file. Only the
-///         commit-worthy keys <c>elicit</c>, <c>workspace</c>, and <c>vsVersion</c> are honored.
+///         commit-worthy keys <c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>, and <c>solution</c>
+///         (a bare file name beside the config file) are honored.
 ///         Machine-specific settings (log, MSBuild, and backup paths) and <c>preload</c> are never
 ///         read from it, so a hostile repo cannot point the server at arbitrary local paths. A
 ///         Visual Studio <em>version</em> is the exception that proves the rule: it selects among
@@ -53,7 +54,7 @@ internal sealed class ProjectConfig
 #endif
 	
 	/// <summary>Sentinel for "no usable project file found" — all <c>*Specified</c> flags false.</summary>
-	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, null, "");
+	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, null, null, "");
 	
 	/// <summary>Whether the file supplied a valid boolean <c>elicit</c> value.</summary>
 	public bool ElicitSpecified { get; }
@@ -73,16 +74,25 @@ internal sealed class ProjectConfig
 	/// </summary>
 	public string? VsVersion { get; }
 	
+	/// <summary>
+	///     Full path of the solution pinned by the file's <c>solution</c> key — the default workspace when
+	///     an agent omits <c>projectPath</c> and the root holds more than one solution. <c>null</c> when
+	///     absent or invalid. Only a bare <c>.sln</c>/<c>.slnx</c> file name beside the config file is
+	///     accepted, so a committed file can never name a path outside its own directory.
+	/// </summary>
+	public string? Solution { get; }
+	
 	/// <summary>Full path of the file this config was loaded from; empty for <see cref="Empty"/>.</summary>
 	public string SourcePath { get; }
 	
-	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string? vsVersion, string sourcePath)
+	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string? vsVersion, string? solution, string sourcePath)
 	{
 		ElicitSpecified    = elicitSpecified;
 		Elicit             = elicit;
 		WorkspaceSpecified = workspaceSpecified;
 		Workspace          = workspace;
 		VsVersion          = vsVersion;
+		Solution           = solution;
 		SourcePath         = sourcePath;
 	}
 	
@@ -267,6 +277,7 @@ internal sealed class ProjectConfig
 			var workspaceSpecified = false;
 			var workspace          = WorkspaceMode.Auto;
 			var vsVersion          = (string?) null;
+			var solution           = (string?) null;
 			
 			foreach(var property in doc.RootElement.EnumerateObject()) {
 				
@@ -322,6 +333,29 @@ internal sealed class ProjectConfig
 						
 						break;
 					
+					case "solution":
+						
+						// A bare file name only: anything with a directory part (including "..") or a
+						// rooted path is rejected, keeping the committed file unable to name a path
+						// outside its own directory — the same guarantee the class remarks give.
+						var solutionName = property.Value.ValueKind == JsonValueKind.String
+							? property.Value.GetString()
+							: null;
+						
+						var solutionPath = solutionName is { Length: > 0 }
+							&& Path.GetFileName(solutionName) == solutionName
+							&& (solutionName.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)
+								|| solutionName.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+							? Path.Combine(Path.GetDirectoryName(filePath)!, solutionName)
+							: null;
+						
+						if(solutionPath is not null && File.Exists(solutionPath))
+							solution = solutionPath;
+						else
+							logger.LogInfo("ProjectConfig", $"WARN: 'solution' in '{filePath}' must be the file name of an existing .sln/.slnx beside it — ignored");
+						
+						break;
+					
 					case "version":
 						// Schema version — tolerated but not interpreted in v1.
 						break;
@@ -339,12 +373,13 @@ internal sealed class ProjectConfig
 				}
 			}
 			
-			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, filePath);
+			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, solution, filePath);
 			
 			logger.LogInfo("ProjectConfig",
 				$"loaded '{filePath}': elicit={(elicitSpecified ? elicit.ToString() : "unset")}, " +
 				$"workspace={(workspaceSpecified ? workspace.ToString() : "unset")}, " +
-				$"vsVersion={vsVersion ?? "unset"}");
+				$"vsVersion={vsVersion ?? "unset"}, " +
+				$"solution={(solution is null ? "unset" : Path.GetFileName(solution))}");
 			
 			return config;
 		}

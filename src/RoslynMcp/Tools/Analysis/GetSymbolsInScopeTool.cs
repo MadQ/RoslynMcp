@@ -24,9 +24,11 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 		[Description("Relative path to the C# file, e.g. 'Core/WindowTracker.cs'. Use roslyn_list_files to discover file paths.")] string filePath,
 		[Description("1-based line number of the target position. Use roslyn_read_file to find line numbers.")] int line,
 		[Description("1-based column number of the target position. Use roslyn_read_file to find column offsets.")] int column,
-		[Description(ProjectPathDescription)] string projectPath)
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}", new { column });
+		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

@@ -28,8 +28,8 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 	)]
 	public async Task<object> InsertLines(
 		[Description("Relative path to the file from the workspace root.")                                                ] string  filePath,
-		[Description(ProjectPathDescription)] string projectPath,
 		[Description("The text to insert. May contain newlines for multi-line insertion.")                                 ] string  text,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("1-based line number to insert BEFORE. Mutually exclusive with insertAfter/insertBefore.")            ] int?    atLine       = null,
 		[Description("Literal string pattern — inserts AFTER the first line that contains it. Returns an error if no match is found. Mutually exclusive with atLine/insertBefore.")                    ] string? insertAfter  = null,
 		[Description("Literal string pattern — inserts BEFORE the first line that contains it. Returns an error if no match is found. Mutually exclusive with atLine/insertAfter.")                   ] string? insertBefore = null,
@@ -37,6 +37,8 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_insert_lines", filePath, new { atLine, insertAfter, insertBefore, dryRun });
+		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			

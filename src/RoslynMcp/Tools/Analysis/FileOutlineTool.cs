@@ -21,13 +21,14 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		"Only works on .cs files tracked in the Roslyn compilation — not on .json, .xml, or other files.")]
 	public async Task<object> GetFileOutline(
 		[Description("Relative path to a C# file in the compilation, e.g. 'Core/WindowTracker.cs'. Must be a .cs file.")] string filePath,
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Number of types to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
 		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_file_outline", filePath, new { skip, take });
 		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 100, out var cached))
 			

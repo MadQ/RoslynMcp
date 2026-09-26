@@ -52,7 +52,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		"output tail (last 30 lines) and explains the failure (e.g. locked output file, linker error). " +
 		"Do NOT run dotnet build in a terminal to investigate — error_details already has the output you need.")]
 	public async Task<object> BuildProject(
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
 		[Description(
 			"Default false: Roslyn errors short-circuit — dotnet build only runs when C# is clean, " +
@@ -63,6 +63,8 @@ internal sealed class BuildTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_build_project", null, new { targetFramework, forceBuild });
 		
+		projectPath = ResolveProjectArg(projectPath);
+		
 		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
 			
 			return scope.Error(wsError);
@@ -70,6 +72,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		if(csprojPath is null)
 			
 			return scope.Error(new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode."));
+		
+		// A solution target builds — and fast-path checks — every project in it, not just the first
+		// one the workspace lists.
+		var solutionPath = ResolvedSolutionPath(projectPath);
 		
 		// A workspace that loaded without metadata references reports a flood of phantom
 		// CS0246/CS0234 for code that compiles fine. Short-circuiting on those would fail a healthy
@@ -84,11 +90,32 @@ internal sealed class BuildTool : RoslynMcpTool
 		// itself is unhealthy and its diagnostics cannot be trusted).
 		if(!forceBuild && !unhealthyWorkspace) {
 
-			if(!TryGetCompilation(projectPath, out var compilation, out var error))
-
-				return scope.Error(error!);
+			string[] fastPathProjects = [projectPath];
 			
-			var roslynDiagnostics = GetRoslynDiagnostics(compilation, rootPath);
+			if(solutionPath is not null) {
+				
+				if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+					
+					return scope.Error(solutionError);
+				
+				// Multi-targeted projects appear once per framework with the same file path.
+				fastPathProjects = [..solution.Projects
+					.Select(p => p.FilePath)
+					.OfType<string>()
+					.Distinct(StringComparer.OrdinalIgnoreCase)];
+			}
+			
+			var roslynDiagnostics = new List<DiagnosticItem>();
+			
+			foreach(var project in fastPathProjects) {
+				
+				if(!TryGetCompilation(project, out var compilation, out var error))
+					
+					return scope.Error(error!);
+				
+				roslynDiagnostics.AddRange(GetRoslynDiagnostics(compilation, rootPath));
+			}
+			
 			var roslynErrors      = roslynDiagnostics.Where(d => d.Severity == "error").ToArray();
 			
 			if(roslynErrors.Length > 0) {
@@ -109,7 +136,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		
 		// Slow path: run actual dotnet build.
-		var args = BuildArgs(csprojPath, targetFramework)
+		var args = BuildArgs(solutionPath ?? csprojPath, targetFramework)
 		;
 		
 		string		output;

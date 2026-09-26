@@ -24,8 +24,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		"Results are paged; pass page_token from a previous response to retrieve the next page.")]
 	public async Task<object> SearchFiles(
 		[Description("Pattern to match against the CONTENT of each source line. Interpretation is controlled by 'mode' (default regex). This is not a filename filter — use filePattern to restrict which files are searched.")] string pattern,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Filename glob filter selecting WHICH files are searched (matches the file name/path, not content): e.g. '*.cs', '*Test.cs'. Default: '*.cs'. Non-C# files are never searched regardless of this filter.")] string? filePattern = null,
 		[Description("Case-sensitive matching. Default: false (case-insensitive).")] bool caseSensitive = false,
 		[Description(MatchModeDescription + "Default: 'regex'.")] string? mode = null,
@@ -36,6 +36,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, mode, skip, take });
 		
+		projectPath   = ResolveProjectArg(projectPath);
 		filePattern ??= "*.cs";
 		
 		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 200, out var cached))

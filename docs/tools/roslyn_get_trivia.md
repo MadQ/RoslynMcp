@@ -15,7 +15,7 @@ For most code-understanding tasks, prefer:
 
 ```typescript
 {
-  projectPath: string;       // Required
+  projectPath?: string;      // Optional; omit to use the project containing filePath in the default workspace
   filePath?: string;         // Required for analysis; omit only for discovery
   startLine?: number;        // Optional 1-based start line; default: start of file
   endLine?: number;          // Optional 1-based end line; default: end of file

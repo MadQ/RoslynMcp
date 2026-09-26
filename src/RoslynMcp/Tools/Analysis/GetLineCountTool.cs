@@ -21,9 +21,13 @@ internal sealed class GetLineCountTool : RoslynMcpTool
         "whole request — safe to use on mixed lists where some files may be absent.")]
     public async Task<object> GetLineCount(
 		[Description("Relative file path or comma-separated list of paths, e.g. 'WorkspaceManager.cs' or 'Foo.cs,Bar.cs,appsettings.json'. Paths are trimmed of whitespace.")] string filePaths,
-		[Description(ProjectPathDescription)] string projectPath)
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_get_line_count", filePaths);
+		
+		// Not anchored to a file: the list can span projects, and every path is counted from the
+		// solution or disk. Only the not-on-disk compilation fallback below sees a single project.
+		projectPath = ResolveProjectArg(projectPath);
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			

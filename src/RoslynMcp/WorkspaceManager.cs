@@ -8,6 +8,8 @@ enum ResolutionKind
 {
 	/// <summary>Agent passed a .csproj path directly — ideal path, no inference needed.</summary>
 	Explicit,
+	/// <summary>A .sln/.slnx path — passed by the agent, or the session default when projectPath was omitted.</summary>
+	Solution,
 	/// <summary>Agent passed a directory; a single .csproj was found inside it.</summary>
 	Directory,
 	/// <summary>Agent passed a source file; walked up the tree to find the .csproj.</summary>
@@ -128,6 +130,12 @@ internal sealed partial class WorkspaceManager : IDisposable
 				Directory.Exists(normalizedPath) ? normalizedPath : Path.GetDirectoryName(normalizedPath)!, logger)
 			;
 			cacheKey = instance.RootPath;
+		}
+		
+		else if(IsSolutionPath(normalizedPath)) {
+			
+			instance = WorkspaceInstance.ForSolution(normalizedPath, logger);
+			cacheKey = normalizedPath;
 		}
 		
 		else if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {

@@ -15,9 +15,11 @@ public RestorePackagesTool(WorkspaceResolver workspace, FileLogger logger, Pagin
 "Does not compile or validate C# source - for a full build after restore, use roslyn_build_project. " +
 "Requires a .csproj to be present.")]
 public async Task<object> RestorePackages(
-[Description(ProjectPathDescription)] string projectPath)
+[Description(OptionalProjectPathDescription)] string? projectPath = null)
 {
 using var scope = BeginTool("roslyn_restore_packages");
+
+projectPath = ResolveProjectArg(projectPath);
 
 if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
 
@@ -26,12 +28,15 @@ return scope.Error(wsError);
 if(csprojPath is null)
 return scope.Error(new ErrorResult("No .csproj found - restore requires a project file."));
 
+// A solution target restores every project in it, not just the first one the workspace lists.
+var target = ResolvedSolutionPath(projectPath) ?? csprojPath;
+
 string output;
 int exitCode;
 
 try {
 // -tl:off: disable terminal logger for predictable plain-text output.
-		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", csprojPath, "/nologo", "-tl:off"], rootPath, scope.Record)
+		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", target, "/nologo", "-tl:off"], rootPath, scope.Record)
 		;
 }
 catch(InvalidOperationException ex) {

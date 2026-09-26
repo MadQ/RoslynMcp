@@ -16,9 +16,11 @@ public CleanSolutionTool(WorkspaceResolver workspace, FileLogger logger, Paginat
 "To rebuild after cleaning, use roslyn_build_project. " +
 "For package restore only, use roslyn_restore_packages.")]
 public async Task<object> CleanSolution(
-[Description(ProjectPathDescription)] string projectPath)
+[Description(OptionalProjectPathDescription)] string? projectPath = null)
 {
 using var scope = BeginTool("roslyn_clean_solution");
+
+projectPath = ResolveProjectArg(projectPath);
 
 if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
 
@@ -27,12 +29,15 @@ return scope.Error(wsError);
 if(csprojPath is null)
 return scope.Error(new ErrorResult("No .csproj found - clean requires a project file."));
 
+// A solution target cleans every project in it, not just the first one the workspace lists.
+var target = ResolvedSolutionPath(projectPath) ?? csprojPath;
+
 string output;
 int exitCode;
 
 try {
 // -tl:off: disable terminal logger for predictable plain-text output.
-		(output, _, exitCode) = await DotnetRunner.RunAsync(["clean", csprojPath, "/nologo", "/v:quiet", "-tl:off"], rootPath, scope.Record)
+		(output, _, exitCode) = await DotnetRunner.RunAsync(["clean", target, "/nologo", "/v:quiet", "-tl:off"], rootPath, scope.Record)
 		;
 }
 catch(InvalidOperationException ex) {

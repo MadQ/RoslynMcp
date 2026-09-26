@@ -30,8 +30,8 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	public async Task<object> LocalHistory(
 		[Description("Action to perform: \"list\" (enumerate backups), \"preview\" (conflict check), or \"apply\" (restore from backup).")]
 		string  action,
-		[Description(ProjectPathDescription)]
-		string  projectPath,
+		[Description(OptionalProjectPathDescription)]
+		string? projectPath = null,
 		[Description("Backup token returned by roslyn_write_file. Required for preview and apply; optional filter for list.")]
 		string? token  = null,
 		[Description("Relative path to filter list results to a specific file. Optional.")]
@@ -41,6 +41,8 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action, new { action, filePath, force });
+		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		Task<object> task = action.ToLowerInvariant() switch {
 			

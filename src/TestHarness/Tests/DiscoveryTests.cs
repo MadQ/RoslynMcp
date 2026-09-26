@@ -84,7 +84,7 @@ static class DiscoveryTests
 			// search_files and list_files resolve the workspace ONLY through the new read-guards
 			// (TryResolveSolution / TryResolveRoot) — they have no TryGetCompilation funnel ahead of the
 			// call. Before the guard a mid-reload throw propagated unhandled and surfaced as an opaque
-			// "An error occurred invoking '<tool>'". An empty projectPath deterministically forces a
+			// "An error occurred invoking '<tool>'". A projectPath that never exists deterministically forces a
 			// resolution failure, standing in for the transient case; the tool must now return a
 			// STRUCTURED JSON error. RunTestAsync fails on non-JSON, so these fail against the pre-guard
 			// server — not tautological: they assert the direct resolver call is now wrapped.
@@ -92,13 +92,13 @@ static class DiscoveryTests
 			new("roslyn_search_files: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_search_files",
-					new { pattern = "x", filePattern = "*.cs", take = 1, projectPath = "" },
+					new { pattern = "x", filePattern = "*.cs", take = 1, projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_list_files: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_list_files",
-					new { pattern = "**/*", take = 1, projectPath = "" },
+					new { pattern = "**/*", take = 1, projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 		};
 		

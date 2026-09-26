@@ -143,6 +143,7 @@ class Program
 			groups.Add(await ReloadFlaggingTests.BuildAsync(ctx));
 			groups.Add(await IncrementalAdditionalDocTests.BuildAsync(ctx));
 			groups.Add(await LocalHistoryTests.BuildAsync(ctx));
+			groups.Add(await DefaultWorkspaceTests.BuildAsync(ctx));
 			
 			// Last on purpose: it reads the server log written by everything above.
 			groups.Add(WorkspaceHygieneTests.Build(ctx, serverLogDir, serverLogGlob));

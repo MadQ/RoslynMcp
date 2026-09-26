@@ -353,7 +353,7 @@ static class EditingTests
 			// GetSolution / ApplyChanges directly. When the workspace threw during resolution — e.g. a
 			// project reloading after a prior edit — the exception propagated unhandled and the MCP
 			// transport reported an opaque "An error occurred invoking '<tool>'": no JSON, no detail.
-			// An empty projectPath deterministically forces a resolution failure, standing in for the
+			// A projectPath that never exists deterministically forces a resolution failure, standing in for the
 			// transient case that cannot be provoked on demand. The fix must now return a STRUCTURED
 			// JSON error (parseable, carrying an "error" field) instead of an unhandled throw.
 			// RunTestAsync fails on non-JSON content, so each of these would fail against the pre-fix
@@ -362,31 +362,31 @@ static class EditingTests
 			new("roslyn_replace_in_code: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = "code.cs", nodeKind = "IdentifierName", textPattern = "x", replacement = "y", projectPath = "" },
+					new { filePath = "code.cs", nodeKind = "IdentifierName", textPattern = "x", replacement = "y", projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_replace_in_file: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_file",
-					new { filePath = "replace.cs", pattern = "x", replacement = "y", dryRun = true, projectPath = "" },
+					new { filePath = "replace.cs", pattern = "x", replacement = "y", dryRun = true, projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_insert_lines: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_insert_lines",
-					new { filePath = "insert.txt", text = "x", atLine = 1, projectPath = "" },
+					new { filePath = "insert.txt", text = "x", atLine = 1, projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_write_file: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_write_file",
-					new { filePath = "write.cs", content = "x", createNew = true, dryRun = true, projectPath = "" },
+					new { filePath = "write.cs", content = "x", createNew = true, dryRun = true, projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_local_history: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_local_history",
-					new { action = "list", filePath = "code.cs", projectPath = "" },
+					new { action = "list", filePath = "code.cs", projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 		};
 		
