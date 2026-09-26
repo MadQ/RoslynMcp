@@ -22,11 +22,13 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		"The response includes the source field ('roslyn' or 'disk'), total line count, and the requested line range.")]
 	public async Task<object> ReadFile(
 		[Description("Relative path to the file, e.g. 'Core/WindowTracker.cs' or 'Directory.Build.props'. Path is relative to the project root.")] string filePath,
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("1-based line to start reading from. Default: 1 (start of file). Combine with endLine to read a specific section.")] int startLine = 1,
 		[Description("1-based line to stop reading at (inclusive). Default: end of file. Use roslyn_get_file_outline to find a member's line range.")] int endLine = int.MaxValue)
 	{
 		using var scope = BeginTool("roslyn_read_file", filePath, new { startLine, endLine });
+		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			

@@ -170,7 +170,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		error		= null;
 		compilation	= null;
 		
-		if(PathCacheEnabled && !Path.IsPathRooted(projectPath))
+		// An empty projectPath means "the session default workspace" — nothing to cache or rewrite.
+		var cacheable = PathCacheEnabled && !string.IsNullOrWhiteSpace(projectPath) && !Path.IsPathRooted(projectPath)
+		;
+		
+		if(cacheable)
 			lock(pathCacheLock)
 				if(pathCache.TryGetValue(projectPath, out var cached)) {
 					
@@ -199,7 +203,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				_                                 => null!
 			});
 			
-			if(PathCacheEnabled && !Path.IsPathRooted(originalPath)) {
+			// Re-checked on originalPath: after a cache hit it is already the absolute path — nothing new to cache.
+			if(cacheable && !Path.IsPathRooted(originalPath)) {
 				
 				// Cache the absolute .csproj path, not the workspace root directory.
 				// GetWorkspaceInfo().RootPath is the solution root (e.g. J:\Projects\RoslynMcp),
@@ -261,7 +266,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			error = new PathErrorResult(ex.Message)
 			{
 				Error = "missing_project_path",
-				Hint  = "projectPath is required. Pass the .csproj file path or a directory containing one."
+				Hint  = MissingProjectPathHint
 			};
 			logger.LogError("TryGetCompilation", ex.Message);
 			
@@ -341,7 +346,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			error = new PathErrorResult(ex.Message)
 			{
 				Error = "missing_project_path",
-				Hint  = "projectPath is required. Pass the .csproj file path or a directory containing one."
+				Hint  = MissingProjectPathHint
 			};
 			logger.LogError("TryGetProject", ex.Message);
 			
@@ -645,7 +650,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				return new PathErrorResult(e.Message)
 				{
 					Error = "missing_project_path",
-					Hint  = "projectPath is required. Pass the .csproj file path or a directory containing one."
+					Hint  = MissingProjectPathHint
 				};
 			
 			default:
@@ -714,15 +719,134 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	;
 	
 	/// <summary>
-	///     Common parameter description for projectPath across all tools.
+	///     Parameter description for a required <c>string projectPath</c> — tools whose target project cannot
+	///     yet be inferred when the argument is omitted. RMCP009 pins it to that parameter shape.
 	/// </summary>
 	protected const string ProjectPathDescription =
-		"Path to project directory, .csproj file, or source file — absolute or relative (relative paths are resolved against the server's working directory). " +
+		"Path to a .csproj, .sln/.slnx, project directory, or source file — absolute or relative (relative paths are resolved against the server's working directory). " +
 		"REQUIRED - must be explicitly specified. " +
 		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj. " +
 		"NOTE: a directory or file path that cannot locate a .csproj falls back to AdhocWorkspace (no MSBuild, " +
 		"reduced functionality). Prefer passing the .csproj path directly for full MSBuild support."
 	;
+	
+	/// <summary>
+	///     Parameter description for an optional <c>string? projectPath = null</c>. RMCP009 pins it to that
+	///     parameter shape, so the two descriptions cannot be swapped by accident.
+	/// </summary>
+	protected const string OptionalProjectPathDescription =
+		"Optional — omit to use the session's default solution. Otherwise a .csproj, .sln/.slnx, project directory, or source file path " +
+		"(relative paths resolve against the server's working directory). When omitted, a filePath argument selects the project that contains that file."
+	;
+	
+	/// <summary>
+	///     Hint on the <c>missing_project_path</c> error — raised when <c>projectPath</c> is empty and no
+	///     default workspace could be derived (<see cref="NoDefaultWorkspaceException"/>).
+	/// </summary>
+	protected const string MissingProjectPathHint =
+		"Pass projectPath (a .csproj, a .sln/.slnx, or a directory containing a .csproj), or start the server with " +
+		"--root <dir> (or ROSLYNMCP_ROOT) so projectPath can be omitted."
+	;
+	
+	/// <summary>
+	///     Normalizes an optional <c>projectPath</c> argument for a tool with no file anchor: an omitted value
+	///     becomes the empty string, which <see cref="WorkspaceManager.ResolveProjectPath"/> resolves to the
+	///     session default workspace. Records the fallback on the active scope so the log shows it.
+	/// </summary>
+	protected static string ResolveProjectArg(string? projectPath)
+	{
+		if(!string.IsNullOrWhiteSpace(projectPath))
+			
+			return projectPath;
+		
+		activeScope.Value?.Record("default workspace");
+		
+		return "";
+	}
+	
+	/// <summary>
+	///     Normalizes an optional <c>projectPath</c> argument for a tool that operates on
+	///     <paramref name="filePath"/>. An omitted value resolves to the .csproj of the project in the default
+	///     solution that contains the file, so a file in any project of the solution works — the default
+	///     solution's own default project would not see it. Falls back to the default workspace itself when
+	///     the file is not a tracked document (a new file, a .json, an unknown path), and to the empty string
+	///     on any resolution failure so the tool's own guard reports the structured error.
+	/// </summary>
+	protected string ResolveProjectArg(string? projectPath, string? filePath)
+	{
+		if(!string.IsNullOrWhiteSpace(projectPath))
+			
+			return projectPath;
+		
+		if(string.IsNullOrWhiteSpace(filePath))
+			
+			return ResolveProjectArg(projectPath);
+		
+		try {
+			
+			var solution = ResolveWithRetry("ResolveProjectArg", () => workspace.GetSolution(""));
+			var rootPath = workspace.GetRootPath("");
+			var owner    = FindOwningProject(solution, filePath, rootPath);
+			
+			if(owner is not null) {
+				
+				activeScope.Value?.Record($"default workspace → {Path.GetFileName(owner)}");
+				
+				return owner;
+			}
+		}
+		catch(Exception ex) when(!IsFatal(ex)) {
+			
+			// Not a failure in its own right: the tool's resolution guard re-raises the same fault
+			// through its structured mapping on the empty path below.
+			logger.LogInfo("ResolveProjectArg", $"{ex.GetType().Name}: {ex.Message}");
+		}
+		
+		return ResolveProjectArg(projectPath);
+	}
+	
+	/// <summary>
+	///     The solution file <paramref name="projectPath"/> resolves to — an omitted projectPath whose
+	///     default is a solution, or an explicit .sln/.slnx — or <c>null</c> when it resolves to a single
+	///     project. Build-family tools target the whole solution in that case rather than whichever
+	///     project the workspace happens to list first. Call after a guarded resolution has succeeded.
+	/// </summary>
+	protected string? ResolvedSolutionPath(string projectPath)
+		=> workspace.Resolve(projectPath) is (var path, ResolutionKind.Solution) ? path : null;
+	
+	/// <summary>
+	///     The .csproj path of the first project holding <paramref name="filePath"/> as a document or
+	///     additional document, or <c>null</c>. An exact full-path match against <paramref name="rootPath"/>
+	///     wins; otherwise a path-suffix match anchored at a segment boundary, so <c>Foo.cs</c> never selects
+	///     the project holding <c>BigFoo.cs</c> — an unanchored match would hand the tool a compilation that
+	///     does not contain the requested file. A linked file or a multi-targeted duplicate resolves to the
+	///     first project in solution order.
+	/// </summary>
+	static string? FindOwningProject(Solution solution, string filePath, string rootPath)
+	{
+		var fullPath = Path.GetFullPath(Path.IsPathRooted(filePath) ? filePath : Path.Combine(rootPath, filePath))
+		;
+		
+		foreach(var id in solution.GetDocumentIdsWithFilePath(fullPath))
+			if(solution.GetProject(id.ProjectId)?.FilePath is { } exact)
+				
+				return exact;
+		
+		var suffix = Path.DirectorySeparatorChar + NormalizePath(filePath).TrimStart(Path.DirectorySeparatorChar);
+		
+		foreach(var project in solution.Projects) {
+			
+			if(project.FilePath is null)
+				continue;
+			
+			foreach(var document in project.Documents.Concat<TextDocument>(project.AdditionalDocuments))
+				if(document.FilePath?.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) == true)
+					
+					return project.FilePath;
+		}
+		
+		return null;
+	}
 	
 	/// <summary>
 	///     How a content/value <c>pattern</c> is interpreted. The <em>target</em> (a source line, a decoded

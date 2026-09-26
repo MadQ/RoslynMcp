@@ -29,13 +29,15 @@ internal sealed class WriteFileTool : RoslynMcpTool
 	)]
 	public async Task<object> WriteFile(
 		[Description("Relative path to the file from the workspace root.")]                                                                          string  filePath,
-		[Description(ProjectPathDescription)]                                                                                                        string  projectPath,
 		[Description("Full file content to write.")]                                                                                                 string  content,
+		[Description(OptionalProjectPathDescription)]                                                                                                string? projectPath = null,
 		[Description("false (default): file must already exist. true: create new file or overwrite existing.")]                                      bool    createNew = false,
 		[Description("Preview without writing — returns line count and encoding info. Default: false.")]                                             bool    dryRun    = false
 	)
 	{
 		using var scope   = BeginTool("roslyn_write_file", filePath, new { createNew, dryRun });
+		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			

@@ -18,8 +18,9 @@ namespace RoslynMcp.Analyzers;
 ///     RMCP008 — A parameter on the tool method is missing a <c>[Description]</c> attribute
 ///               (<c>CancellationToken</c> and <c>McpServer</c> parameters are exempt — SDK-injected
 ///               infrastructure, never surfaced in the agent-facing tool schema).
-///     RMCP009 — The <c>string projectPath</c> parameter uses an inline description string instead of the
-///               <c>ProjectPathDescription</c> constant; inline text drifts and diverges.
+///     RMCP009 — A <c>projectPath</c> parameter does not use the description constant matching its shape
+///               (<c>ProjectPathDescription</c> for required <c>string</c>, <c>OptionalProjectPathDescription</c>
+///               for <c>string? = null</c>), or is nullable without the <c>= null</c> default.
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
@@ -54,15 +55,16 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 	
 	private static readonly DiagnosticDescriptor Rule009 = new(
 		"RMCP009",
-		"projectPath must use ProjectPathDescription constant",
-		"[McpServerTool] method '{0}': 'projectPath' parameter must use [Description(ProjectPathDescription)], not an inline string",
+		"projectPath must use the description constant matching its shape",
+		"[McpServerTool] method '{0}': '{1}' must be declared exactly so and use [Description({2})]",
 		Category,
 		DiagnosticSeverity.Error,
 		isEnabledByDefault: true,
 		description:
-			"The 'string projectPath' parameter on every [McpServerTool] method must use " +
-			"[Description(ProjectPathDescription)] — the shared constant defined in RoslynMcpTool. " +
-			"Inline description strings drift and diverge across tools; the constant is the single source of truth."
+			"A required 'string projectPath' parameter must use [Description(ProjectPathDescription)]; an optional one " +
+			"must be declared 'string? projectPath = null' and use [Description(OptionalProjectPathDescription)] — both " +
+			"shared constants defined in RoslynMcpTool. Inline description strings drift and diverge across tools, and " +
+			"a nullable projectPath without '= null' is still advertised to agents as required."
 	);
 	
 	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule007, Rule008, Rule009];
@@ -101,9 +103,25 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 				continue;
 			}
 			
-			// RMCP009 — string projectPath must use [Description(ProjectPathDescription)], not an inline string
-			if(IsStringProjectPathParam(param) && !UsesProjectPathDescriptionConstant(param))
-				context.ReportDiagnostic(Diagnostic.Create(Rule009, param.Identifier.GetLocation(), methodName));
+			// RMCP009 — projectPath must use the description constant matching its shape: a required
+			// 'string projectPath' takes ProjectPathDescription; an optional 'string? projectPath = null'
+			// takes OptionalProjectPathDescription. The MCP schema marks a parameter optional only when it
+			// has a C# default, so a nullable projectPath without '= null' would still be advertised as
+			// required — that mismatch is reported too.
+			var shape = ProjectPathShape(param);
+			
+			if(shape is not ProjectPathKind.None) {
+				
+				var optional = shape is ProjectPathKind.Optional;
+				
+				var (expectedConstant, shapeText) = optional
+					? ("OptionalProjectPathDescription", "string? projectPath = null")
+					: ("ProjectPathDescription",         "string projectPath")
+				;
+				
+				if(optional && param.Default is null || !UsesDescriptionConstant(param, expectedConstant))
+					context.ReportDiagnostic(Diagnostic.Create(Rule009, param.Identifier.GetLocation(), methodName, shapeText, expectedConstant));
+			}
 		}
 	}
 	
@@ -127,11 +145,29 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 		return false;
 	}
 	
-	private static bool IsStringProjectPathParam(ParameterSyntax param) =>
-		param.Identifier.Text == "projectPath"
-		&& param.Type is PredefinedTypeSyntax { Keyword.RawKind: (int) SyntaxKind.StringKeyword };
+	private enum ProjectPathKind { None, Required, Optional }
 	
-	private static bool UsesProjectPathDescriptionConstant(ParameterSyntax param)
+	/// <summary>
+	///     Classifies a <c>projectPath</c> parameter: <c>string</c> is required, <c>string?</c> is optional,
+	///     anything else (including a non-string <c>projectPath</c>) is not checked.
+	/// </summary>
+	private static ProjectPathKind ProjectPathShape(ParameterSyntax param)
+	{
+		if(param.Identifier.Text != "projectPath")
+			
+			return ProjectPathKind.None;
+		
+		return param.Type switch {
+			
+			PredefinedTypeSyntax { Keyword.RawKind: (int) SyntaxKind.StringKeyword }
+				=> ProjectPathKind.Required,
+			NullableTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword.RawKind: (int) SyntaxKind.StringKeyword } }
+				=> ProjectPathKind.Optional,
+			_   => ProjectPathKind.None
+		};
+	}
+	
+	private static bool UsesDescriptionConstant(ParameterSyntax param, string constantName)
 	{
 		foreach(var attrList in param.AttributeLists)
 		foreach(var attr in attrList.Attributes) {
@@ -146,7 +182,7 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 			if(name is not ("Description" or "DescriptionAttribute"))
 				continue;
 			
-			// The argument must be a bare identifier named ProjectPathDescription — not a string literal.
+			// The argument must be a bare identifier naming the expected constant — not a string literal.
 			var args = attr.ArgumentList?.Arguments
 			;
 			
@@ -154,7 +190,7 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 				
 				return false;
 			
-			return args.Value[0].Expression is IdentifierNameSyntax { Identifier.Text: "ProjectPathDescription" };
+			return args.Value[0].Expression is IdentifierNameSyntax constant && constant.Identifier.Text == constantName;
 		}
 		
 		return false;

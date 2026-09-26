@@ -21,9 +21,11 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		"representation may not appear in the list.")]
 	public async Task<object> GetUsings(
 		[Description("Relative path to the C# file to inspect, e.g. 'Core/WindowTracker.cs'. Must exist in the compilation.")] string filePath,
-		[Description(ProjectPathDescription)] string projectPath)
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_get_usings", filePath);
+		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

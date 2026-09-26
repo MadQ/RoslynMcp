@@ -34,10 +34,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		[Description("Pattern to match against source CONTENT within the chosen syntax context. Interpretation is controlled by 'mode' (default regex). This is not a filename filter — use filePattern to restrict which files are searched.")]
 		string pattern,
 		
-		[Description(ProjectPathDescription)]
-		string projectPath,
-		
 		CancellationToken cancellationToken,
+		
+		[Description(OptionalProjectPathDescription)]
+		string? projectPath = null,
 		
 		[Description("Syntax context to restrict matches: 'comments' (// and /* */), 'strings' (string literals), 'identifiers' (symbol names), 'code' (non-comment, non-string executable lines), 'xmldocs' (/// XML documentation), 'all' (no filtering). Default: 'all'.")]
 		string? context = null,
@@ -69,6 +69,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_semantic_search", pattern, new { context, caseSensitive, excludeGenerated, filePattern, mode, containingKind, skip, take });
 		
+		projectPath   = ResolveProjectArg(projectPath);
 		context     ??= "all";
 		filePattern ??= "*.cs";
 		

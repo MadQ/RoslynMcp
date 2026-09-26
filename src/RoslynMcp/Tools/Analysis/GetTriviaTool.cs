@@ -23,7 +23,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         "Returns trivia entries grouped by syntax node, each with kind, span, truncated node text, and leading/trailing " +
         "trivia arrays. Paged with default take=100, max take=500.")]
     public async Task<object> GetTrivia(
-        [Description(ProjectPathDescription)] string projectPath,
+        [Description(OptionalProjectPathDescription)] string? projectPath = null,
         [Description("Relative file path, e.g. 'Core/WindowTracker.cs'. Required for trivia analysis; omit only when using listSyntaxKinds or listTriviaKinds.")] string? filePath = null,
         [Description("Optional 1-based starting line to restrict analysis. Default: start of file.")] int? startLine = null,
         [Description("Optional 1-based ending line to restrict analysis. Default: end of file.")] int? endLine = null,
@@ -50,6 +50,8 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         if(string.IsNullOrEmpty(filePath))
 
             return scope.Error(new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds"));
+
+        projectPath = ResolveProjectArg(projectPath, filePath);
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
 

@@ -27,9 +27,9 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	)]
 	public async Task<object> ReplaceInFile(
 		[Description("Relative path to the file from the workspace root.")                                                ] string  filePath,
-		[Description(ProjectPathDescription)] string projectPath,
 		[Description("The pattern to find in file CONTENT. Interpretation is controlled by 'mode' (default literal). This is not a filename filter.")               ] string  pattern,
 		[Description("The replacement text. Supports $1/$2 backreferences when mode is 'regex'; inserted literally for 'literal' and 'glob' modes.")                ] string  replacement,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description(MatchModeDescription + "Default: 'literal'.")                                                        ] string? mode      = null,
 		[Description("DEPRECATED — use mode:\"regex\" instead. Treat pattern as a regular expression. Ignored when 'mode' is set.")                                 ] bool    useRegex  = false,
 		[Description("Preview replacements without writing the file. Returns what would change. Default: false.")         ] bool    dryRun    = false,
@@ -42,6 +42,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	)
 	{
 		using var scope = BeginTool("roslyn_replace_in_file", filePath, new { pattern, mode, useRegex, caseSensitive, dryRun, normalizeLineEndings });
+		
+		projectPath = ResolveProjectArg(projectPath, filePath);
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			

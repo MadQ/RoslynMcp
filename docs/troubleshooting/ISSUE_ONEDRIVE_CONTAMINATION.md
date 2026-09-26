@@ -6,7 +6,7 @@ This was originally observed as RoslynMcp wandering into unrelated OneDrive cont
 effective workspace root was far too broad.
 
 The current source code has important mitigations:
-- every Roslyn tool requires an explicit `projectPath`
+- an omitted `projectPath` never means "load the CWD": it resolves to a session default workspace that must be a `.sln`/`.slnx` or `.csproj` — found in the root (`--root` / `ROSLYNMCP_ROOT` / CWD) or a solution above it, never by searching downward and never as an AdhocWorkspace. A server started in a home directory or on a drive root gets `missing_project_path`, not a recursive `*.cs` crawl (#295)
 - `WorkspaceManager.ResolveProjectPath()` rejects dangerous roots such as drive roots and known system directories
 - Adhoc enumeration skips hidden/system directories plus `node_modules`, `bin`, `obj`, `.git`, `.vs`, and `packages`
 
@@ -48,14 +48,15 @@ workspace root and recurse through it looking for `*.cs`.
 
 ### Path resolution
 
-`ResolveProjectPath()` now requires a non-empty `projectPath` and resolves it explicitly:
-- `.csproj` path → use it directly
+`ResolveProjectPath()` resolves `projectPath` explicitly:
+- empty → the session default workspace (a solution or project only — see above), or `missing_project_path` when there is none
+- `.sln`/`.slnx` or `.csproj` path → use it directly
 - directory with a `.csproj` in that directory → MSBuildWorkspace
 - directory with **no** `.csproj` → AdhocWorkspace rooted at that directory
 - source file path → walk upward looking for a `.csproj`
 
 Relevant source behavior:
-- empty path throws `missing_project_path`
+- empty path with no usable default throws `missing_project_path`
 - drive roots / known system directories are rejected as invalid project locations
 - relative paths are still resolved against the server's working directory
 
@@ -156,8 +157,8 @@ To reproduce the modern form of this issue:
 
 ---
 
-**Status:** Partially mitigated in source. The old implicit-CWD failure mode is much harder to hit because
-`projectPath` is required and dangerous roots are rejected, but broad Adhoc roots can still pull in OneDrive
-content if the caller chooses them.
+**Status:** Partially mitigated in source. The old implicit-CWD failure mode stays closed: an omitted
+`projectPath` only ever resolves to a solution or project file, and dangerous roots are rejected. Broad
+Adhoc roots can still pull in OneDrive content if the caller passes one explicitly.
 
 **ARRRRRRRRR!** Found the treasure (and the curse)! 🏴‍☠️

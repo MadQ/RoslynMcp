@@ -28,10 +28,10 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		[Description("Pattern to match against string-literal tokens. Interpretation is controlled by 'mode' (default regex). Matches the decoded value unless matchRaw is set. This is not a filename filter — use filePattern to restrict which files are searched.")]
 		string pattern,
 
-		[Description(ProjectPathDescription)]
-		string projectPath,
-
 		CancellationToken cancellationToken,
+
+		[Description(OptionalProjectPathDescription)]
+		string? projectPath = null,
 
 		[Description(MatchModeDescription + "Default: 'regex'.")]
 		string? mode = null,
@@ -60,6 +60,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_find_string_literal", pattern, new { mode, useGlob, matchRaw, caseSensitive, filePattern, skip, take });
 
+		projectPath   = ResolveProjectArg(projectPath);
 		filePattern ??= "*.cs";
 
 		if(scope.TryServeCachedPage<StringLiteralMatch>(page_token, ref skip, ref take, 200, out var cached))

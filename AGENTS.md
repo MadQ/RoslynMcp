@@ -153,6 +153,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - **VS workspace** — uses Visual Studio's MSBuild instance when available
 - See [docs/reference/WORKSPACE_MODES.md](docs/reference/WORKSPACE_MODES.md) for detailed comparison and FAQ
 - **CLI flag:** `--workspace sdk|vs|adhoc|auto` (default: `auto`) — or set `ROSLYNMCP_WORKSPACE` env var to override; a committed `.madq_roslynmcp.json` at the repo root (written by `setup-project`) can pin a per-project mode when neither is given
+- **Default workspace:** tools whose `projectPath` is optional fall back to a session default when it is omitted — `--root <path>` (or a bare positional path, so `"args": ["."]` works) > `ROSLYNMCP_ROOT` > server CWD, resolved to the one `.sln`/`.slnx` in that directory (`"solution"` in `.madq_roslynmcp.json` picks among several), else the nearest solution above it, else its single `.csproj`. Resolved lazily once and logged as `Workspace — Default workspace: …`. `.sln`/`.slnx` paths are also accepted as an explicit `projectPath`; build/clean/restore then target the whole solution. Many MCP clients do not start servers in the project directory — prefer an explicit `--root` in client configs
 - **MSBuild override:** `--msbuild-path <dir>` (or `ROSLYNMCP_MSBUILD_PATH`) points discovery at a dotnet SDK directory or a VS `MSBuild\Current\Bin` directory, bypassing auto-discovery. Honored in `auto`, `sdk`, and `vs`; ignored in `adhoc`. Invalid paths fall through to normal discovery rather than failing. Precedence, as everywhere: CLI arg > env var
 - **VS version pin:** `--vs-version <ver>` (or `ROSLYNMCP_VS_VERSION`, or `"vsVersion"` in a committed `.madq_roslynmcp.json` — a version is portable, unlike a path) narrows vswhere to a Visual Studio version range: `17` → `[17.0,18.0)`, `17.14` → `[17.14,17.15)`, or a raw vswhere range. Needed when the newest installed VS (e.g. 2026 / 18.x) crashes Roslyn's .NET Framework BuildHost on legacy projects — bare `vswhere -latest` and the BuildHost agree on "newest", so the #258 pin alone cannot escape it. In `vs` mode it selects the server's instance (structured failure if nothing matches); in `auto`/`sdk` it only steers the BuildHost; `--msbuild-path` still wins; `adhoc` ignores it. Precedence: CLI arg > env var > project file
 
@@ -495,23 +496,28 @@ Parameter descriptions follow the same principle — write for the AI to underst
 **Both are enforced at compile time:**
 - **RMCP007** — every `[McpServerTool]` method must have a `[Description]` attribute (Error)
 - **RMCP008** — every parameter on a `[McpServerTool]` method must have `[Description]`, except `CancellationToken` (Error)
-- **RMCP009** — `string projectPath` parameters must use `[Description(ProjectPathDescription)]` specifically — inline strings drift; the constant is the single source of truth (Error)
+- **RMCP009** — a required `string projectPath` must use `[Description(ProjectPathDescription)]`; an optional one must be declared `string? projectPath = null` and use `[Description(OptionalProjectPathDescription)]` — inline strings drift; the constants are the single source of truth (Error)
 
-**Always use `ProjectPathDescription`** for the `projectPath` parameter — it's a constant with the canonical, full description. Inline text drifts and diverges. Never duplicate it.
+**Always use `ProjectPathDescription` or `OptionalProjectPathDescription`** for the `projectPath` parameter — constants with the canonical, full description. Inline text drifts and diverges. Never duplicate them.
 
 #### Parameter Conventions
 
 ```csharp
 public object MyToolMethod(
     [Description("...")] string requiredParam,           // required params first
-    [Description(ProjectPathDescription)] string projectPath,  // always last, always required
-    [Description("...")] string? optionalParam = null)   // optional params after projectPath? No — see below.
+    [Description(ProjectPathDescription)] string projectPath,  // required shape: last required param
+    [Description("...")] string? optionalParam = null)   // optional params after projectPath — or see the optional shape below.
 ```
 
-Actually: `projectPath` is **declared last among required parameters**, but optional parameters with defaults come after it in the method signature. The AI is always expected to provide `projectPath` explicitly — it has no default, so the AI can't omit it.
+Actually: `projectPath` comes in two shapes, each enforced by RMCP009:
 
-**Why `projectPath` is always required (no default):**
-The workspace resolution is the heaviest operation. Forcing the AI to specify it explicitly prevents lazy omission that would cause the server to guess the wrong project when multiple workspaces are cached.
+- **Optional** — `[Description(OptionalProjectPathDescription)] string? projectPath = null`, declared after every required parameter (and after `CancellationToken`). The first statement after `BeginTool` normalizes it: `projectPath = ResolveProjectArg(projectPath)` for solution-level tools, or `ResolveProjectArg(projectPath, filePath)` for file-anchored tools, which resolves an omitted value to the .csproj of the project in the default solution that contains `filePath`. From there on `projectPath` is a plain non-null string and every helper works unchanged.
+- **Required** — `[Description(ProjectPathDescription)] string projectPath`, declared last among required parameters. Still used by tools whose target project cannot yet be inferred without it: symbol-by-name and project-aggregate tools, plus the rename/signature apply tools (#296 tracks making those optional).
+
+**Why omitting `projectPath` is safe (#295):**
+An omitted `projectPath` resolves to the **session default workspace**, fixed by startup inputs only — `--root` / a bare positional argument, then `ROSLYNMCP_ROOT`, then the server CWD; from that directory the one `.sln`/`.slnx` in it (or the one pinned by `"solution"` in `.madq_roslynmcp.json`), else the nearest solution above it, else its single `.csproj`. It never depends on which workspaces happen to be cached, so it is not a guess — the concern that originally made `projectPath` mandatory. When nothing qualifies, the call fails with `missing_project_path` and a hint naming `--root`.
+
+**`= null` is a deliberate exception to the no-default-parameters convention:** the MCP SDK marks a parameter optional in the tool schema only when it has a C# default, and MCP tool methods cannot use forwarding overloads.
 
 #### The `BeginTool` / Scope Lifecycle
 
@@ -590,11 +596,11 @@ Without this, subsequent Roslyn tools see the stale in-memory source tree, not t
 
 #### Key Points (Summary)
 
-- `projectPath` is always the last required parameter, always non-optional
+- `projectPath` is either optional (`string? projectPath = null` + `OptionalProjectPathDescription`, normalized with `ResolveProjectArg` right after `BeginTool`) or required (`string projectPath` + `ProjectPathDescription`, last required parameter) — RMCP009 enforces the pairing
 - `using var scope = BeginTool(...)` is always the first statement
 - `Name` in `[McpServerTool]` must match `BeginTool`'s first argument exactly
 - Every `return` with a value must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
-- Use `[Description(ProjectPathDescription)]` — never inline text for `projectPath`
+- Use `[Description(ProjectPathDescription)]` / `[Description(OptionalProjectPathDescription)]` — never inline text for `projectPath`
 - Use `scope.Error<T>` when `T : ToolResult, IToolError`; use `scope.Failed` otherwise
 - Mutation tools: call `workspace.InvalidateFile` after every successful write
 

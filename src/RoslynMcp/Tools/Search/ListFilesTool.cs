@@ -18,7 +18,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		"For searching file content (lines matching a pattern), use roslyn_search_files instead. " +
 		"For filename/path matching with no content search, this is the right tool.")]
 	public object ListFiles(
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Glob pattern matching file NAMES/PATHS, not file content (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). Default: '**/*'.")] string? pattern = null,
 		[Description("Include subdirectories. Default: true.")] bool recursive = true,
 		[Description("Number of files to skip (for paging). Default: 0.")] int skip = 0,
@@ -28,7 +28,8 @@ internal sealed class ListFilesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_list_files", pattern, new { recursive, skip, take });
 		
-		pattern ??= "**/*";
+		projectPath = ResolveProjectArg(projectPath);
+		pattern   ??= "**/*";
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 500, out var cached))
 			

@@ -63,7 +63,7 @@ static int PrintHelp()
         {RoslynMcp.Cli.ToolCommand.Name} v{version} — Roslyn MCP server for AI coding agents
 
         Usage:
-          {RoslynMcp.Cli.ToolCommand.Name} [options]            Start MCP server (stdio transport)
+          {RoslynMcp.Cli.ToolCommand.Name} [root] [options]     Start MCP server (stdio transport)
           {RoslynMcp.Cli.ToolCommand.Name} <command> [options]
 
         Commands:
@@ -75,6 +75,11 @@ static int PrintHelp()
           update        Update agent config paths after reinstall
 
         Options:
+              --root         <path>   Default workspace for tool calls that omit projectPath: a
+                                      directory (its solution, the nearest solution above it,
+                                      or its single .csproj) or a .sln/.slnx/.csproj file.
+                                      A bare [root] argument is the same. Default: the server's
+                                      working directory.
               --workspace    <mode>   Workspace mode: auto|sdk|vs|adhoc (default: auto)
           -p, --preload      <path>   Pre-warm workspace on startup (repeatable)
               --log-path     <path>   Log file base path (empty string = disable logging)
@@ -93,6 +98,7 @@ static int PrintHelp()
           -h, --help                  Show this help and exit
 
         Environment variables (the CLI flags above take precedence):
+          ROSLYNMCP_ROOT                  Default workspace root (same as --root)
           ROSLYNMCP_WORKSPACE             Workspace mode (same as --workspace)
           ROSLYNMCP_LOG_PATH              Log file base path (same as --log-path)
           ROSLYNMCP_MSBUILD_PATH          MSBuild installation path (same as --msbuild-path)
@@ -108,7 +114,8 @@ static int PrintHelp()
 
         Project config:
           A committed .madq_roslynmcp.json at the repo root (written by 'setup-project')
-          can set elicit, workspace, and vsVersion per project. Explicit settings always win:
+          can set elicit, workspace, vsVersion, and solution (which of several solutions
+          beside it is the default workspace) per project. Explicit settings always win:
           CLI arg > env var > project file > built-in default.
 
         Documentation: https://github.com/MadQ/RoslynMcp

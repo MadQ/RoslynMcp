@@ -1,4 +1,4 @@
-﻿namespace RoslynMcp.Tools;
+namespace RoslynMcp.Tools;
 
 /// <summary>
 ///     Thrown when no .csproj file can be found in or above the specified path.
@@ -41,6 +41,23 @@ internal sealed class InvalidProjectPathException : Exception
 		: base($"Invalid project path '{path}': {reason}")
 	{
 		Path = path;
+	}
+}
+
+/// <summary>
+///     Thrown when <c>projectPath</c> is omitted and no session default workspace can be derived from the
+///     configured root (<c>--root</c> / <c>ROSLYNMCP_ROOT</c>) or the process CWD. Derives from
+///     <see cref="ArgumentException"/> so every existing resolution guard already maps it to the structured
+///     <c>missing_project_path</c> error and excludes it from transient-fault retries.
+/// </summary>
+internal sealed class NoDefaultWorkspaceException : ArgumentException
+{
+	public string Root { get; }
+	
+	public NoDefaultWorkspaceException(string root, string source, string reason)
+		: base($"projectPath was omitted and no default workspace could be determined from the {source} '{root}': {reason}.")
+	{
+		Root = root;
 	}
 }
 

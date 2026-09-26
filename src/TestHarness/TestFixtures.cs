@@ -59,6 +59,13 @@ static class TestFixtures
 	/// <summary>Every fixture tree lives under here, so one sweep covers them all.</summary>
 	public static string TempRoot { get; } = Path.Combine(Path.GetTempPath(), "RoslynMcp.TestHarness");
 	
+	/// <summary>
+	///     A .csproj path that never exists — a deterministic workspace-resolution failure for tests that
+	///     assert a tool returns a structured error rather than crashing. An empty projectPath no longer
+	///     serves: it now resolves to the server's default workspace (#295).
+	/// </summary>
+	public static string MissingProjectPath { get; } = Path.Combine(TempRoot, "does-not-exist", "Missing.csproj");
+	
 	// Exact scratch names older harness binaries wrote into the dogfood project. Swept so a run of an
 	// old build, or a killed run, cannot leave a broken .cs that fails the next server build.
 	static readonly HashSet<string> LegacyDogfoodScratchFiles = new(StringComparer.OrdinalIgnoreCase) {
