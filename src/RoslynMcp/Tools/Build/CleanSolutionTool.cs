@@ -14,7 +14,9 @@ public CleanSolutionTool(WorkspaceResolver workspace, FileLogger logger, Paginat
 "Use when the build is in a bad state, producing stale artifacts, or before a full rebuild from scratch. " +
 "Safe to run at any time; only compiled output is deleted. " +
 "To rebuild after cleaning, use roslyn_build_project. " +
-"For package restore only, use roslyn_restore_packages.")]
+"For package restore only, use roslyn_restore_packages. " +
+"Omit projectPath to clean the whole default solution in one run rather than one call per project; " +
+"the server runs one dotnet build/clean/restore at a time, so parallel calls only queue.")]
 public async Task<object> CleanSolution(
 [Description(OptionalProjectPathDescription)] string? projectPath = null)
 {

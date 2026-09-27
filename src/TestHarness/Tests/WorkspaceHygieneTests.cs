@@ -45,6 +45,10 @@ static class WorkspaceHygieneTests
 			// #303: tools that resolve only a root or a solution must still record Adhoc.
 			new("workspace hygiene: root/solution-only tools label an adhoc workspace ADH",
 				() => AssertAdhocLabelAsync(ctx, serverLogDir, serverLogGlob)),
+			
+			// #306: concurrent dotnet runs are queued, not raced. Lives here for log access.
+			new("workspace hygiene: concurrent dotnet runs are serialized",
+				() => AssertDotnetRunsSerializedAsync(ctx, serverLogDir, serverLogGlob)),
 		};
 		
 		return new TestGroup($"Workspace Hygiene ({tests.Count} tests)", tests);
@@ -218,6 +222,76 @@ static class WorkspaceHygieneTests
 			return listMode == "ADH" && searchMode == "ADH"
 				? (true,  "PASS  (list_files and search_files on an adhoc workspace both logged ADH)")
 				: (false, $"FAIL  (expected ADH; list_files logged '{listMode ?? "no entry"}', search_files logged '{searchMode ?? "no entry"}')")
+			;
+		}
+		finally {
+			fx.Dispose();
+		}
+	}
+	
+	/// <summary>
+	///     Guards #306: the server runs one dotnet build/clean/restore at a time, because concurrent runs over
+	///     one solution race on shared obj\ state (the contention behind #300). Two roslyn_clean_solution
+	///     requests are written to the server before either response is read, so they are in flight together;
+	///     clean is used because it is quick and needs no restore. Both TOOL entries are then found in the
+	///     server log by the fixture directory, which DotnetRunner records as <c>cwd=…</c> in each entry's
+	///     detail, and exactly one must carry the <c>queued … behind another dotnet command</c> note. Without the
+	///     gate neither call waits, so no entry is marked. The exit codes are not asserted: the fixture is never
+	///     restored, and whether clean then succeeds is beside the point — what matters is that both processes
+	///     ran, and not at the same time.
+	/// </summary>
+	static async Task<(bool pass, string message)> AssertDotnetRunsSerializedAsync(TestContext ctx, string logDir, string logGlob)
+	{
+		var fx = TestFixtures.NewMsBuildProject("DotnetGate");
+		
+		try {
+			
+			fx.Write("Probe.cs", "class Probe { }\n");
+			
+			// Both requests go out before either response is read — sequential RunTestAsync calls would
+			// never overlap. Responses may arrive in either order; only their count matters here.
+			foreach(var _ in Enumerable.Range(0, 2))
+				await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
+					@params = new { name = "roslyn_clean_solution", arguments = new { projectPath = fx.Csproj } } });
+			
+			for(var i = 0; i < 2; i++)
+				if(await ctx.ReceiveAsync() is null)
+					
+					return (false, "FAIL  (a clean request timed out)");
+			
+			if(!TryReadLog(logDir, logGlob, out var lines, out var failure))
+				
+				return (false, failure);
+			
+			var cleans = 0;
+			var queued = 0;
+			
+			foreach(var line in lines) {
+				
+				JsonNode? entry;
+				
+				try {
+					entry = JsonNode.Parse(line);
+				}
+				catch(System.Text.Json.JsonException) {
+					continue;
+				}
+				
+				var detail = entry?["detail"]?.GetValue<string>() ?? "";
+				
+				if(entry?["tool_name"]?.GetValue<string>() != "clean_solution"
+					|| !detail.Contains(fx.Dir, StringComparison.OrdinalIgnoreCase))
+					continue;
+				
+				cleans++;
+				
+				if(detail.Contains("behind another dotnet command", StringComparison.Ordinal))
+					queued++;
+			}
+			
+			return cleans == 2 && queued == 1
+				? (true,  "PASS  (two concurrent cleans; the second queued behind the first)")
+				: (false, $"FAIL  (expected 2 clean entries with exactly 1 queued; found {cleans} entries, {queued} queued)")
 			;
 		}
 		finally {

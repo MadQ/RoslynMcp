@@ -44,7 +44,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		"(2) 'dotnet build' when Roslyn is clean — catches what Roslyn cannot see: NuGet restore failures, " +
 		"MSBuild target errors, SDK version issues, and source generator problems. " +
 		"Does not modify source files. " +
-		"For quick C# error checks during editing, use roslyn_get_diagnostics instead. " +
+		"To check whether code compiles, use roslyn_get_diagnostics instead — it answers in-process, without spawning a build. " +
+		"Build once per solution, not once per project: projects in one solution share build output, so omit projectPath " +
+		"to build the whole default solution in a single run. Do not issue several builds in parallel — the server runs " +
+		"one dotnet build/clean/restore at a time and queues the rest, so parallel calls only wait. " +
 		"Requires a .csproj to be present. " +
 		"NuGet/MSBuild errors (NU*, MSB*) without a source location appear in errors[] with line: 0, column: 0. " +
 		"exit_code is null when build_skipped is true (no dotnet build ran). " +
@@ -58,7 +61,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			"Default false: Roslyn errors short-circuit — dotnet build only runs when C# is clean, " +
 			"validating NuGet restore, MSBuild targets, SDK props, and source generators. " +
 			"Set true only when you suspect an MSBuild-specific failure Roslyn cannot see " +
-			"(broken .targets file, generator crash, restore failure) — skips the Roslyn fast-path entirely."
+			"(broken .targets file, generator crash, restore failure), or when roslyn_check_drift reports " +
+			"workspace_healthy: false — skips the Roslyn fast-path entirely. Never set it just to confirm code compiles."
 		)] bool forceBuild = false)
 	{
 		using var scope = BeginTool("roslyn_build_project", null, new { targetFramework, forceBuild });

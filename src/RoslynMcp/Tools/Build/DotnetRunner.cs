@@ -9,15 +9,49 @@ namespace RoslynMcp.Tools;
 // and deterministic process disposal.
 internal static class DotnetRunner
 {
+	// One dotnet CLI run at a time, process-wide (#306). Builds, cleans, and restores of projects in
+	// one solution write the same obj\ output — a project referenced by two targets is built by both
+	// — so concurrent runs race on its state files ("Could not write state file …", "… being used by
+	// another process"), the contention that corrupted a workspace reload in #300. Agents do issue
+	// these in parallel, so the server queues them rather than trusting the tool descriptions alone.
+	// Global rather than per-solution: concurrent runs over different solutions are rare, and for a
+	// disk-mutating operation correctness beats throughput.
+	static readonly SemaphoreSlim gate = new(1, 1);
+	
 	// Runs `dotnet <args>` in workingDirectory and returns the combined stdout+stderr output,
 	// elapsed time, and exit code. Throws InvalidOperationException if the process fails to start
 	// or if output cannot be read — callers map these to their own error result types.
 	// record is an optional sink for diagnostic annotations (e.g. scope.Record in BuildTool).
+	// Waits for any other dotnet run to finish first; the wait is recorded, and is not part of the
+	// returned elapsed time, which stays the process's own runtime. Cancellation while queued throws
+	// OperationCanceledException without ever starting the process.
 	internal static async Task<(string combined, TimeSpan elapsed, int exitCode)> RunAsync(
 		IEnumerable<string> args,
 		string workingDirectory,
 		Action<string>? record = null,
 		CancellationToken ct = default)
+	{
+		if(!gate.Wait(0)) {
+			
+			var queued = Stopwatch.StartNew();
+			
+			await gate.WaitAsync(ct);
+			record?.Invoke($"queued {queued.ElapsedMilliseconds} ms behind another dotnet command");
+		}
+		
+		try {
+			return await RunCoreAsync(args, workingDirectory, record, ct);
+		}
+		finally {
+			gate.Release();
+		}
+	}
+	
+	static async Task<(string combined, TimeSpan elapsed, int exitCode)> RunCoreAsync(
+		IEnumerable<string> args,
+		string workingDirectory,
+		Action<string>? record,
+		CancellationToken ct)
 	{
 		var psi = new ProcessStartInfo("dotnet") {
 			
