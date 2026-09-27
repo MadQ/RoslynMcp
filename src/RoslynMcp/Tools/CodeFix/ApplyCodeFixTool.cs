@@ -25,12 +25,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 		"Always call preview first to obtain a token. Pass approval 'y' to apply " +
 		"or 'n' to cancel without changing files. " +
 		"Phase 1 applies targeted modifications to existing in-workspace text documents only (.cs source, " +
-		"declared AdditionalFiles items, and analyzer config), not file lifecycle or project-system changes.")]
+		"declared AdditionalFiles items, and analyzer config), not file lifecycle or project-system changes. " +
+		"Omit projectPath to apply against the workspace the preview was created in; when given, it must resolve to that same workspace.")]
 	public async Task<ApplyCodeFixResult> ApplyCodeFix(
 		[Description("The confirmation token returned by roslyn_preview_code_fix.")] string token,
 		[Description("'y' to apply this code fix; 'n' to cancel without writing files.")] string approval,
-		[Description(ProjectPathDescription)] string projectPath,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_apply_code_fix", $"{token} ({approval})");
 		
@@ -72,21 +73,28 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					null,
 					"workspace binding missing"));
 			
-			if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
+			// The mismatch check guards against applying a token to a workspace the caller *named*
+			// differently. An omitted projectPath names nothing, so the token's own binding is the
+			// workspace — resolving the session default here would instead compare against whichever
+			// project the default solution lists first and reject a perfectly valid token.
+			if(!string.IsNullOrWhiteSpace(projectPath)) {
 				
-				var (message, kind) = DescribeResolveFailure(wsInfoError);
+				if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
+					
+					var (message, kind) = DescribeResolveFailure(wsInfoError);
+					
+					return scope.Failed("workspace unavailable", new ApplyCodeFixResult(message, null, kind));
+				}
 				
-				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(message, null, kind));
+				var requestedBinding = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
+				
+				if(!operation.WorkspaceBinding.Matches(requestedBinding))
+					return scope.Failed("workspace mismatch", new ApplyCodeFixResult(
+						$"Apply aborted — this token belongs to '{operation.WorkspaceBinding.CanonicalPath}', " +
+						$"but projectPath resolved to '{requestedBinding.CanonicalPath}'. Re-run roslyn_preview_code_fix for the intended workspace.",
+						null,
+						"workspace mismatch"));
 			}
-			
-			var requestedBinding = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
-			
-			if(!operation.WorkspaceBinding.Matches(requestedBinding))
-				return scope.Failed("workspace mismatch", new ApplyCodeFixResult(
-					$"Apply aborted — this token belongs to '{operation.WorkspaceBinding.CanonicalPath}', " +
-					$"but projectPath resolved to '{requestedBinding.CanonicalPath}'. Re-run roslyn_preview_code_fix for the intended workspace.",
-					null,
-					"workspace mismatch"));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;
 			if(!TryResolveRoot(boundProjectPath, out var rootPath, out var rootError)) {

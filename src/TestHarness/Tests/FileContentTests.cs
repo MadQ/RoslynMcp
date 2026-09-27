@@ -41,20 +41,20 @@ static class FileContentTests
 			// read_file and get_line_count resolve root + security boundary through the new
 			// TryResolveFileContext guard, ahead of any compilation access. Before the guard a mid-reload
 			// throw during that resolution surfaced as an opaque "An error occurred invoking '<tool>'".
-			// An empty projectPath deterministically forces the resolution failure; the tool must now
+			// A projectPath that never exists deterministically forces the resolution failure; the tool must now
 			// return a STRUCTURED JSON error. RunTestAsync fails on non-JSON, so these fail against the
 			// pre-guard server — not tautological: they assert the resolver call is now wrapped.
 			
 			new("roslyn_read_file: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_read_file",
-					new { filePath = "WorkspaceManager.cs", projectPath = "" },
+					new { filePath = "WorkspaceManager.cs", projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 			
 			new("roslyn_get_line_count: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_get_line_count",
-					new { filePaths = "WorkspaceManager.cs", projectPath = "" },
+					new { filePaths = "WorkspaceManager.cs", projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 		};
 		

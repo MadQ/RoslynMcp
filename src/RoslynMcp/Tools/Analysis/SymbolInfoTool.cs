@@ -22,9 +22,14 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		[Description("Relative file path, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description("1-based line number.")] int line,
 		[Description("1-based column number.")] int column,
-		[Description(ProjectPathDescription)] string projectPath)
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_info", $"{filePath}:{line}", new { column });
+		
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);

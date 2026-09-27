@@ -33,15 +33,19 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		"declared AdditionalFiles items, and analyzer config (.editorconfig/.globalconfig); " +
 		"file creation, deletion, external linked files, project-system changes, and FixAll are rejected.")]
 	public async Task<object> PreviewCodeFix(
-		[Description(ProjectPathDescription)] string projectPath,
 		[Description("Relative or absolute path to the C# file containing the diagnostic.")] string filePath,
 		[Description("1-based line number near or inside the diagnostic span.")] int line,
 		[Description("1-based column number near or inside the diagnostic span.")] int column,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional diagnostic ID to disambiguate when multiple diagnostics are on the same line, e.g. 'RMCP001'.")] string? diagnosticId = null,
 		[Description("Optional zero-based code action index. Required when multiple fixes are available.")] int? actionIndex = null)
 	{
 		using var scope = BeginTool("roslyn_preview_code_fix", filePath, new { line, column, diagnosticId, actionIndex });
+		
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetProject(projectPath, out var project, out var error))
 			

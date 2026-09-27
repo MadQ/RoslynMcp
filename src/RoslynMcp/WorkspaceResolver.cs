@@ -27,6 +27,21 @@ internal sealed class WorkspaceResolver
 	}
 	
 	/// <summary>
+	///     The session default workspace path (.sln/.slnx or .csproj) for tools whose projectPath is
+	///     optional. Throws <see cref="Tools.NoDefaultWorkspaceException"/> when there is none.
+	/// </summary>
+	public string GetDefaultWorkspacePath()
+		=> manager.ResolveDefaultWorkspacePath();
+	
+	/// <summary>
+	///     Resolves a projectPath to the .sln/.slnx, .csproj, or directory it stands for. Throws the same
+	///     typed path exceptions as every other member; call it after a guarded resolution has already
+	///     succeeded for the same path.
+	/// </summary>
+	public (string Path, ResolutionKind Kind) Resolve(string projectPath)
+		=> ResolveWithKind(projectPath);
+	
+	/// <summary>
 	///     Returns how the given projectPath would be resolved (explicit, directory, file walk-up, inferred, or adhoc).
 	///     Tools use this to annotate log entries when non-obvious resolution occurred.
 	/// </summary>

@@ -9,7 +9,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 > **Also see:** [README.md](README.md) for the tool catalog, agent instructions, and architecture details.
 
-> All `roslyn_*` tools support multi-project workflows via the required `projectPath` parameter. Individual tool calls can target different projects without restarting the server.
+> All `roslyn_*` tools support multi-project workflows via the `projectPath` parameter. Individual tool calls can target different projects without restarting the server. Search, read, edit, and build tools also accept an omitted `projectPath` and use the session's default workspace — see [`--root`](#cli-flags).
 
 ---
 
@@ -53,7 +53,7 @@ Complete setup instructions for all major MCP-compatible AI coding assistants.
 
 3. **Restart your client.** That's it.
 
-> Each `roslyn_*` tool call specifies `projectPath` directly — do NOT pass project paths as `args`.
+> Tool calls can always name their project with `projectPath`. To let agents omit it, give the server a default workspace with `"args": ["--root", "/absolute/path/to/your/repo"]` — otherwise the server's working directory is used, and many clients do not start servers in the project directory.
 
 See the client sections below for exact config file locations and JSON structure.
 
@@ -135,7 +135,7 @@ Local tools require `dotnet tool run` as the invocation, and your client config 
 
 > Not all MCP clients support `cwd`. Global install (`-g`) is recommended for most users.
 
-Do not pass project paths as args — each `roslyn_*` tool call specifies `projectPath` directly. Client-specific examples below.
+With `cwd` set, the project root is also the server's default workspace, so tool calls may omit `projectPath`. Client-specific examples below.
 
 ---
 
@@ -448,12 +448,13 @@ See **[Troubleshooting Guide](docs/guides/TROUBLESHOOTING.md)** for comprehensiv
 ### CLI flags
 
 ```bash
-RoslynMcp.exe [options]
+RoslynMcp.exe [root] [options]
 ```
 
 | Argument | Description |
 |----------|-------------|
-| `-p`, `--preload <path>` | Pre-warm a workspace on startup. Repeat the flag to preload multiple projects. Each tool call still requires a `projectPath` parameter regardless. |
+| `--root <path>`, or a bare `[root]` | The session's **default workspace**, used by any tool call that omits `projectPath`. A directory resolves to the one `.sln`/`.slnx` in it (pick among several with `"solution"` in `.madq_roslynmcp.json`), else the nearest solution above it, else its single `.csproj`; a `.sln`/`.slnx`/`.csproj` path is used as-is. Never searches downward; drive roots and system directories are rejected. Default: the server's working directory. When nothing qualifies, tool calls that omit `projectPath` fail with `missing_project_path`. |
+| `-p`, `--preload <path>` | Pre-warm a workspace on startup. Repeat the flag to preload multiple projects. Preloading does not change the default workspace — use `--root` for that. |
 | `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
 | `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
 | `--msbuild-path` | Override the MSBuild installation path used for workspace loading — a dotnet SDK directory or a Visual Studio `MSBuild\Current\Bin` directory. Honored in `auto`, `sdk`, and `vs` modes; ignored in `adhoc`, which skips MSBuild entirely. If the path is invalid, the server falls through to normal discovery. |
@@ -470,6 +471,7 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `ROSLYNMCP_ROOT` | *(server working directory)* | Same as `--root` (which, like a bare positional root, takes precedence) — the default workspace for tool calls that omit `projectPath`. |
 | `ROSLYNMCP_WORKSPACE` | `auto` | Same as `--workspace` flag — `sdk`, `vs`, `adhoc`, or `auto` |
 | `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` | Log file base path. PID is always injected before the extension. Set to empty string to disable logging. |
 | `ROSLYNMCP_BACKUP_PATH` | `%LOCALAPPDATA%\RoslynMcp\backups` | Backup store root for `roslyn_write_file` / `roslyn_local_history`. Set to empty to disable backups. |
@@ -498,16 +500,16 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 }
 ```
 
-- **Honored keys:** `elicit` (boolean) and `workspace` (`"sdk"`, `"vs"`, or `"adhoc"`). Unknown keys are ignored.
+- **Honored keys:** `elicit` (boolean), `workspace` (`"sdk"`, `"vs"`, or `"adhoc"`), `vsVersion` (see `--vs-version`), and `solution` — the file name of one `.sln`/`.slnx` beside the config file, selecting the default workspace when that directory holds several (a path with any directory component is ignored). Unknown keys are ignored.
 - **Discovery:** the server finds the file by walking up from each tool call's resolved `projectPath` — no reliance on the server's working directory. The result is cached, so edits to the file require a server restart.
 - **Precedence:** an explicit setting always wins over the committed file — CLI arg > env var > project file > built-in default. Note that `--elicit` written into an agent's global MCP config by `madq-roslynmcp setup` is a CLI arg and therefore overrides this file.
 - **Security:** the file is committed and potentially untrusted, so machine-specific settings (`--log-path`, `--msbuild-path`, backup paths) and `--preload` are never read from it.
 
 ### Multi-project workspaces
 
-All `roslyn_*` tools require a `projectPath` parameter, enabling multi-project workflows without restarting the server.
+Every `roslyn_*` tool takes a `projectPath` parameter (a `.csproj`, `.sln`/`.slnx`, directory, or source file), enabling multi-project workflows without restarting the server. Where it is optional and omitted, the default workspace from `--root` is used; file-based tools then pick the project in that solution that contains the file, and build/clean/restore target the whole solution.
 
-RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point the command-line argument at the solution directory or primary project directory for pre-loading.
+RoslynMcp can analyze multiple projects if they're part of a `.sln` file or linked via `<ProjectReference>`. Point `--root` (or `--preload`, for pre-warming) at the solution directory or primary project directory.
 
 **See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md) for details on MSBuildWorkspace vs AdhocWorkspace.**
 

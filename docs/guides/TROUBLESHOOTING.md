@@ -78,7 +78,7 @@ Common issues and solutions when setting up and using RoslynMcp.
 **Checklist:**
 1. ✅ Server process started successfully (check client logs)
 2. ✅ MCP session initialized (`initialize` request succeeded)
-3. ✅ `projectPath` values are explicit and correct — every Roslyn tool requires one
+3. ✅ `projectPath` values are correct — or, where omitted, the server has a default workspace (`--root`)
 4. ✅ RoslynMcp is built/published correctly
 
 **Verification:**
@@ -267,10 +267,10 @@ Accepts `17`, `17.14`, or a vswhere range like `[17.0,18.0)`. The version pin al
    - Check your target directory contains a `.csproj` file
    - RoslynMcp needs the project file for full NuGet resolution
 
-2. **Point to correct directory:**
+2. **Point to correct directory:** pass a `projectPath` naming the `.csproj` (or its directory), or set the server's default workspace:
    ```json
    {
-     "args": ["src/MyApp"]  // Directory containing .csproj
+     "args": ["--root", "src/MyApp"]  // Directory containing .csproj, or a solution directory
    }
    ```
 
@@ -296,8 +296,8 @@ Accepts `17`, `17.14`, or a vswhere range like `[17.0,18.0)`. The version pin al
 **Cause:** `projectPath` is missing, ambiguous, or points at the wrong place.
 
 **Solution:**
-1. **Always pass `projectPath` explicitly** — Roslyn tools require it
-2. **Prefer the `.csproj` path directly** when you have one
+1. **`missing_project_path` on a call that omitted `projectPath`** means the server has no default workspace — its root (`--root`, `ROSLYNMCP_ROOT`, or its working directory) holds no solution or project, holds several solutions, or is a drive root/system directory. The error message says which. Pass `projectPath`, or start the server with `--root <repo dir>`; with several solutions, pin one with `"solution": "Foo.slnx"` in `.madq_roslynmcp.json`
+2. **Prefer the `.csproj` (or `.sln`/`.slnx`) path directly** when you have one
 3. **If you pass a source file path,** RoslynMcp walks upward looking for exactly one `.csproj`
 4. **If you pass a directory,** RoslynMcp checks that directory for `.csproj`; no match means AdhocWorkspace
 5. **Check directory structure:**
@@ -375,10 +375,10 @@ NETSDK1209: The current Visual Studio version does not support targeting .NET 11
    ```bash
    dotnet restore src/MyApp/MyApp.csproj
    ```
-3. **Point to subdirectory** — if you only need one project, don't point at solution root:
+3. **Point to subdirectory** — if you only need one project, pass its `.csproj` as `projectPath`, or make it the default workspace:
    ```json
    {
-     "args": ["src/MyApp"]  // Not "."
+     "args": ["--root", "src/MyApp/MyApp.csproj"]  // Not the solution directory
    }
    ```
 

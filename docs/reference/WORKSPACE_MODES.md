@@ -256,7 +256,7 @@ RoslynMcp auto-detects the mode per `projectPath`. To force a specific mode for 
 
 ### Multi-Project Workflows
 
-All tools require a `projectPath` parameter, so you can work with **multiple modes in a single session**:
+Every tool takes a `projectPath` parameter, so you can work with **multiple modes in a single session**:
 
 ```json
 // Example: workspace with both project types
@@ -264,7 +264,7 @@ All tools require a `projectPath` parameter, so you can work with **multiple mod
   "servers": {
     "MadQ.RoslynMcp": {
       "command": "/path/to/RoslynMcp.exe",
-      "args": ["."]
+      "args": ["--root", "/path/to/repo"]
     }
   }
 }
@@ -277,7 +277,20 @@ roslyn_get_diagnostics({ projectPath: "src/MyApp" })
 
 // AdhocWorkspace project (no .csproj)
 roslyn_get_diagnostics({ projectPath: "scripts" })
+
+// Omitted: the default workspace from --root (search, read, edit, and build tools)
+roslyn_search_files({ pattern: "TODO" })
 ```
+
+### Default Workspace
+
+A tool call that omits `projectPath` uses the session's **default workspace**, resolved once from startup inputs only — never from whichever workspaces happen to be cached:
+
+1. **Root:** `--root <path>` (or a bare positional path) > `ROSLYNMCP_ROOT` > the server's working directory.
+2. **Workspace:** a `.sln`/`.slnx`/`.csproj` root is used as-is. A directory resolves to the solution named by `"solution"` in `.madq_roslynmcp.json`, else the one `.sln`/`.slnx` in it, else the nearest solution above it, else its single `.csproj`.
+3. **Guards:** drive roots and system directories are rejected, the search never goes downward, and the default is never an AdhocWorkspace. With no usable default, the call fails with `missing_project_path` and a hint to pass `projectPath` or `--root`.
+
+File-based tools (`roslyn_read_file`, `roslyn_get_file_outline`, the editing tools, …) then pick the project **in that solution that contains the file**, so a file in any project works. Build, clean, and restore target the whole solution. A `.sln`/`.slnx` path is also accepted as an explicit `projectPath`.
 
 ---
 

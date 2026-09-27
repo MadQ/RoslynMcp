@@ -228,13 +228,13 @@ static class ValidationTests
 			// build_project resolves the workspace ONLY through the new TryResolveWorkspaceInfo guard
 			// (for root + .csproj), before any dotnet spawn. Before the guard a mid-reload throw during
 			// that resolution surfaced as an opaque "An error occurred invoking 'roslyn_build_project'".
-			// An empty projectPath deterministically forces the resolution failure; the tool must now
+			// A projectPath that never exists deterministically forces the resolution failure; the tool must now
 			// return a STRUCTURED JSON error (and never reach the dotnet CLI). RunTestAsync fails on
 			// non-JSON, so this fails against the pre-guard server — not tautological.
 			new("roslyn_build_project: structured error (not crash) on resolution failure",
 				() => ctx.RunTestAsync(
 					"roslyn_build_project",
-					new { projectPath = "" },
+					new { projectPath = TestFixtures.MissingProjectPath },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
 		};
 		
