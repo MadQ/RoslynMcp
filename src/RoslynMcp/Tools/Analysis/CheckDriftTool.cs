@@ -36,7 +36,9 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_check_drift", null);
 		
-		projectPath = ResolveProjectArg(projectPath);
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		// Resolved before the peek so a bad or missing path — including an omitted projectPath with no
 		// default workspace — surfaces as the structured path error, not an exception the peek's

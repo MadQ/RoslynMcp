@@ -69,7 +69,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_semantic_search", pattern, new { context, caseSensitive, excludeGenerated, filePattern, mode, containingKind, skip, take });
 		
-		projectPath   = ResolveProjectArg(projectPath);
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
+		
 		context     ??= "all";
 		filePattern ??= "*.cs";
 		

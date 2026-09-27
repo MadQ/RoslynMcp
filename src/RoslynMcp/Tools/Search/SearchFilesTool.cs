@@ -36,7 +36,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, mode, skip, take });
 		
-		projectPath   = ResolveProjectArg(projectPath);
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
+		
 		filePattern ??= "*.cs";
 		
 		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 200, out var cached))

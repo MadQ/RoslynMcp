@@ -63,7 +63,9 @@ internal sealed class BuildTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_build_project", null, new { targetFramework, forceBuild });
 		
-		projectPath = ResolveProjectArg(projectPath);
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
 			
@@ -105,7 +107,7 @@ internal sealed class BuildTool : RoslynMcpTool
 					.Distinct(StringComparer.OrdinalIgnoreCase)];
 			}
 			
-			var roslynDiagnostics = new List<DiagnosticItem>();
+			var aggregated = new List<DiagnosticItem>();
 			
 			foreach(var project in fastPathProjects) {
 				
@@ -113,8 +115,13 @@ internal sealed class BuildTool : RoslynMcpTool
 					
 					return scope.Error(error!);
 				
-				roslynDiagnostics.AddRange(GetRoslynDiagnostics(compilation, rootPath));
+				aggregated.AddRange(GetRoslynDiagnostics(compilation, rootPath));
 			}
+			
+			// A file linked into several projects is compiled — and diagnosed — once per project, with
+			// identical items (the fast path carries no per-project or TFM context to tell them apart).
+			// Record equality is exact here because TargetFrameworks is always null on this path.
+			DiagnosticItem[] roslynDiagnostics = [..aggregated.Distinct()];
 			
 			var roslynErrors      = roslynDiagnostics.Where(d => d.Severity == "error").ToArray();
 			

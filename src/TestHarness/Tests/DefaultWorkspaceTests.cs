@@ -183,6 +183,17 @@ static class DefaultWorkspaceTests
 					$"expected a drift report, got {data?.ToJsonString() ?? "null"}");
 			}),
 			
+			// Only tools whose projectPath is optional may use the default. A tool that still requires it
+			// must reject "" even when a default exists — otherwise it would silently search the default
+			// solution's first project (App here), not fail as the schema promises.
+			new("DefaultWorkspace: a required projectPath still rejects the empty string", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", projectPath = "" });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "missing_project_path",
+					$"expected missing_project_path, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
 			// A root with nothing to load: the structured error must name the fix.
 			new("DefaultWorkspace: no default yields missing_project_path with a --root hint", async () => {
 				

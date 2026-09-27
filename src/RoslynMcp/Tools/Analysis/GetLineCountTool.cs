@@ -27,7 +27,9 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		
 		// Not anchored to a file: the list can span projects, and every path is counted from the
 		// solution or disk. Only the not-on-disk compilation fallback below sees a single project.
-		projectPath = ResolveProjectArg(projectPath);
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			

@@ -19,7 +19,9 @@ public async Task<object> RestorePackages(
 {
 using var scope = BeginTool("roslyn_restore_packages");
 
-projectPath = ResolveProjectArg(projectPath);
+if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+
+return scope.Error(projectError);
 
 if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
 

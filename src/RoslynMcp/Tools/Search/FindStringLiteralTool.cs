@@ -60,7 +60,10 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_find_string_literal", pattern, new { mode, useGlob, matchRaw, caseSensitive, filePattern, skip, take });
 
-		projectPath   = ResolveProjectArg(projectPath);
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+
+			return scope.Error(projectError);
+
 		filePattern ??= "*.cs";
 
 		if(scope.TryServeCachedPage<StringLiteralMatch>(page_token, ref skip, ref take, 200, out var cached))

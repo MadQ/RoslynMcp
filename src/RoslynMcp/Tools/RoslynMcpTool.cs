@@ -170,7 +170,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		error		= null;
 		compilation	= null;
 		
-		// An empty projectPath means "the session default workspace" — nothing to cache or rewrite.
+		// An empty projectPath is rejected by resolution below — nothing to cache or rewrite.
 		var cacheable = PathCacheEnabled && !string.IsNullOrWhiteSpace(projectPath) && !Path.IsPathRooted(projectPath)
 		;
 		
@@ -741,43 +741,24 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	;
 	
 	/// <summary>
-	///     Hint on the <c>missing_project_path</c> error — raised when <c>projectPath</c> is empty and no
-	///     default workspace could be derived (<see cref="NoDefaultWorkspaceException"/>).
+	///     Hint on the <c>missing_project_path</c> error — raised when a tool that requires <c>projectPath</c>
+	///     receives an empty one, or an optional one is omitted and no default workspace could be derived
+	///     (<see cref="NoDefaultWorkspaceException"/>).
 	/// </summary>
 	protected const string MissingProjectPathHint =
-		"Pass projectPath (a .csproj, a .sln/.slnx, or a directory containing a .csproj), or start the server with " +
-		"--root <dir> (or ROSLYNMCP_ROOT) so projectPath can be omitted."
+		"Pass projectPath (a .csproj, a .sln/.slnx, or a directory containing a .csproj). Tools whose projectPath is optional " +
+		"can omit it once the server has a default workspace — start it with --root <dir> (or ROSLYNMCP_ROOT)."
 	;
 	
 	/// <summary>
 	///     Normalizes an optional <c>projectPath</c> argument for a tool with no file anchor: an omitted value
-	///     becomes the empty string, which <see cref="WorkspaceManager.ResolveProjectPath"/> resolves to the
-	///     session default workspace. Records the fallback on the active scope so the log shows it.
-	/// </summary>
-	protected static string ResolveProjectArg(string? projectPath)
-	{
-		if(!string.IsNullOrWhiteSpace(projectPath))
-			
-			return projectPath;
-		
-		activeScope.Value?.Record("default workspace");
-		
-		return "";
-	}
-	
-	/// <summary>
-	///     Normalizes an optional <c>projectPath</c> argument for a tool that operates on
-	///     <paramref name="filePath"/>. An omitted value resolves to the .csproj of the project in the default
-	///     solution that contains the file, so a file in any project of the solution works — the default
-	///     solution's own default project would not see it. Falls back to the default workspace itself when
-	///     the file is not a tracked document (a new file, a .json, an unknown path), and to the empty string
-	///     on a workspace fault so the tool's own guard reports the structured error. Fails only when a
-	///     suffix-only <paramref name="filePath"/> names different files in different projects — picking
-	///     one silently would hand the tool the wrong file's compilation.
+	///     resolves to the session default workspace (a .sln/.slnx or .csproj path). This is the only way a
+	///     tool opts in to the default — <see cref="WorkspaceManager.ResolveProjectPath"/> rejects an empty
+	///     path, so a tool that requires <c>projectPath</c> can never land on the default by receiving
+	///     <c>""</c>. Fails with the structured <c>missing_project_path</c> error when there is no default.
 	/// </summary>
 	protected bool TryResolveProjectArg(
 		string? projectPath,
-		string? filePath,
 		out string resolved,
 		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
 	{
@@ -790,16 +771,54 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			return true;
 		}
 		
-		resolved = ResolveProjectArg(projectPath);
+		try {
+			resolved = workspace.GetDefaultWorkspacePath();
+		}
+		catch(Exception ex) when(!IsFatal(ex)) {
+			
+			resolved = "";
+			error    = MapWorkspaceFault("TryResolveProjectArg", ex);
+			
+			return false;
+		}
 		
-		if(string.IsNullOrWhiteSpace(filePath))
+		activeScope.Value?.Record("default workspace");
+		
+		return true;
+	}
+	
+	/// <summary>
+	///     Normalizes an optional <c>projectPath</c> argument for a tool that operates on
+	///     <paramref name="filePath"/>. An omitted value resolves to the .csproj of the project in the default
+	///     solution that contains the file, so a file in any project of the solution works — the default
+	///     solution's own default project would not see it. Falls back to the default workspace itself when
+	///     the file is not a tracked document (a new file, a .json, an unknown path), and to the default path
+	///     on a workspace fault so the tool's own guard reports the structured error. Fails when there is no
+	///     default workspace, or when a suffix-only <paramref name="filePath"/> names different files in
+	///     different projects — picking one silently would hand the tool the wrong file's compilation.
+	/// </summary>
+	protected bool TryResolveProjectArg(
+		string? projectPath,
+		string? filePath,
+		out string resolved,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
+	{
+		var wasOmitted = string.IsNullOrWhiteSpace(projectPath);
+		
+		if(!TryResolveProjectArg(projectPath, out resolved, out error))
+			
+			return false;
+		
+		if(!wasOmitted || string.IsNullOrWhiteSpace(filePath))
 			
 			return true;
 		
+		var defaultPath = resolved;
+		
 		try {
 			
-			var solution = ResolveWithRetry("TryResolveProjectArg", () => workspace.GetSolution(""));
-			var rootPath = workspace.GetRootPath("");
+			var solution = ResolveWithRetry("TryResolveProjectArg", () => workspace.GetSolution(defaultPath));
+			var rootPath = workspace.GetRootPath(defaultPath);
 			var owner    = FindOwningProject(solution, filePath, rootPath, out var candidates);
 			
 			if(candidates.Length > 0) {
@@ -820,7 +839,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		catch(Exception ex) when(!IsFatal(ex)) {
 			
 			// Not a failure in its own right: the tool's resolution guard re-raises the same fault
-			// through its structured mapping on the empty path.
+			// through its structured mapping when it resolves the default path.
 			logger.LogInfo("TryResolveProjectArg", $"{ex.GetType().Name}: {ex.Message}");
 		}
 		

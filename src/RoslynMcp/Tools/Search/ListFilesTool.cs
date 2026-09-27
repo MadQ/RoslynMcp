@@ -28,8 +28,11 @@ internal sealed class ListFilesTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_list_files", pattern, new { recursive, skip, take });
 		
-		projectPath = ResolveProjectArg(projectPath);
-		pattern   ??= "**/*";
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
+		
+		pattern ??= "**/*";
 		
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 500, out var cached))
 			

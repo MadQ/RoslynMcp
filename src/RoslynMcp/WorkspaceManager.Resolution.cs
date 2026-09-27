@@ -8,7 +8,6 @@ internal sealed partial class WorkspaceManager
 	
 	/// <summary>
 	///     Resolves a project path using smart inference:
-	///     - empty → the session default workspace (see <see cref="ResolveDefaultWorkspace"/>)
 	///     - .sln/.slnx file → use directly
 	///     - .csproj file → use directly
 	///     - directory → search for .csproj
@@ -17,9 +16,11 @@ internal sealed partial class WorkspaceManager
 	/// </summary>
 	public (string Path, ResolutionKind Kind) ResolveProjectPath(string inputPath)
 	{
+		// Deliberately not the default workspace: only tools whose projectPath is optional opt in to it,
+		// explicitly, via ResolveDefaultWorkspacePath. An empty string sent to a tool that requires
+		// projectPath must fail as missing rather than silently land on the default solution.
 		if(string.IsNullOrWhiteSpace(inputPath))
-			
-			return ResolveDefaultWorkspace();
+			throw new ArgumentException("projectPath is required by this tool and cannot be empty.", nameof(inputPath));
 		
 		var fullPath = Path.GetFullPath(inputPath);
 		
@@ -202,9 +203,10 @@ internal sealed partial class WorkspaceManager
 	///     The session default workspace — a .sln/.slnx or .csproj path — used whenever a tool is called
 	///     without <c>projectPath</c>. Deterministic by construction: it depends only on startup inputs,
 	///     never on which workspaces happen to be cached, which is what separates it from a guess.
-	///     Throws <see cref="NoDefaultWorkspaceException"/> when nothing usable is found.
+	///     Throws <see cref="NoDefaultWorkspaceException"/> when nothing usable is found. Filesystem-only:
+	///     never loads a workspace.
 	/// </summary>
-	(string Path, ResolutionKind Kind) ResolveDefaultWorkspace()
+	public string ResolveDefaultWorkspacePath()
 	{
 		if(Volatile.Read(ref defaultWorkspacePath) is not { } path) {
 			
@@ -223,7 +225,7 @@ internal sealed partial class WorkspaceManager
 			path = defaultWorkspacePath!;
 		}
 		
-		return (path, IsSolutionPath(path) ? ResolutionKind.Solution : ResolutionKind.Explicit);
+		return path;
 	}
 	
 	/// <summary>
