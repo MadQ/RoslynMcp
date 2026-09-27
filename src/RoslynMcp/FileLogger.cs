@@ -118,7 +118,7 @@ internal sealed class FileLogger : IDisposable
 			, Pid             = pid
 			, Level           = "TOOL"
 			, Instance        = instance
-			, WorkspaceMode   = isMSBuild ? "MSB" : "ADH"
+			, WorkspaceMode   = WorkspaceModeLabel(isMSBuild)
 			, ToolName        = shortName
 			, ElapsedMs       = elapsedMs
 			, Success         = success
@@ -132,6 +132,36 @@ internal sealed class FileLogger : IDisposable
 		});
 	}
 	
+	/// <summary>
+	///     The <c>workspace_mode</c> label for a TOOL entry: <c>SDK</c>, <c>VS</c>, or <c>ADH</c>. SDK and VS
+	///     both load through <c>MSBuildWorkspace</c>, so <paramref name="isMSBuild"/> alone cannot tell them
+	///     apart. MSBuild registration is process-global — every <c>MSBuildWorkspace</c> in the process shares
+	///     the mode <see cref="MSBuildBootstrap"/> resolved, which is always concrete once a load has run
+	///     (auto mode detects Sdk/Vs before bootstrapping). Before the first load it is still Auto, so the
+	///     configured mode stands in; only an undecided auto session falls back to the generic <c>MSB</c>,
+	///     which also keeps a label on tools that never touch a workspace.
+	/// </summary>
+	static string WorkspaceModeLabel(bool isMSBuild)
+	{
+		if(!isMSBuild)
+			
+			return "ADH";
+		
+		var mode = MSBuildBootstrap.ResolvedMode is WorkspaceMode.Auto
+			? ServerArgs.Current.WorkspaceMode
+			: MSBuildBootstrap.ResolvedMode
+		;
+		
+		return mode switch {
+			
+			WorkspaceMode.Sdk   => "SDK",
+			WorkspaceMode.Vs    => "VS",
+			WorkspaceMode.Adhoc => "ADH",
+			_                   => "MSB"
+		};
+	}
+	
+
 	/// <summary>
 	///     Logs a hook invocation (opt-in, enabled by the <c>--log</c> flag on
 	///     <c>dotnet roslynmcp hook</c>). Called once per hook process from its

@@ -51,7 +51,11 @@ record LogEntry
 
     // ── TOOL entry fields ─────────────────────────────────────────────────
 
-    /// <summary>For TOOL entries: 'MSB' (MSBuildWorkspace) or 'ADH' (AdhocWorkspace).</summary>
+    /// <summary>
+    ///     For TOOL entries: 'SDK' or 'VS' (MSBuildWorkspace, by the MSBuild the process registered), 'ADH'
+    ///     (AdhocWorkspace), or 'MSB' (MSBuildWorkspace in an auto session that has not loaded a workspace
+    ///     yet — and every MSBuild entry in logs written before the SDK/VS split).
+    /// </summary>
     [JsonPropertyName("workspace_mode")]
     public string? WorkspaceMode { get; init; }
 

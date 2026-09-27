@@ -145,7 +145,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - Rotation: 10 MB cap, 3 rotated backups (`roslynmcp.{pid}.log`, `.log.1`, `.log.2`, `.log.3`)
 - Pruning: old logs deleted after `ROSLYNMCP_LOG_MAX_AGE_DAYS` days (default: 30); backups after `ROSLYNMCP_BACKUP_MAX_AGE_DAYS` days (default: 90); pruning runs only after the server has started at least `ROSLYNMCP_PRUNE_MIN_RUNS` times (default: 3)
 - Format: NDJSON — one `LogEntry` object per line
-- Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `message` (non-TOOL entries), `tool_name`, `workspace_mode` (MSB/ADH), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`, `response_peek` (truncated JSON preview of response)
+- Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `message` (non-TOOL entries), `tool_name`, `workspace_mode` (SDK/VS/ADH — MSB in pre-split logs and in an auto session before its first workspace load), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`, `response_peek` (truncated JSON preview of response)
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility

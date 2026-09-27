@@ -1210,8 +1210,16 @@
 	  row.appendChild(lvl);
 
 	  // workspace mode
-	  const wsHints = { MSB: 'MSBuildWorkspace (.csproj)', ADH: 'AdhocWorkspace (no .csproj)' };
-	  const ws = mk('span', e.workspace_mode === 'MSB' ? 'col-ws ws-msb' : e.workspace_mode === 'ADH' ? 'col-ws ws-adh' : 'col-ws', e.workspace_mode || '');
+	  // SDK and VS are both MSBuildWorkspace and share its color; MSB is the pre-split label (old
+	  // logs) and an auto session that has not loaded a workspace yet.
+	  const wsHints = {
+	    SDK: 'MSBuildWorkspace — .NET SDK MSBuild',
+	    VS:  'MSBuildWorkspace — Visual Studio MSBuild',
+	    MSB: 'MSBuildWorkspace (.csproj) — SDK/VS not yet resolved, or a log written before SDK/VS labels',
+	    ADH: 'AdhocWorkspace (no .csproj)'
+	  };
+	  const wsClass = { SDK: 'ws-msb', VS: 'ws-msb', MSB: 'ws-msb', ADH: 'ws-adh' }[e.workspace_mode];
+	  const ws = mk('span', wsClass ? 'col-ws ' + wsClass : 'col-ws', e.workspace_mode || '');
 	  if(e.workspace_mode) ws.title = wsHints[e.workspace_mode] || '';
 	  row.appendChild(ws);
 
