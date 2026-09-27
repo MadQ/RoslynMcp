@@ -454,7 +454,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	/// <summary>
 	///     Reads the current <see cref="Solution"/> for a tool, guarding the same transient mid-reload and
-	///     path-resolution failures as <see cref="TryResolveFileContext"/>.
+	///     path-resolution failures as <see cref="TryResolveFileContext"/>. Records the workspace mode
+	///     (MSBuild vs. Adhoc) on the active scope, like every other resolution guard.
 	/// </summary>
 	protected bool TryResolveSolution(
 		string projectPath,
@@ -467,6 +468,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		try {
 			
 			solution = ResolveWithRetry("TryResolveSolution", () => workspace.GetSolution(projectPath));
+			
+			// Recorded here, not left to the scope's MSBuild default: a tool that only reads the solution
+			// (search, list) would otherwise log an AdhocWorkspace call with an MSBuild label (#303).
+			// The instance is already loaded by GetSolution, so the lookup is a cache hit.
+			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
 			return true;
 		}
@@ -481,7 +487,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// <summary>
 	///     Resolves only the workspace root path for a tool, guarding the same transient mid-reload and
 	///     path-resolution failures as <see cref="TryResolveFileContext"/>. Use in tools that call
-	///     <c>workspace.GetRootPath</c> directly and do not also need the security boundary.
+	///     <c>workspace.GetRootPath</c> directly and do not also need the security boundary. Records the
+	///     workspace mode (MSBuild vs. Adhoc) on the active scope, like every other resolution guard.
 	/// </summary>
 	protected bool TryResolveRoot(
 		string projectPath,
@@ -493,7 +500,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
-			rootPath = ResolveWithRetry("TryResolveRoot", () => workspace.GetRootPath(projectPath));
+			// GetWorkspaceInfo rather than GetRootPath: the same lookup also says whether the workspace is
+			// MSBuild or Adhoc, which the scope must record — list_files resolves only its root, and
+			// without this logged an AdhocWorkspace call with an MSBuild label (#303).
+			var (rPath, isMSBuild, _) = ResolveWithRetry("TryResolveRoot", () => workspace.GetWorkspaceInfo(projectPath));
+			rootPath = rPath;
+			
+			activeScope.Value?.SetWorkspaceMode(isMSBuild);
 			
 			return true;
 		}

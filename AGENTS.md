@@ -561,7 +561,7 @@ These may be called at any point before the terminal call:
 | `scope.SetArgs(obj)` | Call early, right after `BeginTool`. Records key input arguments serialized to compact JSON. **Only included in the log entry on failure** — helps diagnose what inputs caused a problem. Truncate large values before passing. |
 | `scope.Record(note)` | Append a mid-scope annotation. Useful for recording intermediate outcomes ("cache hit", "2 workspaces merged") that don't change the final outcome. Appended with `;` to any existing detail. |
 | `scope.SetCacheTag(bool hit)` | Record whether a pagination cache hit or miss occurred. Called by `TryServeCachedPage`. |
-| `scope.SetWorkspaceMode(bool isMSBuild)` | Record whether MSBuildWorkspace or AdhocWorkspace was used. Called by `TryGetCompilation` / `TryGetProject` internally — tools generally don't call this directly. |
+| `scope.SetWorkspaceMode(bool isMSBuild)` | Record whether MSBuildWorkspace or AdhocWorkspace was used. Called internally by every resolution guard (`TryGetCompilation`, `TryGetProject`, `TryResolveFileContext`, `TryResolveWorkspaceInfo`, `TryResolveRoot`, `TryResolveSolution`) — tools generally don't call this directly. The scope defaults to MSBuild, so a guard that skipped it would log an Adhoc call with the MSBuild label. |
 
 #### Workspace Access Patterns
 

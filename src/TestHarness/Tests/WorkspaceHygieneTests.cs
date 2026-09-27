@@ -41,6 +41,10 @@ static class WorkspaceHygieneTests
 			// this group already reads the harness server's log, and only a full run produces one.
 			new("workspace hygiene: MSBuild entries are labelled SDK once resolved",
 				() => Task.FromResult(AssertSdkWorkspaceLabel(serverLogDir, serverLogGlob))),
+			
+			// #303: tools that resolve only a root or a solution must still record Adhoc.
+			new("workspace hygiene: root/solution-only tools label an adhoc workspace ADH",
+				() => AssertAdhocLabelAsync(ctx, serverLogDir, serverLogGlob)),
 		};
 		
 		return new TestGroup($"Workspace Hygiene ({tests.Count} tests)", tests);
@@ -151,6 +155,74 @@ static class WorkspaceHygieneTests
 			return (false, $"FAIL  ({msbAfterSdk} MSB entr(ies) after the mode resolved to SDK; unexpected labels: [{string.Join(", ", otherLabels)}])");
 		
 		return (true, $"PASS  ({sdkEntries} SDK entries, no MSB after resolution)");
+	}
+	
+	/// <summary>
+	///     Guards the second half of #303. The tool scope defaults to the MSBuild label, and only the guards
+	///     that record the mode override it. <c>roslyn_list_files</c> resolves nothing but its root
+	///     (<c>TryResolveRoot</c>) and <c>roslyn_search_files</c> nothing but the solution and root
+	///     (<c>TryResolveSolution</c>) — neither recorded the mode, so both logged an AdhocWorkspace call as
+	///     <c>SDK</c> (before the SDK/VS split: <c>MSB</c>). The check makes one call to each against a bare
+	///     temp directory (no .csproj, so AdhocWorkspace), using a pattern no other test uses as the log
+	///     subject, then finds exactly those two TOOL entries in the server's log and requires <c>ADH</c>.
+	///     The scope writes its entry as the tool method returns, before the response is sent, so the
+	///     entries exist once the calls complete. Against the pre-fix server both entries read <c>SDK</c>.
+	/// </summary>
+	static async Task<(bool pass, string message)> AssertAdhocLabelAsync(TestContext ctx, string logDir, string logGlob)
+	{
+		var fx = TestFixtures.NewAdhocDir("AdhocLabel");
+		
+		try {
+			
+			fx.Write("AdhocLabelProbe.cs", "class AdhocLabelProbe { }\n");
+			
+			// Both patterns double as the TOOL entry's subject; neither is used by any other test, and
+			// the GUID makes the search entry unique even across repeated runs sharing a log.
+			var listPattern   = "AdhocLabelProbe*.cs";
+			var searchPattern = $"AdhocLabelProbe_{Guid.NewGuid():N}|class AdhocLabelProbe";
+			
+			var list   = await ctx.RunTestAsync("roslyn_list_files",   new { pattern = listPattern,   projectPath = fx.Dir }, data => data?["count"] is not null);
+			var search = await ctx.RunTestAsync("roslyn_search_files", new { pattern = searchPattern, projectPath = fx.Dir }, data => data?["matches"] is not null);
+			
+			if(!list.pass || !search.pass)
+				
+				return (false, $"FAIL  (probe calls failed: list_files {list.message}; search_files {search.message})");
+			
+			if(!TryReadLog(logDir, logGlob, out var lines, out var failure))
+				
+				return (false, failure);
+			
+			string? listMode   = null;
+			string? searchMode = null;
+			
+			foreach(var line in lines) {
+				
+				JsonNode? entry;
+				
+				try {
+					entry = JsonNode.Parse(line);
+				}
+				catch(System.Text.Json.JsonException) {
+					continue;
+				}
+				
+				var subject = entry?["subject"]?.GetValue<string>();
+				var mode    = entry?["workspace_mode"]?.GetValue<string>();
+				
+				if(subject == listPattern)
+					listMode = mode;
+				else if(subject == searchPattern)
+					searchMode = mode;
+			}
+			
+			return listMode == "ADH" && searchMode == "ADH"
+				? (true,  "PASS  (list_files and search_files on an adhoc workspace both logged ADH)")
+				: (false, $"FAIL  (expected ADH; list_files logged '{listMode ?? "no entry"}', search_files logged '{searchMode ?? "no entry"}')")
+			;
+		}
+		finally {
+			fx.Dispose();
+		}
 	}
 	
 	/// <summary>
