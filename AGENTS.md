@@ -145,7 +145,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 - Rotation: 10 MB cap, 3 rotated backups (`roslynmcp.{pid}.log`, `.log.1`, `.log.2`, `.log.3`)
 - Pruning: old logs deleted after `ROSLYNMCP_LOG_MAX_AGE_DAYS` days (default: 30); backups after `ROSLYNMCP_BACKUP_MAX_AGE_DAYS` days (default: 90); pruning runs only after the server has started at least `ROSLYNMCP_PRUNE_MIN_RUNS` times (default: 3)
 - Format: NDJSON — one `LogEntry` object per line
-- Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `message` (non-TOOL entries), `tool_name`, `workspace_mode` (MSB/ADH), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`, `response_peek` (truncated JSON preview of response)
+- Key fields: `timestamp` (ISO 8601 UTC), `pid`, `level` (START/STOP/TOOL/ERROR/INFO), `instance` (per-process tool-call counter), `message` (non-TOOL entries), `tool_name`, `workspace_mode` (SDK/VS/ADH — MSB in pre-split logs and in an auto session before its first workspace load), `elapsed_ms`, `success`, `subject`, `detail`, `cache_tag`, `estimated_tokens`, `session_tokens`, `response_peek` (truncated JSON preview of response)
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
@@ -561,7 +561,7 @@ These may be called at any point before the terminal call:
 | `scope.SetArgs(obj)` | Call early, right after `BeginTool`. Records key input arguments serialized to compact JSON. **Only included in the log entry on failure** — helps diagnose what inputs caused a problem. Truncate large values before passing. |
 | `scope.Record(note)` | Append a mid-scope annotation. Useful for recording intermediate outcomes ("cache hit", "2 workspaces merged") that don't change the final outcome. Appended with `;` to any existing detail. |
 | `scope.SetCacheTag(bool hit)` | Record whether a pagination cache hit or miss occurred. Called by `TryServeCachedPage`. |
-| `scope.SetWorkspaceMode(bool isMSBuild)` | Record whether MSBuildWorkspace or AdhocWorkspace was used. Called by `TryGetCompilation` / `TryGetProject` internally — tools generally don't call this directly. |
+| `scope.SetWorkspaceMode(bool isMSBuild)` | Record whether MSBuildWorkspace or AdhocWorkspace was used. Called internally by every resolution guard (`TryGetCompilation`, `TryGetProject`, `TryResolveFileContext`, `TryResolveWorkspaceInfo`, `TryResolveRoot`, `TryResolveSolution`) — tools generally don't call this directly. The scope defaults to MSBuild, so a guard that skipped it would log an Adhoc call with the MSBuild label. |
 
 #### Workspace Access Patterns
 
