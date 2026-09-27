@@ -17,6 +17,7 @@ public RestorePackagesTool(WorkspaceResolver workspace, FileLogger logger, Pagin
 "Omit projectPath to restore the whole default solution in one run rather than one call per project; " +
 "the server runs one dotnet build/clean/restore at a time, so parallel calls only queue.")]
 public async Task<object> RestorePackages(
+CancellationToken cancellationToken,
 [Description(OptionalProjectPathDescription)] string? projectPath = null)
 {
 using var scope = BeginTool("roslyn_restore_packages");
@@ -40,8 +41,13 @@ int exitCode;
 
 try {
 // -tl:off: disable terminal logger for predictable plain-text output.
-		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", target, "/nologo", "-tl:off"], rootPath, scope.Record)
+		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", target, "/nologo", "-tl:off"], rootPath, scope.Record, cancellationToken)
 		;
+}
+catch(OperationCanceledException) {
+// Logged as a cancellation rather than an unhandled exception; the SDK answers the client.
+scope.Failed("cancelled");
+throw;
 }
 catch(InvalidOperationException ex) {
 return scope.Failed(ex.Message, new RestoreResult(false, ex.Message, ex.InnerException?.Message));

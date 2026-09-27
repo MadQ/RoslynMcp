@@ -55,6 +55,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		"output tail (last 30 lines) and explains the failure (e.g. locked output file, linker error). " +
 		"Do NOT run dotnet build in a terminal to investigate — error_details already has the output you need.")]
 	public async Task<object> BuildProject(
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
 		[Description(
@@ -155,7 +156,13 @@ internal sealed class BuildTool : RoslynMcpTool
 		int			exitCode;
 		
 		try {
-			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope);
+			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope, cancellationToken);
+		}
+		catch(OperationCanceledException) {
+			
+			// Logged as a cancellation rather than an unhandled exception; the SDK answers the client.
+			scope.Failed("cancelled");
+			throw;
 		}
 		catch(InvalidOperationException ex) {
 			
@@ -231,8 +238,8 @@ internal sealed class BuildTool : RoslynMcpTool
 		return [.. args];
 	}
 	
-	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope)
-		=> await DotnetRunner.RunAsync(args, workingDirectory, scope.Record);
+	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope, CancellationToken cancellationToken)
+		=> await DotnetRunner.RunAsync(args, workingDirectory, scope.Record, cancellationToken);
 	
 	private static DiagnosticItem[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
 	{

@@ -31,11 +31,31 @@ internal static class DotnetRunner
 		Action<string>? record = null,
 		CancellationToken ct = default)
 	{
+		// Recorded before any wait, so a run cancelled while queued still says what it was.
+		record?.Invoke($"dotnet {string.Join(" ", args)}");
+		record?.Invoke($"cwd={workingDirectory}");
+		
+		// A request cancelled before it got here must not start a process — with the gate free, it
+		// would otherwise launch dotnet only for RunCoreAsync to kill it straight away.
+		if(ct.IsCancellationRequested) {
+			
+			record?.Invoke("cancelled before start — dotnet never started");
+			ct.ThrowIfCancellationRequested();
+		}
+		
 		if(!gate.Wait(0)) {
 			
 			var queued = Stopwatch.StartNew();
 			
-			await gate.WaitAsync(ct);
+			try {
+				await gate.WaitAsync(ct);
+			}
+			catch(OperationCanceledException) {
+				
+				record?.Invoke($"cancelled after {queued.ElapsedMilliseconds} ms queued — dotnet never started");
+				throw;
+			}
+			
 			record?.Invoke($"queued {queued.ElapsedMilliseconds} ms behind another dotnet command");
 		}
 		
@@ -81,11 +101,6 @@ internal static class DotnetRunner
 		// special characters — do not use the Arguments string property instead.
 		foreach(var arg in args)
 			psi.ArgumentList.Add(arg);
-		
-		var argsDisplay = string.Join(" ", args);
-		record?.Invoke($"dotnet {argsDisplay}")
-		;
-		record?.Invoke($"cwd={workingDirectory}");
 		
 		Process? process = null;
 		
