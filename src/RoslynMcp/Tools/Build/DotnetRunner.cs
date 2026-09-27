@@ -60,6 +60,16 @@ internal static class DotnetRunner
 		}
 		
 		try {
+			
+			// WaitAsync can hand over the gate in the same instant the token is cancelled — the release
+			// and the cancellation race — so re-check before starting anything. The finally still
+			// releases the gate just acquired.
+			if(ct.IsCancellationRequested) {
+				
+				record?.Invoke("cancelled on acquiring the gate — dotnet never started");
+				ct.ThrowIfCancellationRequested();
+			}
+			
 			return await RunCoreAsync(args, workingDirectory, record, ct);
 		}
 		finally {
