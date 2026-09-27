@@ -14,8 +14,11 @@ public CleanSolutionTool(WorkspaceResolver workspace, FileLogger logger, Paginat
 "Use when the build is in a bad state, producing stale artifacts, or before a full rebuild from scratch. " +
 "Safe to run at any time; only compiled output is deleted. " +
 "To rebuild after cleaning, use roslyn_build_project. " +
-"For package restore only, use roslyn_restore_packages.")]
+"For package restore only, use roslyn_restore_packages. " +
+"Omit projectPath to clean the whole default solution in one run rather than one call per project; " +
+"the server runs one dotnet build/clean/restore at a time, so parallel calls only queue.")]
 public async Task<object> CleanSolution(
+CancellationToken cancellationToken,
 [Description(OptionalProjectPathDescription)] string? projectPath = null)
 {
 using var scope = BeginTool("roslyn_clean_solution");
@@ -39,8 +42,13 @@ int exitCode;
 
 try {
 // -tl:off: disable terminal logger for predictable plain-text output.
-		(output, _, exitCode) = await DotnetRunner.RunAsync(["clean", target, "/nologo", "/v:quiet", "-tl:off"], rootPath, scope.Record)
+		(output, _, exitCode) = await DotnetRunner.RunAsync(["clean", target, "/nologo", "/v:quiet", "-tl:off"], rootPath, scope.Record, cancellationToken)
 		;
+}
+catch(OperationCanceledException) {
+// Logged as a cancellation rather than an unhandled exception; the SDK answers the client.
+scope.Failed("cancelled");
+throw;
 }
 catch(InvalidOperationException ex) {
 return scope.Failed(ex.Message, new CleanResult(false, ex.Message, ex.InnerException?.Message));

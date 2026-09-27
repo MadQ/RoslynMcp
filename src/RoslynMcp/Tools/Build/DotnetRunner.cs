@@ -9,15 +9,79 @@ namespace RoslynMcp.Tools;
 // and deterministic process disposal.
 internal static class DotnetRunner
 {
+	// One dotnet CLI run at a time, process-wide (#306). Builds, cleans, and restores of projects in
+	// one solution write the same obj\ output — a project referenced by two targets is built by both
+	// — so concurrent runs race on its state files ("Could not write state file …", "… being used by
+	// another process"), the contention that corrupted a workspace reload in #300. Agents do issue
+	// these in parallel, so the server queues them rather than trusting the tool descriptions alone.
+	// Global rather than per-solution: concurrent runs over different solutions are rare, and for a
+	// disk-mutating operation correctness beats throughput.
+	static readonly SemaphoreSlim gate = new(1, 1);
+	
 	// Runs `dotnet <args>` in workingDirectory and returns the combined stdout+stderr output,
 	// elapsed time, and exit code. Throws InvalidOperationException if the process fails to start
 	// or if output cannot be read — callers map these to their own error result types.
 	// record is an optional sink for diagnostic annotations (e.g. scope.Record in BuildTool).
+	// Waits for any other dotnet run to finish first; the wait is recorded, and is not part of the
+	// returned elapsed time, which stays the process's own runtime. Cancellation while queued throws
+	// OperationCanceledException without ever starting the process.
 	internal static async Task<(string combined, TimeSpan elapsed, int exitCode)> RunAsync(
 		IEnumerable<string> args,
 		string workingDirectory,
 		Action<string>? record = null,
 		CancellationToken ct = default)
+	{
+		// Recorded before any wait, so a run cancelled while queued still says what it was.
+		record?.Invoke($"dotnet {string.Join(" ", args)}");
+		record?.Invoke($"cwd={workingDirectory}");
+		
+		// A request cancelled before it got here must not start a process — with the gate free, it
+		// would otherwise launch dotnet only for RunCoreAsync to kill it straight away.
+		if(ct.IsCancellationRequested) {
+			
+			record?.Invoke("cancelled before start — dotnet never started");
+			ct.ThrowIfCancellationRequested();
+		}
+		
+		if(!gate.Wait(0)) {
+			
+			var queued = Stopwatch.StartNew();
+			
+			try {
+				await gate.WaitAsync(ct);
+			}
+			catch(OperationCanceledException) {
+				
+				record?.Invoke($"cancelled after {queued.ElapsedMilliseconds} ms queued — dotnet never started");
+				throw;
+			}
+			
+			record?.Invoke($"queued {queued.ElapsedMilliseconds} ms behind another dotnet command");
+		}
+		
+		try {
+			
+			// WaitAsync can hand over the gate in the same instant the token is cancelled — the release
+			// and the cancellation race — so re-check before starting anything. The finally still
+			// releases the gate just acquired.
+			if(ct.IsCancellationRequested) {
+				
+				record?.Invoke("cancelled on acquiring the gate — dotnet never started");
+				ct.ThrowIfCancellationRequested();
+			}
+			
+			return await RunCoreAsync(args, workingDirectory, record, ct);
+		}
+		finally {
+			gate.Release();
+		}
+	}
+	
+	static async Task<(string combined, TimeSpan elapsed, int exitCode)> RunCoreAsync(
+		IEnumerable<string> args,
+		string workingDirectory,
+		Action<string>? record,
+		CancellationToken ct)
 	{
 		var psi = new ProcessStartInfo("dotnet") {
 			
@@ -47,11 +111,6 @@ internal static class DotnetRunner
 		// special characters — do not use the Arguments string property instead.
 		foreach(var arg in args)
 			psi.ArgumentList.Add(arg);
-		
-		var argsDisplay = string.Join(" ", args);
-		record?.Invoke($"dotnet {argsDisplay}")
-		;
-		record?.Invoke($"cwd={workingDirectory}");
 		
 		Process? process = null;
 		

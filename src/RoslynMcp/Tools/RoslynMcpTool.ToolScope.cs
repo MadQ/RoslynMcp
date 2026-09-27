@@ -23,6 +23,7 @@ internal abstract partial class RoslynMcpTool
 		bool    failed;
 		bool    completed;
 		string? detail;
+		string? notes;             // Record() annotations — kept apart so a terminal's detail cannot erase them.
 		string? responsePeek;
 		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
 		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
@@ -182,8 +183,22 @@ internal abstract partial class RoslynMcpTool
 			return returnValue;
 		}
 		
-		/// <summary>Appends a neutral annotation without changing the outcome.</summary>
-		public void Record(string note) => detail = detail is null ? note : $"{detail}; {note}";
+		/// <summary>
+		///     Appends a neutral annotation without changing the outcome. Notes are kept apart from the
+		///     terminal detail and joined after it on dispose — they used to be appended to the detail
+		///     itself, where the terminal call (Outcome/Failed/Error), which always runs last, overwrote
+		///     them, so no note recorded on a normal return path ever reached the log (#306).
+		/// </summary>
+		public void Record(string? note)
+		{
+			// Callers pass null for "nothing worth noting" (e.g. the resolution-kind switch in
+			// TryGetCompilation) — ignored rather than logged as an empty "; " segment.
+			if(string.IsNullOrEmpty(note))
+				
+				return;
+			
+			notes = notes is null ? note : $"{notes}; {note}";
+		}
 		
 		public void Dispose()
 		{
@@ -195,7 +210,13 @@ internal abstract partial class RoslynMcpTool
 				detail ??= "unhandled exception";
 			}
 			
-			log.LogTool(name, sw.ElapsedMilliseconds, !failed, isMSBuild, estimatedTokens, subject, detail, cacheTag, responsePeek, args);
+			// Outcome first — it is what the log viewer's detail column should lead with.
+			var logged = notes is null ? detail
+				: detail is null ? notes
+				: $"{detail}; {notes}"
+			;
+			
+			log.LogTool(name, sw.ElapsedMilliseconds, !failed, isMSBuild, estimatedTokens, subject, logged, cacheTag, responsePeek, args);
 			
 			onDispose();
 		}
