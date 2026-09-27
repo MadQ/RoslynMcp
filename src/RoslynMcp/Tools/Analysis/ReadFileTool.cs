@@ -28,7 +28,9 @@ internal sealed class ReadFileTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_read_file", filePath, new { startLine, endLine });
 		
-		projectPath = ResolveProjectArg(projectPath, filePath);
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			

@@ -349,10 +349,13 @@ internal sealed class ProjectConfig
 							? Path.Combine(Path.GetDirectoryName(filePath)!, solutionName)
 							: null;
 						
-						if(solutionPath is not null && File.Exists(solutionPath))
+						// A bare name still reaches outside the directory if the file itself is a
+						// symlink — rejected for the same reason as a symlinked config file above.
+						if(solutionPath is not null && File.Exists(solutionPath)
+							&& !File.GetAttributes(solutionPath).HasFlag(FileAttributes.ReparsePoint))
 							solution = solutionPath;
 						else
-							logger.LogInfo("ProjectConfig", $"WARN: 'solution' in '{filePath}' must be the file name of an existing .sln/.slnx beside it — ignored");
+							logger.LogInfo("ProjectConfig", $"WARN: 'solution' in '{filePath}' must be the file name of an existing, non-symlink .sln/.slnx beside it — ignored");
 						
 						break;
 					

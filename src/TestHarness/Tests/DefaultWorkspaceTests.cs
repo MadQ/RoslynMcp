@@ -65,12 +65,22 @@ static class DefaultWorkspaceTests
 		fx.Write("App/Consumer.cs", "namespace App;\n\npublic class Consumer\n{\n\tpublic string Use() => new Lib.Greeter().Greet();\n}\n");
 		fx.Write("Notes.md", "# notes\n");
 		
+		// Same file name, different files, different projects — the Program.cs-in-every-project case.
+		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
+		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
+		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		// Calls a tool on the given server and returns (no-protocol-error, parsed JSON data).
-		static async Task<(bool ok, JsonNode? data)> Call(TestContext server, string tool, object args)
+		// Calls a tool on the given server and returns (no-protocol-error, parsed JSON data). A server
+		// that failed to start yields a plain failure: the harness has no per-test exception guard, so
+		// a null dereference here would abort the whole run instead of failing one test.
+		static async Task<(bool ok, JsonNode? data)> Call(TestContext? server, string tool, object args)
 		{
+			
+			if(server is null)
+				
+				return (false, null);
 			
 			await server.SendAsync(new { jsonrpc = "2.0", id = server.NextId(), method = "tools/call",
 				@params = new { name = tool, arguments = args } });
@@ -98,7 +108,7 @@ static class DefaultWorkspaceTests
 			// Solution-level: text search is solution-wide, so both projects' files must appear.
 			new("DefaultWorkspace: search_files without projectPath spans the solution", async () => {
 				
-				var (ok, data) = await Call(rootedCtx!, "roslyn_search_files", new { pattern = "class (Greeter|Consumer)" });
+				var (ok, data) = await Call(rootedCtx, "roslyn_search_files", new { pattern = "class (Greeter|Consumer)" });
 				var files      = data?["matches"]?.AsArray().Select(m => m?["file"]?.GetValue<string>() ?? "").ToArray() ?? [];
 				
 				return Verdict(ok
@@ -110,16 +120,27 @@ static class DefaultWorkspaceTests
 			// File-anchored: Lib is not the solution's default project (see the class remarks).
 			new("DefaultWorkspace: get_file_outline infers the owning project", async () => {
 				
-				var (ok, data) = await Call(rootedCtx!, "roslyn_get_file_outline", new { filePath = "Lib/Greeter.cs" });
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_file_outline", new { filePath = "Lib/Greeter.cs" });
 				var types      = data?["types"]?.AsArray().Select(t => t?["name"]?.GetValue<string>()).ToArray() ?? [];
 				
 				return Verdict(ok && types.Contains("Greeter"), $"expected type Greeter, got {data?.ToJsonString() ?? "null"}");
 			}),
 			
+			// A bare file name matching a different file in each project must not silently pick the first
+			// project: that would outline App's Shared.cs for a caller that meant Lib's, or the reverse.
+			new("DefaultWorkspace: an ambiguous file name is rejected with candidates", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_file_outline", new { filePath = "Shared.cs" });
+				var found      = data?["found_in"]?.AsArray().Count ?? 0;
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file" && found == 2,
+					$"expected ambiguous_file naming both projects, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
 			// A position-based semantic tool needs the owning project's semantic model, not just its text.
 			new("DefaultWorkspace: get_symbol_info resolves in a non-default project", async () => {
 				
-				var (ok, data) = await Call(rootedCtx!, "roslyn_get_symbol_info", new { filePath = "Lib/Greeter.cs", line = 5, column = 28 });
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_symbol_info", new { filePath = "Lib/Greeter.cs", line = 5, column = 28 });
 				var json       = data?.ToJsonString() ?? "";
 				
 				return Verdict(ok && json.Contains("Text") && data?["error"] is null, $"expected Text, got {json}");
@@ -128,14 +149,14 @@ static class DefaultWorkspaceTests
 			// Editing a C# file with only filePath: the write lands and the workspace sees it.
 			new("DefaultWorkspace: replace_in_code edits with only filePath", async () => {
 				
-				var (ok, _) = await Call(rootedCtx!, "roslyn_replace_in_code", new {
+				var (ok, _) = await Call(rootedCtx, "roslyn_replace_in_code", new {
 					filePath    = "Lib/Greeter.cs",
 					nodeKind    = "method",
 					textPattern = "Greet",
 					replacement = "public string Greet() => \"hello\";"
 				});
 				
-				var (readOk, read) = await Call(rootedCtx!, "roslyn_read_file", new { filePath = "Lib/Greeter.cs" });
+				var (readOk, read) = await Call(rootedCtx, "roslyn_read_file", new { filePath = "Lib/Greeter.cs" });
 				var lines          = read?["lines"]?.AsArray().Select(l => l?.GetValue<string>() ?? "") ?? [];
 				
 				return Verdict(ok && readOk
@@ -147,7 +168,7 @@ static class DefaultWorkspaceTests
 			// A file no project tracks falls back to the default solution rather than failing.
 			new("DefaultWorkspace: insert_lines on an untracked file", async () => {
 				
-				var (ok, data) = await Call(rootedCtx!, "roslyn_insert_lines", new { filePath = "Notes.md", text = "- added", atLine = 2 });
+				var (ok, data) = await Call(rootedCtx, "roslyn_insert_lines", new { filePath = "Notes.md", text = "- added", atLine = 2 });
 				
 				return Verdict(ok && data?["error"] is null && File.ReadAllText(fx.PathOf("Notes.md")).Contains("- added"),
 					$"expected the line on disk, got {data?.ToJsonString() ?? "null"}");
@@ -156,7 +177,7 @@ static class DefaultWorkspaceTests
 			// check_drift resolves the workspace before peeking, so an omitted path is a normal call.
 			new("DefaultWorkspace: check_drift without projectPath", async () => {
 				
-				var (ok, data) = await Call(rootedCtx!, "roslyn_check_drift", new { });
+				var (ok, data) = await Call(rootedCtx, "roslyn_check_drift", new { });
 				
 				return Verdict(ok && data?["drifted"] is not null && data?["error"] is null,
 					$"expected a drift report, got {data?.ToJsonString() ?? "null"}");
@@ -165,7 +186,7 @@ static class DefaultWorkspaceTests
 			// A root with nothing to load: the structured error must name the fix.
 			new("DefaultWorkspace: no default yields missing_project_path with a --root hint", async () => {
 				
-				var (ok, data) = await Call(bareCtx!, "roslyn_list_files", new { });
+				var (ok, data) = await Call(bareCtx, "roslyn_list_files", new { });
 				
 				return Verdict(ok
 					&& data?["error"]?.GetValue<string>() == "missing_project_path"

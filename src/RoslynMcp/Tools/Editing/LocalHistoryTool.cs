@@ -42,7 +42,9 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_local_history", token ?? filePath ?? action, new { action, filePath, force });
 		
-		projectPath = ResolveProjectArg(projectPath, filePath);
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		Task<object> task = action.ToLowerInvariant() switch {
 			

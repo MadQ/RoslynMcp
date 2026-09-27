@@ -106,8 +106,7 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 			// RMCP009 — projectPath must use the description constant matching its shape: a required
 			// 'string projectPath' takes ProjectPathDescription; an optional 'string? projectPath = null'
 			// takes OptionalProjectPathDescription. The MCP schema marks a parameter optional only when it
-			// has a C# default, so a nullable projectPath without '= null' would still be advertised as
-			// required — that mismatch is reported too.
+			// has a C# default, so a nullable projectPath without a literal '= null' is reported too.
 			var shape = ProjectPathShape(param);
 			
 			if(shape is not ProjectPathKind.None) {
@@ -119,7 +118,11 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 					: ("ProjectPathDescription",         "string projectPath")
 				;
 				
-				if(optional && param.Default is null || !UsesDescriptionConstant(param, expectedConstant))
+				// Literally '= null': '= ""' or '= default' would still make the parameter optional but let
+				// the declaration drift from the shape the rule and the description promise.
+				var nullDefault = param.Default?.Value is LiteralExpressionSyntax { RawKind: (int) SyntaxKind.NullLiteralExpression };
+				
+				if(optional && !nullDefault || !UsesDescriptionConstant(param, expectedConstant))
 					context.ReportDiagnostic(Diagnostic.Create(Rule009, param.Identifier.GetLocation(), methodName, shapeText, expectedConstant));
 			}
 		}

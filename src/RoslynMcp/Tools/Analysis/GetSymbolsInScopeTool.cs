@@ -28,7 +28,9 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_symbols_in_scope", $"{filePath}:{line}", new { column });
 		
-		projectPath = ResolveProjectArg(projectPath, filePath);
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

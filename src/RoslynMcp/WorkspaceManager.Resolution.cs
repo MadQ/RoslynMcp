@@ -234,6 +234,24 @@ internal sealed partial class WorkspaceManager
 	/// </summary>
 	static string FindDefaultWorkspace(string root, string source, FileLogger logger)
 	{
+		// Checked before anything else, so a file root inside a sensitive tree (~/.ssh/X.slnx) is
+		// rejected exactly like the directory itself would be.
+		if(SecurityBoundary.IsDangerousProjectPath(root))
+			throw new NoDefaultWorkspaceException(root, source, "it is, or lies inside, a drive root or system directory");
+		
+		var found = FindDefaultWorkspaceCandidate(root, source, logger);
+		
+		// The upward walk can land on a solution whose own directory is dangerous — a .sln at a drive
+		// root. Loading it would scope the workspace, its watcher, and its security boundary to that
+		// whole tree, so the result is held to the same rule as the root.
+		if(SecurityBoundary.IsDangerousProjectPath(Path.GetDirectoryName(found)!))
+			throw new NoDefaultWorkspaceException(root, source, $"it resolves to '{found}', whose directory is a drive root or system directory");
+		
+		return found;
+	}
+	
+	static string FindDefaultWorkspaceCandidate(string root, string source, FileLogger logger)
+	{
 		if(File.Exists(root))
 			
 			return IsSolutionPath(root) || root.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
@@ -243,9 +261,6 @@ internal sealed partial class WorkspaceManager
 		
 		if(!Directory.Exists(root))
 			throw new NoDefaultWorkspaceException(root, source, "the directory does not exist");
-		
-		if(SecurityBoundary.IsDangerousProjectPath(root))
-			throw new NoDefaultWorkspaceException(root, source, "it is a drive root or system directory");
 		
 		if(ProjectConfig.ForPath(root, logger).Solution is { } pinned)
 			

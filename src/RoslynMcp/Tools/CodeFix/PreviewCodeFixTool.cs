@@ -43,7 +43,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_preview_code_fix", filePath, new { line, column, diagnosticId, actionIndex });
 		
-		projectPath = ResolveProjectArg(projectPath, filePath);
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetProject(projectPath, out var project, out var error))
 			

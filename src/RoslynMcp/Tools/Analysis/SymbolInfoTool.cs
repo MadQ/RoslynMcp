@@ -26,7 +26,9 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_get_symbol_info", $"{filePath}:{line}", new { column });
 		
-		projectPath = ResolveProjectArg(projectPath, filePath);
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

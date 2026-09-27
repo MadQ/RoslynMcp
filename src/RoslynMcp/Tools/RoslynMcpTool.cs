@@ -735,8 +735,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     parameter shape, so the two descriptions cannot be swapped by accident.
 	/// </summary>
 	protected const string OptionalProjectPathDescription =
-		"Optional — omit to use the session's default solution. Otherwise a .csproj, .sln/.slnx, project directory, or source file path " +
-		"(relative paths resolve against the server's working directory). When omitted, a filePath argument selects the project that contains that file."
+		"Optional — omit to use the session's default workspace (a solution or project set by the server's --root). Otherwise a .csproj, .sln/.slnx, " +
+		"project directory, or source file path (relative paths resolve against the server's working directory). When omitted, a filePath " +
+		"argument selects the project in the default workspace that contains that file."
 	;
 	
 	/// <summary>
@@ -770,39 +771,60 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     solution that contains the file, so a file in any project of the solution works — the default
 	///     solution's own default project would not see it. Falls back to the default workspace itself when
 	///     the file is not a tracked document (a new file, a .json, an unknown path), and to the empty string
-	///     on any resolution failure so the tool's own guard reports the structured error.
+	///     on a workspace fault so the tool's own guard reports the structured error. Fails only when a
+	///     suffix-only <paramref name="filePath"/> names different files in different projects — picking
+	///     one silently would hand the tool the wrong file's compilation.
 	/// </summary>
-	protected string ResolveProjectArg(string? projectPath, string? filePath)
+	protected bool TryResolveProjectArg(
+		string? projectPath,
+		string? filePath,
+		out string resolved,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
 	{
-		if(!string.IsNullOrWhiteSpace(projectPath))
+		error = null;
+		
+		if(!string.IsNullOrWhiteSpace(projectPath)) {
 			
-			return projectPath;
+			resolved = projectPath;
+			
+			return true;
+		}
+		
+		resolved = ResolveProjectArg(projectPath);
 		
 		if(string.IsNullOrWhiteSpace(filePath))
 			
-			return ResolveProjectArg(projectPath);
+			return true;
 		
 		try {
 			
-			var solution = ResolveWithRetry("ResolveProjectArg", () => workspace.GetSolution(""));
+			var solution = ResolveWithRetry("TryResolveProjectArg", () => workspace.GetSolution(""));
 			var rootPath = workspace.GetRootPath("");
-			var owner    = FindOwningProject(solution, filePath, rootPath);
+			var owner    = FindOwningProject(solution, filePath, rootPath, out var candidates);
+			
+			if(candidates.Length > 0) {
+				
+				error = AmbiguousFileError(new AmbiguousFileException(filePath, candidates)) with {
+					Hint = "Pass filePath relative to the solution root (e.g. 'src/App/Program.cs'), or the owning .csproj as projectPath."
+				};
+				
+				return false;
+			}
 			
 			if(owner is not null) {
 				
-				activeScope.Value?.Record($"default workspace → {Path.GetFileName(owner)}");
-				
-				return owner;
+				activeScope.Value?.Record($"→ {Path.GetFileName(owner)}");
+				resolved = owner;
 			}
 		}
 		catch(Exception ex) when(!IsFatal(ex)) {
 			
 			// Not a failure in its own right: the tool's resolution guard re-raises the same fault
-			// through its structured mapping on the empty path below.
-			logger.LogInfo("ResolveProjectArg", $"{ex.GetType().Name}: {ex.Message}");
+			// through its structured mapping on the empty path.
+			logger.LogInfo("TryResolveProjectArg", $"{ex.GetType().Name}: {ex.Message}");
 		}
 		
-		return ResolveProjectArg(projectPath);
+		return true;
 	}
 	
 	/// <summary>
@@ -819,11 +841,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     additional document, or <c>null</c>. An exact full-path match against <paramref name="rootPath"/>
 	///     wins; otherwise a path-suffix match anchored at a segment boundary, so <c>Foo.cs</c> never selects
 	///     the project holding <c>BigFoo.cs</c> — an unanchored match would hand the tool a compilation that
-	///     does not contain the requested file. A linked file or a multi-targeted duplicate resolves to the
-	///     first project in solution order.
+	///     does not contain the requested file. One file seen by several projects (a linked file, a
+	///     multi-targeted duplicate) resolves to the first project in solution order. Different files in
+	///     different projects — <c>Program.cs</c> matching every project's own — return <c>null</c> with
+	///     those projects in <paramref name="candidates"/>.
 	/// </summary>
-	static string? FindOwningProject(Solution solution, string filePath, string rootPath)
+	static string? FindOwningProject(Solution solution, string filePath, string rootPath, out string[] candidates)
 	{
+		candidates = [];
+		
 		var fullPath = Path.GetFullPath(Path.IsPathRooted(filePath) ? filePath : Path.Combine(rootPath, filePath))
 		;
 		
@@ -834,18 +860,29 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		var suffix = Path.DirectorySeparatorChar + NormalizePath(filePath).TrimStart(Path.DirectorySeparatorChar);
 		
+		// Matched document path → first project holding it, in solution order.
+		var matches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		
 		foreach(var project in solution.Projects) {
 			
 			if(project.FilePath is null)
 				continue;
 			
 			foreach(var document in project.Documents.Concat<TextDocument>(project.AdditionalDocuments))
-				if(document.FilePath?.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) == true)
-					
-					return project.FilePath;
+				if(document.FilePath is { } path && path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+					matches.TryAdd(path, project.FilePath);
 		}
 		
-		return null;
+		string[] owners = [..matches.Values.Distinct(StringComparer.OrdinalIgnoreCase)];
+		
+		if(matches.Count > 1 && owners.Length > 1) {
+			
+			candidates = owners;
+			
+			return null;
+		}
+		
+		return owners.FirstOrDefault();
 	}
 	
 	/// <summary>

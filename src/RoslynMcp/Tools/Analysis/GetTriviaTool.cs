@@ -51,7 +51,9 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             return scope.Error(new ErrorResult("filePath is required unless using listSyntaxKinds or listTriviaKinds"));
 
-        projectPath = ResolveProjectArg(projectPath, filePath);
+        if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+
+            return scope.Error(projectError);
 
         if(!TryGetCompilation(projectPath, out var compilation, out var error))
 

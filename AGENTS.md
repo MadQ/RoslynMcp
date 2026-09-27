@@ -496,7 +496,7 @@ Parameter descriptions follow the same principle — write for the AI to underst
 **Both are enforced at compile time:**
 - **RMCP007** — every `[McpServerTool]` method must have a `[Description]` attribute (Error)
 - **RMCP008** — every parameter on a `[McpServerTool]` method must have `[Description]`, except `CancellationToken` (Error)
-- **RMCP009** — a required `string projectPath` must use `[Description(ProjectPathDescription)]`; an optional one must be declared `string? projectPath = null` and use `[Description(OptionalProjectPathDescription)]` — inline strings drift; the constants are the single source of truth (Error)
+- **RMCP009** — a required `string projectPath` must use `[Description(ProjectPathDescription)]`; an optional one must be declared `string? projectPath = null` (a literal `null` default) and use `[Description(OptionalProjectPathDescription)]` — inline strings drift; the constants are the single source of truth (Error)
 
 **Always use `ProjectPathDescription` or `OptionalProjectPathDescription`** for the `projectPath` parameter — constants with the canonical, full description. Inline text drifts and diverges. Never duplicate them.
 
@@ -511,7 +511,7 @@ public object MyToolMethod(
 
 Actually: `projectPath` comes in two shapes, each enforced by RMCP009:
 
-- **Optional** — `[Description(OptionalProjectPathDescription)] string? projectPath = null`, declared after every required parameter (and after `CancellationToken`). The first statement after `BeginTool` normalizes it: `projectPath = ResolveProjectArg(projectPath)` for solution-level tools, or `ResolveProjectArg(projectPath, filePath)` for file-anchored tools, which resolves an omitted value to the .csproj of the project in the default solution that contains `filePath`. From there on `projectPath` is a plain non-null string and every helper works unchanged.
+- **Optional** — `[Description(OptionalProjectPathDescription)] string? projectPath = null`, declared after every required parameter (and after `CancellationToken`). The first statement after `BeginTool` normalizes it: `projectPath = ResolveProjectArg(projectPath)` for solution-level tools, or `if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError)) return scope.Error(projectError);` for file-anchored tools, which resolves an omitted value to the .csproj of the project in the default solution that contains `filePath` — and fails with `ambiguous_file` when a suffix-only `filePath` names different files in different projects. From there on `projectPath` is a plain non-null string and every helper works unchanged.
 - **Required** — `[Description(ProjectPathDescription)] string projectPath`, declared last among required parameters. Still used by tools whose target project cannot yet be inferred without it: symbol-by-name and project-aggregate tools, plus the rename/signature apply tools (#296 tracks making those optional).
 
 **Why omitting `projectPath` is safe (#295):**
@@ -596,7 +596,7 @@ Without this, subsequent Roslyn tools see the stale in-memory source tree, not t
 
 #### Key Points (Summary)
 
-- `projectPath` is either optional (`string? projectPath = null` + `OptionalProjectPathDescription`, normalized with `ResolveProjectArg` right after `BeginTool`) or required (`string projectPath` + `ProjectPathDescription`, last required parameter) — RMCP009 enforces the pairing
+- `projectPath` is either optional (`string? projectPath = null` + `OptionalProjectPathDescription`, normalized with `ResolveProjectArg` / `TryResolveProjectArg` right after `BeginTool`) or required (`string projectPath` + `ProjectPathDescription`, last required parameter) — RMCP009 enforces the pairing
 - `using var scope = BeginTool(...)` is always the first statement
 - `Name` in `[McpServerTool]` must match `BeginTool`'s first argument exactly
 - Every `return` with a value must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
