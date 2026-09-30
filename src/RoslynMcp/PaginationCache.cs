@@ -11,6 +11,7 @@ internal sealed class PaginationCache
 	record CachedResult(Array Items, DateTime LastAccess);
 	
 	private readonly Dictionary<string, CachedResult> cache = new();
+	private readonly SortedDictionary<long, HashSet<string>> accessBuckets = new();
 	private readonly object syncRoot = new();
 	
 	private const int              MaxEntries = 50;
@@ -19,20 +20,24 @@ internal sealed class PaginationCache
 	public string Store<T>(T[] items)
 	{
 		var token = Guid.NewGuid().ToString("N")[..12];
+		var now   = DateTime.UtcNow;
 		
 		lock(syncRoot) {
-			
 			EvictExpired();
 			
+			if(cache.TryGetValue(token, out _))
+				RemoveToken(token);
+			
 			while(cache.Count >= MaxEntries) {
-				// O(n) scan is fine — MaxEntries is 50, so this is at most 50 comparisons.
-				var oldest = cache.OrderBy(kvp => kvp.Value.LastAccess).First()
-				;
+				var oldest = FindOldestToken();
+				if(oldest is null)
+					break;
 				
-				cache.Remove(oldest.Key);
+				RemoveToken(oldest);
 			}
 			
-			cache[token] = new CachedResult(items, DateTime.UtcNow);
+			cache[token] = new CachedResult(items, now);
+			AddAccessBucket(token, now);
 		}
 		
 		return token;
@@ -41,42 +46,106 @@ internal sealed class PaginationCache
 	public bool TryGet<T>(string token, out ReadOnlyMemory<T> items)
 	{
 		lock(syncRoot) {
+			var now = DateTime.UtcNow;
 			
 			if(cache.TryGetValue(token, out var entry)
-				&& DateTime.UtcNow - entry.LastAccess < Ttl
+				&& now - entry.LastAccess < Ttl
 				&& entry.Items is T[] typed) {
-				
-				// Sliding window: reset TTL on each access.
-				cache[token] = entry with { LastAccess = DateTime.UtcNow }
-				;
-				
+				UpdateLastAccess(token, now);
 				items = typed.AsMemory();
-				
 				return true;
 			}
 			
-			items = ReadOnlyMemory<T>.Empty;
+			if(cache.ContainsKey(token))
+				RemoveToken(token);
 			
+			items = ReadOnlyMemory<T>.Empty;
 			return false;
 		}
 	}
 	
 	public void InvalidateAll()
 	{
-		lock(syncRoot)
+		lock(syncRoot) {
 			cache.Clear();
+			accessBuckets.Clear();
+		}
 	}
 	
-	void EvictExpired()
+	private void UpdateLastAccess(string token, DateTime lastAccess)
 	{
-		var now     = DateTime.UtcNow;
-		var expired = cache
-			.Where(kvp => now - kvp.Value.LastAccess >= Ttl)
-			.Select(kvp => kvp.Key)
-			.ToArray()
-		;
+		if(!cache.TryGetValue(token, out var entry))
+			return;
 		
-		foreach(var key in expired)
-			cache.Remove(key);
+		RemoveBucketEntry(token, entry.LastAccess);
+		cache[token] = entry with { LastAccess = lastAccess };
+		AddAccessBucket(token, lastAccess);
+	}
+	
+	private void AddAccessBucket(string token, DateTime lastAccess)
+	{
+		var bucketKey = lastAccess.Ticks;
+		if(!accessBuckets.TryGetValue(bucketKey, out var bucket)) {
+			bucket = new HashSet<string>();
+			accessBuckets[bucketKey] = bucket;
+		}
+		
+		bucket.Add(token);
+	}
+	
+	private void RemoveBucketEntry(string token, DateTime lastAccess)
+	{
+		var bucketKey = lastAccess.Ticks;
+		if(!accessBuckets.TryGetValue(bucketKey, out var bucket))
+			return;
+		
+		bucket.Remove(token);
+		if(bucket.Count == 0)
+			accessBuckets.Remove(bucketKey);
+	}
+	
+	private string? FindOldestToken()
+	{
+		foreach(var bucket in accessBuckets) {
+			foreach(var token in bucket.Value) {
+				if(cache.ContainsKey(token))
+					return token;
+			}
+		}
+		
+		return null;
+	}
+	
+	private void RemoveToken(string token)
+	{
+		if(!cache.TryGetValue(token, out var entry))
+			return;
+		
+		RemoveBucketEntry(token, entry.LastAccess);
+		cache.Remove(token);
+	}
+	
+	private void EvictExpired()
+	{
+		var now = DateTime.UtcNow;
+		var expired = new List<long>();
+		
+		foreach(var bucket in accessBuckets) {
+			if(now - new DateTime(bucket.Key) >= Ttl)
+				expired.Add(bucket.Key);
+		}
+		
+		foreach(var bucketKey in expired) {
+			if(!accessBuckets.TryGetValue(bucketKey, out var bucket))
+				continue;
+			
+			foreach(var token in bucket.ToArray()) {
+				if(cache.TryGetValue(token, out var entry) && now - entry.LastAccess >= Ttl)
+					RemoveToken(token);
+			}
+			
+			if(accessBuckets.TryGetValue(bucketKey, out var remaining) && remaining.Count == 0)
+				accessBuckets.Remove(bucketKey);
+		}
 	}
 }
