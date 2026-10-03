@@ -205,12 +205,10 @@ internal static partial class MSBuildBootstrap
 		return [..result.Take(maxCandidates)];
 	}
 	
+	// The built-in list only: this runs before a workspace exists, so there is no root whose
+	// configured names or .gitignore could apply. Dot-folders are tooling state, never projects.
 	static bool IsSkippedFolder(string name) =>
-		name.StartsWith('.')
-		|| name.Equals("bin",          StringComparison.OrdinalIgnoreCase)
-		|| name.Equals("obj",          StringComparison.OrdinalIgnoreCase)
-		|| name.Equals("packages",     StringComparison.OrdinalIgnoreCase)
-		|| name.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
+		name.StartsWith('.') || IgnoreRules.BuiltIn.IsExcluded(name)
 	;
 	
 	/// <summary>

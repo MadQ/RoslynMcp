@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Collections.Frozen;
+using System.IO.Enumeration;
 using System.Xml.Linq;
 
 namespace RoslynMcp;
@@ -27,7 +28,15 @@ internal sealed partial class WorkspaceManager
 		private readonly bool        isMSBuild;
 		private ProjectId            defaultProjectId;
 		private readonly ReaderWriterLockSlim @lock = new();
-		private          FileSystemWatcher?   watcher;
+		private          WorkspaceWatchSet?   watchSet;
+		
+		// Which directories this workspace stays out of. Fixed for the life of the instance, like
+		// the rest of the project configuration: read once the root is known, before any walk.
+		private          IgnoreRules          ignoreRules = IgnoreRules.BuiltIn;
+		
+		// When construction began. Changes made on disk after this and before the watchers are
+		// live produced no event; ReconcileMissedChanges picks them up by timestamp.
+		private readonly DateTime             constructedUtc = DateTime.UtcNow;
 		
 		// Maps normalized .csproj paths → ProjectIds for all projects in the workspace.
 		private readonly Dictionary<string, ProjectId> projectMap = new(StringComparer.OrdinalIgnoreCase)
@@ -183,11 +192,6 @@ internal sealed partial class WorkspaceManager
 		;
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
-		// Ref-counted FSW suppression — multiple concurrent ApplyChangesWithFswSuppressed
-		// calls each increment on entry and decrement on exit; EnableRaisingEvents is only
-		// restored when the last suppressor finishes (count returns to 0). See issue #145 item 3.
-		private          int              fswSuppressCount
-		;
 		
 		// ── Factory methods ──────────────────────────────────────────────────
 		
@@ -206,6 +210,7 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Solution:
 					
 					rootPath = Path.GetDirectoryName(path)!;
+					ignoreRules = IgnoreRules.ForRoot(rootPath, logger);
 					AutoDetectAndBootstrap(path, logger);
 					
 					logger.LogInfo("Load", $"Loading solution: {path}");
@@ -239,6 +244,7 @@ internal sealed partial class WorkspaceManager
 				case LoadMode.Project:
 					
 					rootPath = Path.GetDirectoryName(path)!;
+					ignoreRules = IgnoreRules.ForRoot(rootPath, logger);
 					AutoDetectAndBootstrap(path, logger);
 					
 					logger.LogInfo("Load", $"Loading project: {path}");
@@ -282,6 +288,8 @@ internal sealed partial class WorkspaceManager
 					
 					if(dirInfo.Parent is null)
 						throw new InvalidOperationException($"Cannot create AdhocWorkspace for root directory '{path}'. Specify a subdirectory or use a .csproj file.");
+					
+					ignoreRules = IgnoreRules.ForRoot(rootPath, logger);
 					
 					var (adhocWs, adhocPid) = LoadAdhocWorkspace();
 					workspace        = adhocWs;
@@ -554,7 +562,7 @@ internal sealed partial class WorkspaceManager
 			disposed = true
 			;
 			
-			watcher?.Dispose();
+			watchSet?.Dispose();
 			
 			// Quiesce the timer: wait for any in-flight callback to complete before
 			// tearing down @lock and workspace, which the callback accesses.
@@ -927,39 +935,19 @@ internal sealed partial class WorkspaceManager
 		IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
 		{
 			var pathInfo = new DirectoryInfo(path);
+			
 			if(pathInfo.Attributes.HasFlag(FileAttributes.System) || pathInfo.Parent is null)
-				yield break;
-			
-			IEnumerable<string> files;
-			try {
-				files = Directory.EnumerateFiles(path, searchPattern, SearchOption.TopDirectoryOnly);
-			}
-			catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException) {
-				yield break;
-			}
-			
-			foreach(var file in files)
-				yield return file;
-			
-			IEnumerable<string> directories;
-			try {
-				directories = Directory.EnumerateDirectories(path);
-			}
-			catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException) {
-				yield break;
-			}
-			
-			foreach(var directory in directories) {
 				
-				var dirInfo = new DirectoryInfo(directory);
-				if(dirInfo.Attributes.HasFlag(FileAttributes.Hidden) ||
-				   dirInfo.Attributes.HasFlag(FileAttributes.System) ||
-				   IsExcludedDirectoryName(dirInfo.Name))
-					continue;
-				
-				foreach(var file in EnumerateFilesWithErrorHandling(directory, searchPattern))
-					yield return file;
-			}
+				return [];
+			
+			return WorkspaceWalker.EnumerateFiles(
+				path,
+				searchPattern,
+				recursive: true,
+				(ref FileSystemEntry directory) =>
+					(directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0
+					|| ignoreRules.IsExcluded(directory.FileName)
+			);
 		}
 		
 		void AddOrUpdateDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
@@ -1084,13 +1072,9 @@ internal sealed partial class WorkspaceManager
 				;
 			}
 			
-			// Ref-counted suppression: always disable before TryApplyChanges (idempotent),
-			// only re-enable when the last concurrent suppressor finishes.
-			if(watcher is not null) {
-				
-				Interlocked.Increment(ref fswSuppressCount);
-				watcher.EnableRaisingEvents = false;
-			}
+			// Ref-counted inside the watch set: events stop before TryApplyChanges and resume
+			// only when the last concurrent suppressor finishes. See issue #145 item 3.
+			watchSet?.Suspend();
 			
 			bool applied;
 			
@@ -1107,9 +1091,7 @@ internal sealed partial class WorkspaceManager
 				applied = false;
 			}
 			finally {
-				
-				if(watcher is not null && Interlocked.Decrement(ref fswSuppressCount) == 0)
-					watcher.EnableRaisingEvents = true;
+				watchSet?.Resume();
 			}
 			
 			// Record sizes only when TryApplyChanges succeeded and actually wrote files.
@@ -1251,12 +1233,8 @@ internal sealed partial class WorkspaceManager
 		///     For the watcher's pre-queue filter — which must not suppress those generated
 		///     documents — see <see cref="IsNeverCompilationInput"/>.
 		/// </summary>
-		static readonly FrozenSet<string> ExcludedDirectoryNames = new[] {
-			"node_modules", "bin", "obj", ".git", ".vs", "packages",
-		}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
-		
-		static bool IsExcludedDirectoryName(string name) =>
-			ExcludedDirectoryNames.Contains(name);
+		bool IsExcludedDirectoryName(string name) =>
+			ignoreRules.IsExcluded(name);
 
 		/// <summary>
 		///     Directories that can never hold a compilation document, so a change under one is
@@ -1266,8 +1244,8 @@ internal sealed partial class WorkspaceManager
 		///     text updates. Build output is filtered later instead — only from the decision to
 		///     force a full reload. See <see cref="IsUnderExcludedDirectory"/>.
 		/// </summary>
-		static bool IsNeverCompilationInput(string name) =>
-			name is "node_modules" or ".git" or ".vs" or "packages";
+		bool IsNeverCompilationInput(string name) =>
+			ignoreRules.IsNeverInput(name);
 
 		// Reason literals double as the log vocabulary for "Reload — Flagged (<reason>)".
 		const string ReasonNewDocument     = "new document";
@@ -1541,24 +1519,97 @@ internal sealed partial class WorkspaceManager
 
 		void StartWatcher()
 		{
-			// Watch all files, not only .cs: MSBuild inputs such as AdditionalFiles, .editorconfig,
-			// props/targets, and global.json must all reach the shared reload classifier.
-			watcher = new FileSystemWatcher(rootPath)
-			{
-				IncludeSubdirectories = true,
-				NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
-			};
+			watchSet = new WorkspaceWatchSet(rootPath, ignoreRules, (fullPath, deleted) => ScheduleDebounced(fullPath, deleted), logger);
 			
-			watcher.Changed += (_, e) => ScheduleDebounced(e.FullPath);
-			watcher.Created += (_, e) => ScheduleDebounced(e.FullPath);
-			watcher.Deleted += (_, e) => ScheduleDebounced(e.FullPath, deleted: true);
-			watcher.Renamed += (_, e) => {
+			ApplyWatchPlan(workspace.CurrentSolution, ReconcileMissedChanges);
+		}
+		
+		/// <summary>
+		///     Hands the watch set the directories <paramref name="solution"/> spans. It plans and
+		///     starts the watchers on a background thread, and does nothing when the project
+		///     directories are the ones it already planned for — so this is called after every
+		///     reload, where a project may have been added or removed.
+		/// </summary>
+		void ApplyWatchPlan(Solution solution, Action? onReady)
+		{
+			// An AdhocWorkspace has no project files; its one project is the root itself.
+			string[] projectDirectories = isMSBuild
+				? [..solution.Projects
+					.Select(project => Path.GetDirectoryName(project.FilePath))
+					.OfType<string>()
+					.Select(Path.GetFullPath)
+					.Distinct(WatchPlanner.PathComparer)]
+				: [rootPath];
+			
+			string[] DocumentDirectories() =>
+			[
+				..solution.Projects
+					.SelectMany(project => project.Documents.Concat<TextDocument>(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments))
+					.Select(document => Path.GetDirectoryName(document.FilePath))
+					.OfType<string>()
+					.Distinct(WatchPlanner.PathComparer)
+			];
+			
+			watchSet?.Apply(projectDirectories, DocumentDirectories, onReady);
+		}
+		
+		/// <summary>
+		///     Runs once the watchers are live. The workspace was read from disk before they
+		///     existed — during the load itself, then while they started in the background — so an
+		///     edit made in that window raised no event. Any tracked document written since
+		///     construction began is queued as if the watcher had reported it; an unchanged one is
+		///     dropped by the content comparison in the flush.
+		///     <para>
+		///         Build output is left out: the design-time build writes generated documents under
+		///         <c>obj</c> during the load, and reporting those would force a reload on every
+		///         start. A missing file is left out too — a generated document that has never been
+		///         built is tracked but not on disk, which is not a deletion.
+		///     </para>
+		/// </summary>
+		void ReconcileMissedChanges()
+		{
+			// Runs on a pool thread, possibly after Dispose: PeekSolution takes a lock that
+			// Dispose tears down.
+			try {
 				
-				ScheduleDebounced(e.OldFullPath, deleted: true);
-				ScheduleDebounced(e.FullPath);
-			};
-			
-			watcher.EnableRaisingEvents = true;
+				if(disposed)
+					
+					return;
+				
+				var queued = 0;
+				
+				var paths = PeekSolution().Projects
+					.SelectMany(project => project.Documents.Concat<TextDocument>(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments))
+					.Select(document => document.FilePath)
+					.OfType<string>()
+					.Distinct(WatchPlanner.PathComparer)
+				;
+				
+				foreach(var path in paths) {
+					
+					if(IsUnderExcludedDirectory(path, IsExcludedDirectoryName))
+						continue;
+					
+					try {
+						
+						// A missing file reports the year 1601, so it never compares as newer.
+						if(File.GetLastWriteTimeUtc(path) <= constructedUtc)
+							continue;
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						continue;
+					}
+					
+					ScheduleDebounced(path);
+					queued++;
+				}
+				
+				if(queued > 0)
+					logger.LogInfo("Watch", $"{queued} document(s) changed on disk while the workspace was loading — queued for sync");
+			}
+			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
+				// Disposed mid-flight — nothing left to reconcile.
+			}
 		}
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)
@@ -2099,6 +2150,10 @@ internal sealed partial class WorkspaceManager
 
 			MarkSynced();
 			logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({projectCount} projects)");
+
+			// A reload can add or remove projects; the watch set ignores this when the project
+			// directories are unchanged.
+			ApplyWatchPlan(PeekSolution(), null);
 		}
 
 

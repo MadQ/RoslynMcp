@@ -161,6 +161,19 @@ internal sealed class ServerArgs
     /// </summary>
     public string? Root { get; }
 
+    /// <summary>
+    ///     Extra directory names the server stays out of when walking and watching a workspace, on
+    ///     top of the built-in list (see <see cref="IgnoreRules"/>). CLI: <c>--ignore &lt;name&gt;</c>
+    ///     (may repeat). Env: <c>ROSLYNMCP_IGNORE</c>, comma- or semicolon-separated. Bare directory
+    ///     names only — entries with a path separator or wildcard are dropped. Empty when neither
+    ///     source supplied a valid name; the project file may then fill it in
+    ///     (see <see cref="ProjectConfig.EffectiveIgnore"/>).
+    /// </summary>
+    public string[] IgnoreNames { get; }
+
+    /// <summary>Whether <see cref="IgnoreNames"/> came from a CLI arg or env var, blocking the project file's list.</summary>
+    public bool IgnoreSpecified => IgnoreNames.Length > 0;
+
     // ── Env var only ─────────────────────────────────────────────────────────
 
     /// <summary>
@@ -196,6 +209,7 @@ internal sealed class ServerArgs
         string? rootPositional = null;
         var     noBuildHostPin = false;
         var     preload       = new List<string>();
+        var     ignore        = new List<string>();
 		
 		var length = args.Length;
 		
@@ -224,6 +238,12 @@ internal sealed class ServerArgs
                 case "--preload":
                     if(value is not null)
                         preload.Add(value);
+
+                    break;
+
+                case "--ignore":
+                    if(value is not null)
+                        ignore.Add(value);
 
                     break;
 
@@ -269,6 +289,12 @@ internal sealed class ServerArgs
         WorkspaceModeSpecified = WorkspaceMode != WorkspaceMode.Auto;
 
         PreloadPaths = [..preload];
+
+        // The CLI list beats the env var as a whole, like every other setting — but only when it
+        // holds at least one valid name, so a mistyped --ignore cannot mask ROSLYNMCP_IGNORE.
+        IgnoreNames = NormalizeIgnoreNames(ignore) is { Length: > 0 } cliIgnore
+            ? cliIgnore
+            : NormalizeIgnoreNames((Env("ROSLYNMCP_IGNORE") ?? "").Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
 
         // Explicit flag beats the positional alias; either beats the env var. Empty means absent —
         // an empty root carries no meaning, same reasoning as MsBuildPath below.
@@ -366,6 +392,20 @@ internal sealed class ServerArgs
         "adhoc" => WorkspaceMode.Adhoc,
         _       => WorkspaceMode.Auto,
     };
+
+    /// <summary>
+    ///     Keeps the valid, distinct directory names of an ignore list, capped at
+    ///     <see cref="IgnoreRules.MaxConfiguredNames"/>. Shared with <see cref="ProjectConfig"/> so
+    ///     every source applies one rule.
+    /// </summary>
+    internal static string[] NormalizeIgnoreNames(IEnumerable<string?> names) =>
+    [
+        ..names
+            .Where(IgnoreRules.IsValidConfiguredName)
+            .Select(name => name!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(IgnoreRules.MaxConfiguredNames)
+    ];
 
     // ── Env var readers ──────────────────────────────────────────────────────
     // Private on purpose. ServerArgs is already the process-wide sanitizing layer for every

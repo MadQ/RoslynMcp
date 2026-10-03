@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO.Enumeration;
 using Microsoft.Extensions.FileSystemGlobbing;
 using ModelContextProtocol.Server;
 
@@ -15,6 +16,8 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		"Use instead of glob, Get-ChildItem, dir, or file find commands — searches all workspace files without requiring a terminal. " +
 		"Supports standard glob wildcards: * (any chars within a segment), ** (any chars across segments), ? (single char), {a,b} (either). Default: '**/*'. " +
 		"Returns matching paths relative to the project root, with paging. " +
+		"Skips node_modules, .git, .vs, packages, bin, obj, directories the root .gitignore lists by name, and any configured ignore names — " +
+		"unless the pattern names the directory literally (e.g. 'bin/**/*.dll' or '**/obj/project.assets.json'). " +
 		"For searching file content (lines matching a pattern), use roslyn_search_files instead. " +
 		"For filename/path matching with no content search, this is the right tool.")]
 	public object ListFiles(
@@ -49,11 +52,19 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		
 		try {
 			
+			// Ignored directories are never entered — unless the pattern spells one out, which is
+			// how an agent reaches bin/ or obj/ on purpose.
+			var rules = IgnoreRules.ForRoot(rootPath, logger);
+			var named = NamedDirectories(pattern);
+			
 			// Materialize relative paths upfront — reused by close-match hint on miss.
-			allRelativePaths = Directory.EnumerateFiles(
+			allRelativePaths = WorkspaceWalker.EnumerateFiles(
 				rootPath,
 				"*",
-				recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly
+				recursive,
+				(ref FileSystemEntry directory) =>
+					!named.Contains(directory.FileName)
+					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
 				.ToArray()

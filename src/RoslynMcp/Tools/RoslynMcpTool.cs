@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -1040,12 +1041,35 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		return new PaginatedResult<T>(page, allResults.Length, skip, take, token, hasMore);
 	}
 	
+	// Candidates the suffix-match fallback of ResolveFilePath inspects before giving up. The walk
+	// is already pruned; this bounds the remaining cost of a common file name in a huge tree.
+	const int ResolveCandidateLimit = 2_000;
+	
+	/// <summary>
+	///     The directory names a relative path or glob spells out literally — every segment before
+	///     the last that holds no wildcard. A walk that would otherwise skip an ignored directory
+	///     still enters one the caller asked for by name.
+	/// </summary>
+	protected static HashSet<string>.AlternateLookup<ReadOnlySpan<char>> NamedDirectories(string pathOrPattern)
+	{
+		var named    = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var segments = pathOrPattern.Split('/', '\\');
+		
+		// The last segment is the file name or file pattern, never a directory.
+		foreach(var segment in segments.AsSpan(0, segments.Length - 1))
+			if(segment.Length > 0 && segment is not ("." or "..") && segment.AsSpan().IndexOfAny("*?{}[]") < 0)
+				named.Add(segment);
+		
+		return named.GetAlternateLookup<ReadOnlySpan<char>>();
+	}
+	
 	/// <summary>
 	///     Resolves a relative file path to a full path. Tries <paramref name="rootPath"/> first;
-	///     if the file isn't found there, walks subdirectories looking for a suffix match.
-	///     Returns null if the file can't be found.
+	///     if the file isn't found there, walks subdirectories looking for a suffix match — skipping
+	///     ignored directories (see <see cref="IgnoreRules.IsPrunedFromListing"/>) unless the path
+	///     names one. Returns null if the file can't be found.
 	/// </summary>
-	protected static string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary)
+	protected string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary)
 	{
 		try {
 			
@@ -1076,7 +1100,19 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			string? nameHit   = null;
 			var     ambiguous = false;
 			
-			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
+			var     rules     = IgnoreRules.ForRoot(rootPath, logger);
+			var     named     = NamedDirectories(normalized);
+			
+			var candidates = WorkspaceWalker.EnumerateFiles(
+				rootPath,
+				fileName,
+				recursive: true,
+				(ref FileSystemEntry directory) =>
+					!named.Contains(directory.FileName)
+					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+			);
+			
+			foreach(var candidate in candidates.Take(ResolveCandidateLimit)) {
 				
 				try {
 					if(!boundary.IsPathAllowed(candidate))
