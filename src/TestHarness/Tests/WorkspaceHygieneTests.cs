@@ -251,6 +251,11 @@ static class WorkspaceHygieneTests
 		
 		try {
 			
+			// Loaded up front so the two requests overlap only in DotnetRunner. Cold, both would enter
+			// the workspace load together (it runs outside the cache lock) — an unrelated concurrent
+			// design-time build that could blur or destabilize what this check observes.
+			await fx.WarmAsync(ctx);
+			
 			// Both requests go out before either response is read — sequential RunTestAsync calls would
 			// never overlap — and the fixture's clean holds for HoldSeconds, so the second request is
 			// always dispatched while the first dotnet process is still running. Responses may arrive in
@@ -270,9 +275,14 @@ static class WorkspaceHygieneTests
 			var details = CleanDetails(lines, fx);
 			var queued  = details.Count(d => d.Contains("behind another dotnet command", StringComparison.Ordinal));
 			
-			return details.Length == 2 && queued == 1
-				? (true,  "PASS  (two concurrent cleans; the second queued behind the first)")
-				: (false, $"FAIL  (expected 2 clean entries with exactly 1 queued; found {details.Length} entries, {queued} queued)")
+			// pid= is recorded only once Process.Start has succeeded, so two of them prove both runs
+			// really executed — a queued note alone would also fit a run that waited and then failed
+			// before launching anything.
+			var started = details.Count(d => d.Contains("pid=", StringComparison.Ordinal));
+			
+			return details.Length == 2 && queued == 1 && started == 2
+				? (true,  "PASS  (two concurrent cleans; both ran, the second queued behind the first)")
+				: (false, $"FAIL  (expected 2 clean entries, both started, exactly 1 queued; found {details.Length} entries, {started} started, {queued} queued)")
 			;
 		}
 		finally {
