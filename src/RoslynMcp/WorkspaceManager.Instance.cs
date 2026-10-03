@@ -740,9 +740,19 @@ internal sealed partial class WorkspaceManager
 			// walk through node_modules or .git on a network share takes longer than an MCP
 			// client waits (#309). The solution's own project list is exact; the directory scan is
 			// pruned and capped (just above the threshold), so its count is a lower bound.
-			var count = isSolution             ? MSBuildBootstrap.ReadSolutionProjects(path).Length
-			          : Directory.Exists(path) ? MSBuildBootstrap.FindCsprojCandidates(path).Length
-			          : 0;
+			int count;
+			
+			// Advisory only: a warning that cannot be computed must never fail the load. Both
+			// helpers swallow the I/O failures they expect; this covers whatever they do not.
+			try {
+				
+				count = isSolution             ? MSBuildBootstrap.ReadSolutionProjects(path).Length
+				      : Directory.Exists(path) ? MSBuildBootstrap.FindCsprojCandidates(path).Length
+				      : 0;
+			}
+			catch(Exception) {
+				return;
+			}
 			
 			if(count > LargeSolutionThreshold)
 				logger.LogInfo("Workspace",

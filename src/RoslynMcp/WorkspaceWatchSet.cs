@@ -217,6 +217,10 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	bool    disposed;
 	string? scopeKey;
 	
+	// Bumped by every Apply that changes the plan; a background start that finds a newer
+	// version than its own leaves the watchers alone.
+	int     applyVersion;
+	
 	/// <summary>
 	///     Plans and starts the watchers in the background, replacing any earlier plan. A call whose
 	///     project directories match the plan already in place does nothing, so it is cheap to make
@@ -226,6 +230,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	public void Apply(string[] projectDirectories, Func<string[]> documentDirectories, Action? onReady)
 	{
 		var key = string.Join('|', projectDirectories.Order(WatchPlanner.PathComparer));
+		int version;
 		
 		lock(gate) {
 			
@@ -234,6 +239,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				return;
 			
 			scopeKey = key;
+			version  = ++applyVersion;
 		}
 		
 		_ = Task.Run(() => {
@@ -241,18 +247,42 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			// Nothing is above this on a pool thread — an escape would take the process down.
 			try {
 				
-				Start(projectDirectories, documentDirectories);
-				onReady?.Invoke();
+				if(Start(version, projectDirectories, documentDirectories)) {
+					
+					onReady?.Invoke();
+					
+					return;
+				}
 			}
 			catch(Exception ex) {
 				logger.LogError("Watch", $"Starting watchers for '{rootPath}' failed: {ex.GetType().Name}: {ex.Message}");
 			}
+			
+			// Nothing is watching. Forget the key so the next Apply — after the next reload —
+			// tries again instead of taking this plan as already in place.
+			lock(gate)
+				if(version == applyVersion)
+					scopeKey = null;
 		});
 	}
 	
-	void Start(string[] projectDirectories, Func<string[]> documentDirectories)
+	bool Start(int version, string[] projectDirectories, Func<string[]> documentDirectories)
 	{
 		lock(applyLock) {
+			
+			// Pool tasks start in no particular order. A newer Apply that already ran owns the
+			// watchers; putting this older plan in place over it would leave stale roots live
+			// with nothing left to correct them.
+			lock(gate) {
+				
+				if(disposed)
+					
+					return false;
+				
+				if(version != applyVersion)
+					
+					return true;
+			}
 			
 			var started = Stopwatch.GetTimestamp();
 			var plan    = WatchPlanner.Plan(rootPath, projectDirectories, documentDirectories, rules, out var shape);
@@ -263,7 +293,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				if(disposed)
 					
-					return;
+					return false;
 				
 				foreach(var (path, entry) in watchers) {
 					
@@ -285,6 +315,8 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 					live++;
 			
 			logger.LogInfo("Watch", $"{live}/{plan.Length} watch root(s) live ({shape}) in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms: {rootPath}");
+			
+			return live > 0;
 		}
 	}
 	
