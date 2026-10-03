@@ -83,7 +83,28 @@ internal static class WorkspaceWalker
 		entry.Directory[entry.RootDirectory.Length..].TrimStart(Path.DirectorySeparatorChar).TrimStart(Path.AltDirectorySeparatorChar);
 	
 	static bool IsLink(ref FileSystemEntry entry) =>
-		(entry.Attributes & FileAttributes.ReparsePoint) != 0;
+		(entry.Attributes & FileAttributes.ReparsePoint) != 0 && IsLink(entry.ToFileSystemInfo());
+	
+	/// <summary>
+	///     Whether <paramref name="info"/> is a link to somewhere else — a symlink or a junction.
+	///     The reparse-point attribute alone is not enough: on Windows a cloud-synced folder
+	///     (OneDrive and the like) carries it too, and is an ordinary directory that must be
+	///     walked. Only a reparse point that resolves to a target is a link. One that cannot be
+	///     read is treated as a link, the safe side for a walk.
+	/// </summary>
+	public static bool IsLink(FileSystemInfo info)
+	{
+		if(!info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+			
+			return false;
+		
+		try {
+			return info.LinkTarget is not null;
+		}
+		catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+			return true;
+		}
+	}
 	
 	// AttributesToSkip defaults to Hidden | System, which on Unix hides every dot-file. The walks
 	// here must see .editorconfig and .globalconfig, so nothing is skipped by attribute.

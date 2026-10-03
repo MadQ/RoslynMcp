@@ -205,7 +205,7 @@ internal static partial class MSBuildBootstrap
 				foreach(var sub in new DirectoryInfo(dir).EnumerateDirectories()) {
 					
 					// A link is never followed: it can point back up the tree.
-					if(IsSkippedFolder(sub.Name) || sub.Attributes.HasFlag(FileAttributes.ReparsePoint))
+					if(IsSkippedFolder(sub.Name) || WorkspaceWalker.IsLink(sub))
 						continue;
 					
 					queue.Enqueue((sub.FullName, depth + 1));

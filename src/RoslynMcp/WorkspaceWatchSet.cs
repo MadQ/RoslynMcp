@@ -164,7 +164,7 @@ internal static class WatchPlanner
 				foreach(var child in new DirectoryInfo(current).EnumerateDirectories()) {
 					
 					// A link is not followed by the walk above, so it is not watched either.
-					if(rules.IsNeverInput(child.Name) || child.Attributes.HasFlag(FileAttributes.ReparsePoint))
+					if(rules.IsNeverInput(child.Name) || WorkspaceWalker.IsLink(child))
 						continue;
 					
 					if(spine.Contains(child.FullName))
@@ -570,7 +570,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	void Adopt(string directory)
 	{
 		if(rules.IsNeverInput(Path.GetFileName(directory.AsSpan()))
-		   || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+		   || WorkspaceWalker.IsLink(new DirectoryInfo(directory)))
 			
 			return;
 		
