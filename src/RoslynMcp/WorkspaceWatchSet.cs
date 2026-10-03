@@ -390,7 +390,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			var live = 0;
 			
 			foreach(var root in plan)
-				if(IsWatched(root.Path) || Add(root))
+				if(IsWatched(root.Path) || Add(root, withinCap: false))
 					live++;
 			
 			logger.LogInfo("Watch", $"{live}/{plan.Length} watch root(s) live ({shape}) in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms: {rootPath}");
@@ -405,9 +405,16 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			return watchers.ContainsKey(path);
 	}
 	
-	bool Add(WatchRoot root)
+	bool Add(WatchRoot root, bool withinCap)
 	{
 		FileSystemWatcher? watcher = null;
+		
+		// Set under the gate once the watcher is in the table. Until then Suspend cannot see it,
+		// so its events are dropped here instead whenever a suspension is active — otherwise a
+		// watcher that is still starting would report the very write the suspension is hiding.
+		var registered = false;
+		
+		bool Muted() => !Volatile.Read(ref registered) && Volatile.Read(ref suspendCount) > 0;
 		
 		try {
 			
@@ -420,10 +427,14 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.FileName | (root.Expands ? NotifyFilters.DirectoryName : 0),
 			};
 			
-			watcher.Changed += (_, e) => Report(e.FullPath, deleted: false);
-			watcher.Created += (_, e) => Appeared(root, e.FullPath);
-			watcher.Deleted += (_, e) => Vanished(root, e.FullPath);
+			watcher.Changed += (_, e) => { if(!Muted()) Report(e.FullPath, deleted: false); };
+			watcher.Created += (_, e) => { if(!Muted()) Appeared(root, e.FullPath); };
+			watcher.Deleted += (_, e) => { if(!Muted()) Vanished(root, e.FullPath); };
 			watcher.Renamed += (_, e) => {
+				
+				if(Muted())
+					
+					return;
 				
 				Vanished(root, e.OldFullPath);
 				Appeared(root, e.FullPath);
@@ -444,11 +455,17 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 		
 		lock(gate) {
 			
-			if(!disposed && watchers.TryAdd(root.Path, (watcher, root))) {
+			// The cap is checked here, where the count cannot move, so two directories adopted
+			// at once cannot both take the last slot. A planned root is always within it.
+			var fits = !withinCap || watchers.Count < WatchPlanner.MaxRoots;
+			
+			if(!disposed && fits && watchers.TryAdd(root.Path, (watcher, root))) {
 				
 				// A suspension that began while this watcher was starting did not see it.
 				if(suspendCount > 0)
 					watcher.EnableRaisingEvents = false;
+				
+				Volatile.Write(ref registered, true);
 				
 				return true;
 			}
@@ -536,20 +553,23 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			return;
 		
-		bool full;
-		
-		lock(gate)
-			full = watchers.Count >= WatchPlanner.MaxRoots;
-		
-		// One more watcher would pass the cap the planner holds itself to. Planning again picks
-		// the shape that fits — project directories, or a single recursive root — and covers the
-		// new directory through it.
-		if(full)
-			Replan();
-		
-		else if(!Add(new(directory, Recursive: true, Expands: false)))
+		if(!Add(new(directory, Recursive: true, Expands: false), withinCap: true)) {
 			
-			return;
+			bool full;
+			
+			lock(gate)
+				full = !watchers.ContainsKey(directory) && watchers.Count >= WatchPlanner.MaxRoots;
+			
+			// Already watched, or the watcher could not start: nothing more to do here.
+			if(!full)
+				
+				return;
+			
+			// One more watcher would pass the cap the planner holds itself to. Planning again
+			// picks the shape that fits — project directories, or a single recursive root — and
+			// covers the new directory through it.
+			Replan();
+		}
 		
 		var reported = 0;
 		
