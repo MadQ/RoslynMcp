@@ -46,7 +46,8 @@ internal sealed class IgnoreRules
 	public static readonly IgnoreRules BuiltIn = new([], [], []);
 	
 	// One entry per workspace root, revalidated against the .gitignore stamp on every lookup.
-	static readonly Dictionary<string, (IgnoreRules Rules, string[] Configured, long GitIgnoreStamp)> cache = new(StringComparer.OrdinalIgnoreCase);
+	// Keyed with the file system's own case rule: on Linux /work/Foo and /work/foo are two roots.
+	static readonly Dictionary<string, (IgnoreRules Rules, string[] Configured, long GitIgnoreStamp)> cache = new(gitComparer);
 	static readonly Lock cacheLock = new();
 	
 	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> neverInput;
@@ -134,7 +135,9 @@ internal sealed class IgnoreRules
 			
 			foreach(var raw in File.ReadLines(path)) {
 				
-				var line = raw.AsSpan().Trim();
+				// Trailing whitespace only, as git does: a leading space is part of the name, and
+				// trimming it would turn " dist/" into a rule for a different directory.
+				var line = raw.AsSpan().TrimEnd();
 				
 				if(line.IsEmpty || line[0] == '#')
 					continue;

@@ -2042,6 +2042,10 @@ internal sealed partial class WorkspaceManager
 			var gen = reloadVersion
 			;
 
+			// Before the load reads anything: a file edited after the load read it, in a directory
+			// the current watch plan does not cover, is only caught by reconciling from here.
+			var reloadStartedUtc = DateTime.UtcNow;
+
 			// Load workspace OUTSIDE the write lock — this can take seconds for large solutions
 			// and would block every concurrent reader for the duration.
 			logger.LogInfo("Reload", $"Reloading workspace ({loadMode}: {loadPath})")
@@ -2163,9 +2167,9 @@ internal sealed partial class WorkspaceManager
 
 			// A reload can add or remove projects; the watch set ignores this when the directories
 			// it planned for are unchanged. When it does replace watchers there is a moment with
-			// the old ones gone and the new ones not yet live, so edits since this point are
-			// reconciled by timestamp once they are.
-			ApplyWatchPlan(PeekSolution(), DateTime.UtcNow);
+			// the old ones gone and the new ones not yet live, so edits since the reload began
+			// are reconciled by timestamp once they are.
+			ApplyWatchPlan(PeekSolution(), reloadStartedUtc);
 		}
 
 
