@@ -223,6 +223,11 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	// The directories of the last Apply, kept so Replan can plan again without the workspace.
 	(string[] Projects, string[] Documents)? plannedInputs;
 	
+	// Callbacks owed to callers of Apply, run once the newest plan's watchers are live. Held
+	// here rather than by each start: a start that is superseded must not run its callback
+	// before the plan that replaced it is watching.
+	Action? pendingReady;
+	
 	/// <summary>
 	///     Plans and starts the watchers in the background, replacing any earlier plan. A call whose
 	///     project directories match the plan already in place does nothing, so it is cheap to make
@@ -248,9 +253,10 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			scopeKey      = key;
 			version       = ++applyVersion;
 			plannedInputs = (projectDirectories, documentDirectories);
+			pendingReady += onReady;
 		}
 		
-		StartInBackground(version, projectDirectories, documentDirectories, onReady);
+		StartInBackground(version, projectDirectories, documentDirectories);
 	}
 	
 	/// <summary>
@@ -274,32 +280,51 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			documentDirectories = documents;
 		}
 		
-		StartInBackground(version, projectDirectories, documentDirectories, onReady: null);
+		StartInBackground(version, projectDirectories, documentDirectories);
 	}
 	
-	void StartInBackground(int version, string[] projectDirectories, string[] documentDirectories, Action? onReady)
+	void StartInBackground(int version, string[] projectDirectories, string[] documentDirectories)
 	{
 		_ = Task.Run(() => {
 			
 			// Nothing is above this on a pool thread — an escape would take the process down.
 			try {
 				
-				if(Start(version, projectDirectories, documentDirectories)) {
+				var live = Start(version, projectDirectories, documentDirectories);
+				
+				Action? ready;
+				
+				lock(gate) {
 					
-					onReady?.Invoke();
+					// Superseded, before or during the start: the newer plan's own start settles
+					// everything, including the callbacks still pending.
+					if(version != applyVersion)
+						
+						return;
 					
-					return;
+					// Nothing is watching. Forget the key so the next Apply — after the next
+					// reload — tries again instead of taking this plan as already in place.
+					if(!live) {
+						
+						scopeKey = null;
+						
+						return;
+					}
+					
+					ready        = pendingReady;
+					pendingReady = null;
 				}
+				
+				ready?.Invoke();
 			}
 			catch(Exception ex) {
+				
 				logger.LogError("Watch", $"Starting watchers for '{rootPath}' failed: {ex.GetType().Name}: {ex.Message}");
+				
+				lock(gate)
+					if(version == applyVersion)
+						scopeKey = null;
 			}
-			
-			// Nothing is watching. Forget the key so the next Apply — after the next reload —
-			// tries again instead of taking this plan as already in place.
-			lock(gate)
-				if(version == applyVersion)
-					scopeKey = null;
 		});
 	}
 	
@@ -319,7 +344,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				if(version != applyVersion)
 					
-					return true;
+					return false;
 			}
 			
 			var started = Stopwatch.GetTimestamp();
