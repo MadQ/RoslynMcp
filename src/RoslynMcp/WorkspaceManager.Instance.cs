@@ -1563,6 +1563,11 @@ internal sealed partial class WorkspaceManager
 			watchSet?.Apply(projectDirectories, documentDirectories, sinceUtc);
 		}
 		
+		// File-system timestamp granularity — two seconds on FAT, the coarsest in common use, and the
+		// same margin roslyn_check_drift allows. It does not cover a file server whose clock is
+		// further off than this; nothing short of comparing content would.
+		static readonly TimeSpan ReconcileTolerance = TimeSpan.FromSeconds(2);
+		
 		/// <summary>
 		///     Runs once the watchers are live. The workspace was read from disk before they
 		///     existed — during the load itself, then while they started in the background — so an
@@ -1602,8 +1607,11 @@ internal sealed partial class WorkspaceManager
 					
 					try {
 						
+						// Deliberately generous: a file system with coarse timestamps can stamp a
+						// write made just after sinceUtc as earlier. A document caught by the margin
+						// alone is unchanged and is dropped by the content comparison in the flush.
 						// A missing file reports the year 1601, so it never compares as newer.
-						if(File.GetLastWriteTimeUtc(path) <= sinceUtc)
+						if(File.GetLastWriteTimeUtc(path) <= sinceUtc - ReconcileTolerance)
 							continue;
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {

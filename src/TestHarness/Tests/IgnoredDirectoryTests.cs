@@ -208,11 +208,34 @@ static class IgnoredDirectoryTests
 						: (false, "FAIL  (Hidden.txt resolved into node_modules)");
 				}),
 			
+			// The fixture root has node_modules below it, so it is watched non-recursively with one
+			// recursive watcher per remaining child. A directory created afterwards has no watcher;
+			// the root's watcher must adopt it and report the file already inside, or new source
+			// folders would silently stop being picked up. The file is written straight after the
+			// directory is created — the realistic sequence, and the one a late watcher misses.
+			// Written by the harness, not a tool: tool writes sync the workspace without the watcher.
+			// It also establishes, for the test after it, that the watchers are live.
+			new("ignored dirs: a .cs in a directory created after load flags a reload",
+				async () => {
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: reload_pending never cleared)");
+					
+					fx.Write("fresh/Inside.cs", "class InsideFresh { }\n");
+					
+					return await BecomesPendingAsync(TimeSpan.FromSeconds(10))
+						? (true,  "PASS  (reload_pending=True after fresh/Inside.cs appeared)")
+						: (false, "FAIL  (reload_pending stayed False for 10 s — the new directory was not adopted)");
+				}),
+			
 			// The watcher must not see ignored trees. A new .cs anywhere it does watch flags a
 			// reload (see the next test), so "no flag" after a .cs lands in node_modules and in the
 			// configured directory is the observable for "not watched, or dropped". 1.5 s covers
-			// the 300 ms debounce several times over; the next test proves the watchers are live,
-			// so a pass here is not just a watcher that never started.
+			// the 300 ms debounce several times over. This runs after the adoption test on
+			// purpose: the watchers start in the background, and only an event already seen
+			// from them proves they are live — without that, a pass here could be a write that
+			// landed before any watcher existed.
 			new("ignored dirs: a new .cs under an ignored directory does not flag a reload",
 				async () => {
 					
@@ -230,26 +253,6 @@ static class IgnoredDirectoryTests
 					return pending == false
 						? (true,  "PASS  (reload_pending=False after writes under node_modules and custom_skip)")
 						: (false, $"FAIL  (expected reload_pending=False, got {pending?.ToString() ?? "no result"})");
-				}),
-			
-			// The fixture root has node_modules below it, so it is watched non-recursively with one
-			// recursive watcher per remaining child. A directory created afterwards has no watcher;
-			// the root's watcher must adopt it and report the file already inside, or new source
-			// folders would silently stop being picked up. The file is written straight after the
-			// directory is created — the realistic sequence, and the one a late watcher misses.
-			// Written by the harness, not a tool: tool writes sync the workspace without the watcher.
-			new("ignored dirs: a .cs in a directory created after load flags a reload",
-				async () => {
-					
-					if(!await SettleAsync())
-						
-						return (false, "FAIL  (precondition: reload_pending never cleared)");
-					
-					fx.Write("fresh/Inside.cs", "class InsideFresh { }\n");
-					
-					return await BecomesPendingAsync(TimeSpan.FromSeconds(10))
-						? (true,  "PASS  (reload_pending=True after fresh/Inside.cs appeared)")
-						: (false, "FAIL  (reload_pending stayed False for 10 s — the new directory was not adopted)");
 				}),
 		};
 		

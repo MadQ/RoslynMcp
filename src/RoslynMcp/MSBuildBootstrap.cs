@@ -180,13 +180,13 @@ internal static partial class MSBuildBootstrap
 		// directory link that leads back up it — needs bounds of its own.
 		const int maxDirectories = 5_000;
 		
-		var result  = new List<string>();
-		var queue   = new Queue<(string Path, int Depth)>();
-		var visited = 0;
+		var result     = new List<string>();
+		var queue      = new Queue<(string Path, int Depth)>();
+		var discovered = 1;
 		
 		queue.Enqueue((directory, 0));
 		
-		while(queue.Count > 0 && result.Count < maxCandidates && visited++ < maxDirectories) {
+		while(queue.Count > 0 && result.Count < maxCandidates) {
 			
 			var (dir, depth) = queue.Dequeue();
 			
@@ -199,14 +199,22 @@ internal static partial class MSBuildBootstrap
 				if(result.Count >= maxCandidates)
 					break;
 				
-				if(depth >= WorkspaceWalker.MaxDepth)
+				if(depth >= WorkspaceWalker.MaxDepth || discovered >= maxDirectories)
 					continue;
 				
 				foreach(var sub in new DirectoryInfo(dir).EnumerateDirectories()) {
 					
 					// A link is never followed: it can point back up the tree.
-					if(!IsSkippedFolder(sub.Name) && !sub.Attributes.HasFlag(FileAttributes.ReparsePoint))
-						queue.Enqueue((sub.FullName, depth + 1));
+					if(IsSkippedFolder(sub.Name) || sub.Attributes.HasFlag(FileAttributes.ReparsePoint))
+						continue;
+					
+					queue.Enqueue((sub.FullName, depth + 1));
+					
+					// Counted as found, not as visited: one directory with a huge number of
+					// children would otherwise be enumerated and queued in full before any
+					// budget applied.
+					if(++discovered >= maxDirectories)
+						break;
 				}
 			}
 			catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {
