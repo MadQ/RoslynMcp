@@ -166,7 +166,13 @@ AppDomain.CurrentDomain.UnhandledException += (_, e) => {
     }
 };
 
-var builder = Host.CreateApplicationBuilder(args);
+// The empty builder on purpose (#309). Host.CreateApplicationBuilder roots the content at the
+// working directory and loads appsettings.json with reloadOnChange, which puts a recursive file
+// watcher on the whole tree. On Linux that is one inotify watch per directory, registered before
+// the host starts: seconds on a large repo, longer than an MCP client's startup timeout on a
+// network share. Nothing here reads host configuration, so no default is missed; the content root
+// is pinned to the install directory so nothing else can pick the working directory up either.
+var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings { ContentRootPath = AppContext.BaseDirectory });
 
 builder.Logging
 	.ClearProviders()

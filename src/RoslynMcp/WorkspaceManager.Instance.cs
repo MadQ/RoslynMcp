@@ -709,8 +709,9 @@ internal sealed partial class WorkspaceManager
 		const int LargeSolutionThreshold = 30;
 		
 		/// <summary>
-		///     Counts .csproj files under the solution directory. If over the threshold,
-		///     logs a warning before the potentially long MSBuild load.
+		///     Counts the projects a load is about to open — the ones a solution lists, or a bounded
+		///     scan of a directory — and logs a warning before a potentially long MSBuild load when
+		///     the count is over the threshold.
 		/// </summary>
 		static void WarnIfLargeSolution(string path, WorkspaceMode mode, FileLogger logger)
 		{
@@ -718,23 +719,28 @@ internal sealed partial class WorkspaceManager
 				
 				return;
 			
-			var dir = Directory.Exists(path) ? path : Path.GetDirectoryName(path);
-			
-			if(dir is null)
+			// A lone .csproj is one project by definition; counting its neighbours says nothing
+			// about the load.
+			if(path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
 				
 				return;
 			
-			try {
-				
-				var count = Directory.EnumerateFiles(dir, "*.csproj", SearchOption.AllDirectories).Count();
-				
-				if(count > LargeSolutionThreshold)
-					logger.LogInfo("Workspace",
-						$"Large solution detected: ~{count} projects. " +
-						$"MSBuild loading may take several minutes. " +
-						$"For faster startup, use --workspace adhoc or set ROSLYNMCP_WORKSPACE=adhoc.");
-			}
-			catch { }
+			var isSolution = path.EndsWith(".sln",  StringComparison.OrdinalIgnoreCase)
+			              || path.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase);
+			
+			// Never an unbounded recursive enumeration: this runs on the first tool call, and a
+			// walk through node_modules or .git on a network share takes longer than an MCP
+			// client waits (#309). The solution's own project list is exact; the directory scan is
+			// pruned and capped (just above the threshold), so its count is a lower bound.
+			var count = isSolution             ? MSBuildBootstrap.ReadSolutionProjects(path).Length
+			          : Directory.Exists(path) ? MSBuildBootstrap.FindCsprojCandidates(path).Length
+			          : 0;
+			
+			if(count > LargeSolutionThreshold)
+				logger.LogInfo("Workspace",
+					$"Large solution detected: {(isSolution ? "" : "at least ")}{count} projects. " +
+					$"MSBuild loading may take several minutes. " +
+					$"For a faster load, use --workspace adhoc or set ROSLYNMCP_WORKSPACE=adhoc.");
 		}
 		
 		
