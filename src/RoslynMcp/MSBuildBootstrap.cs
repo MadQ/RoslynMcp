@@ -167,20 +167,28 @@ internal static partial class MSBuildBootstrap
 	///     Finds .csproj files under <paramref name="directory"/> for style detection when no
 	///     solution lists them: files in the directory itself first, then one level at a time,
 	///     skipping build output and tooling folders (bin, obj, packages, node_modules, dot-folders)
-	///     where stale or copied project files live. Bounded so a huge tree cannot stall a load.
+	///     where stale or copied project files live. Bounded so a huge tree cannot stall a load:
+	///     at most 32 projects, 5,000 directories, and <see cref="WorkspaceWalker.MaxDepth"/> levels,
+	///     and directory links are not followed. Breadth-first on purpose — nearest projects first —
+	///     which is why this is its own walk rather than <see cref="WorkspaceWalker"/>.
 	/// </summary>
 	public static string[] FindCsprojCandidates(string directory)
 	{
 		const int maxCandidates = 32;
 		
-		var result = new List<string>();
-		var queue  = new Queue<string>();
+		// The candidate cap only ends the walk once projects turn up. A tree with none — or a
+		// directory link that leads back up it — needs bounds of its own.
+		const int maxDirectories = 5_000;
 		
-		queue.Enqueue(directory);
+		var result  = new List<string>();
+		var queue   = new Queue<(string Path, int Depth)>();
+		var visited = 0;
 		
-		while(queue.Count > 0 && result.Count < maxCandidates) {
+		queue.Enqueue((directory, 0));
+		
+		while(queue.Count > 0 && result.Count < maxCandidates && visited++ < maxDirectories) {
 			
-			var dir = queue.Dequeue();
+			var (dir, depth) = queue.Dequeue();
 			
 			try {
 				
@@ -191,10 +199,14 @@ internal static partial class MSBuildBootstrap
 				if(result.Count >= maxCandidates)
 					break;
 				
-				foreach(var sub in Directory.EnumerateDirectories(dir)) {
+				if(depth >= WorkspaceWalker.MaxDepth)
+					continue;
+				
+				foreach(var sub in new DirectoryInfo(dir).EnumerateDirectories()) {
 					
-					if(!IsSkippedFolder(Path.GetFileName(sub)))
-						queue.Enqueue(sub);
+					// A link is never followed: it can point back up the tree.
+					if(!IsSkippedFolder(sub.Name) && !sub.Attributes.HasFlag(FileAttributes.ReparsePoint))
+						queue.Enqueue((sub.FullName, depth + 1));
 				}
 			}
 			catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {

@@ -119,14 +119,16 @@ internal sealed class IgnoreRules
 	///     Reads the directory entries of a <c>.gitignore</c> that can be honored without
 	///     implementing git's matcher: a plain name (<c>dist</c>, <c>dist/</c>) ignores a directory
 	///     of that name at any depth, and an entry with a leading or inner slash
-	///     (<c>/out</c>, <c>docs/generated</c>) ignores that one root-relative path. Everything
-	///     else — globs, negations, escapes — is skipped. Skipping is always safe here: the cost is
-	///     a directory walked that git would have ignored, never a file hidden that git tracks.
+	///     (<c>/out</c>, <c>docs/generated</c>) ignores that one root-relative path. Globs and
+	///     escapes are skipped, which is always safe: the cost is a directory walked that git would
+	///     have ignored. Negations cannot be skipped — in git a later <c>!cache/</c> re-includes
+	///     what <c>cache/</c> ignored — so a plain negation removes the entries it names and one
+	///     with a glob discards everything read so far. Either way no file git tracks is hidden.
 	/// </summary>
 	internal static (string[] Names, string[] Paths) ReadGitIgnore(string path)
 	{
-		var names = new List<string>();
-		var paths = new List<string>();
+		var names = new HashSet<string>(gitComparer);
+		var paths = new HashSet<string>(gitComparer);
 		
 		try {
 			
@@ -134,21 +136,58 @@ internal sealed class IgnoreRules
 				
 				var line = raw.AsSpan().Trim();
 				
-				if(line.IsEmpty || line[0] is '#' or '!' || line.IndexOfAny("*?[\\") >= 0)
+				if(line.IsEmpty || line[0] == '#')
 					continue;
 				
-				var anchored = line[0] == '/';
+				var negated = line[0] == '!';
+				
+				if(negated)
+					line = line[1..];
+				
+				var plain = line.IndexOfAny("*?[\\") < 0;
+				
+				// In git the last matching line wins, so a negation can re-include a directory an
+				// earlier line ignored. One this reader cannot interpret might match anything
+				// collected so far; forgetting all of it is the only safe reading.
+				if(negated && !plain) {
+					
+					names.Clear();
+					paths.Clear();
+					
+					continue;
+				}
+				
+				if(!plain)
+					continue;
+				
+				var anchored = line.Length > 0 && line[0] == '/';
 				var entry    = line.Trim('/');
 				
 				// "." and ".." segments would escape the root or mean nothing; not worth resolving.
 				if(entry.IsEmpty || entry is "." or ".." || entry.StartsWith("../") || entry.Contains("/../", StringComparison.Ordinal) || entry.EndsWith("/.."))
 					continue;
 				
-				if(anchored || entry.Contains('/'))
-					paths.Add(entry.ToString());
+				var isPath = anchored || entry.Contains('/');
+				var text   = entry.ToString();
 				
-				else
-					names.Add(entry.ToString());
+				if(!negated) {
+					
+					(isPath ? paths : names).Add(text);
+					
+					continue;
+				}
+				
+				// A plain negation: drop what it re-includes. Wider than git on purpose — "!/out"
+				// re-includes only the root-level directory, but a name entry cannot express
+				// "everywhere except the root", so the name goes too. The cost is a directory
+				// walked that git ignores, never one hidden that git tracks.
+				var lastSegment = text[(text.LastIndexOf('/') + 1)..];
+				
+				names.Remove(lastSegment);
+				paths.Remove(text);
+				
+				if(!isPath)
+					paths.RemoveWhere(candidate => gitComparer.Equals(candidate[(candidate.LastIndexOf('/') + 1)..], text));
 			}
 		}
 		catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {

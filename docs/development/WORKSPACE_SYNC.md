@@ -299,9 +299,13 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
   recursive watcher, and the files already in it are reported — `mkdir` and the first write into it
   are milliseconds apart.
 
-The plan is recomputed after a reload only when the set of project directories changed. A
-`node_modules` created under a recursive root after the plan was made is still watched until then;
-its events are dropped as before.
+A workspace never holds more than 32 watchers: when adopting a directory would pass that, the
+watch set plans again instead, which moves it to the `projects` or `fallback` shape.
+
+The plan is recomputed after a reload only when the project or document directories changed, and
+edits made while watchers are being replaced are reconciled by timestamp the same way as after
+the initial load. A `node_modules` created under a recursive root after the plan was made is still
+watched until the next re-plan; its events are dropped as before.
 
 ---
 

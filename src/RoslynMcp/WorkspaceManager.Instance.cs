@@ -1531,7 +1531,7 @@ internal sealed partial class WorkspaceManager
 		{
 			watchSet = new WorkspaceWatchSet(rootPath, ignoreRules, (fullPath, deleted) => ScheduleDebounced(fullPath, deleted), logger);
 			
-			ApplyWatchPlan(workspace.CurrentSolution, ReconcileMissedChanges);
+			ApplyWatchPlan(workspace.CurrentSolution, () => ReconcileMissedChanges(constructedUtc));
 		}
 		
 		/// <summary>
@@ -1551,7 +1551,7 @@ internal sealed partial class WorkspaceManager
 					.Distinct(WatchPlanner.PathComparer)]
 				: [rootPath];
 			
-			string[] DocumentDirectories() =>
+			string[] documentDirectories =
 			[
 				..solution.Projects
 					.SelectMany(project => project.Documents.Concat<TextDocument>(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments))
@@ -1560,7 +1560,7 @@ internal sealed partial class WorkspaceManager
 					.Distinct(WatchPlanner.PathComparer)
 			];
 			
-			watchSet?.Apply(projectDirectories, DocumentDirectories, onReady);
+			watchSet?.Apply(projectDirectories, documentDirectories, onReady);
 		}
 		
 		/// <summary>
@@ -1576,7 +1576,7 @@ internal sealed partial class WorkspaceManager
 		///         built is tracked but not on disk, which is not a deletion.
 		///     </para>
 		/// </summary>
-		void ReconcileMissedChanges()
+		void ReconcileMissedChanges(DateTime sinceUtc)
 		{
 			// Runs on a pool thread, possibly after Dispose: PeekSolution takes a lock that
 			// Dispose tears down.
@@ -1603,7 +1603,7 @@ internal sealed partial class WorkspaceManager
 					try {
 						
 						// A missing file reports the year 1601, so it never compares as newer.
-						if(File.GetLastWriteTimeUtc(path) <= constructedUtc)
+						if(File.GetLastWriteTimeUtc(path) <= sinceUtc)
 							continue;
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -2161,9 +2161,13 @@ internal sealed partial class WorkspaceManager
 			MarkSynced();
 			logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({projectCount} projects)");
 
-			// A reload can add or remove projects; the watch set ignores this when the project
-			// directories are unchanged.
-			ApplyWatchPlan(PeekSolution(), null);
+			// A reload can add or remove projects; the watch set ignores this when the directories
+			// it planned for are unchanged. When it does replace watchers there is a moment with
+			// the old ones gone and the new ones not yet live, so edits since this point are
+			// reconciled by timestamp once they are.
+			var replanUtc = DateTime.UtcNow;
+			
+			ApplyWatchPlan(PeekSolution(), () => ReconcileMissedChanges(replanUtc));
 		}
 
 

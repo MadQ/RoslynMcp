@@ -21,8 +21,9 @@ using System.Text.Json.Nodes;
 ///         <item><c>custom_skip/</c> — ignored by the <c>ignore</c> key of <c>.madq_roslynmcp.json</c>.</item>
 ///         <item><c>nested/deep/Only.txt</c> — an ordinary file reachable only by suffix match.</item>
 ///     </list>
-///     The <c>.gitignore</c> also carries a glob (<c>*.log</c>) and a negation (<c>!keep</c>), which
-///     the conservative reader must skip without rejecting the file.
+///     The <c>.gitignore</c> also carries a glob (<c>*.log</c>), which the conservative reader must
+///     skip without rejecting the file, and two negations: <c>!keep</c>, which names nothing that
+///     was ignored, and <c>!reincluded/</c>, which undoes the <c>reincluded/</c> line before it.
 /// </summary>
 static class IgnoredDirectoryTests
 {
@@ -41,7 +42,8 @@ static class IgnoredDirectoryTests
 		fx.Write("sub/anchored/b.txt",           "b\n");
 		fx.Write("custom_skip/c.txt",            "c\n");
 		fx.Write("nested/deep/Only.txt",         "only\n");
-		fx.Write(".gitignore",                   "# build output\ndist/\n*.log\n!keep\n/anchored\n");
+		fx.Write("reincluded/r.txt",             "r\n");
+		fx.Write(".gitignore",                   "# build output\nreincluded/\n!reincluded/\ndist/\n*.log\n!keep\n/anchored\n");
 		fx.Write(".madq_roslynmcp.json",         "{ \"ignore\": [\"custom_skip\"] }\n");
 		
 		// Calls a tool and returns (no-protocol-error, parsed JSON data).
@@ -137,6 +139,8 @@ static class IgnoredDirectoryTests
 			// build output — so one missing rule fails with the path that names it.
 			// sub/anchored/b.txt is the control for the anchored entry: "/anchored" names the
 			// root-level directory only, and matching it at any depth would hide this file.
+			// reincluded/r.txt is the control for negation: the .gitignore ignores "reincluded/"
+			// and then re-includes it, so git tracks the file and hiding it would be wrong.
 			new("ignored dirs: list_files skips ignored directories and keeps the rest",
 				async () => {
 					
@@ -147,7 +151,7 @@ static class IgnoredDirectoryTests
 						return (false, "FAIL  (roslyn_list_files returned no files array)");
 					
 					string[] mustBeAbsent  = ["node_modules/pkg/index.js", "dist/out.txt", "anchored/a.txt", "custom_skip/c.txt"];
-					string[] mustBePresent = ["Probe.cs", "sub/anchored/b.txt", "nested/deep/Only.txt", ".gitignore"];
+					string[] mustBePresent = ["Probe.cs", "sub/anchored/b.txt", "nested/deep/Only.txt", ".gitignore", "reincluded/r.txt"];
 					
 					var leaked  = mustBeAbsent.Where(files.Contains).ToArray();
 					var missing = mustBePresent.Where(path => !files.Contains(path)).ToArray();

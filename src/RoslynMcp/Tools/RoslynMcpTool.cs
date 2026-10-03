@@ -1041,10 +1041,6 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		return new PaginatedResult<T>(page, allResults.Length, skip, take, token, hasMore);
 	}
 	
-	// Candidates the suffix-match fallback of ResolveFilePath inspects before giving up. The walk
-	// is already pruned; this bounds the remaining cost of a common file name in a huge tree.
-	const int ResolveCandidateLimit = 2_000;
-	
 	/// <summary>
 	///     The directory names a relative path or glob spells out literally — every segment before
 	///     the last that holds no wildcard. A walk that would otherwise skip an ignored directory
@@ -1112,7 +1108,10 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 			);
 			
-			foreach(var candidate in candidates.Take(ResolveCandidateLimit)) {
+			// Deliberately not capped: stopping early would report a match as unique without
+			// having seen the rest, and uniqueness is the whole point of the checks below. The
+			// pruned walk is what bounds the cost.
+			foreach(var candidate in candidates) {
 				
 				try {
 					if(!boundary.IsPathAllowed(candidate))

@@ -59,11 +59,11 @@ internal static class WatchPlanner
 	///     Directories outside <paramref name="rootPath"/> are never watched, in any shape.
 	/// </summary>
 	public static WatchRoot[] Plan(
-		string           rootPath,
-		string[]         projectDirectories,
-		Func<string[]>   documentDirectories,
-		IgnoreRules      rules,
-		out string       shape)
+		string       rootPath,
+		string[]     projectDirectories,
+		string[]     documentDirectories,
+		IgnoreRules  rules,
+		out string   shape)
 	{
 		var whole = new Dictionary<string, WatchRoot>(PathComparer);
 		
@@ -107,8 +107,7 @@ internal static class WatchPlanner
 			
 			scoped.TryAdd(rootPath, new(rootPath, Recursive: false, Expands: false));
 			
-			// Asked for only here: listing every document's directory is wasted on the common shape.
-			foreach(var directory in documentDirectories())
+			foreach(var directory in documentDirectories)
 				if(IsUnderOrEqual(directory, rootPath) && !scopes.Any(scope => IsUnderOrEqual(directory, scope)))
 					scoped.TryAdd(directory, new(directory, Recursive: false, Expands: false));
 			
@@ -221,15 +220,23 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	// version than its own leaves the watchers alone.
 	int     applyVersion;
 	
+	// The directories of the last Apply, kept so Replan can plan again without the workspace.
+	(string[] Projects, string[] Documents)? plannedInputs;
+	
 	/// <summary>
 	///     Plans and starts the watchers in the background, replacing any earlier plan. A call whose
 	///     project directories match the plan already in place does nothing, so it is cheap to make
 	///     after every reload. <paramref name="onReady"/> runs once the watchers are live — the
 	///     point from which changes are seen, and so where a caller reconciles what it missed.
 	/// </summary>
-	public void Apply(string[] projectDirectories, Func<string[]> documentDirectories, Action? onReady)
+	public void Apply(string[] projectDirectories, string[] documentDirectories, Action? onReady)
 	{
-		var key = string.Join('|', projectDirectories.Order(WatchPlanner.PathComparer));
+		// Both sets shape the plan: project directories always, document directories in the
+		// "projects" shape, where a document linked from elsewhere gets its own watch root.
+		var key = string.Join('|', projectDirectories.Order(WatchPlanner.PathComparer))
+		        + "\n"
+		        + string.Join('|', documentDirectories.Order(WatchPlanner.PathComparer));
+		
 		int version;
 		
 		lock(gate) {
@@ -238,10 +245,40 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				return;
 			
-			scopeKey = key;
-			version  = ++applyVersion;
+			scopeKey      = key;
+			version       = ++applyVersion;
+			plannedInputs = (projectDirectories, documentDirectories);
 		}
 		
+		StartInBackground(version, projectDirectories, documentDirectories, onReady);
+	}
+	
+	/// <summary>
+	///     Plans again from the directories of the last <see cref="Apply"/>. For when the tree
+	///     changed under an unchanged workspace — a root that has run out of watcher budget.
+	/// </summary>
+	void Replan()
+	{
+		int      version;
+		string[] projectDirectories;
+		string[] documentDirectories;
+		
+		lock(gate) {
+			
+			if(disposed || plannedInputs is not var (projects, documents))
+				
+				return;
+			
+			version             = ++applyVersion;
+			projectDirectories  = projects;
+			documentDirectories = documents;
+		}
+		
+		StartInBackground(version, projectDirectories, documentDirectories, onReady: null);
+	}
+	
+	void StartInBackground(int version, string[] projectDirectories, string[] documentDirectories, Action? onReady)
+	{
 		_ = Task.Run(() => {
 			
 			// Nothing is above this on a pool thread — an escape would take the process down.
@@ -266,7 +303,8 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 		});
 	}
 	
-	bool Start(int version, string[] projectDirectories, Func<string[]> documentDirectories)
+	// Returns whether watchers are live for the newest plan. False means nothing is watching.
+	bool Start(int version, string[] projectDirectories, string[] documentDirectories)
 	{
 		lock(applyLock) {
 			
@@ -453,8 +491,22 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	void Adopt(string directory)
 	{
 		if(rules.IsNeverInput(Path.GetFileName(directory.AsSpan()))
-		   || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint)
-		   || !Add(new(directory, Recursive: true, Expands: false)))
+		   || File.GetAttributes(directory).HasFlag(FileAttributes.ReparsePoint))
+			
+			return;
+		
+		bool full;
+		
+		lock(gate)
+			full = watchers.Count >= WatchPlanner.MaxRoots;
+		
+		// One more watcher would pass the cap the planner holds itself to. Planning again picks
+		// the shape that fits — project directories, or a single recursive root — and covers the
+		// new directory through it.
+		if(full)
+			Replan();
+		
+		else if(!Add(new(directory, Recursive: true, Expands: false)))
 			
 			return;
 		
