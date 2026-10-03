@@ -186,8 +186,17 @@ internal static class WatchPlanner
 	{
 		var trimmed = Path.TrimEndingDirectorySeparator(ancestor.AsSpan());
 		
-		return path.AsSpan().StartsWith(trimmed, pathComparison)
-			&& (path.Length == trimmed.Length || path[trimmed.Length] == Path.DirectorySeparatorChar || path[trimmed.Length] == Path.AltDirectorySeparatorChar);
+		if(trimmed.IsEmpty || !path.AsSpan().StartsWith(trimmed, pathComparison))
+			
+			return false;
+		
+		// A filesystem root ("C:\", "/") keeps its separator when trimmed, so the boundary is the
+		// root's own last character rather than the one after it.
+		return path.Length == trimmed.Length
+			|| IsSeparator(trimmed[^1])
+			|| IsSeparator(path[trimmed.Length]);
+		
+		static bool IsSeparator(char c) => c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar;
 	}
 }
 
@@ -528,13 +537,25 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	{
 		if(root.Expands) {
 			
-			FileSystemWatcher? gone = null;
+			// A directory that goes away takes every watcher at or below it along. Left in the
+			// table they would keep counting toward the cap — on Linux nothing else retires
+			// them — and push later adoptions into needless re-plans.
+			var gone = new List<FileSystemWatcher>();
 			
-			lock(gate)
-				if(watchers.Remove(fullPath, out var entry))
-					gone = entry.Watcher;
+			lock(gate) {
+				
+				foreach(var (path, entry) in watchers) {
+					
+					if(!WatchPlanner.IsUnderOrEqual(path, fullPath))
+						continue;
+					
+					gone.Add(entry.Watcher);
+					watchers.Remove(path);
+				}
+			}
 			
-			gone?.Dispose();
+			foreach(var watcher in gone)
+				watcher.Dispose();
 		}
 		
 		Report(fullPath, deleted: true);
