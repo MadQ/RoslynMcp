@@ -195,9 +195,10 @@ internal static class WatchPlanner
 ///     The file watchers of one workspace: the roots <see cref="WatchPlanner"/> chose, started on a
 ///     background thread so a tool call never waits for them. Events from every watcher funnel
 ///     into one callback, which is the workspace's existing debounce entry point — nothing
-///     downstream knows there is more than one watcher.
+///     downstream knows there is more than one watcher. Whenever a plan replaces watchers, the
+///     reconcile callback is run once the new ones are live, with the moment the change began.
 /// </summary>
-internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Action<string, bool> onChange, FileLogger logger) : IDisposable
+internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Action<string, bool> onChange, Action<DateTime> reconcile, FileLogger logger) : IDisposable
 {
 	// Files reported for a directory that appeared under an expanding root. Bounded so moving a
 	// huge tree into the workspace cannot flood the debounce queue.
@@ -223,18 +224,19 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	// The directories of the last Apply, kept so Replan can plan again without the workspace.
 	(string[] Projects, string[] Documents)? plannedInputs;
 	
-	// Callbacks owed to callers of Apply, run once the newest plan's watchers are live. Held
-	// here rather than by each start: a start that is superseded must not run its callback
-	// before the plan that replaced it is watching.
-	Action? pendingReady;
+	// Set while a plan change is waiting for its watchers: the moment from which changes on disk
+	// may have gone unseen. Held here rather than by each start, because a start that is
+	// superseded must not reconcile before the plan that replaced it is watching.
+	DateTime? reconcileSinceUtc;
 	
 	/// <summary>
 	///     Plans and starts the watchers in the background, replacing any earlier plan. A call whose
-	///     project directories match the plan already in place does nothing, so it is cheap to make
-	///     after every reload. <paramref name="onReady"/> runs once the watchers are live — the
-	///     point from which changes are seen, and so where a caller reconciles what it missed.
+	///     directories match the plan already in place does nothing, so it is cheap to make after
+	///     every reload. <paramref name="sinceUtc"/> is the moment from which the caller cannot
+	///     vouch for what is on disk; once the watchers are live — the point from which changes are
+	///     seen — the reconcile callback is run with it.
 	/// </summary>
-	public void Apply(string[] projectDirectories, string[] documentDirectories, Action? onReady)
+	public void Apply(string[] projectDirectories, string[] documentDirectories, DateTime sinceUtc)
 	{
 		// Both sets shape the plan: project directories always, document directories in the
 		// "projects" shape, where a document linked from elsewhere gets its own watch root.
@@ -253,7 +255,8 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			scopeKey      = key;
 			version       = ++applyVersion;
 			plannedInputs = (projectDirectories, documentDirectories);
-			pendingReady += onReady;
+			
+			OweReconcile(sinceUtc);
 		}
 		
 		StartInBackground(version, projectDirectories, documentDirectories);
@@ -278,9 +281,21 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			version             = ++applyVersion;
 			projectDirectories  = projects;
 			documentDirectories = documents;
+			
+			// Replacing watchers leaves a moment with the old ones gone and the new ones not
+			// yet live, exactly as a plan change after a reload does.
+			OweReconcile(DateTime.UtcNow);
 		}
 		
 		StartInBackground(version, projectDirectories, documentDirectories);
+	}
+	
+	// Callers hold the gate. The earliest moment wins: one reconcile from there covers every
+	// plan change still waiting for its watchers.
+	void OweReconcile(DateTime sinceUtc)
+	{
+		if(reconcileSinceUtc is not { } pending || sinceUtc < pending)
+			reconcileSinceUtc = sinceUtc;
 	}
 	
 	void StartInBackground(int version, string[] projectDirectories, string[] documentDirectories)
@@ -292,7 +307,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				var live = Start(version, projectDirectories, documentDirectories);
 				
-				Action? ready;
+				DateTime? since;
 				
 				lock(gate) {
 					
@@ -311,11 +326,12 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 						return;
 					}
 					
-					ready        = pendingReady;
-					pendingReady = null;
+					since             = reconcileSinceUtc;
+					reconcileSinceUtc = null;
 				}
 				
-				ready?.Invoke();
+				if(since is { } sinceUtc)
+					reconcile(sinceUtc);
 			}
 			catch(Exception ex) {
 				

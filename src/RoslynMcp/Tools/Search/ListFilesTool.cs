@@ -18,6 +18,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		"Returns matching paths relative to the project root, with paging. " +
 		"Skips node_modules, .git, .vs, packages, bin, obj, directories the root .gitignore lists by name, and any configured ignore names — " +
 		"unless the pattern names the directory literally (e.g. 'bin/**/*.dll' or '**/obj/project.assets.json'). " +
+		"A name before the first wildcard applies only at that path ('frontend/node_modules/**' enters that one directory); a name after a wildcard applies at any depth. " +
 		"For searching file content (lines matching a pattern), use roslyn_search_files instead. " +
 		"For filename/path matching with no content search, this is the right tool.")]
 	public object ListFiles(
@@ -55,7 +56,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			// Ignored directories are never entered — unless the pattern spells one out, which is
 			// how an agent reaches bin/ or obj/ on purpose.
 			var rules = IgnoreRules.ForRoot(rootPath, logger);
-			var named = NamedDirectories(pattern);
+			var named = NamedDirectories(pattern, anchorLeadingSegments: true);
 			
 			// Materialize relative paths upfront — reused by close-match hint on miss.
 			allRelativePaths = WorkspaceWalker.EnumerateFiles(
@@ -63,7 +64,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 				"*",
 				recursive,
 				(ref FileSystemEntry directory) =>
-					!named.Contains(directory.FileName)
+					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))

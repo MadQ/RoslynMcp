@@ -1529,9 +1529,9 @@ internal sealed partial class WorkspaceManager
 
 		void StartWatcher()
 		{
-			watchSet = new WorkspaceWatchSet(rootPath, ignoreRules, (fullPath, deleted) => ScheduleDebounced(fullPath, deleted), logger);
+			watchSet = new WorkspaceWatchSet(rootPath, ignoreRules, (fullPath, deleted) => ScheduleDebounced(fullPath, deleted), ReconcileMissedChanges, logger);
 			
-			ApplyWatchPlan(workspace.CurrentSolution, () => ReconcileMissedChanges(constructedUtc));
+			ApplyWatchPlan(workspace.CurrentSolution, constructedUtc);
 		}
 		
 		/// <summary>
@@ -1540,7 +1540,7 @@ internal sealed partial class WorkspaceManager
 		///     directories are the ones it already planned for — so this is called after every
 		///     reload, where a project may have been added or removed.
 		/// </summary>
-		void ApplyWatchPlan(Solution solution, Action? onReady)
+		void ApplyWatchPlan(Solution solution, DateTime sinceUtc)
 		{
 			// An AdhocWorkspace has no project files; its one project is the root itself.
 			string[] projectDirectories = isMSBuild
@@ -1560,7 +1560,7 @@ internal sealed partial class WorkspaceManager
 					.Distinct(WatchPlanner.PathComparer)
 			];
 			
-			watchSet?.Apply(projectDirectories, documentDirectories, onReady);
+			watchSet?.Apply(projectDirectories, documentDirectories, sinceUtc);
 		}
 		
 		/// <summary>
@@ -2165,9 +2165,7 @@ internal sealed partial class WorkspaceManager
 			// it planned for are unchanged. When it does replace watchers there is a moment with
 			// the old ones gone and the new ones not yet live, so edits since this point are
 			// reconciled by timestamp once they are.
-			var replanUtc = DateTime.UtcNow;
-			
-			ApplyWatchPlan(PeekSolution(), () => ReconcileMissedChanges(replanUtc));
+			ApplyWatchPlan(PeekSolution(), DateTime.UtcNow);
 		}
 
 

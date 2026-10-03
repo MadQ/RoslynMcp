@@ -1042,21 +1042,75 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
-	///     The directory names a relative path or glob spells out literally — every segment before
-	///     the last that holds no wildcard. A walk that would otherwise skip an ignored directory
-	///     still enters one the caller asked for by name.
+	///     The directories a relative path or glob spells out literally, which a walk enters even
+	///     when they are ignored. A name is tied to a place when the place is known:
+	///     <c>frontend/node_modules/**</c> names that one directory, not every <c>node_modules</c> in
+	///     the tree — entering them all is the walk #309 exists to avoid. A name after a wildcard
+	///     (<c>**/obj/project.assets.json</c>) has no fixed place and matches at any depth.
 	/// </summary>
-	protected static HashSet<string>.AlternateLookup<ReadOnlySpan<char>> NamedDirectories(string pathOrPattern)
+	protected readonly struct NamedDirectorySet(HashSet<string>.AlternateLookup<ReadOnlySpan<char>> anywhere, List<(string Parent, string Name)> anchored)
 	{
-		var named    = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		/// <summary>
+		///     Whether the directory called <paramref name="name"/>, whose parent is
+		///     <paramref name="relativeParent"/> under the walk root, was asked for by name.
+		/// </summary>
+		public bool Contains(ReadOnlySpan<char> relativeParent, ReadOnlySpan<char> name)
+		{
+			if(anywhere.Contains(name))
+				
+				return true;
+			
+			foreach(var (parent, anchoredName) in anchored)
+				if(name.Equals(anchoredName, StringComparison.OrdinalIgnoreCase)
+				   && relativeParent.Equals(parent, StringComparison.OrdinalIgnoreCase))
+					
+					return true;
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Reads the literally named directories out of <paramref name="pathOrPattern"/> — every
+	///     segment before the last that holds no wildcard. With
+	///     <paramref name="anchorLeadingSegments"/>, the segments before the first wildcard are tied
+	///     to their place under the root (a glob, matched from the root); without it every name
+	///     matches at any depth (a path matched as a suffix, which can sit anywhere).
+	/// </summary>
+	protected static NamedDirectorySet NamedDirectories(string pathOrPattern, bool anchorLeadingSegments)
+	{
+		var anywhere = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var anchored = new List<(string Parent, string Name)>();
 		var segments = pathOrPattern.Split('/', '\\');
+		var parent   = "";
+		var leading  = anchorLeadingSegments;
 		
 		// The last segment is the file name or file pattern, never a directory.
-		foreach(var segment in segments.AsSpan(0, segments.Length - 1))
-			if(segment.Length > 0 && segment is not ("." or "..") && segment.AsSpan().IndexOfAny("*?{}[]") < 0)
-				named.Add(segment);
+		foreach(var segment in segments.AsSpan(0, segments.Length - 1)) {
+			
+			if(segment.Length == 0 || segment == ".")
+				continue;
+			
+			// From the first wildcard on, a segment's position in the tree is unknown.
+			if(segment == ".." || segment.AsSpan().IndexOfAny("*?{}[]") >= 0) {
+				
+				leading = false;
+				
+				continue;
+			}
+			
+			if(!leading) {
+				
+				anywhere.Add(segment);
+				
+				continue;
+			}
+			
+			anchored.Add((parent, segment));
+			parent = parent.Length == 0 ? segment : parent + Path.DirectorySeparatorChar + segment;
+		}
 		
-		return named.GetAlternateLookup<ReadOnlySpan<char>>();
+		return new(anywhere.GetAlternateLookup<ReadOnlySpan<char>>(), anchored);
 	}
 	
 	/// <summary>
@@ -1097,14 +1151,14 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			var     ambiguous = false;
 			
 			var     rules     = IgnoreRules.ForRoot(rootPath, logger);
-			var     named     = NamedDirectories(normalized);
+			var     named     = NamedDirectories(normalized, anchorLeadingSegments: false);
 			
 			var candidates = WorkspaceWalker.EnumerateFiles(
 				rootPath,
 				fileName,
 				recursive: true,
 				(ref FileSystemEntry directory) =>
-					!named.Contains(directory.FileName)
+					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 			);
 			
