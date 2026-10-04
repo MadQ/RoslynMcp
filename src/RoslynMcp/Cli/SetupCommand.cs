@@ -181,7 +181,7 @@ class SetupCommand : CliCommand
                 if(ok)
                     Console.WriteLine("  ✓ Claude Code hook added (applies to all future sessions).");
                 else
-                    Console.WriteLine("  ✗ Failed to update Claude Code hook — check ~/.claude.json permissions.");
+                    Console.WriteLine("  ✗ Failed to update Claude Code hook — check that ~/.claude/settings.json is valid JSON and writable.");
             }
         }
 

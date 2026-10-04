@@ -1,0 +1,258 @@
+using System.Reflection;
+using System.Text.Json.Nodes;
+
+/// <summary>
+///     Covers where and how <c>setup</c> installs the Claude Code pre-tool-use hook (#319). It
+///     used to write the hook into <c>~/.claude.json</c>, a file Claude Code never reads hooks
+///     from, so the hook reported as installed never ran. The install now targets the settings
+///     file and removes the stale entry from the old location.
+///     <para>
+///         Both steps edit a user's configuration files, so what they must <b>not</b> touch
+///         matters as much as what they write. The tests call the two real methods —
+///         <c>ClaudeCodeClient.UpsertHookIn</c> and <c>RemoveHookFrom</c> — by reflection on
+///         the server assembly the harness built, against files in a temp directory. The real
+///         home directory is never read or written. Nothing is mocked: each test writes a JSON
+///         file, runs the method, and reads the file back.
+///     </para>
+///     <para>
+///         The inputs are the states a real machine can be in: no settings file yet; a settings
+///         file with unrelated settings and other people's hooks; an entry of ours with a
+///         hand-edited absolute path and <c>--log</c> (which a rerun must keep); an entry under
+///         a legacy command name that no longer exists (which a rerun must replace); and a file
+///         that is not valid JSON (which must be left exactly as it is).
+///     </para>
+/// </summary>
+static class ClaudeHookSetupTests
+{
+	const string HookCommand = "madq-roslynmcp hook";
+	
+	static Assembly? serverAssembly;
+	
+	internal static TestGroup Build(TestContext ctx)
+	{
+		
+		var dir = Path.Combine(TestFixtures.TempRoot, $"ClaudeHookSetup.{Guid.NewGuid():N}");
+		
+		Directory.CreateDirectory(dir);
+		
+		var tests = new List<TestCase> {
+			
+			// No settings file: the install creates it, including the missing directory, with
+			// one entry scoped to the file tools and a short timeout.
+			Case("fresh install creates the settings file with one scoped entry", () => {
+				
+				var path = Path.Combine(dir, "fresh", "settings.json");
+				
+				if(!Upsert(ctx, path))
+					return "UpsertHookIn returned false";
+				
+				var groups = Groups(path);
+				
+				if(groups is not [JsonObject group])
+					return $"expected one PreToolUse group, got {groups?.Count.ToString() ?? "none"}";
+				
+				var hook = group["hooks"]?[0];
+				
+				return group["matcher"]?.GetValue<string>() == "Read|Grep|Glob|Edit|MultiEdit|Write"
+					&& hook?["type"]?.GetValue<string>() == "command"
+					&& hook["command"]?.GetValue<string>() == HookCommand
+					&& hook["timeout"]?.GetValue<int>() == 5
+					? null
+					: $"unexpected entry: {group.ToJsonString()}";
+			}),
+			
+			// Unrelated settings, another tool's PreToolUse hook, and a different hook event
+			// must all survive. The comment and trailing comma are the lenient JSON that
+			// hand-edited settings files often contain.
+			Case("install preserves unrelated settings and other hooks", () => {
+				
+				var path = Path.Combine(dir, "preserve.json");
+				
+				File.WriteAllText(path, """
+					{
+					  // hand-edited
+					  "model": "opus",
+					  "hooks": {
+					    "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "guard.sh && echo 'ok'" } ] } ],
+					    "Stop":       [ { "hooks": [ { "type": "command", "command": "notify.sh" } ] } ],
+					  },
+					}
+					""");
+				
+				if(!Upsert(ctx, path))
+					return "UpsertHookIn returned false";
+				
+				var root   = JsonNode.Parse(File.ReadAllText(path));
+				var groups = Groups(path);
+				
+				return root?["model"]?.GetValue<string>() == "opus"
+					&& root["hooks"]?["Stop"]?[0]?["hooks"]?[0]?["command"]?.GetValue<string>() == "notify.sh"
+					&& groups?.Count == 2
+					&& Commands(groups).SequenceEqual(["guard.sh && echo 'ok'", HookCommand])
+					// Written as typed, not as && — the file is edited by hand.
+					&& File.ReadAllText(path).Contains("guard.sh && echo 'ok'")
+					? null
+					: $"unexpected content: {root?.ToJsonString()}";
+			}),
+			
+			// A second run must not add a second entry, must keep a hand-edited command (an
+			// absolute path plus --log), and must still narrow the old catch-all matcher.
+			Case("rerun keeps one entry and a customised command, and narrows the matcher", () => {
+				
+				const string custom = "/c/Users/someone/.dotnet/tools/madq-roslynmcp.exe hook --log";
+				
+				var path = Path.Combine(dir, "rerun.json");
+				
+				File.WriteAllText(path, $$"""
+					{ "hooks": { "PreToolUse": [ { "matcher": "", "hooks": [ { "type": "command", "command": "{{custom}}" } ] } ] } }
+					""");
+				
+				if(!Upsert(ctx, path) || !Upsert(ctx, path))
+					return "UpsertHookIn returned false";
+				
+				var groups = Groups(path);
+				
+				return groups is [JsonObject group]
+					&& Commands(groups).SequenceEqual([custom])
+					&& group["matcher"]?.GetValue<string>() == "Read|Grep|Glob|Edit|MultiEdit|Write"
+					? null
+					: $"unexpected groups: {groups?.ToJsonString()}";
+			}),
+			
+			// "dotnet roslynmcp hook" was the command before the package was renamed; that
+			// command no longer exists, so it is replaced rather than kept.
+			Case("an entry under a legacy command name is replaced", () => {
+				
+				var path = Path.Combine(dir, "legacy-name.json");
+				
+				File.WriteAllText(path, """
+					{ "hooks": { "PreToolUse": [ { "matcher": "", "hooks": [ { "type": "command", "command": "dotnet roslynmcp hook" } ] } ] } }
+					""");
+				
+				if(!Upsert(ctx, path))
+					return "UpsertHookIn returned false";
+				
+				var groups = Groups(path);
+				
+				return groups is not null && Commands(groups).SequenceEqual([HookCommand])
+					? null
+					: $"unexpected groups: {groups?.ToJsonString()}";
+			}),
+			
+			// The stale entry in ~/.claude.json: the hook goes, the now-empty "hooks" object goes
+			// with it, and the MCP server registration in the same file is untouched.
+			Case("cleanup removes our hook from the old location and keeps the rest of the file", () => {
+				
+				var path = Path.Combine(dir, "old-location.json");
+				
+				File.WriteAllText(path, """
+					{
+					  "mcpServers": { "MadQ.RoslynMcp": { "command": "madq-roslynmcp", "args": ["."] } },
+					  "hooks": { "PreToolUse": [ { "matcher": "", "hooks": [ { "type": "command", "command": "madq-roslynmcp hook" } ] } ] }
+					}
+					""");
+				
+				if(!Remove(ctx, path))
+					return "RemoveHookFrom returned false";
+				
+				var root = JsonNode.Parse(File.ReadAllText(path));
+				
+				return root?["hooks"] is null
+					&& root?["mcpServers"]?["MadQ.RoslynMcp"]?["command"]?.GetValue<string>() == "madq-roslynmcp"
+					? null
+					: $"unexpected content: {root?.ToJsonString()}";
+			}),
+			
+			// A foreign hook sharing our matcher group must stay, and so must its containers.
+			Case("cleanup leaves a foreign hook in the same group alone", () => {
+				
+				var path = Path.Combine(dir, "shared-group.json");
+				
+				File.WriteAllText(path, """
+					{ "hooks": { "PreToolUse": [ { "matcher": "", "hooks": [
+					    { "type": "command", "command": "guard.sh" },
+					    { "type": "command", "command": "madq-roslynmcp hook" } ] } ] } }
+					""");
+				
+				if(!Remove(ctx, path))
+					return "RemoveHookFrom returned false";
+				
+				var groups = Groups(path);
+				
+				return groups is not null && Commands(groups).SequenceEqual(["guard.sh"])
+					? null
+					: $"unexpected groups: {groups?.ToJsonString() ?? "none"}";
+			}),
+			
+			// A file that cannot be parsed is reported as a failure and left byte-for-byte as it
+			// was — rewriting it would destroy the user's settings.
+			Case("an unparseable settings file is left untouched", () => {
+				
+				const string broken = "{ \"model\": \"opus\", oops";
+				
+				var path = Path.Combine(dir, "broken.json");
+				
+				File.WriteAllText(path, broken);
+				
+				if(Upsert(ctx, path))
+					return "UpsertHookIn reported success on invalid JSON";
+				
+				return File.ReadAllText(path) == broken ? null : "the file was modified";
+			}),
+		};
+		
+		return new TestGroup($"Claude Code Hook Setup ({tests.Count} tests)", tests, Teardown: () => {
+			
+			try { Directory.Delete(dir, recursive: true); }
+			catch(IOException) { }
+			
+			return Task.CompletedTask;
+		});
+	}
+	
+	// A test body returns null on success or a description of what was wrong.
+	static TestCase Case(string name, Func<string?> body)
+		=> new($"claude hook setup: {name}", () => {
+			
+			string? failure;
+			
+			try { failure = body(); }
+			catch(Exception ex) { failure = $"{ex.GetType().Name}: {ex.Message}"; }
+			
+			return Task.FromResult(failure is null ? (true, "PASS") : (false, $"FAIL  ({failure})"));
+		})
+	;
+	
+	static bool Upsert(TestContext ctx, string path) => (bool) Method(ctx, "UpsertHookIn").Invoke(null, [path, HookCommand])!;
+	
+	static bool Remove(TestContext ctx, string path) => (bool) Method(ctx, "RemoveHookFrom").Invoke(null, [path])!;
+	
+	static MethodInfo Method(TestContext ctx, string name)
+		=> LoadServerAssembly(ctx)
+			.GetType("RoslynMcp.Cli.ClaudeCodeClient", throwOnError: true)!
+			.GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!
+	;
+	
+	static JsonArray? Groups(string path) => JsonNode.Parse(File.ReadAllText(path))?["hooks"]?["PreToolUse"] as JsonArray;
+	
+	// Every hook command in the PreToolUse groups, in file order.
+	static IEnumerable<string> Commands(JsonArray groups)
+		=> groups
+			.SelectMany(group => group?["hooks"] as JsonArray ?? [])
+			.Select(hook => hook?["command"]?.GetValue<string>() ?? "")
+	;
+	
+	// Same load as VsVersionPinTests: the server assembly the harness just built.
+	static Assembly LoadServerAssembly(TestContext ctx)
+	{
+		if(serverAssembly is not null)
+			return serverAssembly;
+		
+		var projectDir   = Path.GetDirectoryName(ctx.ServerProj)!;
+		var assemblyPath = Path.Combine(projectDir, "bin", "Debug", "net10.0", "RoslynMcp.dll");
+		
+		serverAssembly = Assembly.LoadFrom(assemblyPath);
+		
+		return serverAssembly;
+	}
+}
