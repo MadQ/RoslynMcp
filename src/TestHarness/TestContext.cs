@@ -16,6 +16,10 @@ class TestContext
 	public string RepoRoot   { get; }
 	public string ServerProj { get; }
 	
+	// Where a failure to read a response is reported. Stderr unless the owner says otherwise; the
+	// harness run supplies its own, so that quiet mode can hold the message for its report.
+	internal Action<string> Diagnostic { get; init; } = Console.Error.WriteLine;
+	
 	internal TestContext(StreamWriter writer, StreamReader reader, string targetPath, string repoRoot, string serverProj)
 	{
 		_writer    = writer;
@@ -55,7 +59,7 @@ class TestContext
 		}
 		catch(Exception ex) {
 			
-			Console.Error.WriteLine($"[recv error] {ex.Message}");
+			Diagnostic($"[recv error] {ex.Message}");
 			
 			return null; // Pipe closed or other I/O error.
 		}
