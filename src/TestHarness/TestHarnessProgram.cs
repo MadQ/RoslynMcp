@@ -70,11 +70,15 @@ sealed class HarnessRun(string[] args)
 	/// <summary>
 	///     Records why the run ended before or outside a test. The first reason wins: what follows
 	///     a failure is usually a consequence of it. The reason becomes part of the summary line,
-	///     so line breaks are folded away — some exception messages span several lines, and the
-	///     summary must stay one line and the last one.
+	///     which must stay one line and the last one.
 	/// </summary>
-	public void Stop(string reason)
-		=> stopReason ??= string.Join(' ', reason.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+	public void Stop(string reason) => stopReason ??= OneLine(reason);
+	
+	// Folds line breaks into spaces. Quiet mode promises one line per failing test and one summary
+	// line, and the text it is given does not: exception messages, the server's error messages
+	// and file contents quoted in a failure all span lines.
+	static string OneLine(string text)
+		=> string.Join(' ', text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
 	;
 	
 	void Info(string line)
@@ -199,7 +203,7 @@ sealed class HarnessRun(string[] args)
 		};
 		server.BeginErrorReadLine();
 		
-		var ctx = new TestContext(server.StandardInput, server.StandardOutput, targetPath, repoRoot, serverProj);
+		var ctx = new TestContext(server.StandardInput, server.StandardOutput, targetPath, repoRoot, serverProj) { Diagnostic = Diagnostic };
 		
 		// -- MCP Session Initialization --------------------------------------------------------
 		
@@ -303,7 +307,7 @@ sealed class HarnessRun(string[] args)
 					if(!Quiet)
 						Console.WriteLine($"{msg}  [{done}/{total}]");
 					else if(!pass)
-						Console.WriteLine($"FAIL  {group.Header} › {tc.Name}: {msg}");
+						Console.WriteLine($"FAIL  {group.Header} › {tc.Name}: {OneLine(msg)}");
 					
 					results.Add((tc.Name, pass, msg));
 				}
