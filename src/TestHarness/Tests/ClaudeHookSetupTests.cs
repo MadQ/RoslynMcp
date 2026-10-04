@@ -158,6 +158,37 @@ static class ClaudeHookSetupTests
 					: $"unexpected groups: {groups?.ToJsonString()} / {blankGroups?.ToJsonString()}";
 			}),
 			
+			// Single quotes are how a POSIX shell user quotes the same path. The second file guards
+			// the rule that makes that safe: a single quote opens a run only at the start of a
+			// token, so an unquoted path with an apostrophe in a directory name (no spaces) is
+			// still read as one token ending in the tool's file name. Both must be recognised as
+			// the existing hook and kept as written — one entry each, not two.
+			Case("a single-quoted path is recognised and kept; an apostrophe inside a path is not a quote", () => {
+				
+				var spaced     = Path.Combine($"{Path.DirectorySeparatorChar}Users", "John Doe", ".dotnet", "tools", "madq-roslynmcp");
+				var apostrophe = Path.Combine($"{Path.DirectorySeparatorChar}Users", "O'Brien", ".dotnet", "tools", "madq-roslynmcp");
+				
+				var singleQuoted = $"'{spaced}' hook --log";
+				var unquoted     = $"{apostrophe} hook";
+				
+				var quotedPath     = Path.Combine(dir, "single-quoted.json");
+				var apostrophePath = Path.Combine(dir, "apostrophe.json");
+				
+				WriteHookEntry(quotedPath,     singleQuoted);
+				WriteHookEntry(apostrophePath, unquoted);
+				
+				if(!Upsert(ctx, quotedPath) || !Upsert(ctx, apostrophePath))
+					return "UpsertHookIn returned false";
+				
+				var quotedGroups     = Groups(quotedPath);
+				var apostropheGroups = Groups(apostrophePath);
+				
+				return quotedGroups is not null && Commands(quotedGroups).SequenceEqual([singleQuoted])
+					&& apostropheGroups is not null && Commands(apostropheGroups).SequenceEqual([unquoted])
+					? null
+					: $"unexpected groups: {quotedGroups?.ToJsonString()} / {apostropheGroups?.ToJsonString()}";
+			}),
+			
 			// Only the hook subcommand is our advisor entry. Some other invocation of this tool in
 			// a hook slot must be left alone — and above all must not be carried over as the
 			// advisor command, which would report a working hook that cannot run.
@@ -381,6 +412,21 @@ static class ClaudeHookSetupTests
 		=> LoadServerAssembly(ctx)
 			.GetType("RoslynMcp.Cli.ClaudeCodeClient", throwOnError: true)!
 			.GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!
+	;
+	
+	// A settings file holding one catch-all PreToolUse group with one command hook. Built as a
+	// JsonObject so quotes and backslashes in the command are escaped correctly.
+	static void WriteHookEntry(string path, string command)
+		=> File.WriteAllText(path, new JsonObject {
+			
+			["hooks"] = new JsonObject {
+				
+				["PreToolUse"] = new JsonArray {
+					
+					new JsonObject { ["matcher"] = "", ["hooks"] = new JsonArray { new JsonObject { ["type"] = "command", ["command"] = command } } }
+				}
+			}
+		}.ToJsonString())
 	;
 	
 	static JsonArray? Groups(string path) => JsonNode.Parse(File.ReadAllText(path))?["hooks"]?["PreToolUse"] as JsonArray;

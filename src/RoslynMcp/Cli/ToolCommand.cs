@@ -119,20 +119,30 @@ static class ToolCommand
 		;
 	}
 
-	// Splits an invocation on whitespace, keeping a double-quoted run together and dropping the
-	// quotes: an executable path under a profile directory with a space in it is written quoted,
-	// and a plain whitespace split would cut it at the space and miss the file name.
+	// Splits an invocation on whitespace, keeping a quoted run together and dropping the quotes:
+	// an executable path under a profile directory with a space in it is written quoted, and a
+	// plain whitespace split would cut it at the space and miss the file name. Double quotes are
+	// the Windows form, single quotes the POSIX one. A single quote opens a run only at the start
+	// of a token, so an unquoted path such as C:\Users\O'Brien\tool.exe keeps its apostrophe.
+	// Backslash escapes are not interpreted — a backslash is a path separator on Windows.
 	static List<string> SplitCommand(string command)
 	{
 		var tokens  = new List<string>();
 		var current = new System.Text.StringBuilder();
-		var quoted  = false;
+		var quote   = '\0';
 
 		foreach(var c in command) {
 
-			if(c == '"')
-				quoted = !quoted;
-			else if(char.IsWhiteSpace(c) && !quoted) {
+			if(quote != '\0') {
+
+				if(c == quote)
+					quote = '\0';
+				else
+					current.Append(c);
+			}
+			else if(c == '"' || (c == '\'' && current.Length == 0))
+				quote = c;
+			else if(char.IsWhiteSpace(c)) {
 
 				if(current.Length > 0)
 					tokens.Add(current.ToString());
