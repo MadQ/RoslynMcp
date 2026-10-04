@@ -9,23 +9,23 @@ namespace RoslynMcp.Tools;
 internal static class GlobMatcher
 {
 	/// <summary>
-	/// Returns true when <paramref name="fileName"/> matches <paramref name="pattern"/>.
+	/// Creates a reusable matcher for <paramref name="pattern"/>.
 	/// Operates on filenames only — path separators in the input produce unspecified results.
 	/// Supports * (within a segment), ** (across segments), and ? (single char).
 	/// Does NOT support {a,b} brace expansion.
 	/// </summary>
-	public static bool Matches(string fileName, string pattern)
+	public static Func<string, bool> CreateMatcher(string pattern)
 	{
 		if(pattern is "*" or "*.*")
-			
-			return true;
-		
+			return static _ => true;
+
 		// Fast-path for the common *.ext form.
 		if(pattern.StartsWith("*.") && !pattern.AsSpan(2).Contains('*') && !pattern.AsSpan(2).Contains('?'))
-			
-			return fileName.EndsWith(pattern.AsSpan(1), StringComparison.OrdinalIgnoreCase);
-		
-		return Regex.IsMatch(fileName, BuildRegex(pattern), RegexOptions.IgnoreCase);
+			return fileName => fileName.EndsWith(pattern.AsSpan(1), StringComparison.OrdinalIgnoreCase);
+
+		var regex = new Regex(BuildRegex(pattern), RegexOptions.IgnoreCase);
+
+		return regex.IsMatch;
 	}
 	
 	static string BuildRegex(string pattern)
