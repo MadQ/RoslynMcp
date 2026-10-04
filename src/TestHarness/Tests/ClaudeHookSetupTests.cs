@@ -285,6 +285,24 @@ static class ClaudeHookSetupTests
 				
 				return File.ReadAllText(path) == broken ? null : "the file was modified";
 			}),
+			
+			// A duplicate key is well-formed enough to parse lazily, and then throws when the
+			// object is first indexed. It must be a plain "could not load" for both methods — no
+			// exception (the Case wrapper would report one), and the file left as it was. The
+			// duplicate sits in a nested object because that is where a lazy load would miss it.
+			Case("a settings file with a duplicate key is rejected, not crashed on", () => {
+				
+				const string duplicated = "{ \"hooks\": { \"PreToolUse\": [], \"PreToolUse\": [] } }";
+				
+				var path = Path.Combine(dir, "duplicate.json");
+				
+				File.WriteAllText(path, duplicated);
+				
+				if(Upsert(ctx, path) || Remove(ctx, path))
+					return "a method reported success on a duplicate key";
+				
+				return File.ReadAllText(path) == duplicated ? null : "the file was modified";
+			}),
 		};
 		
 		return new TestGroup($"Claude Code Hook Setup ({tests.Count} tests)", tests, Teardown: () => {

@@ -354,6 +354,9 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
             var parsed = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions {
 
+                // Rejected here, as a parse error. Left to JsonObject, a duplicate key throws
+                // ArgumentException only when the object is first indexed — outside this guard.
+                AllowDuplicateProperties = false,
                 AllowTrailingCommas = true,
                 CommentHandling     = JsonCommentHandling.Skip
             });
