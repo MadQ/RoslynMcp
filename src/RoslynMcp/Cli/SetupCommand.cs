@@ -184,9 +184,11 @@ class SetupCommand : CliCommand
 
                     if(install == HookInstall.InstalledStaleEntryRemains)
                     {
-                        Console.WriteLine("  ⚠ An older RoslynMcp hook entry in ~/.claude.json could not be removed — the file");
+                        // The file could not be read or rewritten, so whether it holds an old entry is
+                        // not known — the message must not claim that one is there.
+                        Console.WriteLine("  ⚠ ~/.claude.json could not be checked for an older RoslynMcp hook entry — the file");
                         Console.WriteLine("    is not valid JSON or not writable. Claude Code does not read hooks from that file,");
-                        Console.WriteLine("    so the entry does nothing; delete it by hand when convenient.");
+                        Console.WriteLine("    so an entry left there does nothing; delete it by hand when convenient.");
                     }
                 }
                 else
