@@ -167,20 +167,28 @@ internal static partial class MSBuildBootstrap
 	///     Finds .csproj files under <paramref name="directory"/> for style detection when no
 	///     solution lists them: files in the directory itself first, then one level at a time,
 	///     skipping build output and tooling folders (bin, obj, packages, node_modules, dot-folders)
-	///     where stale or copied project files live. Bounded so a huge tree cannot stall a load.
+	///     where stale or copied project files live. Bounded so a huge tree cannot stall a load:
+	///     at most 32 projects, 5,000 directories, and <see cref="WorkspaceWalker.MaxDepth"/> levels,
+	///     and directory links are not followed. Breadth-first on purpose — nearest projects first —
+	///     which is why this is its own walk rather than <see cref="WorkspaceWalker"/>.
 	/// </summary>
 	public static string[] FindCsprojCandidates(string directory)
 	{
 		const int maxCandidates = 32;
 		
-		var result = new List<string>();
-		var queue  = new Queue<string>();
+		// The candidate cap only ends the walk once projects turn up. A tree with none — or a
+		// directory link that leads back up it — needs bounds of its own.
+		const int maxDirectories = 5_000;
 		
-		queue.Enqueue(directory);
+		var result     = new List<string>();
+		var queue      = new Queue<(string Path, int Depth)>();
+		var discovered = 1;
+		
+		queue.Enqueue((directory, 0));
 		
 		while(queue.Count > 0 && result.Count < maxCandidates) {
 			
-			var dir = queue.Dequeue();
+			var (dir, depth) = queue.Dequeue();
 			
 			try {
 				
@@ -191,10 +199,22 @@ internal static partial class MSBuildBootstrap
 				if(result.Count >= maxCandidates)
 					break;
 				
-				foreach(var sub in Directory.EnumerateDirectories(dir)) {
+				if(depth >= WorkspaceWalker.MaxDepth || discovered >= maxDirectories)
+					continue;
+				
+				foreach(var sub in new DirectoryInfo(dir).EnumerateDirectories()) {
 					
-					if(!IsSkippedFolder(Path.GetFileName(sub)))
-						queue.Enqueue(sub);
+					// A link is never followed: it can point back up the tree.
+					if(IsSkippedFolder(sub.Name) || WorkspaceWalker.IsLink(sub))
+						continue;
+					
+					queue.Enqueue((sub.FullName, depth + 1));
+					
+					// Counted as found, not as visited: one directory with a huge number of
+					// children would otherwise be enumerated and queued in full before any
+					// budget applied.
+					if(++discovered >= maxDirectories)
+						break;
 				}
 			}
 			catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {
@@ -205,12 +225,10 @@ internal static partial class MSBuildBootstrap
 		return [..result.Take(maxCandidates)];
 	}
 	
+	// The built-in list only: this runs before a workspace exists, so there is no root whose
+	// configured names or .gitignore could apply. Dot-folders are tooling state, never projects.
 	static bool IsSkippedFolder(string name) =>
-		name.StartsWith('.')
-		|| name.Equals("bin",          StringComparison.OrdinalIgnoreCase)
-		|| name.Equals("obj",          StringComparison.OrdinalIgnoreCase)
-		|| name.Equals("packages",     StringComparison.OrdinalIgnoreCase)
-		|| name.Equals("node_modules", StringComparison.OrdinalIgnoreCase)
+		name.StartsWith('.') || IgnoreRules.BuiltIn.IsExcluded(name)
 	;
 	
 	/// <summary>

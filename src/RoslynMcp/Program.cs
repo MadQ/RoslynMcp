@@ -81,6 +81,9 @@ static int PrintHelp()
                                       A bare [root] argument is the same. Default: the server's
                                       working directory.
               --workspace    <mode>   Workspace mode: auto|sdk|vs|adhoc (default: auto)
+              --ignore       <name>   Extra directory name to stay out of when listing,
+                                      resolving, and watching files (repeatable). Always
+                                      skipped: node_modules, .git, .vs, packages.
           -p, --preload      <path>   Pre-warm workspace on startup (repeatable)
               --log-path     <path>   Log file base path (empty string = disable logging)
               --msbuild-path <path>   Override MSBuild installation path — a dotnet SDK
@@ -100,6 +103,7 @@ static int PrintHelp()
         Environment variables (the CLI flags above take precedence):
           ROSLYNMCP_ROOT                  Default workspace root (same as --root)
           ROSLYNMCP_WORKSPACE             Workspace mode (same as --workspace)
+          ROSLYNMCP_IGNORE                Extra directory names to skip, comma-separated (same as --ignore)
           ROSLYNMCP_LOG_PATH              Log file base path (same as --log-path)
           ROSLYNMCP_MSBUILD_PATH          MSBuild installation path (same as --msbuild-path)
           ROSLYNMCP_VS_VERSION            Visual Studio version pin (same as --vs-version)
@@ -114,8 +118,9 @@ static int PrintHelp()
 
         Project config:
           A committed .madq_roslynmcp.json at the repo root (written by 'setup-project')
-          can set elicit, workspace, vsVersion, and solution (which of several solutions
-          beside it is the default workspace) per project. Explicit settings always win:
+          can set elicit, workspace, vsVersion, solution (which of several solutions
+          beside it is the default workspace), and ignore (an array of extra directory
+          names to skip) per project. Explicit settings always win:
           CLI arg > env var > project file > built-in default.
 
         Documentation: https://github.com/MadQ/RoslynMcp
@@ -166,7 +171,13 @@ AppDomain.CurrentDomain.UnhandledException += (_, e) => {
     }
 };
 
-var builder = Host.CreateApplicationBuilder(args);
+// The empty builder on purpose (#309). Host.CreateApplicationBuilder roots the content at the
+// working directory and loads appsettings.json with reloadOnChange, which puts a recursive file
+// watcher on the whole tree. On Linux that is one inotify watch per directory, registered before
+// the host starts: seconds on a large repo, longer than an MCP client's startup timeout on a
+// network share. Nothing here reads host configuration, so no default is missed; the content root
+// is pinned to the install directory so nothing else can pick the working directory up either.
+var builder = Host.CreateEmptyApplicationBuilder(new HostApplicationBuilderSettings { ContentRootPath = AppContext.BaseDirectory });
 
 builder.Logging
 	.ClearProviders()

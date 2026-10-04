@@ -19,8 +19,9 @@ namespace RoslynMcp;
 ///     </para>
 ///     <para>
 ///         Security: this is a committed, potentially untrusted repo file. Only the
-///         commit-worthy keys <c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>, and <c>solution</c>
-///         (a bare file name beside the config file) are honored.
+///         commit-worthy keys <c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>, <c>solution</c>
+///         (a bare file name beside the config file), and <c>ignore</c> (bare directory names) are
+///         honored.
 ///         Machine-specific settings (log, MSBuild, and backup paths) and <c>preload</c> are never
 ///         read from it, so a hostile repo cannot point the server at arbitrary local paths. A
 ///         Visual Studio <em>version</em> is the exception that proves the rule: it selects among
@@ -54,7 +55,7 @@ internal sealed class ProjectConfig
 #endif
 	
 	/// <summary>Sentinel for "no usable project file found" — all <c>*Specified</c> flags false.</summary>
-	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, null, null, "");
+	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, null, null, [], "");
 	
 	/// <summary>Whether the file supplied a valid boolean <c>elicit</c> value.</summary>
 	public bool ElicitSpecified { get; }
@@ -82,11 +83,19 @@ internal sealed class ProjectConfig
 	/// </summary>
 	public string? Solution { get; }
 	
+	/// <summary>
+	///     The file's <c>ignore</c> list: extra directory names the server stays out of (see
+	///     <see cref="IgnoreRules"/>). Bare names only, so a committed file cannot name a path. Empty
+	///     when absent.
+	/// </summary>
+	public string[] Ignore { get; }
+	
 	/// <summary>Full path of the file this config was loaded from; empty for <see cref="Empty"/>.</summary>
 	public string SourcePath { get; }
 	
-	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string? vsVersion, string? solution, string sourcePath)
+	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string? vsVersion, string? solution, string[] ignore, string sourcePath)
 	{
+		Ignore             = ignore;
 		ElicitSpecified    = elicitSpecified;
 		Elicit             = elicit;
 		WorkspaceSpecified = workspaceSpecified;
@@ -145,6 +154,22 @@ internal sealed class ProjectConfig
 			return ServerArgs.Current.VsVersion;
 		
 		return ForPath(pathInProject, logger).VsVersion;
+	}
+	
+	/// <summary>
+	///     The effective ignore list for the workspace containing <paramref name="pathInProject"/>:
+	///     <c>--ignore</c> / <c>ROSLYNMCP_IGNORE</c> (<see cref="ServerArgs.IgnoreSpecified"/>) wins as
+	///     a whole; otherwise the project file's <c>ignore</c>; otherwise empty. Returns the same
+	///     array instance for the same source, which <see cref="IgnoreRules.ForRoot"/> relies on to
+	///     detect an unchanged list.
+	/// </summary>
+	public static string[] EffectiveIgnore(string pathInProject, FileLogger logger)
+	{
+		if(ServerArgs.Current.IgnoreSpecified)
+			
+			return ServerArgs.Current.IgnoreNames;
+		
+		return ForPath(pathInProject, logger).Ignore;
 	}
 	
 	/// <summary>
@@ -278,6 +303,7 @@ internal sealed class ProjectConfig
 			var workspace          = WorkspaceMode.Auto;
 			var vsVersion          = (string?) null;
 			var solution           = (string?) null;
+			var ignore             = (string[]) [];
 			
 			foreach(var property in doc.RootElement.EnumerateObject()) {
 				
@@ -359,6 +385,27 @@ internal sealed class ProjectConfig
 						
 						break;
 					
+					case "ignore":
+						
+						// Bare directory names only — the same guarantee as "solution": a committed
+						// file can widen what the server skips, never point it at a path.
+						if(property.Value.ValueKind == JsonValueKind.Array) {
+							
+							var entries = property.Value.EnumerateArray()
+								.Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
+								.ToArray()
+							;
+							
+							ignore = ServerArgs.NormalizeIgnoreNames(entries);
+							
+							if(ignore.Length != entries.Length)
+								logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' takes up to {IgnoreRules.MaxConfiguredNames} distinct bare directory names — {entries.Length - ignore.Length} entr{(entries.Length - ignore.Length == 1 ? "y" : "ies")} dropped");
+						}
+						else
+							logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' must be an array of directory names — ignored");
+						
+						break;
+					
 					case "version":
 						// Schema version — tolerated but not interpreted in v1.
 						break;
@@ -376,13 +423,14 @@ internal sealed class ProjectConfig
 				}
 			}
 			
-			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, solution, filePath);
+			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, solution, ignore, filePath);
 			
 			logger.LogInfo("ProjectConfig",
 				$"loaded '{filePath}': elicit={(elicitSpecified ? elicit.ToString() : "unset")}, " +
 				$"workspace={(workspaceSpecified ? workspace.ToString() : "unset")}, " +
 				$"vsVersion={vsVersion ?? "unset"}, " +
-				$"solution={(solution is null ? "unset" : Path.GetFileName(solution))}");
+				$"solution={(solution is null ? "unset" : Path.GetFileName(solution))}, " +
+				$"ignore={(ignore.Length == 0 ? "unset" : string.Join(",", ignore))}");
 			
 			return config;
 		}

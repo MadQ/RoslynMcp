@@ -141,6 +141,7 @@ class Program
 			groups.Add(RefactoringTests.Build(ctx));
 			groups.Add(EditingTests.Build(ctx));
 			groups.Add(await ReloadFlaggingTests.BuildAsync(ctx));
+			groups.Add(await IgnoredDirectoryTests.BuildAsync(ctx));
 			groups.Add(await IncrementalAdditionalDocTests.BuildAsync(ctx));
 			groups.Add(await LocalHistoryTests.BuildAsync(ctx));
 			groups.Add(await DefaultWorkspaceTests.BuildAsync(ctx));

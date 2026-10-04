@@ -456,6 +456,7 @@ RoslynMcp.exe [root] [options]
 | `--root <path>`, or a bare `[root]` | The session's **default workspace**, used by any tool call that omits `projectPath`. A directory resolves to the one `.sln`/`.slnx` in it (pick among several with `"solution"` in `.madq_roslynmcp.json`), else the nearest solution above it, else its single `.csproj`; a `.sln`/`.slnx`/`.csproj` path is used as-is. Never searches downward; drive roots and system directories are rejected. Default: the server's working directory. When nothing qualifies, tool calls that omit `projectPath` fail with `missing_project_path`. |
 | `-p`, `--preload <path>` | Pre-warm a workspace on startup. Repeat the flag to preload multiple projects. Preloading does not change the default workspace — use `--root` for that. |
 | `--workspace` | Override workspace mode: `auto` (default), `sdk`, `vs`, `adhoc`. See [Workspace Modes Reference](docs/reference/WORKSPACE_MODES.md). |
+| `--ignore <name>` | An extra directory name the server stays out of when listing, resolving, and watching files. Repeat the flag for several. A bare directory name only — no paths or wildcards. `node_modules`, `.git`, `.vs`, and `packages` are always skipped. Also settable per project as `"ignore": ["name", …]` in `.madq_roslynmcp.json`. |
 | `--log-path` | Override the log file base path. Pass an empty string to disable logging. |
 | `--msbuild-path` | Override the MSBuild installation path used for workspace loading — a dotnet SDK directory or a Visual Studio `MSBuild\Current\Bin` directory. Honored in `auto`, `sdk`, and `vs` modes; ignored in `adhoc`, which skips MSBuild entirely. If the path is invalid, the server falls through to normal discovery. |
 | `--vs-version` | Pin the Visual Studio version used to load legacy (.NET Framework) projects: `17`, `17.14`, or a vswhere range like `[17.0,18.0)`. Steers Roslyn's MSBuild BuildHost in every mode except `adhoc`; `--msbuild-path` still wins. Also settable per project as `vsVersion` in `.madq_roslynmcp.json`. See [Pinning the Visual Studio Version](docs/reference/WORKSPACE_MODES.md#pinning-the-visual-studio-version). |
@@ -473,6 +474,7 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 |----------|---------|-------------|
 | `ROSLYNMCP_ROOT` | *(server working directory)* | Same as `--root` (which, like a bare positional root, takes precedence) — the default workspace for tool calls that omit `projectPath`. |
 | `ROSLYNMCP_WORKSPACE` | `auto` | Same as `--workspace` flag — `sdk`, `vs`, `adhoc`, or `auto` |
+| `ROSLYNMCP_IGNORE` | *(none)* | Same as `--ignore` — extra directory names to skip, separated by commas or semicolons. |
 | `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` | Log file base path. PID is always injected before the extension. Set to empty string to disable logging. |
 | `ROSLYNMCP_BACKUP_PATH` | `%LOCALAPPDATA%\RoslynMcp\backups` | Backup store root for `roslyn_write_file` / `roslyn_local_history`. Set to empty to disable backups. |
 | `ROSLYNMCP_LOG_MAX_AGE_DAYS` | `30` | Delete old per-PID log files after this many days. |

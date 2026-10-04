@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.IO.Enumeration;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -1041,11 +1042,84 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
-	///     Resolves a relative file path to a full path. Tries <paramref name="rootPath"/> first;
-	///     if the file isn't found there, walks subdirectories looking for a suffix match.
-	///     Returns null if the file can't be found.
+	///     The directories a relative path or glob spells out literally, which a walk enters even
+	///     when they are ignored. A name is tied to a place when the place is known:
+	///     <c>frontend/node_modules/**</c> names that one directory, not every <c>node_modules</c> in
+	///     the tree — entering them all is the walk #309 exists to avoid. A name after a wildcard
+	///     (<c>**/obj/project.assets.json</c>) has no fixed place and matches at any depth.
 	/// </summary>
-	protected static string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary)
+	protected readonly struct NamedDirectorySet(HashSet<string>.AlternateLookup<ReadOnlySpan<char>> anywhere, List<(string Parent, string Name)> anchored)
+	{
+		/// <summary>
+		///     Whether the directory called <paramref name="name"/>, whose parent is
+		///     <paramref name="relativeParent"/> under the walk root, was asked for by name.
+		/// </summary>
+		public bool Contains(ReadOnlySpan<char> relativeParent, ReadOnlySpan<char> name)
+		{
+			if(anywhere.Contains(name))
+				
+				return true;
+			
+			foreach(var (parent, anchoredName) in anchored)
+				if(name.Equals(anchoredName, StringComparison.OrdinalIgnoreCase)
+				   && relativeParent.Equals(parent, StringComparison.OrdinalIgnoreCase))
+					
+					return true;
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Reads the literally named directories out of <paramref name="pathOrPattern"/> — every
+	///     segment before the last that holds no wildcard. With
+	///     <paramref name="anchorLeadingSegments"/>, the segments before the first wildcard are tied
+	///     to their place under the root (a glob, matched from the root); without it every name
+	///     matches at any depth (a path matched as a suffix, which can sit anywhere).
+	/// </summary>
+	protected static NamedDirectorySet NamedDirectories(string pathOrPattern, bool anchorLeadingSegments)
+	{
+		var anywhere = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var anchored = new List<(string Parent, string Name)>();
+		var segments = pathOrPattern.Split('/', '\\');
+		var parent   = "";
+		var leading  = anchorLeadingSegments;
+		
+		// The last segment is the file name or file pattern, never a directory.
+		foreach(var segment in segments.AsSpan(0, segments.Length - 1)) {
+			
+			if(segment.Length == 0 || segment == ".")
+				continue;
+			
+			// From the first wildcard on, a segment's position in the tree is unknown.
+			if(segment == ".." || segment.AsSpan().IndexOfAny("*?{}[]") >= 0) {
+				
+				leading = false;
+				
+				continue;
+			}
+			
+			if(!leading) {
+				
+				anywhere.Add(segment);
+				
+				continue;
+			}
+			
+			anchored.Add((parent, segment));
+			parent = parent.Length == 0 ? segment : parent + Path.DirectorySeparatorChar + segment;
+		}
+		
+		return new(anywhere.GetAlternateLookup<ReadOnlySpan<char>>(), anchored);
+	}
+	
+	/// <summary>
+	///     Resolves a relative file path to a full path. Tries <paramref name="rootPath"/> first;
+	///     if the file isn't found there, walks subdirectories looking for a suffix match — skipping
+	///     ignored directories (see <see cref="IgnoreRules.IsPrunedFromListing"/>) unless the path
+	///     names one. Returns null if the file can't be found.
+	/// </summary>
+	protected string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary)
 	{
 		try {
 			
@@ -1076,7 +1150,22 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			string? nameHit   = null;
 			var     ambiguous = false;
 			
-			foreach(var candidate in Directory.EnumerateFiles(rootPath, fileName, SearchOption.AllDirectories)) {
+			var     rules     = IgnoreRules.ForRoot(rootPath, logger);
+			var     named     = NamedDirectories(normalized, anchorLeadingSegments: false);
+			
+			var candidates = WorkspaceWalker.EnumerateFiles(
+				rootPath,
+				fileName,
+				recursive: true,
+				(ref FileSystemEntry directory) =>
+					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+			);
+			
+			// Deliberately not capped: stopping early would report a match as unique without
+			// having seen the rest, and uniqueness is the whole point of the checks below. The
+			// pruned walk is what bounds the cost.
+			foreach(var candidate in candidates) {
 				
 				try {
 					if(!boundary.IsPathAllowed(candidate))
