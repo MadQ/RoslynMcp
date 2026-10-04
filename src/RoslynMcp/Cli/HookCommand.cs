@@ -7,7 +7,7 @@ namespace RoslynMcp.Cli;
 /// <summary>
 ///     Implements the <c>madq-roslynmcp hook</c> subcommand, used as the target for
 ///     pre-tool-use hooks in Copilot CLI (<c>.github/hooks/roslynmcp.json</c>) and
-///     Claude Code (<c>~/.claude.json</c>). Reads hook event JSON from stdin and, when a
+///     Claude Code (<c>~/.claude/settings.json</c>). Reads hook event JSON from stdin and, when a
 ///     built-in file tool targets a <c>.cs</c> file, writes guidance naming the roslyn_* tools
 ///     for that kind of operation. It never blocks: every other case answers <c>{}</c>.
 /// </summary>
