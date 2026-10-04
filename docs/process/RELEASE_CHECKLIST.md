@@ -11,7 +11,8 @@ Use this checklist when preparing a new release of RoslynMcp.
 - [ ] No compiler errors (`roslyn_get_diagnostics` — never use `dotnet build` for this)
 - [ ] Full build succeeds (`roslyn_build_project` preferred; `dotnet build src/RoslynMcp/RoslynMcp.csproj` also works)
 - [ ] No Roslyn analyzer warnings
-- [ ] All tests pass (`dotnet run --project src/TestHarness/TestHarness.csproj`)
+- [ ] All tests pass locally (`dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --quiet`)
+- [ ] The harness passes on Windows, Linux and macOS — `publish.yml` enforces this through `harness.yml` (even for a dry run); to check ahead of time, run *Test Harness* by hand on the release branch (`gh workflow run harness.yml --ref <branch>`)
 - [ ] Code coverage is adequate for new features
 
 ### Documentation
