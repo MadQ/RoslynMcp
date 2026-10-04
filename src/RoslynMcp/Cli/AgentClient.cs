@@ -4,6 +4,15 @@ using System.Text.Json.Nodes;
 
 namespace RoslynMcp.Cli;
 
+// Outcome of installing a client's user-level hook. The stale-entry case is its own value because
+// the hook does work, yet setup must still say that an old entry was left behind.
+enum HookInstall
+{
+    NotInstalled,
+    Installed,
+    InstalledStaleEntryRemains
+}
+
 // Base for all supported AI coding agent integrations.
 // Each subclass knows its own config path(s) and JSON schema for MCP server entries.
 abstract partial class AgentClient
@@ -71,9 +80,9 @@ abstract partial class AgentClient
     public abstract string? GetCommandPath(JsonObject entry)
 ;
 
-    // Called by SetupCommand after MCP config is patched. Returns true if the hook was
-    // installed or updated; false (default) means this client doesn't support user-level hooks.
-    public virtual bool UpsertHook(string hookCommand) => false;
+    // Called by SetupCommand after MCP config is patched. NotInstalled (default) also covers a
+    // client that doesn't support user-level hooks.
+    public virtual HookInstall UpsertHook(string hookCommand) => HookInstall.NotInstalled;
 
 }
 
@@ -188,90 +197,239 @@ sealed class ClaudeCodeClient : McpServersDictClient
     public override string[] GetConfigPaths() =>
         [Path.Combine(Home, ".claude.json")];
 
-    // Adds a pre-tool-use advisor hook to ~/.claude.json that guides Claude Code to prefer
-    // roslyn_* tools for .cs files. Hook applies globally to all Claude Code sessions.
-    public override bool UpsertHook(string hookCommand)
+    // Claude Code reads hooks from its settings file. ~/.claude.json holds mcpServers only;
+    // earlier versions wrote the hook there, where it never ran (#319).
+    static string HookSettingsPath => Path.Combine(Home, ".claude", "settings.json");
+
+    // The built-in tools the hook acts on. Naming them keeps Claude Code from starting the hook
+    // process for every other tool call (Bash, MCP tools, and so on).
+    const string HookMatcher = "Read|Grep|Glob|Edit|MultiEdit|Write";
+
+    // The hook answers in well under a second; Claude Code's default for a command hook is 600.
+    const int HookTimeoutSeconds = 5;
+
+    // Adds a pre-tool-use advisor hook that guides Claude Code to prefer roslyn_* tools for .cs
+    // files. The hook applies globally to all Claude Code sessions.
+    public override HookInstall UpsertHook(string hookCommand)
+        => InstallHook(HookSettingsPath, GetConfigPaths()[0], hookCommand);
+
+    // Installs into settingsPath, then removes the entry earlier versions left in legacyPath.
+    // A failed cleanup does not undo the install — the leftover entry is inert, because Claude
+    // Code does not read hooks from that file — but it is reported, so setup can say so instead
+    // of claiming the old entry is gone.
+    internal static HookInstall InstallHook(string settingsPath, string legacyPath, string hookCommand)
     {
-        var configPath = GetConfigPaths()[0];
-        JsonObject root;
+        if(!UpsertHookIn(settingsPath, hookCommand))
+            return HookInstall.NotInstalled;
 
-        if(File.Exists(configPath))
-        {
-            try
-            {
-                var json = File.ReadAllText(configPath);
-                root = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions {
+        return RemoveHookFrom(legacyPath)
+            ? HookInstall.Installed
+            : HookInstall.InstalledStaleEntryRemains;
+    }
 
-                    AllowTrailingCommas = true,
-                    CommentHandling    = JsonCommentHandling.Skip
-                }) as JsonObject ?? [];
-            }
-            catch
-            {
-                return false;
-            }
-        }
-        else
-        {
-            root = [];
-        }
+    // Writes a single RoslynMcp hook entry into the settings file at settingsPath, replacing any
+    // earlier one. Everything else in the file is preserved. False when the file cannot be
+    // parsed or written, or holds a "hooks" or "PreToolUse" value of an unexpected shape — it
+    // is then left untouched.
+    internal static bool UpsertHookIn(string settingsPath, string hookCommand)
+    {
+        if(!TryLoadJsonObject(settingsPath, out var root))
+            return false;
 
+        // A missing (or null) container is created. One that exists with another shape — "hooks"
+        // as an array, "PreToolUse" as a string — is not understood, and replacing it would
+        // discard whatever the user put there: the file is left alone, like one that is not JSON.
         if(root["hooks"] is not JsonObject hooks)
         {
+            if(root["hooks"] is not null)
+                return false;
+
             hooks = [];
             root["hooks"] = hooks;
         }
 
         if(hooks["PreToolUse"] is not JsonArray preToolUse)
         {
+            if(hooks["PreToolUse"] is not null)
+                return false;
+
             preToolUse = [];
             hooks["PreToolUse"] = preToolUse;
         }
 
-        // Remove any existing RoslynMcp hook entries (current or legacy command forms) so a
-        // renamed command doesn't leave a stale duplicate, then append a single fresh entry.
-        for(var i = preToolUse.Count - 1; i >= 0; i--)
-        {
-            if(preToolUse[i] is not JsonObject itemObj || itemObj["hooks"] is not JsonArray innerHooks)
-                continue;
-
-            for(var j = innerHooks.Count - 1; j >= 0; j--)
-            {
-                if(innerHooks[j] is JsonObject hObj &&
-                   ToolCommand.IsOurCommandInvocation(hObj["command"]?.GetValue<string>()))
-                    innerHooks.RemoveAt(j);
-            }
-
-            // Drop the wrapper only if removing our hook left it empty — preserve unrelated hooks.
-            if(innerHooks.Count == 0)
-                preToolUse.RemoveAt(i);
-        }
+        RemoveOurHooks(preToolUse, out var existingCommand);
 
         preToolUse.Add(new JsonObject {
 
-            ["matcher"] = "",
+            ["matcher"] = HookMatcher,
             ["hooks"]   = new JsonArray {
 
                 new JsonObject {
 
                     ["type"]    = "command",
-                    ["command"] = hookCommand
+                    // An entry that already invokes this tool keeps its command: an absolute
+                    // path or --log is a deliberate local choice a rerun must not undo.
+                    ["command"] = existingCommand ?? hookCommand,
+                    ["timeout"] = HookTimeoutSeconds
                 }
             }
         });
 
-        var dir = Path.GetDirectoryName(configPath);
+        return TryWriteJson(settingsPath, root);
+    }
 
-        if(dir is not null)
-            Directory.CreateDirectory(dir);
+    // Removes RoslynMcp hook entries from a config file and nothing else, dropping the
+    // "PreToolUse" and "hooks" containers only when that leaves them empty. True when the file
+    // holds no such entry afterwards (including when it does not exist).
+    internal static bool RemoveHookFrom(string configPath)
+    {
+        if(!File.Exists(configPath))
+            return true;
 
-        var updated = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-        var tmp     = configPath + ".roslynmcp.tmp";
+        if(!TryLoadJsonObject(configPath, out var root))
+            return false;
 
-        File.WriteAllText(tmp, updated);
-        File.Move(tmp, configPath, overwrite: true);
+        if(root["hooks"] is not JsonObject hooks || hooks["PreToolUse"] is not JsonArray preToolUse)
+            return true;
 
-        return true;
+        if(!RemoveOurHooks(preToolUse, out _))
+            return true;
+
+        if(preToolUse.Count == 0)
+            hooks.Remove("PreToolUse");
+
+        if(hooks.Count == 0)
+            root.Remove("hooks");
+
+        return TryWriteJson(configPath, root);
+    }
+
+    // Removes every RoslynMcp hook (current or legacy command form) from a PreToolUse array, so
+    // a renamed command never leaves a stale duplicate. A matcher group is dropped only when
+    // that empties it — unrelated hooks in the same group stay. existingCommand is the command
+    // of a removed entry that invokes the current tool name, or null.
+    static bool RemoveOurHooks(JsonArray preToolUse, out string? existingCommand)
+    {
+        var removed = false;
+
+        existingCommand = null;
+
+        for(var i = preToolUse.Count - 1; i >= 0; i--)
+        {
+            if(preToolUse[i] is not JsonObject itemObj || itemObj["hooks"] is not JsonArray innerHooks)
+                continue;
+
+            var removedHere = false;
+
+            for(var j = innerHooks.Count - 1; j >= 0; j--)
+            {
+                if(innerHooks[j] is not JsonObject hObj
+                   || hObj["command"] is not JsonValue commandValue
+                   || !commandValue.TryGetValue<string>(out var command)
+                   || !ToolCommand.IsOurCommandInvocation(command))
+                    continue;
+
+                if(ToolCommand.InvokesCurrentName(command))
+                    existingCommand = command;
+
+                innerHooks.RemoveAt(j);
+                removedHere = true;
+            }
+
+            removed |= removedHere;
+
+            // Only a group this pass emptied goes. One that was already empty is not ours.
+            if(removedHere && innerHooks.Count == 0)
+                preToolUse.RemoveAt(i);
+        }
+
+        return removed;
+    }
+
+    // A missing or blank file loads as an empty object. False when the file holds anything that
+    // is not a JSON object: writing back would then destroy it.
+    static bool TryLoadJsonObject(string path, out JsonObject root)
+    {
+        root = [];
+
+        if(!File.Exists(path))
+            return true;
+
+        try
+        {
+            var text = File.ReadAllText(path);
+
+            if(string.IsNullOrWhiteSpace(text))
+                return true;
+
+            var parsed = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions {
+
+                // Rejected here, as a parse error. Left to JsonObject, a duplicate key throws
+                // ArgumentException only when the object is first indexed — outside this guard.
+                AllowDuplicateProperties = false,
+                AllowTrailingCommas = true,
+                CommentHandling     = JsonCommentHandling.Skip
+            });
+
+            if(parsed is not JsonObject parsedObject)
+                return false;
+
+            root = parsedObject;
+
+            return true;
+        }
+        catch(Exception ex) when(ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    // Temp file plus rename, so an interrupted write never leaves a truncated config behind.
+    static bool TryWriteJson(string path, JsonObject root)
+    {
+        var tmp = path + ".roslynmcp.tmp";
+
+        try
+        {
+            // A settings file kept in a dotfiles repository is a symlink. Renaming over the
+            // link would replace it with a regular file and detach it from the repository, so
+            // the write goes to the file the link points at.
+            if(File.Exists(path) && File.ResolveLinkTarget(path, returnFinalTarget: true) is { } target)
+            {
+                path = target.FullName;
+                tmp  = path + ".roslynmcp.tmp";
+            }
+
+            var dir = Path.GetDirectoryName(path);
+
+            if(dir is not null)
+                Directory.CreateDirectory(dir);
+
+            // Relaxed escaping: the default encoder would turn every '&', '<', '>' and quote in
+            // the user's own hook commands into \uXXXX, in a file people edit by hand.
+            File.WriteAllText(tmp, root.ToJsonString(new JsonSerializerOptions {
+
+                WriteIndented = true,
+                Encoder       = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            }));
+
+            // The rename puts the temp file in the target's place, mode included. Without this a
+            // settings file the user made private (0600) would come back with the default mode.
+            if(!OperatingSystem.IsWindows() && File.Exists(path))
+                File.SetUnixFileMode(tmp, File.GetUnixFileMode(path));
+
+            File.Move(tmp, path, overwrite: true);
+
+            return true;
+        }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
+        {
+            // A failed rename must not leave a full copy of the user's config lying next to it.
+            try { File.Delete(tmp); }
+            catch(Exception cleanup) when(cleanup is IOException or UnauthorizedAccessException) { }
+
+            return false;
+        }
     }
 
 }

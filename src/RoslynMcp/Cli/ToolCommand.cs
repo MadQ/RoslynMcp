@@ -72,30 +72,90 @@ static class ToolCommand
 		;
 	}
 
-	// True when a full invocation string belongs to this tool — current or any legacy form.
-	// Handles the direct command form ("madq-roslynmcp hook", "roslynmcp hook --log") and the
-	// legacy dotnet-driver form ("dotnet roslynmcp hook"). Used by setup/setup-project to
+	// True when a full invocation string is this tool's hook subcommand — current or any legacy
+	// form. Handles the direct command form ("madq-roslynmcp hook", "roslynmcp hook --log") and
+	// the legacy dotnet-driver form ("dotnet roslynmcp hook"). Used by setup/setup-project to
 	// upsert our hook entry in place rather than appending a duplicate when the command name
 	// changed across versions — otherwise a rename leaves the stale entry behind.
+	// The subcommand is part of the match: these entries get removed or carried over as the
+	// advisor hook, and some other invocation of this tool in a hook slot is neither.
 	public static bool IsOurCommandInvocation(string? command)
 	{
 		if(string.IsNullOrWhiteSpace(command))
 			return false;
 
-		var tokens = command.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries);
+		var tokens = SplitCommand(command);
 
-		if(tokens.Length == 0)
+		if(tokens.Count < 2)
 			return false;
 
 		var first = Path.GetFileNameWithoutExtension(tokens[0]);
 
 		if(MatchesCommandStem(first))
-			return true;
+			return IsHookSubcommand(tokens[1]);
 
-		// Legacy dotnet-driver form: `dotnet <name> ...`.
-		if(first.Equals("dotnet", StringComparison.OrdinalIgnoreCase) && tokens.Length > 1)
-			return MatchesCommandStem(Path.GetFileNameWithoutExtension(tokens[1]));
+		// Legacy dotnet-driver form: `dotnet <name> hook ...`.
+		return first.Equals("dotnet", StringComparison.OrdinalIgnoreCase)
+			&& tokens.Count > 2
+			&& MatchesCommandStem(Path.GetFileNameWithoutExtension(tokens[1]))
+			&& IsHookSubcommand(tokens[2])
+		;
+	}
 
-		return false;
+	static bool IsHookSubcommand(string token) => token.Equals("hook", StringComparison.OrdinalIgnoreCase);
+
+	// True when a full invocation string runs this tool under its current command name — not a
+	// legacy name. Setup keeps such a command as written (an absolute path, --log) instead of
+	// replacing it; a legacy-named one must be replaced because that command no longer exists.
+	public static bool InvokesCurrentName(string? command)
+	{
+		if(string.IsNullOrWhiteSpace(command))
+			return false;
+
+		var tokens = SplitCommand(command);
+
+		return tokens.Count > 0
+			&& Path.GetFileNameWithoutExtension(tokens[0]).Equals(Name, StringComparison.OrdinalIgnoreCase)
+		;
+	}
+
+	// Splits an invocation on whitespace, keeping a quoted run together and dropping the quotes:
+	// an executable path under a profile directory with a space in it is written quoted, and a
+	// plain whitespace split would cut it at the space and miss the file name. Double quotes are
+	// the Windows form, single quotes the POSIX one. A single quote opens a run only at the start
+	// of a token, so an unquoted path such as C:\Users\O'Brien\tool.exe keeps its apostrophe.
+	// Backslash escapes are not interpreted — a backslash is a path separator on Windows.
+	static List<string> SplitCommand(string command)
+	{
+		var tokens  = new List<string>();
+		var current = new System.Text.StringBuilder();
+		var quote   = '\0';
+
+		foreach(var c in command) {
+
+			if(quote != '\0') {
+
+				if(c == quote)
+					quote = '\0';
+				else
+					current.Append(c);
+			}
+			else if(c == '"' || (c == '\'' && current.Length == 0))
+				quote = c;
+			else if(char.IsWhiteSpace(c)) {
+
+				if(current.Length > 0)
+					tokens.Add(current.ToString());
+
+				current.Clear();
+			}
+			else
+				current.Append(c);
+		}
+
+		if(current.Length > 0)
+			tokens.Add(current.ToString());
+
+		return tokens;
 	}
 }
