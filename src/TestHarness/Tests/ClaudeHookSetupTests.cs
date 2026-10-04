@@ -158,6 +158,27 @@ static class ClaudeHookSetupTests
 					: $"unexpected groups: {groups?.ToJsonString()} / {blankGroups?.ToJsonString()}";
 			}),
 			
+			// Only the hook subcommand is our advisor entry. Some other invocation of this tool in
+			// a hook slot must be left alone — and above all must not be carried over as the
+			// advisor command, which would report a working hook that cannot run.
+			Case("a non-hook invocation of this tool is neither removed nor reused", () => {
+				
+				var path = Path.Combine(dir, "non-hook.json");
+				
+				File.WriteAllText(path, """
+					{ "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [ { "type": "command", "command": "madq-roslynmcp verify" } ] } ] } }
+					""");
+				
+				if(!Remove(ctx, path) || !Upsert(ctx, path))
+					return "a method returned false";
+				
+				var groups = Groups(path);
+				
+				return groups is not null && Commands(groups).SequenceEqual(["madq-roslynmcp verify", HookCommand])
+					? null
+					: $"unexpected groups: {groups?.ToJsonString()}";
+			}),
+			
 			// A matcher group someone else left with an empty hooks array is not ours to delete,
 			// in either the install or the cleanup.
 			Case("a foreign group with no hooks is left in place", () => {
