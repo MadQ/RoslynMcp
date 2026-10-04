@@ -1,0 +1,47 @@
+name: Test Harness
+permissions:
+  contents: read
+
+# The TestHarness on all three operating systems. It is the release gate: publish.yml calls this
+# workflow and will not publish unless it passes (#330). It deliberately does not run on every
+# push or pull request — day-to-day verification is the local run (Windows, plus WSL for
+# platform-sensitive changes; see AGENTS.md, "Testing").
+on:
+  # Called by publish.yml.
+  workflow_call:
+
+  # Run by hand, on any branch: Actions -> Test Harness -> Run workflow.
+  workflow_dispatch:
+
+  # A change to this file is tested by its own pull request.
+  pull_request:
+    branches: [ main, dev ]
+    paths:
+      - '.github/workflows/harness.yml'
+
+jobs:
+  harness:
+    name: Harness (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      # One operating system failing must not hide the result of the others.
+      fail-fast: false
+      matrix:
+        os: [ windows-latest, ubuntu-latest, macos-latest ]
+
+    # A full run takes a few minutes. The limit only stops a hung run from holding a runner.
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.302'
+
+    # --quiet: one line per failing test, the server's stderr after them, and one summary line.
+    # The exit code fails the job.
+    - name: Run the TestHarness
+      run: dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --quiet

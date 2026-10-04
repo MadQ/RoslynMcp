@@ -213,7 +213,8 @@ static class ClaudeHookSetupTests
 			// A settings file kept in a dotfiles repository is a symlink. The install must write
 			// through the link: the link survives and the file it points at receives the hook.
 			// Creating a symlink needs a privilege Windows grants only to administrators or in
-			// developer mode; where it is refused the case cannot be set up and is passed over.
+			// developer mode; where it is refused the case cannot be set up, which is a skip on
+			// a developer's machine and a failure on a CI runner — never a pass.
 			Case("a symlinked settings file is written through, not replaced", () => {
 				
 				var real = Path.Combine(dir, "dotfiles-settings.json");
@@ -222,7 +223,9 @@ static class ClaudeHookSetupTests
 				File.WriteAllText(real, "{ \"model\": \"opus\" }");
 				
 				try { File.CreateSymbolicLink(link, real); }
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { return null; }
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					throw new SkipTest(Skip.SetupUnavailable("this machine may not create symbolic links"));
+				}
 				
 				if(!Upsert(ctx, link))
 					return "UpsertHookIn returned false";
@@ -238,11 +241,11 @@ static class ClaudeHookSetupTests
 			// The rewrite goes through a temp file and a rename, and a rename carries the temp
 			// file's permissions. A settings file the user restricted to themselves (0600) must
 			// still be 0600 afterwards — it can hold private settings. Unix file modes do not
-			// exist on Windows, so there the case has nothing to check and is passed over.
+			// exist on Windows, so there the case has nothing to check and is reported as skipped.
 			Case("a private settings file keeps its Unix permissions", () => {
 				
 				if(OperatingSystem.IsWindows())
-					return null;
+					throw new SkipTest(Skip.NotApplicable("Unix file modes do not exist on Windows"));
 				
 				const UnixFileMode ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 				
@@ -453,13 +456,15 @@ static class ClaudeHookSetupTests
 		});
 	}
 	
-	// A test body returns null on success or a description of what was wrong.
+	// A test body returns null on success or a description of what was wrong. One that cannot
+	// check anything on this machine throws SkipTest with the outcome to report instead.
 	static TestCase Case(string name, Func<string?> body)
 		=> new($"claude hook setup: {name}", () => {
 			
 			string? failure;
 			
 			try { failure = body(); }
+			catch(SkipTest skip) { return Task.FromResult(skip.Outcome); }
 			catch(Exception ex) { failure = $"{ex.GetType().Name}: {ex.Message}"; }
 			
 			return Task.FromResult(failure is null ? (true, "PASS") : (false, $"FAIL  ({failure})"));

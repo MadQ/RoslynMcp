@@ -31,8 +31,15 @@ jobs:
             dotnet publish src/RoslynMcp/RoslynMcp.csproj -c Release -f net10.0 -r "$rid" -o "artifacts/runtime-checks/$rid"
           done
 
+  # The TestHarness on Windows, Linux and macOS. Nothing is published unless it passes on all
+  # three; a dry run is gated the same way (#330).
+  harness:
+    uses: ./.github/workflows/harness.yml
+    permissions:
+      contents: read
+
   publish:
-    needs: runtime-checks
+    needs: [ runtime-checks, harness ]
     # Gated on the `release` GitHub environment — this name must match exactly the
     # environment registered in the NuGet.org Trusted Publishing policy. Add a
     # required-reviewer protection rule to this environment (repo Settings →

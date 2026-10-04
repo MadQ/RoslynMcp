@@ -4,7 +4,7 @@ namespace RoslynMcp;
 ///     Enforces filesystem access boundaries for a workspace.
 ///     All path validation normalizes with <see cref="Path.GetFullPath"/> before comparison
 ///     to prevent directory traversal via <c>..</c> components or alternate path representations.
-///     Symbolic links are denied to prevent escape via symlink redirection.
+///     Symbolic links inside a trusted root are denied to prevent escape via symlink redirection.
 /// </summary>
 internal sealed class SecurityBoundary
 {
@@ -34,7 +34,8 @@ internal sealed class SecurityBoundary
 	
 	/// <summary>
 	///     Returns true if <paramref name="requestedPath"/> is accessible within this workspace's
-	///     trusted roots. Normalizes the path with <see cref="Path.GetFullPath"/> and denies symbolic links.
+	///     trusted roots. Normalizes the path with <see cref="Path.GetFullPath"/> and denies a path
+	///     that passes through a symbolic link inside a trusted root.
 	/// </summary>
 	public bool IsPathAllowed(string requestedPath)
 	{
@@ -48,32 +49,51 @@ internal sealed class SecurityBoundary
 			return false;
 		}
 		
-		// Deny symbolic links anywhere in the path chain — prevents escape via symlinked directories.
+		foreach(var root in allowedRoots.AsSpan())
+			if(IsUnderDirectory(normalized, root) && !HasLinkBelowRoot(normalized, root))
+				
+				return true;
+		
+		return false;
+	}
+	
+	/// <summary>
+	///     Whether <paramref name="path"/> passes through a symbolic link or junction somewhere
+	///     below <paramref name="root"/>, the path's own last component included. Such a link can
+	///     point anywhere, so following it would leave the boundary.
+	///     <para>
+	///         The root itself and the directories above it are deliberately not checked. They are
+	///         where the user put the workspace: a link among them moves the whole workspace, it
+	///         is not a way out of it. Checking the entire chain denied every file of a workspace
+	///         that merely lives under a link — which on macOS is every workspace under the temp
+	///         directory, since <c>/var</c> is a link to <c>/private/var</c> (#330).
+	///     </para>
+	/// </summary>
+	static bool HasLinkBelowRoot(string path, string root)
+	{
+		var rootLength = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Length;
+		
 		try {
 			
-			var current = normalized;
+			var current = path;
 			
-			while(!string.IsNullOrEmpty(current)) {
+			// Strictly longer than the root: the walk stops when it reaches the root itself.
+			while(current.Length > rootLength) {
 				
 				if((File.Exists(current) || Directory.Exists(current)) &&
 					File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
 					
-					return false;
+					return true;
 				
 				var parent = Path.GetDirectoryName(current);
 				
-				if(parent is null || string.Equals(parent, current, StringComparison.OrdinalIgnoreCase))
+				if(parent is null || parent.Length >= current.Length)
 					break;
 				
 				current = parent;
 			}
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
-		
-		foreach(var root in allowedRoots.AsSpan())
-			if(IsUnderDirectory(normalized, root))
-				
-				return true;
 		
 		return false;
 	}

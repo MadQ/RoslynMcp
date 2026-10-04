@@ -788,6 +788,8 @@ FAIL  238 passed, 1 failed
 ```
 The summary line is always the last line, also when the run is cut short: if a test, a teardown or a group's setup throws, it reads `FAIL  70 passed, 0 failed, 169 not run — aborted in <group> › <test>: <exception>`. The server's stderr is printed after the server has shut down, so it includes what was logged during the last request.
 
+**Skipped tests.** A test that cannot check anything on the machine is a skip, never a pass. It prints a `SKIP` line in quiet mode too and is counted in the summary: `PASS  240 passed, 1 skipped`. Use `Skip.NotApplicable(reason)` when the thing under test does not exist on this operating system (Unix file modes on Windows) — always a skip. Use `Skip.SetupUnavailable(reason)` when the test applies but the machine will not let the fixture be built (no permission to create symbolic links) — a skip locally, a **failure on a CI runner**, so the release gate cannot pass with a case nobody checked. Never return a plain pass from a test that did not run.
+
 Do not filter the full output with a text match instead — passing tests with "error" or "fail" in their name match too.
 
 **Linux run under WSL (#325).** The harness normally runs on Windows only, so anything that behaves differently on Linux is untested, and a test that skips itself on Windows checks nothing. `scripts/Test-HarnessWsl.ps1` runs the same harness on Linux, against the current working tree including uncommitted changes:
@@ -799,7 +801,14 @@ Do not filter the full output with a text match instead — passing tests with "
 - Further harness arguments go through `-HarnessArgs '--only-build-diag'`.
 - Exit codes: 0 — all passed; 1 — the harness reported failures, or did not build on Linux; 2 — the harness could not be run (WSL, the distribution, `rsync` or the pinned SDK is missing, or a setup step failed).
 
-**When to run it:** the Windows run is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine (the script exits with code 2), say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either run.
+**When to run it:** the Windows run is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine (the script exits with code 2), say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either local run — see the release gate below.
+
+**Release gate (#330).** `.github/workflows/harness.yml` runs the harness with `--quiet` on `windows-latest`, `ubuntu-latest` and `macos-latest`. `publish.yml` calls it, and the `publish` job needs it: nothing is published — not even a dry run reaches the packing step — unless all three pass. It does **not** run on every push or pull request (`build.yml` only builds); day to day the local runs above are the verify step. It runs in three ways:
+- as part of `publish.yml`;
+- by hand: Actions → *Test Harness* → *Run workflow*, on any branch (`gh workflow run harness.yml --ref <branch>`);
+- on a pull request that changes `harness.yml` itself.
+
+Run it by hand before merging a change that is platform-sensitive on macOS specifically (temp-directory paths, symlinks, file watching, case-insensitive-but-preserving names): macOS is the one platform no local run covers, and its first run found a boundary bug that Windows and Linux never hit.
 
 **Fixture pattern (#274):** a test that needs real compilable code, or any file to edit, gets a throwaway project under `%TEMP%\RoslynMcp.TestHarness\<label>.<guid>` from `TestFixtures.NewMsBuildProject(label)` (or `NewAdhocDir` for an AdhocWorkspace) and passes `fx.Csproj` as `projectPath`. **Never write a fixture into `src/RoslynMcp`:** a directory target resolves to the repo's `.slnx`, so the FileSystemWatcher of every server with the repo open — the harness's own *and* the developer's live one — covers the whole tree; the SDK glob compiles the file into `RoslynMcp.dll`; and each create/delete forces a full solution reload. A checked-in fixture project elsewhere in the repo, or `<Compile Remove>`, does not help — the file is still an unknown document under the watched root. Example:
 ```csharp
