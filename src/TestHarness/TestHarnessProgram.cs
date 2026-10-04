@@ -69,9 +69,13 @@ sealed class HarnessRun(string[] args)
 	
 	/// <summary>
 	///     Records why the run ended before or outside a test. The first reason wins: what follows
-	///     a failure is usually a consequence of it.
+	///     a failure is usually a consequence of it. The reason becomes part of the summary line,
+	///     so line breaks are folded away — some exception messages span several lines, and the
+	///     summary must stay one line and the last one.
 	/// </summary>
-	public void Stop(string reason) => stopReason ??= reason;
+	public void Stop(string reason)
+		=> stopReason ??= string.Join(' ', reason.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+	;
 	
 	void Info(string line)
 	{
@@ -378,8 +382,9 @@ sealed class HarnessRun(string[] args)
 			if(!server.HasExited)
 				server.Kill(entireProcessTree: true);
 		}
-		catch(Exception ex) when(ex is InvalidOperationException or Win32Exception) {
-			// The process went away between the check and the call. That is the goal anyway.
+		catch(Exception ex) when(ex is InvalidOperationException or Win32Exception or AggregateException or NotSupportedException) {
+			// The process went away between the check and the call, or part of its tree could
+			// not be ended. Neither may stand between a failure and its report.
 		}
 	}
 	
