@@ -1,4 +1,4 @@
-﻿<!-- Developer tool — not a production web app. Accessibility (WCAG) not targeted unless requested. -->
+<!-- Developer tool — not a production web app. Accessibility (WCAG) not targeted unless requested. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1311,6 +1311,21 @@
 	// Falls back to regex highlighting if the string is truncated/invalid.
 	function renderPeek(str) {
 	  const pre = document.createElement('pre');
+
+	  // Source-returning tools log a one-line JSON header followed by raw source text (#328).
+	  // Compact JSON never contains a raw newline, so the first one marks where that text starts.
+	  const newline = str.indexOf('\n');
+
+	  if(newline > 0) {
+		try {
+		  const header = smartTruncate(JSON.parse(str.slice(0, newline)));
+		  pre.innerHTML = highlightJSON(JSON.stringify(header, null, 2));
+		  pre.appendChild(document.createTextNode('\n' + str.slice(newline + 1)));
+
+		  return pre;
+		}
+		catch { /* Not a header line: fall through to the plain rendering. */ }
+	  }
 
 	  try {
 		const truncated = smartTruncate(JSON.parse(str));

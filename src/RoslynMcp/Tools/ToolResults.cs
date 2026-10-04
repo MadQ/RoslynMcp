@@ -177,13 +177,14 @@ internal sealed record TypeMembersResult(
 	[property: JsonPropertyName("has_more")]      bool      HasMore
 ) : ToolResult;
 
+// Headers of the source-returning tools (#328). The source itself is not a property: it follows
+// the header as raw text blocks — see ToolScope.Outcome(detail, header, source).
 internal sealed record ReadFileResult(
-	[property: JsonPropertyName("file")]        string   File,
-	[property: JsonPropertyName("source")]      string   Source,
-	[property: JsonPropertyName("total_lines")] int      TotalLines,
-	[property: JsonPropertyName("start_line")]  int      StartLine,
-	[property: JsonPropertyName("end_line")]    int      EndLine,
-	[property: JsonPropertyName("lines")]       string[] Lines
+	[property: JsonPropertyName("file")]        string File,
+	[property: JsonPropertyName("source")]      string Source,
+	[property: JsonPropertyName("total_lines")] int    TotalLines,
+	[property: JsonPropertyName("start_line")]  int    StartLine,
+	[property: JsonPropertyName("end_line")]    int    EndLine
 ) : ToolResult;
 
 internal sealed record LineCountResult(
@@ -202,23 +203,22 @@ internal sealed record MemberBodySingleResult(
 	[property: JsonPropertyName("symbol_kind")] string SymbolKind,
 	[property: JsonPropertyName("file")]        string File,
 	[property: JsonPropertyName("start_line")]  int    StartLine,
-	[property: JsonPropertyName("end_line")]    int    EndLine,
-	[property: JsonPropertyName("body")]        string Body
+	[property: JsonPropertyName("end_line")]    int    EndLine
 ) : ToolResult;
 
 internal sealed record MemberBodyPartialResult(
-	[property: JsonPropertyName("symbol_name")] string       SymbolName,
-	[property: JsonPropertyName("symbol_kind")] string       SymbolKind,
-	[property: JsonPropertyName("parts")]       List<object> Parts,
-	[property: JsonPropertyName("note")]        string       Note
+	[property: JsonPropertyName("symbol_name")] string SymbolName,
+	[property: JsonPropertyName("symbol_kind")] string SymbolKind,
+	[property: JsonPropertyName("parts")]       int    Parts,
+	[property: JsonPropertyName("note")]        string Note
 ) : ToolResult;
 
+/// <summary>Header line that precedes the source of one part of a partial declaration.</summary>
 internal sealed record MemberBodyPart(
+	[property: JsonPropertyName("part")]       int    Part,
 	[property: JsonPropertyName("file")]       string File,
 	[property: JsonPropertyName("start_line")] int    StartLine,
-	[property: JsonPropertyName("end_line")]   int    EndLine,
-	[property: JsonPropertyName("body")]       string Body,
-	[property: JsonPropertyName("part_index")] int?   PartIndex
+	[property: JsonPropertyName("end_line")]   int    EndLine
 );
 
 internal sealed record MetadataSymbolResult(

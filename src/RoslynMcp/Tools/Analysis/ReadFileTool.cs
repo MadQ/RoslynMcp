@@ -12,14 +12,16 @@ internal sealed class ReadFileTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_read_file", ReadOnly = true, Title = "Read File", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Use this to read the raw content of any file in the project with 1-based line numbers. " +
+		"Use this to read the raw content of any file in the project. " +
 		"For text documents Roslyn tracks — .cs source, declared AdditionalFiles items, and .editorconfig/.globalconfig — " +
 		"content is served from the in-memory workspace, always reflecting the latest state of the compilation " +
 		"(including edits not yet written to disk). Every other file (.csproj, an untracked .json, .props, …) is read from disk. " +
 		"Always use startLine/endLine to narrow the range for large files — returning the full file of a large .cs " +
 		"file can overflow the context window. Use roslyn_get_file_outline to find the line range of a specific member first. " +
 		"For reading a single method or property body, prefer roslyn_get_member_body — it's more token-efficient. " +
-		"The response includes the source field ('roslyn' or 'disk'), total line count, and the requested line range.")]
+		"The response is a one-line JSON header (file, source: 'roslyn' or 'disk', total_lines, start_line, end_line) " +
+		"followed by the requested lines as raw text: unescaped and unnumbered, so they can be copied verbatim into an edit. " +
+		"Line N of the text is line start_line + N - 1 of the file. Lines are joined with '\\n' and one newline is added after the last.")]
 	public async Task<object> ReadFile(
 		[Description("Relative path to the file, e.g. 'Core/WindowTracker.cs' or 'Directory.Build.props'. Path is relative to the project root.")] string filePath,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
@@ -110,15 +112,16 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		
 		var relative = Path.GetRelativePath(rootPath, canonicalPath);
 		
+		// Joined with '\n' whatever the file uses: the text is exact per line, not byte-exact for a
+		// CRLF file.
 		return scope.Outcome($"{result.Length}/{totalLines} line(s)", new ReadFileResult(
 			File:       relative,
 			Source:     source,
 			TotalLines: totalLines,
 			StartLine:  first,
-			EndLine:    last,
-			Lines:      result)
+			EndLine:    last)
 		{
 			Caution = AdhocCaution(projectPath)
-		});
+		}, string.Join("\n", result));
 	}
 }

@@ -15,8 +15,12 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		"file path and start/end line numbers. " +
 		"Use this instead of roslyn_read_file when you need only one specific declaration rather than the " +
 		"whole file; use roslyn_get_file_outline when you only need signatures without body content. " +
-		"For partial types or partial methods split across multiple files, returns all declaration parts " +
-		"as an array, each with its own file, start line, and end line. " +
+		"The response is a one-line JSON header (symbol_name, symbol_kind, file, start_line, end_line) followed by " +
+		"the declaration as raw text: unescaped and unnumbered, so it can be copied verbatim into an edit. " +
+		"For partial types or partial methods split across multiple files, the header carries the part count " +
+		"(parts) instead of a location, and each part follows as its own one-line JSON header " +
+		"(part, file, start_line, end_line) and then that part's raw text. " +
+		"Lines are joined with '\\n' and one newline is added after the last line of each part. " +
 		"Returns a structured metadata error (not source) if the symbol is defined in a compiled assembly " +
 		"rather than project source code.")]
 	public async Task<object> GetMemberBody(
@@ -38,7 +42,8 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
-		var symbol   = FindSymbol(compilation, symbolName, containingType);
+		
+		var symbol = FindSymbol(compilation, symbolName, containingType);
 		
 		if(symbol is null)
 			
@@ -56,21 +61,24 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 				Error = "This symbol is defined in metadata (compiled assembly), not source code."
 			});
 		
-		var parts = new List<object>();
+		var single     = syntaxRefs.Length == 1;
+		var parts      = new List<(object? Header, string Source)>(syntaxRefs.Length);
+		var files      = new HashSet<string>();
+		var totalLines = 0;
+		
+		MemberBodyPart? first = null;
 		
 		for(var i = 0; i < syntaxRefs.Length; i++) {
 			
-			var syntaxRef = syntaxRefs[i];
-			var node      = await syntaxRef.GetSyntaxAsync(ct);
+			var node      = await syntaxRefs[i].GetSyntaxAsync(ct);
 			var tree      = node.SyntaxTree;
 			var text      = await tree.GetTextAsync(ct);
 			var span      = tree.GetLineSpan(node.Span);
 			var startLine = span.StartLinePosition.Line;
 			var endLine   = span.EndLinePosition.Line;
 			
-			// Extract source lines with 1-based line numbers.
-			var lines = new string[endLine - startLine + 1]
-			;
+			// Whole lines, so the declaration keeps its indentation.
+			var lines = new string[endLine - startLine + 1];
 			
 			for(var ln = startLine; ln <= endLine; ln++)
 				lines[ln - startLine] = text.Lines[ln].ToString();
@@ -80,43 +88,36 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 				: Path.GetRelativePath(rootPath, tree.FilePath)
 			;
 			
-			parts.Add(new MemberBodyPart(
-				filePath,
-				startLine + 1,
-				endLine + 1,
-				string.Join("\n", lines),
-				syntaxRefs.Length > 1 ? i + 1 : null
-			));
+			var part = new MemberBodyPart(i + 1, filePath, startLine + 1, endLine + 1);
+			
+			// A single declaration is located by the response header, so its source needs no header
+			// of its own.
+			parts.Add((single ? null : part, string.Join("\n", lines)));
+			files.Add(filePath);
+			
+			totalLines += lines.Length;
+			first     ??= part;
 		}
 		
-		var totalLines = parts.Cast<MemberBodyPart>().Sum(p => p.EndLine - p.StartLine + 1);
+		var displayName = FormatSymbolName(symbol);
+		var kind        = symbol.Kind.ToString().ToLowerInvariant();
 		
-		var single = syntaxRefs.Length == 1;
-		var symbolName2 = FormatSymbolName(symbol);
-		var symbolKind2 = symbol.Kind.ToString().ToLowerInvariant();
-		
-		ToolResult bodyResult = single
-			? new MemberBodySingleResult(
-				symbolName2,
-				symbolKind2,
-				((MemberBodyPart) parts[0]).File,
-				((MemberBodyPart) parts[0]).StartLine,
-				((MemberBodyPart) parts[0]).EndLine,
-				((MemberBodyPart) parts[0]).Body)
+		ToolResult header = single
+			? new MemberBodySingleResult(displayName, kind, first!.File, first.StartLine, first.EndLine)
 			{
 				Caution = AdhocCaution(projectPath)
 			}
 			: new MemberBodyPartialResult(
-				symbolName2,
-				symbolKind2,
-				parts,
-				$"Partial declaration — {syntaxRefs.Length} parts across {parts.Cast<MemberBodyPart>().Select(p => p.File).Distinct().Count()} file(s).")
+				displayName,
+				kind,
+				parts.Count,
+				$"Partial declaration — {parts.Count} parts across {files.Count} file(s).")
 			{
 				Caution = AdhocCaution(projectPath)
 			}
 		;
 		
-		return scope.Outcome($"{totalLines} line(s)", bodyResult);
+		return scope.Outcome($"{totalLines} line(s)", header, parts);
 	}
 
 

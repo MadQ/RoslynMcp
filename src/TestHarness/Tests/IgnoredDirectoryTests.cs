@@ -197,7 +197,7 @@ static class IgnoredDirectoryTests
 					
 					var (foundOk, found) = await Call("roslyn_read_file", new { projectPath = csproj, filePath = "deep/Only.txt" });
 					
-					if(!foundOk || found?["error"] is not null || found?["lines"] is null)
+					if(!foundOk || found?["error"] is not null || found?["total_lines"] is null)
 						
 						return (false, $"FAIL  (deep/Only.txt did not resolve: {found?["error"]?.GetValue<string>() ?? "no result"})");
 					
