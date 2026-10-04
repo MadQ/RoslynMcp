@@ -31,7 +31,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description(MatchModeDescription + "Default: 'regex'.")] string? mode = null,
 		[Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of results to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
+		[Description(PageTokenDescription)] string? page_token = null
 	)
 	{
 		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, mode, skip, take });
@@ -42,7 +42,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		
 		filePattern ??= "*.cs";
 		
-		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<MatchResult>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -102,18 +102,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		}
 		
 		var allResults = allMatches.ToArray();
-		var result     = PaginateAndStore(allResults, ref skip, take);
+		var shape      = PageShape(ComposeCautions(fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
+		var result     = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Total} match(es)", new SearchFilesResult(
-			result.Items,
-			result.Total,
-			result.Items.Length,
-			result.PageToken,
-			result.HasMore)
-		{
-			Caution = ComposeCautions(fallbackCaution, AdhocCaution(projectPath)),
-			Hint    = fallbackHint
-		});
+		return scope.Outcome($"{result.Total} match(es)", shape(result));
 		
 		async Task<List<MatchResult>> CollectAsync(Regex rx)
 		{
@@ -155,6 +147,21 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			return matches;
 		}
 	}
+	
+	// Builds every page of one query, first and cached alike, so a cached page keeps the same fields
+	// — the caution and hint included.
+	static Func<PaginatedResult<MatchResult>, object> PageShape(string? caution, string? hint)
+		=> page => new SearchFilesResult(
+			page.Items,
+			page.Total,
+			page.Items.Length,
+			page.PageToken,
+			page.HasMore)
+		{
+			Caution = caution,
+			Hint    = hint
+		}
+	;
 	
 	private sealed class MatchResult
 	{

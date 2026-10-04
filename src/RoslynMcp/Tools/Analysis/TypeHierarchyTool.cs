@@ -27,7 +27,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		CancellationToken cancellationToken,
 		[Description("Number of items to skip in the paged interfaces-and-derived list. Default: 0.")] int skip = 0,
 		[Description("Maximum items to return from the paged interfaces-and-derived list. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
+		[Description(PageTokenDescription)] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName, new { skip, take });
 		
@@ -35,7 +35,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -74,23 +74,39 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		
 		// Page both interfaces
 		var combined = allInterfaces.Concat(allDerived).ToArray();
-		var result   = PaginateAndStore(combined, ref skip, take);
 		
-		return scope.Outcome($"{result.Items.Length} interface(s)/derived", new TypeHierarchyResult(
-			TypeName:           type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-			TypeKind:           type.TypeKind.ToString().ToLowerInvariant(),
-			BaseTypes:          baseTypes,
-			TotalInterfaces:    allInterfaces.Length,
-			TotalDerivedTypes: allDerived.Length,
-			Skip: skip,
-			Take: take,
-			InterfacesAndDerived: result.Items,
-			PageToken:          result.PageToken,
-			HasMore:            result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		var shape = PageShape(
+			type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+			type.TypeKind.ToString().ToLowerInvariant(),
+			baseTypes,
+			allInterfaces.Length,
+			allDerived.Length,
+			AdhocCaution(projectPath))
+		;
+		var result = PaginateAndStore(combined, ref skip, take, shape);
+		
+		return scope.Outcome($"{result.Items.Length} interface(s)/derived", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
+	// the function the pagination cache holds never captures the type symbol or its compilation.
+	static Func<PaginatedResult<string>, object> PageShape(
+		string typeName, string typeKind, string[] baseTypes, int totalInterfaces, int totalDerivedTypes, string? caution)
+		=> page => new TypeHierarchyResult(
+			TypeName:           typeName,
+			TypeKind:           typeKind,
+			BaseTypes:          baseTypes,
+			TotalInterfaces:    totalInterfaces,
+			TotalDerivedTypes: totalDerivedTypes,
+			Skip: page.Skip,
+			Take: page.Take,
+			InterfacesAndDerived: page.Items,
+			PageToken:          page.PageToken,
+			HasMore:            page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 	
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{

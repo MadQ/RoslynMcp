@@ -53,7 +53,8 @@ static class DiscoveryTests
 				() => ctx.RunTestAsync(
 					"roslyn_list_types",
 					new { namespaceFilter = "RoslynMcp.Tools", projectPath = ctx.TargetPath },
-					data => data?["types"]?.AsArray().Count > 10 && data?["page_token"] is not null)),
+					// A token is handed out exactly when another page exists (#305).
+					data => data?["types"]?.AsArray().Count > 10 && (data?["page_token"] is not null) == (data?["has_more"]?.GetValue<bool>() == true))),
 			
 			new("roslyn_list_files: enumerate tool files with glob pattern",
 				() => ctx.RunTestAsync(

@@ -214,10 +214,15 @@ static class FindStringLiteralTests
 
 					var (pass, msg) = await ctx.RunTestAsync(
 						"roslyn_find_string_literal",
-						new { pattern = "roslyn_*", useGlob = true, take = 2, page_token = paginationToken, projectPath = ctx.TargetPath },
+						// No take: the token carries the page size (#305), so exactly 2 matches prove it.
+						new { pattern = "roslyn_*", useGlob = true, page_token = paginationToken, projectPath = ctx.TargetPath },
 						data => {
 							
-							if(data?["matches"]?.AsArray().Count == 0) return false;
+							// A missing "matches" must fail. The old check compared a null count with 0,
+							// which is false, so a page in the wrong shape passed.
+							if(data?["matches"]?.AsArray().Count != 2) return false;
+
+							if(data?["page_token"]?.GetValue<string>() == paginationToken) return false;
 
 							// Page 2 must contain different results than page 1.
 							var file2 = data?["matches"]?[0]?["file"]?.GetValue<string>();

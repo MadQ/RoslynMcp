@@ -122,7 +122,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `ErrorResult` | Standard error response record (`ToolResult, IToolError`); used by all tools for consistent JSON error shape; serializes as `{ "error": "...", "hint": "..." }` |
 | `SolutionDiff` | Unified diff generation for `Solution` → `Solution` edits |
 | `MSBuildBootstrap` | One-time MSBuild locator init; detects SDK vs VS workspace style; exposes `EnsureReady()`, `DetectLoadStyle()` (solution-aware: reads the `.sln`/`.slnx` project list, any legacy project ⇒ VS), `DetectProjectStyle()`, `ResolvedMode`, `DiscoveryMethod` |
-| `PaginationCache` | Generic TTL-based token cache for paginated tool results; shared across all tools via DI |
+| `PaginationCache` | Generic TTL-based cache for paginated tool results, shared across all tools via DI; stores each result set with the tool's static shape function so every page has the tool's own shape. `page_token` is a `PageCursor` (`{id}.{skip}.{take}`): the token alone yields the next page, and a token whose entry is gone re-runs the query from its position (#305) |
 | `SymbolFormatter` | Static helpers to format Roslyn `ISymbol` instances into human-readable signatures (method, property, field, event, type) |
 | `SymbolVisitors.cs` | Roslyn symbol tree visitors (`SimpleNameFinder`, `AllSymbolsFinder`, `AnySymbolFinder`) used by reference and rename tools |
 | `Exceptions.cs` | Project-specific exception types for workspace path resolution (`ProjectNotFoundException`, `MultipleProjectsFoundException`, `InvalidProjectPathException`, `AmbiguousFileException`) |
@@ -196,7 +196,7 @@ When discovering files/content:
 - `roslyn_build_project` — checks Roslyn diagnostics first (fast, in-process). Only runs `dotnet build` if Roslyn is clean. To check that code compiles, use `roslyn_get_diagnostics` instead. When a build is needed, make **one** call with `projectPath` omitted (whole solution) — never one call per project, never several in parallel (they only queue), and no `forceBuild` unless diagnostics are untrustworthy. Skip it entirely before a TestHarness run, which builds everything itself.
 - `roslyn_preview_rename` / `roslyn_apply_rename` — always call preview first; renames can affect dozens of files. The token from preview is required by apply.
 - `roslyn_change_signature` / `roslyn_apply_signature_change` — same two-step pattern as rename: preview returns a diff + token, apply commits it.
-- Paginated tools return `page_token` + `has_more` — pass the token back to get subsequent pages without re-executing the query.
+- Paginated tools return `page_token` + `has_more` — pass the token back **alone** (with the original arguments, no `skip`/`take`) to get the next page; it carries the position and page size. Each response has a new token, and none on the last page.
 
 ---
 

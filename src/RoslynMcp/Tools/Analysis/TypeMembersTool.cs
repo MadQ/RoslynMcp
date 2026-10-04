@@ -34,7 +34,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		
 		[Description("Number of members to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum members to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
+		[Description(PageTokenDescription)] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_type_members", typeName, new { memberKind, includeInherited, skip, take });
 		
@@ -42,7 +42,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<object?>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<object?>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -79,20 +79,30 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		]
 		;
 		
-		var result = PaginateAndStore(allMembers, ref skip, take);
+		var shape  = PageShape(
+			type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
+			type.TypeKind.ToString().ToLowerInvariant(),
+			AdhocCaution(projectPath));
+		var result = PaginateAndStore(allMembers, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} member(s)", new TypeMembersResult(
-			TypeName:     type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat),
-			TypeKind:     type.TypeKind.ToString().ToLowerInvariant(),
-			TotalMembers: result.Total,
-			Skip: skip, Take: take,
-			Members:    result.Items,
-			PageToken: result.PageToken,
-			HasMore:   result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} member(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
+	// the function the pagination cache holds never captures a symbol or the compilation.
+	static Func<PaginatedResult<object?>, object> PageShape(string typeName, string typeKind, string? caution)
+		=> page => new TypeMembersResult(
+			TypeName:     typeName,
+			TypeKind:     typeKind,
+			TotalMembers: page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Members:   page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 	
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{

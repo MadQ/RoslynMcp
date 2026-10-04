@@ -28,7 +28,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		[Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
 		[Description("Number of implementations to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
+		[Description(PageTokenDescription)] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_find_implementations", symbolName, new { containingType, skip, take });
 		
@@ -36,7 +36,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -74,19 +74,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					
 					return scope.Outcome("no implementations", new FindImplementationsResult(typeKind, typeName, 0, skip, take, ["No implementations found."]));
 				
-				var result = PaginateAndStore(allResults, ref skip, take);
+				var shape  = ImplementationsShape(typeKind, typeName, AdhocCaution(projectPath));
+				var result = PaginateAndStore(allResults, ref skip, take, shape);
 				
-				return scope.Outcome($"{result.Items.Length}/{result.Total} implementation(s)", new FindImplementationsResult(
-					SymbolType:  typeKind,
-					SymbolName:  typeName,
-					TotalImplementations: result.Total,
-					Skip: skip, Take: take,
-					Implementations: result.Items,
-					PageToken:      result.PageToken,
-					HasMore:        result.HasMore)
-				{
-					Caution = AdhocCaution(projectPath)
-				});
+				return scope.Outcome($"{result.Items.Length}/{result.Total} implementation(s)", shape(result));
 			}
 			
 			return scope.Error(new ErrorResult($"'{symbolName}' is not an interface or abstract class."));
@@ -111,19 +102,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 					
 					return scope.Outcome("no overrides", new FindOverridesResult("method", methodDisplay, 0, skip, take, ["No overrides found."]));
 				
-				var result = PaginateAndStore(allResults, ref skip, take);
+				var shape  = OverridesShape(methodDisplay, AdhocCaution(projectPath));
+				var result = PaginateAndStore(allResults, ref skip, take, shape);
 				
-				return scope.Outcome($"{result.Items.Length}/{result.Total} override(s)", new FindOverridesResult(
-					SymbolType: "method",
-					SymbolName: methodDisplay,
-					TotalOverrides: result.Total,
-					Skip: skip, Take: take,
-					Overrides:  result.Items,
-					PageToken: result.PageToken,
-					HasMore:   result.HasMore)
-				{
-					Caution = AdhocCaution(projectPath)
-				});
+				return scope.Outcome($"{result.Items.Length}/{result.Total} override(s)", shape(result));
 			}
 			
 			return scope.Error(new ErrorResult($"'{symbolName}' is not an abstract, virtual, or override method."));
@@ -131,6 +113,39 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		return scope.Error(new ErrorResult($"'{symbolName}' is not a type or method — cannot find implementations."));
 	}
+	
+	// Page shapes for the two kinds of query. Each builds every page of its query, first and cached
+	// alike; static factories taking plain values, so the functions the pagination cache holds never
+	// capture a symbol or the solution. The cache stores the shape with the results, so a token from a
+	// type query is always served as FindImplementationsResult and one from a method query as
+	// FindOverridesResult, although both page over strings.
+	static Func<PaginatedResult<string>, object> ImplementationsShape(string typeKind, string typeName, string? caution)
+		=> page => new FindImplementationsResult(
+			SymbolType:  typeKind,
+			SymbolName:  typeName,
+			TotalImplementations: page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Implementations: page.Items,
+			PageToken:      page.PageToken,
+			HasMore:        page.HasMore)
+		{
+			Caution = caution
+		}
+	;
+	
+	static Func<PaginatedResult<string>, object> OverridesShape(string methodDisplay, string? caution)
+		=> page => new FindOverridesResult(
+			SymbolType: "method",
+			SymbolName: methodDisplay,
+			TotalOverrides: page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Overrides:  page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 	
 	
 	private static string FormatMethod(IMethodSymbol method)

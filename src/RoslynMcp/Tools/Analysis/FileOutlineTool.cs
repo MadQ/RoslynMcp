@@ -24,7 +24,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Number of types to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
+		[Description(PageTokenDescription)] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_file_outline", filePath, new { skip, take });
 		
@@ -32,7 +32,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 			
 			return scope.Error(projectError);
 		
-		if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 100, out var cached))
+		if(scope.TryServeCachedPage<TypeOutline>(page_token, ref skip, ref take, 20, 100, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -52,19 +52,26 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		var root     = await tree.GetRootAsync();
 		var model    = compilation.GetSemanticModel(tree);
 		var allTypes = ExtractTypes(root, model);
-		var result   = PaginateAndStore(allTypes, ref skip, take);
+		var shape    = PageShape(Path.GetRelativePath(rootPath, tree.FilePath), AdhocCaution(projectPath));
+		var result   = PaginateAndStore(allTypes, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new FileOutlineResult(
-			File:       Path.GetRelativePath(rootPath, tree.FilePath),
-			TotalTypes: result.Total,
-			Skip: skip, Take: take,
-			Types:     result.Items,
-			PageToken: result.PageToken,
-			HasMore:   result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
+	// the function the pagination cache holds never captures the syntax tree or the compilation.
+	static Func<PaginatedResult<TypeOutline>, object> PageShape(string file, string? caution)
+		=> page => new FileOutlineResult(
+			File:       file,
+			TotalTypes: page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Types:     page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 	
 	private static TypeOutline[] ExtractTypes(SyntaxNode root, SemanticModel model)
 	{

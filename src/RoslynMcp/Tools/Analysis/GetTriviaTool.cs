@@ -33,7 +33,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         [Description("Include trailing trivia (whitespace/comments after each node). Default: true.")] bool includeTrailing = true,
         [Description("Number of results to skip. Default: 0.")] int skip = 0,
         [Description("Maximum results to return. Default: 100, max: 500.")] int take = 100,
-        [Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null,
+        [Description(PageTokenDescription)] string? page_token = null,
         [Description("Pass true to return all available C# syntax kind names instead of analyzing trivia. No filePath needed.")] bool listSyntaxKinds = false,
         [Description("Pass true to return all available trivia kind names instead of analyzing trivia. No filePath needed.")] bool listTriviaKinds = false)
     {
@@ -43,7 +43,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             return scope.Outcome("discovery", discovery);
 
-        if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 500, out var cached))
+        if(scope.TryServeCachedPage<object>(page_token, ref skip, ref take, 100, 500, out var cached))
 
             return scope.Outcome("cached page", cached);
 
@@ -148,18 +148,25 @@ internal sealed class GetTriviaTool : RoslynMcpTool
         }
 
         object[] allResults = [.. results];
-        var result = PaginateAndStore(allResults, ref skip, take);
+        var shape  = PageShape(filePath, totalNodes);
+        var result = PaginateAndStore(allResults, ref skip, take, shape);
 
-        return scope.Outcome("trivia", new GetTriviaResult(
+        return scope.Outcome("trivia", shape(result));
+    }
+
+    // Builds every page of one query, first and cached alike. A static factory taking plain values, so
+    // the function the pagination cache holds never captures the syntax tree or the compilation.
+    static Func<PaginatedResult<object>, object> PageShape(string filePath, int totalNodes)
+        => page => new GetTriviaResult(
             filePath,
             totalNodes,
-            allResults.Length,
-            skip, take,
-            result.Items,
-            result.PageToken,
-            result.HasMore
-        ));
-    }
+            page.Total,
+            page.Skip, page.Take,
+            page.Items,
+            page.PageToken,
+            page.HasMore
+        )
+    ;
 
     private static object[] FilterTrivia(SyntaxTriviaList triviaList, string? kindFilter)
     {

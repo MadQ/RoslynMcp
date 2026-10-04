@@ -54,7 +54,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		[Description("Maximum results to return. Default: 50, max: 200.")]
 		int take = 50,
 
-		[Description("Token from a previous response to get the next page without re-executing the query.")]
+		[Description(PageTokenDescription)]
 		string? page_token = null
 	)
 	{
@@ -66,7 +66,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 
 		filePattern ??= "*.cs";
 
-		if(scope.TryServeCachedPage<StringLiteralMatch>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<StringLiteralMatch>(page_token, ref skip, ref take, 50, 200, out var cached))
 
 			return scope.Outcome("cached page", cached);
 
@@ -124,18 +124,10 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		}
 
 		var allResults = allMatches.ToArray();
-		var result     = PaginateAndStore(allResults, ref skip, take);
+		var shape      = PageShape(ComposeCautions(modeCaution, fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
+		var result     = PaginateAndStore(allResults, ref skip, take, shape);
 
-		return scope.Outcome($"{result.Total} match(es)", new FindStringLiteralResult(
-			result.Items,
-			result.Total,
-			result.Items.Length,
-			result.PageToken,
-			result.HasMore)
-		{
-			Caution = ComposeCautions(modeCaution, fallbackCaution, AdhocCaution(projectPath)),
-			Hint    = fallbackHint
-		});
+		return scope.Outcome($"{result.Total} match(es)", shape(result));
 
 		async Task<List<StringLiteralMatch>> CollectAsync(Regex rx)
 		{
@@ -193,6 +185,21 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			return matches;
 		}
 	}
+
+	// Builds every page of one query, first and cached alike, so a cached page keeps the same fields
+	// — the caution and hint included.
+	static Func<PaginatedResult<StringLiteralMatch>, object> PageShape(string? caution, string? hint)
+		=> page => new FindStringLiteralResult(
+			page.Items,
+			page.Total,
+			page.Items.Length,
+			page.PageToken,
+			page.HasMore)
+		{
+			Caution = caution,
+			Hint    = hint
+		}
+	;
 }
 
 sealed record StringLiteralMatch(

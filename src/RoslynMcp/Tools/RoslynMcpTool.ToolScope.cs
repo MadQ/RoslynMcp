@@ -55,15 +55,42 @@ internal abstract partial class RoslynMcpTool
 		public void SetCaution(string caution) => pendingCaution = caution;
 		
 		/// <summary>
-		///     Checks the pagination cache for <paramref name="pageToken"/> and, on a hit, writes
-		///     the page slice to <paramref name="result"/> and returns <see langword="true"/>.
-		///     Always clamps <paramref name="take"/> to <paramref name="maxTake"/>.
+		///     Applies a page token to <paramref name="skip"/>/<paramref name="take"/> and, when its result
+		///     set is still cached, builds the page with the tool's own shape function, writes it to
+		///     <paramref name="result"/>, and returns <see langword="true"/>.
+		///     <para>
+		///         The token is a <see cref="PageCursor"/>: it supplies the position and page size whenever
+		///         the caller left them at their defaults, so a token passed alone yields the next page at
+		///         the same size. An explicit non-zero <paramref name="skip"/>, or a <paramref name="take"/>
+		///         other than <paramref name="defaultTake"/>, overrides it — there is no way to tell an
+		///         omitted argument from one that equals its default, so those values read as omitted.
+		///     </para>
+		///     <para>
+		///         The cursor is applied before the cache lookup on purpose: on a miss (entry expired, or
+		///         the cache cleared by an edit) the caller re-runs its query with <paramref name="skip"/>
+		///         already at the cursor's position, serving the page that was asked for rather than page 1.
+		///         Always clamps <paramref name="take"/> to <paramref name="maxTake"/>.
+		///     </para>
 		/// </summary>
-		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int maxTake, [NotNullWhen(true)] out ToolResult? result)
+		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int defaultTake, int maxTake, [NotNullWhen(true)] out object? result)
 		{
+			var hasCursor = PageCursor.TryParse(pageToken, out var cursor);
+			
+			if(hasCursor) {
+				
+				if(skip == 0)
+					skip = cursor.Skip;
+				
+				if(take == defaultTake)
+					take = cursor.Take;
+			}
+			
 			take = Math.Clamp(take, 1, maxTake);
 			
-			if(pageToken is null || !paginationCache.TryGet<T>(pageToken, out var cached)) {
+			if(!hasCursor || !paginationCache.TryGet<T>(cursor.Id, out var cached, out var shape)) {
+				
+				if(hasCursor)
+					Record("page token no longer cached — query re-run");
 				
 				result = null;
 				
@@ -74,16 +101,17 @@ internal abstract partial class RoslynMcpTool
 			
 			skip = Math.Clamp(skip, 0, cached.Length);
 			
-			var page = cached.Slice(skip, Math.Min(take, cached.Length - skip)).ToArray();
+			var page    = cached.Slice(skip, Math.Min(take, cached.Length - skip)).ToArray();
+			var hasMore = skip + page.Length < cached.Length;
 			
-			result = new CachedPageResult<T>(
+			result = shape(new PaginatedResult<T>(
 				Items:     page,
 				Total:     cached.Length,
 				Skip:      skip,
 				Take:      take,
-				PageToken: pageToken,
-				HasMore:   skip + page.Length < cached.Length
-			);
+				PageToken: hasMore ? new PageCursor(cursor.Id, skip + page.Length, take).ToString() : null,
+				HasMore:   hasMore
+			));
 			
 			return true;
 		}
