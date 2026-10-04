@@ -24,8 +24,7 @@ using System.Text.Json.Nodes;
 ///     </para>
 ///     <para>
 ///         Creating a link needs a privilege Windows grants only to administrators or in developer
-///         mode. Where it is refused the fixture cannot be built and both tests are passed over,
-///         saying so in their message.
+///         mode. Where it is refused both tests fail visibly rather than silently passing unchecked.
 ///     </para>
 /// </summary>
 static class LinkedWorkspaceTests
@@ -83,7 +82,7 @@ static class LinkedWorkspaceTests
 			return (null, data?["error"]?.GetValue<string>() ?? content);
 		}
 		
-		const string passedOver = "PASS  (not checked: this machine may not create symbolic links)";
+		const string unavailable = "FAIL  (not checked: this machine may not create symbolic links)";
 		
 		var tests = new List<TestCase> {
 			
@@ -94,7 +93,7 @@ static class LinkedWorkspaceTests
 					
 					if(!linksMade)
 						
-						return (true, passedOver);
+						return (false, unavailable);
 					
 					var (notes, notesError) = await ReadAsync("Notes.txt");
 					var (probe, probeError) = await ReadAsync("Probe.cs");
@@ -111,7 +110,7 @@ static class LinkedWorkspaceTests
 					
 					if(!linksMade)
 						
-						return (true, passedOver);
+						return (false, unavailable);
 					
 					var (text, error) = await ReadAsync("escape/secret.txt");
 					
