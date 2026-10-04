@@ -174,14 +174,25 @@ class SetupCommand : CliCommand
                hookAnswer.Equals("yes", StringComparison.OrdinalIgnoreCase))
             {
                 const string hookCommand = ToolCommand.HookCommand;
-                var ok = ((ClaudeCodeClient) claudeResult.Client).UpsertHook(hookCommand);
+                var install = claudeResult.Client.UpsertHook(hookCommand);
 
                 Console.WriteLine();
 
-                if(ok)
-                    Console.WriteLine("  ✓ Claude Code hook added (applies to all future sessions).");
+                if(install != HookInstall.NotInstalled)
+                {
+                    Console.WriteLine("  ✓ Claude Code hook added to ~/.claude/settings.json (applies to all future sessions).");
+
+                    if(install == HookInstall.InstalledStaleEntryRemains)
+                    {
+                        // The file could not be read or rewritten, so whether it holds an old entry is
+                        // not known — the message must not claim that one is there.
+                        Console.WriteLine("  ⚠ ~/.claude.json could not be checked for an older RoslynMcp hook entry — the file");
+                        Console.WriteLine("    is not valid JSON or not writable. Claude Code does not read hooks from that file,");
+                        Console.WriteLine("    so an entry left there does nothing; delete it by hand when convenient.");
+                    }
+                }
                 else
-                    Console.WriteLine("  ✗ Failed to update Claude Code hook — check ~/.claude.json permissions.");
+                    Console.WriteLine("  ✗ Failed to update Claude Code hook — check that ~/.claude/settings.json is writable, valid JSON, and that \"hooks\" is an object with \"PreToolUse\" as an array.");
             }
         }
 
