@@ -240,6 +240,33 @@ static class ClaudeHookSetupTests
 					: $"unexpected groups: {groups?.ToJsonString() ?? "none"}";
 			}),
 			
+			// The install and the cleanup are separate outcomes. When the old file cannot be
+			// cleaned (here: not valid JSON), the hook is still installed, but the result must say
+			// the stale entry remains — setup prints a different message for it — and the old
+			// file must be left as it was. A clean old file gives the plain "Installed".
+			Case("a cleanup that fails is reported without undoing the install", () => {
+				
+				const string broken = "{ \"hooks\": oops";
+				
+				var settings  = Path.Combine(dir, "report-settings.json");
+				var badLegacy = Path.Combine(dir, "report-bad-legacy.json");
+				var noLegacy  = Path.Combine(dir, "report-no-legacy.json");
+				
+				File.WriteAllText(badLegacy, broken);
+				
+				var install     = Method(ctx, "InstallHook");
+				var withStale   = install.Invoke(null, [settings, badLegacy, HookCommand])!.ToString();
+				var withNothing = install.Invoke(null, [settings, noLegacy,  HookCommand])!.ToString();
+				var groups      = Groups(settings);
+				
+				return withStale == "InstalledStaleEntryRemains"
+					&& withNothing == "Installed"
+					&& File.ReadAllText(badLegacy) == broken
+					&& groups is not null && Commands(groups).SequenceEqual([HookCommand])
+					? null
+					: $"results: {withStale} / {withNothing}; groups: {groups?.ToJsonString()}";
+			}),
+			
 			// A file that cannot be parsed is reported as a failure and left byte-for-byte as it
 			// was — rewriting it would destroy the user's settings.
 			Case("an unparseable settings file is left untouched", () => {

@@ -4,6 +4,15 @@ using System.Text.Json.Nodes;
 
 namespace RoslynMcp.Cli;
 
+// Outcome of installing a client's user-level hook. The stale-entry case is its own value because
+// the hook does work, yet setup must still say that an old entry was left behind.
+enum HookInstall
+{
+    NotInstalled,
+    Installed,
+    InstalledStaleEntryRemains
+}
+
 // Base for all supported AI coding agent integrations.
 // Each subclass knows its own config path(s) and JSON schema for MCP server entries.
 abstract partial class AgentClient
@@ -71,9 +80,9 @@ abstract partial class AgentClient
     public abstract string? GetCommandPath(JsonObject entry)
 ;
 
-    // Called by SetupCommand after MCP config is patched. Returns true if the hook was
-    // installed or updated; false (default) means this client doesn't support user-level hooks.
-    public virtual bool UpsertHook(string hookCommand) => false;
+    // Called by SetupCommand after MCP config is patched. NotInstalled (default) also covers a
+    // client that doesn't support user-level hooks.
+    public virtual HookInstall UpsertHook(string hookCommand) => HookInstall.NotInstalled;
 
 }
 
@@ -201,16 +210,21 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
     // Adds a pre-tool-use advisor hook that guides Claude Code to prefer roslyn_* tools for .cs
     // files. The hook applies globally to all Claude Code sessions.
-    public override bool UpsertHook(string hookCommand)
+    public override HookInstall UpsertHook(string hookCommand)
+        => InstallHook(HookSettingsPath, GetConfigPaths()[0], hookCommand);
+
+    // Installs into settingsPath, then removes the entry earlier versions left in legacyPath.
+    // A failed cleanup does not undo the install — the leftover entry is inert, because Claude
+    // Code does not read hooks from that file — but it is reported, so setup can say so instead
+    // of claiming the old entry is gone.
+    internal static HookInstall InstallHook(string settingsPath, string legacyPath, string hookCommand)
     {
-        if(!UpsertHookIn(HookSettingsPath, hookCommand))
-            return false;
+        if(!UpsertHookIn(settingsPath, hookCommand))
+            return HookInstall.NotInstalled;
 
-        // Best effort — the hook is installed either way, and a leftover entry in the file
-        // Claude Code does not read hooks from is inert.
-        RemoveHookFrom(GetConfigPaths()[0]);
-
-        return true;
+        return RemoveHookFrom(legacyPath)
+            ? HookInstall.Installed
+            : HookInstall.InstalledStaleEntryRemains;
     }
 
     // Writes a single RoslynMcp hook entry into the settings file at settingsPath, replacing any
