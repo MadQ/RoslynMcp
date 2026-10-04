@@ -35,7 +35,7 @@ internal class SetupProjectCommand : CliCommand
 		
 		var hookFile = Path.Combine(githubDir, "roslynmcp.json");
 		
-		// The hook reads tool event JSON from stdin and writes allow/additionalContext.
+		// The hook reads tool event JSON from stdin and writes guidance for .cs file operations.
 		// See ToolCommand.HookCommand for why this is the bare command name (not `dotnet …`
 		// and not an absolute path — this file is committed and shared across contributors).
 		const string hookCommand = ToolCommand.HookCommand;

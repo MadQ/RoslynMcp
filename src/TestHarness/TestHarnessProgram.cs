@@ -142,6 +142,7 @@ class Program
 			groups.Add(EditingTests.Build(ctx));
 			groups.Add(await ReloadFlaggingTests.BuildAsync(ctx));
 			groups.Add(PaginationTests.Build(ctx));
+			groups.Add(HookHintTests.Build(ctx));
 			groups.Add(ClaudeHookSetupTests.Build(ctx));
 			groups.Add(await IgnoredDirectoryTests.BuildAsync(ctx));
 			groups.Add(await IncrementalAdditionalDocTests.BuildAsync(ctx));
