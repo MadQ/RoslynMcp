@@ -46,8 +46,10 @@ internal sealed class PaginationCache
 	}
 	
 	/// <summary>
-	///     Looks up an entry by id. False when it is unknown, expired, or holds a different element type —
-	///     an id presented to the wrong tool misses without disturbing the entry it belongs to.
+	///     Looks up an entry by id. False when it is unknown, expired, or holds a different element type;
+	///     a mismatch leaves the entry it belongs to untouched. The element type is the only check: an
+	///     id presented to another tool with the same element type still hits, and is served with the
+	///     shape of the tool that stored it (#316).
 	/// </summary>
 	public bool TryGet<T>(
 		string id,
