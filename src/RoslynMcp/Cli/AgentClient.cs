@@ -295,6 +295,8 @@ sealed class ClaudeCodeClient : McpServersDictClient
             if(preToolUse[i] is not JsonObject itemObj || itemObj["hooks"] is not JsonArray innerHooks)
                 continue;
 
+            var removedHere = false;
+
             for(var j = innerHooks.Count - 1; j >= 0; j--)
             {
                 if(innerHooks[j] is not JsonObject hObj
@@ -303,32 +305,25 @@ sealed class ClaudeCodeClient : McpServersDictClient
                    || !ToolCommand.IsOurCommandInvocation(command))
                     continue;
 
-                if(InvokesCurrentToolName(command))
+                if(ToolCommand.InvokesCurrentName(command))
                     existingCommand = command;
 
                 innerHooks.RemoveAt(j);
-                removed = true;
+                removedHere = true;
             }
 
-            if(innerHooks.Count == 0)
+            removed |= removedHere;
+
+            // Only a group this pass emptied goes. One that was already empty is not ours.
+            if(removedHere && innerHooks.Count == 0)
                 preToolUse.RemoveAt(i);
         }
 
         return removed;
     }
 
-    // True when the command's executable is this tool under its current name — not a legacy
-    // name, which must be replaced because that command no longer exists.
-    static bool InvokesCurrentToolName(string command)
-    {
-        var tokens = command.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries);
-
-        return tokens.Length > 0
-            && Path.GetFileNameWithoutExtension(tokens[0]).Equals(ToolCommand.Name, StringComparison.OrdinalIgnoreCase);
-    }
-
-    // A missing file loads as an empty object. False when the file exists but is not a JSON
-    // object: writing back would then destroy whatever it holds.
+    // A missing or blank file loads as an empty object. False when the file holds anything that
+    // is not a JSON object: writing back would then destroy it.
     static bool TryLoadJsonObject(string path, out JsonObject root)
     {
         root = [];
@@ -338,7 +333,12 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
         try
         {
-            var parsed = JsonNode.Parse(File.ReadAllText(path), documentOptions: new JsonDocumentOptions {
+            var text = File.ReadAllText(path);
+
+            if(string.IsNullOrWhiteSpace(text))
+                return true;
+
+            var parsed = JsonNode.Parse(text, documentOptions: new JsonDocumentOptions {
 
                 AllowTrailingCommas = true,
                 CommentHandling     = JsonCommentHandling.Skip

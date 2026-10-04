@@ -82,9 +82,9 @@ static class ToolCommand
 		if(string.IsNullOrWhiteSpace(command))
 			return false;
 
-		var tokens = command.Split((char[]?) null, StringSplitOptions.RemoveEmptyEntries);
+		var tokens = SplitCommand(command);
 
-		if(tokens.Length == 0)
+		if(tokens.Count == 0)
 			return false;
 
 		var first = Path.GetFileNameWithoutExtension(tokens[0]);
@@ -93,9 +93,54 @@ static class ToolCommand
 			return true;
 
 		// Legacy dotnet-driver form: `dotnet <name> ...`.
-		if(first.Equals("dotnet", StringComparison.OrdinalIgnoreCase) && tokens.Length > 1)
+		if(first.Equals("dotnet", StringComparison.OrdinalIgnoreCase) && tokens.Count > 1)
 			return MatchesCommandStem(Path.GetFileNameWithoutExtension(tokens[1]));
 
 		return false;
+	}
+
+	// True when a full invocation string runs this tool under its current command name — not a
+	// legacy name. Setup keeps such a command as written (an absolute path, --log) instead of
+	// replacing it; a legacy-named one must be replaced because that command no longer exists.
+	public static bool InvokesCurrentName(string? command)
+	{
+		if(string.IsNullOrWhiteSpace(command))
+			return false;
+
+		var tokens = SplitCommand(command);
+
+		return tokens.Count > 0
+			&& Path.GetFileNameWithoutExtension(tokens[0]).Equals(Name, StringComparison.OrdinalIgnoreCase)
+		;
+	}
+
+	// Splits an invocation on whitespace, keeping a double-quoted run together and dropping the
+	// quotes: an executable path under a profile directory with a space in it is written quoted,
+	// and a plain whitespace split would cut it at the space and miss the file name.
+	static List<string> SplitCommand(string command)
+	{
+		var tokens  = new List<string>();
+		var current = new System.Text.StringBuilder();
+		var quoted  = false;
+
+		foreach(var c in command) {
+
+			if(c == '"')
+				quoted = !quoted;
+			else if(char.IsWhiteSpace(c) && !quoted) {
+
+				if(current.Length > 0)
+					tokens.Add(current.ToString());
+
+				current.Clear();
+			}
+			else
+				current.Append(c);
+		}
+
+		if(current.Length > 0)
+			tokens.Add(current.ToString());
+
+		return tokens;
 	}
 }

@@ -119,6 +119,62 @@ static class ClaudeHookSetupTests
 					: $"unexpected groups: {groups?.ToJsonString()}";
 			}),
 			
+			// A profile directory with a space forces a quoted executable path. A plain whitespace
+			// split would cut it at the space, miss the file name, and append a second entry
+			// instead of recognising this one. An empty settings file (0 bytes) is the other
+			// awkward-but-real state covered here: it must load as "no settings", not fail.
+			Case("a quoted path with a space is recognised and kept; a blank file loads as empty", () => {
+				
+				const string quoted = "\"C:\\Users\\John Doe\\.dotnet\\tools\\madq-roslynmcp.exe\" hook --log";
+				
+				var path  = Path.Combine(dir, "quoted.json");
+				var blank = Path.Combine(dir, "blank.json");
+				
+				File.WriteAllText(path, new JsonObject {
+					
+					["hooks"] = new JsonObject {
+						
+						["PreToolUse"] = new JsonArray {
+							
+							new JsonObject { ["matcher"] = "", ["hooks"] = new JsonArray { new JsonObject { ["type"] = "command", ["command"] = quoted } } }
+						}
+					}
+				}.ToJsonString());
+				
+				File.WriteAllText(blank, "");
+				
+				if(!Upsert(ctx, path) || !Upsert(ctx, blank))
+					return "UpsertHookIn returned false";
+				
+				var groups      = Groups(path);
+				var blankGroups = Groups(blank);
+				
+				return groups is not null && Commands(groups).SequenceEqual([quoted])
+					&& blankGroups is not null && Commands(blankGroups).SequenceEqual([HookCommand])
+					? null
+					: $"unexpected groups: {groups?.ToJsonString()} / {blankGroups?.ToJsonString()}";
+			}),
+			
+			// A matcher group someone else left with an empty hooks array is not ours to delete,
+			// in either the install or the cleanup.
+			Case("a foreign group with no hooks is left in place", () => {
+				
+				var path = Path.Combine(dir, "empty-group.json");
+				
+				File.WriteAllText(path, """
+					{ "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [] } ] } }
+					""");
+				
+				if(!Remove(ctx, path) || !Upsert(ctx, path))
+					return "a method returned false";
+				
+				var groups = Groups(path);
+				
+				return groups?.Count == 2 && groups[0]?["matcher"]?.GetValue<string>() == "Bash"
+					? null
+					: $"unexpected groups: {groups?.ToJsonString()}";
+			}),
+			
 			// "dotnet roslynmcp hook" was the command before the package was renamed; that
 			// command no longer exists, so it is replaced rather than kept.
 			Case("an entry under a legacy command name is replaced", () => {
