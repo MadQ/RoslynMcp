@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Text;
 using System.Text.Json;
+using ModelContextProtocol.Protocol;
 using RoslynMcp;
 
 namespace RoslynMcp.Tools;
@@ -140,6 +142,20 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records a success detail and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
 		public T Outcome<T>(string detail, T returnValue)
 		{
+			returnValue = Complete(detail, returnValue);
+			
+			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
+			
+			return returnValue!;
+		}
+		
+		/// <summary>
+		///     Marks the call successful and merges the session note and any pending hint or caution into
+		///     <paramref name="returnValue"/>. Shared by the success terminals, which differ only in how
+		///     they measure the response for the log.
+		/// </summary>
+		T Complete<T>(string detail, T returnValue)
+		{
 			this.detail = detail;
 			completed   = true;
 			
@@ -154,11 +170,67 @@ internal abstract partial class RoslynMcpTool
 			if(returnValue is ToolResult tr && (_pendingHint is not null || pendingCaution is not null))
 				returnValue = (T)(object)(tr with { Hint = tr.Hint ?? _pendingHint, Caution = tr.Caution ?? pendingCaution });
 			
-			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
-			
 			return returnValue!;
 		}
 		
+		/// <summary>
+		///     Success terminal for tools that return source text: one JSON header block followed by the
+		///     raw source. Inside a JSON string the same code costs about 12% more characters and reaches
+		///     the model with its tabs, quotes and backslashes escaped, which an exact-match edit built
+		///     from the response then has to undo (#328).
+		/// </summary>
+		public ContentBlock[] Outcome(string detail, ToolResult header, string source)
+			=> Outcome(detail, header, [(null, source)]);
+		
+		/// <summary>
+		///     Multi-part form of the source terminal: each part is a one-line JSON header followed by its
+		///     source. A client may join text blocks with nothing between them (Claude Code does), so
+		///     every block ends with a newline and each header states the line range that follows. The
+		///     boundaries stay readable without the block structure, and no file content can forge one.
+		/// </summary>
+		public ContentBlock[] Outcome(string detail, ToolResult header, IReadOnlyList<(object? Header, string Source)> parts)
+		{
+			// Not the generic terminal: that one would serialize the header a second time for a peek and a
+			// token estimate that are replaced below.
+			header = Complete(detail, header);
+			
+			var texts = new List<string>(1 + parts.Count * 2) { ToJson(header) + "\n" };
+			
+			foreach(var (partHeader, source) in parts) {
+				
+				if(partHeader is not null)
+					texts.Add(ToJson(partHeader) + "\n");
+				
+				// Appended unconditionally: source whose last line is empty already ends in a newline,
+				// and treating that as the terminator would drop the line.
+				texts.Add(source + "\n");
+			}
+			
+			var length = 0;
+			var peek   = new StringBuilder(PeekLength);
+			
+			foreach(var text in texts) {
+				
+				length += text.Length;
+				
+				if(peek.Length < PeekLength)
+					peek.Append(text, 0, Math.Min(text.Length, PeekLength - peek.Length));
+			}
+			
+			estimatedTokens = length / 4;
+			responsePeek    = length <= PeekLength ? peek.ToString() : peek + "…";
+			
+			return [..texts.Select(text => new TextContentBlock { Text = text })];
+		}
+		
+		// The runtime type, not the declared one: a header typed as ToolResult would otherwise
+		// serialize only the base record's properties.
+		static string ToJson(object value) => JsonSerializer.Serialize(value, value.GetType(), RoslynMcpJson.Compact);
+		
+		/// <summary>Characters of the response kept for the log viewer — enough to show meaningful content.</summary>
+		const int PeekLength = 600;
+		
+
 		const string SessionNote =
 			"[RoslynMcp hint — shown once per session]\n" +
 			"For .cs file operations in this session, roslyn_* tools provide semantic accuracy " +
@@ -260,7 +332,7 @@ internal abstract partial class RoslynMcpTool
 				
 				var json   = JsonSerializer.Serialize(value, RoslynMcpJson.Compact);
 				var tokens = json.Length / 4;
-				var peek   = json.Length <= 600 ? json : json[..600] + "…";
+				var peek   = json.Length <= PeekLength ? json : json[..PeekLength] + "…";
 				
 				return (tokens, peek);
 			}

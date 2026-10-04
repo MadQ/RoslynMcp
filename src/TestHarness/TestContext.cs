@@ -65,12 +65,23 @@ class TestContext
 		}
 	}
 	
+	// The common case: a tool whose whole response is its first content block.
+	internal Task<(bool pass, string message)> RunTestAsync(
+		string toolName,
+		object arguments,
+		Func<JsonNode?, bool> validate,
+		bool expectJson = true)
+		=> RunTestAsync(toolName, arguments, (data, _) => validate(data), expectJson)
+	;
+	
+	// The validator also receives the text of every content block after the first: the
+	// source-returning tools answer with a JSON header block followed by raw source blocks (#328).
 	// Sends a tool call and validates the response. The test name is owned by
 	// the calling TestCase — this method only concerns itself with the wire protocol.
 	internal async Task<(bool pass, string message)> RunTestAsync(
 		string toolName,
 		object arguments,
-		Func<JsonNode?, bool> validate,
+		Func<JsonNode?, string[], bool> validate,
 		bool expectJson = true)
 	{
 		var sw = Stopwatch.StartNew();
@@ -102,9 +113,9 @@ class TestContext
 			
 			return (false, $"FAIL  (no result) [{sw.ElapsedMilliseconds}ms]");
 		
-		var content = result["content"]?[0]?["text"]?.GetValue<string>();
+		var texts = result["content"]?.AsArray().Select(block => block?["text"]?.GetValue<string>()).ToArray() ?? [];
 		
-		if(content is null)
+		if(texts is not [{ } content, ..])
 			
 			return (false, $"FAIL  (no content) [{sw.ElapsedMilliseconds}ms]");
 		
@@ -125,7 +136,7 @@ class TestContext
 			;
 		}
 		
-		var pass = validate(data);
+		var pass = validate(data, [..texts.Skip(1).Select(text => text ?? "")]);
 		
 		return pass
 			? (true,  $"PASS  [{sw.ElapsedMilliseconds}ms]")

@@ -104,9 +104,9 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `GetSymbolDocumentationTool` | `roslyn_get_symbol_documentation` — XML doc comments for symbols |
 | `GetSymbolDefinitionTool` | `roslyn_get_symbol_definition` — find declaration location with signature |
 | `GetSymbolsInScopeTool` | `roslyn_get_symbols_in_scope` — enumerate accessible symbols at a location |
-| `ReadFileTool` | `roslyn_read_file` — file contents with line numbers (tracked text documents from the in-memory workspace) |
+| `ReadFileTool` | `roslyn_read_file` — file contents as a one-line JSON header (`file`, `source`, `total_lines`, `start_line`, `end_line`) followed by the requested lines as raw, unescaped text (#328); tracked text documents come from the in-memory workspace |
 | `GetLineCountTool` | `roslyn_get_line_count` — line count for one or more files |
-| `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name; handles partial types |
+| `GetMemberBodyTool` | `roslyn_get_member_body` — return full source of a single method/property/field/type by name, as a one-line JSON header followed by the raw, unescaped declaration (#328); a partial type returns one header line plus raw text per part |
 | `CheckSyntaxTool` | `roslyn_check_syntax` — validate a C# snippet for syntax (and optionally semantic) errors without writing to disk; fast pre-flight check before writing; returns `valid`, counts, and `DiagnosticItem[]` with 1-indexed lines mapped back to the original snippet |
 | `GetTriviaTool` | `roslyn_get_trivia` (**EXPERIMENTAL**) — extract whitespace, comments, and formatting trivia; filter by syntax kind, trivia kind, or line range; useful for understanding indentation context |
 | `InfoTool` | `roslyn_info` — server version, PID, uptime, MSBuild discovery method, log markers |
@@ -548,6 +548,7 @@ Every `return` statement that carries a value must go through a scope terminal. 
 |--------|-------------|
 | `scope.Outcome(detail, returnValue)` | Normal success. `detail` is a short log annotation ("12 results", "3 files changed"). Serializes the return value for log peek and token estimate. **Use this for successful returns.** |
 | `scope.Outcome(detail)` | Success with no return value (rare — only for `void`-adjacent paths before final `return`). |
+| `scope.Outcome(detail, header, source)` | Success for a tool that returns source code (#328). `header` is a `ToolResult` serialized as one JSON line; `source` follows as a raw text block, so the model reads the code unescaped and can copy it verbatim into an edit. The overload taking a list of `(Header, Source)` parts writes a one-line JSON header before each part. Every block ends with a newline, because a client may join blocks with nothing between them. Never put source text in a `ToolResult` property. |
 | `scope.Error<T>(returnValue)` | Structured error. `T` must satisfy `where T : ToolResult, IToolError`. Marks the invocation failed, logs the error message. **Prefer over `Failed` when returning a known `ErrorResult` or custom `IToolError` type.** |
 | `scope.Failed(reason, returnValue)` | Unstructured failure. Use when the error is a raw string (e.g., caught exception message) and no `IToolError` type is appropriate. |
 | `scope.Failed(reason)` | Failure with no return value — marks the call failed and sets the log detail. Used before a `return` that returns void or before an exception. |

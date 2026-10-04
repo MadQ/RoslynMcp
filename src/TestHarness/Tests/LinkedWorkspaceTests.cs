@@ -77,9 +77,10 @@ static class LinkedWorkspaceTests
 			try { data = JsonNode.Parse(content); }
 			catch { return (null, "unparseable response"); }
 			
-			if(data?["lines"] is JsonArray lines)
+			// A successful read is a JSON header block followed by the file's text as a raw block (#328).
+			if(data?["error"] is null && resp?["result"]?["content"]?[1]?["text"]?.GetValue<string>() is { } source)
 				
-				return (string.Join("\n", lines.Select(line => line?.ToString())), null);
+				return (source, null);
 			
 			return (null, data?["error"]?.GetValue<string>() ?? content);
 		}

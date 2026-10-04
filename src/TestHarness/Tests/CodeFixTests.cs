@@ -16,10 +16,14 @@ internal static class CodeFixTests
 			});
 			
 			var response = await ctx.ReceiveAsync();
-			var text = response?["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? string.Empty;
+			
+			// Text is the whole response; Data is its first block. They differ only for the
+			// source-returning tools, which answer with a JSON header block and then raw source (#328).
+			var blocks = response?["result"]?["content"]?.AsArray().Select(block => block?["text"]?.GetValue<string>() ?? string.Empty).ToArray() ?? [];
+			var text   = string.Concat(blocks);
 			JsonNode? data = null;
 			
-			try { data = JsonNode.Parse(text); }
+			try { data = JsonNode.Parse(blocks.FirstOrDefault() ?? string.Empty); }
 			catch { }
 			
 			return (data, text);

@@ -156,8 +156,10 @@ static class DefaultWorkspaceTests
 					replacement = "public string Greet() => \"hello\";"
 				});
 				
-				var (readOk, read) = await Call(rootedCtx, "roslyn_read_file", new { filePath = "Lib/Greeter.cs" });
-				var lines          = read?["lines"]?.AsArray().Select(l => l?.GetValue<string>() ?? "") ?? [];
+				// The workspace's view of the file, through a content search: roslyn_read_file returns its
+				// source as a raw text block, which this group's JSON-only Call helper does not see.
+				var (readOk, read) = await Call(rootedCtx, "roslyn_search_files", new { pattern = "\"hello\"", mode = "literal", filePattern = "Greeter.cs" });
+				var lines          = read?["matches"]?.AsArray().Select(m => m?["text"]?.GetValue<string>() ?? "") ?? [];
 				
 				return Verdict(ok && readOk
 					&& lines.Any(l => l.Contains("\"hello\""))
