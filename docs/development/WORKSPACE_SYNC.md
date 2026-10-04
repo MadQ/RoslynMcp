@@ -267,6 +267,48 @@ reloads during a batch write operation.
 
 ---
 
+## Watch roots (#309)
+
+A workspace no longer holds one recursive `FileSystemWatcher` on its root. A watcher cannot
+exclude a directory, and on Linux a recursive one registers an inotify watch per directory below
+it, so a root watcher walked all of `node_modules` and `.git` on the first load — and again on
+every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
+
+`WatchPlanner` picks the roots, in order of coverage:
+
+1. **`root`** — the whole workspace root, split around the never-input directories
+   (`IgnoreRules.IsNeverInput`: `node_modules`, `.git`, `.vs`, `packages`, configured names). A
+   directory with such a directory somewhere below it is watched non-recursively; every other child
+   is watched recursively. Coverage is what the single watcher had, minus the trees whose events
+   `ScheduleDebounced` dropped anyway. With nothing to skip this is one recursive root, as before.
+2. **`projects`** — when that needs more than 32 watchers: project directories only (split the same
+   way), plus their ancestors up to the root and the directories of documents linked from
+   elsewhere, non-recursively. An imported `.props`/`.targets` outside those is not watched.
+3. **`fallback`** — a single recursive watcher on the root.
+
+`WorkspaceWatchSet` starts the planned watchers on a background thread and funnels every event into
+`ScheduleDebounced`, so nothing downstream changed. Three things follow from that:
+
+- **Tool calls do not wait for the watchers.** Once they are live, `ReconcileMissedChanges` queues
+  every tracked document (outside `bin`/`obj`) whose mtime is later than the start of construction,
+  covering edits made during the load and the watcher start. New files created in that window are
+  not detected.
+- **Suppression is unchanged in meaning.** `ApplyChangesWithFswSuppressed` calls
+  `Suspend`/`Resume`, which disable and re-enable every watcher under the same ref-count rule.
+- **Non-recursive roots adopt new directories.** A directory created or moved under one gets a
+  recursive watcher, and the files already in it are reported — `mkdir` and the first write into it
+  are milliseconds apart.
+
+A workspace never holds more than 32 watchers: when adopting a directory would pass that, the
+watch set plans again instead, which moves it to the `projects` or `fallback` shape.
+
+The plan is recomputed after a reload only when the project or document directories changed, and
+edits made while watchers are being replaced are reconciled by timestamp the same way as after
+the initial load. A `node_modules` created under a recursive root after the plan was made is still
+watched until the next re-plan; its events are dropped as before.
+
+---
+
 *Investigation notes: `files/stage1-findings.md` through `files/stage5-findings.md` in the
 session state contain the full per-stage analysis. This document distills the architectural
 conclusions.*
