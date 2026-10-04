@@ -190,7 +190,7 @@ class SetupCommand : CliCommand
                     }
                 }
                 else
-                    Console.WriteLine("  ✗ Failed to update Claude Code hook — check that ~/.claude/settings.json is valid JSON and writable.");
+                    Console.WriteLine("  ✗ Failed to update Claude Code hook — check that ~/.claude/settings.json is writable, valid JSON, and that \"hooks\" is an object with \"PreToolUse\" as an array.");
             }
         }
 

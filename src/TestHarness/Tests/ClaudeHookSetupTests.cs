@@ -387,6 +387,44 @@ static class ClaudeHookSetupTests
 				return File.ReadAllText(path) == broken ? null : "the file was modified";
 			}),
 			
+			// "hooks" must be an object and "PreToolUse" an array. A value of another shape is
+			// something the installer does not understand; creating a fresh container in its place
+			// would silently discard it. Each file must be reported as a failed install and left
+			// byte-for-byte as it was. A null value, by contrast, holds nothing and is filled in.
+			Case("a hooks or PreToolUse value of the wrong shape is left untouched; null is filled in", () => {
+				
+				(string name, string content)[] wrong = [
+					("hooks-array.json",  "{ \"hooks\": [ \"mine\" ] }"),
+					("pretool-text.json", "{ \"hooks\": { \"PreToolUse\": \"mine\" } }"),
+				];
+				
+				foreach(var (name, content) in wrong) {
+					
+					var path = Path.Combine(dir, name);
+					
+					File.WriteAllText(path, content);
+					
+					if(Upsert(ctx, path))
+						return $"{name}: UpsertHookIn reported success";
+					
+					if(File.ReadAllText(path) != content)
+						return $"{name}: the file was modified";
+				}
+				
+				var nullPath = Path.Combine(dir, "hooks-null.json");
+				
+				File.WriteAllText(nullPath, "{ \"hooks\": null }");
+				
+				if(!Upsert(ctx, nullPath))
+					return "hooks-null.json: UpsertHookIn returned false";
+				
+				var groups = Groups(nullPath);
+				
+				return groups is not null && Commands(groups).SequenceEqual([HookCommand])
+					? null
+					: $"hooks-null.json: unexpected groups: {groups?.ToJsonString() ?? "none"}";
+			}),
+			
 			// A duplicate key is well-formed enough to parse lazily, and then throws when the
 			// object is first indexed. It must be a plain "could not load" for both methods — no
 			// exception (the Case wrapper would report one), and the file left as it was. The

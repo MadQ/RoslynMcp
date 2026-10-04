@@ -229,20 +229,30 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
     // Writes a single RoslynMcp hook entry into the settings file at settingsPath, replacing any
     // earlier one. Everything else in the file is preserved. False when the file cannot be
-    // parsed or written — it is then left untouched.
+    // parsed or written, or holds a "hooks" or "PreToolUse" value of an unexpected shape — it
+    // is then left untouched.
     internal static bool UpsertHookIn(string settingsPath, string hookCommand)
     {
         if(!TryLoadJsonObject(settingsPath, out var root))
             return false;
 
+        // A missing (or null) container is created. One that exists with another shape — "hooks"
+        // as an array, "PreToolUse" as a string — is not understood, and replacing it would
+        // discard whatever the user put there: the file is left alone, like one that is not JSON.
         if(root["hooks"] is not JsonObject hooks)
         {
+            if(root["hooks"] is not null)
+                return false;
+
             hooks = [];
             root["hooks"] = hooks;
         }
 
         if(hooks["PreToolUse"] is not JsonArray preToolUse)
         {
+            if(hooks["PreToolUse"] is not null)
+                return false;
+
             preToolUse = [];
             hooks["PreToolUse"] = preToolUse;
         }
