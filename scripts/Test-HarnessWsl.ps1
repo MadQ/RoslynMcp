@@ -131,8 +131,14 @@ elif command -v dotnet >/dev/null 2>&1 && has_sdk "$(command -v dotnet)"; then
     dotnet_bin="$(command -v dotnet)"
 elif [ "$install" = "1" ]; then
     echo "Installing .NET SDK $sdk into $home_dir/dotnet ..." >&2
-    curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/roslynmcp-dotnet-install.sh
-    bash /tmp/roslynmcp-dotnet-install.sh --version "$sdk" --install-dir "$home_dir/dotnet" --no-path >/dev/null
+    # A private file from mktemp, not a fixed name in /tmp: on a distribution with more than one
+    # user, a predictable path could be created or swapped by someone else before it is run.
+    installer="$(mktemp)"
+    trap 'rm -f "$installer"' EXIT
+    curl -fsSL https://dot.net/v1/dotnet-install.sh -o "$installer"
+    bash "$installer" --version "$sdk" --install-dir "$home_dir/dotnet" --no-path >/dev/null
+    rm -f "$installer"
+    trap - EXIT
     dotnet_bin="$private_dotnet"
 else
     echo "WSL has no .NET SDK $sdk (the version global.json pins). Run again with -InstallSdk to install it into $home_dir/dotnet." >&2
