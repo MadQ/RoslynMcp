@@ -3,7 +3,12 @@ using System.Reflection;
 
 /// <summary>
 ///     Comprehensive test harness for RoslynMcp. Tests all tools against RoslynMcp itself (dogfooding).
-///     Usage: dotnet run --project TestHarness/TestHarness.csproj [-- --only-build-diag]
+///     Usage: dotnet run --project TestHarness/TestHarness.csproj [-- --only-build-diag] [-- --quiet]
+///     <para>
+///         <c>--quiet</c> is for runs whose output is read by an agent or a script: a passing test
+///         prints nothing, a failing one prints one line, and the run ends with exactly one summary
+///         line. The exit code is the same either way — 0 when everything passed, 1 otherwise.
+///     </para>
 /// </summary>
 class Program
 {
@@ -16,12 +21,21 @@ class Program
 		
 		var version = typeof(Program).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "?";
 		
-		Console.WriteLine("═══════════════════════════════════════════════════════════════");
-		Console.WriteLine($"  RoslynMcp Test Harness v{version}");
-		Console.WriteLine("═══════════════════════════════════════════════════════════════");
-		Console.WriteLine($"Server:  {serverProj}");
-		Console.WriteLine($"Target:  {targetPath}");
-		Console.WriteLine();
+		// Quiet mode (#325): only failures and the final summary line reach the console.
+		var quiet = args.Contains("--quiet");
+		
+		void Info(string line)
+		{
+			if(!quiet)
+				Console.WriteLine(line);
+		}
+		
+		Info("═══════════════════════════════════════════════════════════════");
+		Info($"  RoslynMcp Test Harness v{version}");
+		Info("═══════════════════════════════════════════════════════════════");
+		Info($"Server:  {serverProj}");
+		Info($"Target:  {targetPath}");
+		Info("");
 		
 		// Sweep what a killed run left behind before building: stale fixture trees under %TEMP%, and
 		// the scratch .cs files older harness binaries wrote into src/RoslynMcp, which would break the
@@ -29,24 +43,36 @@ class Program
 		TestFixtures.SweepStale(repoRoot, TimeSpan.FromHours(1));
 		
 		// Build the server first -- dotnet run's build output goes to stdout and breaks the MCP stdio protocol.
-		Console.Write("Building server... ")
-		;
+		if(!quiet)
+			Console.Write("Building server... ");
+		
+		// Quiet mode captures the build output and shows it only when the build fails. Otherwise
+		// it goes straight to the console, as it always has.
 		var buildProc = Process.Start(new ProcessStartInfo("dotnet")
 		{
 			
-			Arguments       = $"build \"{serverProj}\" -f net10.0 --nologo -v q",
-			UseShellExecute = false,
+			Arguments              = $"build \"{serverProj}\" -f net10.0 --nologo -v q",
+			UseShellExecute        = false,
+			RedirectStandardOutput = quiet,
+			RedirectStandardError  = quiet,
 		})!;
-		buildProc.WaitForExit();
+		
+		// Both pipes are drained while the build runs — a full pipe would stall it.
+		var buildOutput = quiet ? buildProc.StandardOutput.ReadToEndAsync() : Task.FromResult("");
+		var buildErrors = quiet ? buildProc.StandardError.ReadToEndAsync()  : Task.FromResult("");
+		
+		await buildProc.WaitForExitAsync();
 		
 		if(buildProc.ExitCode != 0) {
 			
+			Console.Error.Write(await buildOutput);
+			Console.Error.Write(await buildErrors);
 			Console.Error.WriteLine($"Server build failed (exit code {buildProc.ExitCode}).");
 			
 			return 1;
 		}
 		
-		Console.WriteLine("done.");
+		Info("done.");
 		
 		// The harness server logs to its own per-run file under the fixture root, not the shared
 		// %LOCALAPPDATA% log. The server inserts its PID before the extension, hence the glob;
@@ -72,12 +98,29 @@ class Program
 		
 		using var proc = Process.Start(psi)!;
 		
+		// The server's stderr. Quiet mode holds it back and prints it only if the run fails —
+		// a passing run logs expected errors there too (a cancelled request, for one).
+		var serverErrors = new System.Collections.Concurrent.ConcurrentQueue<string>();
+		
 		proc.ErrorDataReceived += (_, e) =>
 		{
 			
-			if(e.Data is not null)
+			if(e.Data is null)
+				return;
+			
+			if(quiet)
+				serverErrors.Enqueue(e.Data);
+			else
 				Console.Error.WriteLine($"[stderr] {e.Data}");
 		};
+		
+		// Written to stdout, like the failure lines and the summary: one stream keeps their order,
+		// so the summary is reliably the last line even when a caller merges the two streams.
+		void FlushServerErrors()
+		{
+			while(serverErrors.TryDequeue(out var line))
+				Console.WriteLine($"[stderr] {line}");
+		}
 		proc.BeginErrorReadLine();
 		
 		var ctx = new TestContext(proc.StandardInput, proc.StandardOutput, targetPath, repoRoot, serverProj);
@@ -102,6 +145,7 @@ class Program
 		if(initResponse is null) {
 			
 			await Task.Delay(200); // Allow stderr to flush.
+			FlushServerErrors();
 			Console.Error.WriteLine("\n[FATAL] Server did not respond to initialize -- check stderr above for crash details.")
 			;
 			proc.Kill(entireProcessTree: true);
@@ -111,7 +155,7 @@ class Program
 		
 		await ctx.SendAsync(new { jsonrpc = "2.0", method = "notifications/initialized" });
 		
-		Console.WriteLine("OK MCP session initialized\n");
+		Info("OK MCP session initialized\n");
 		
 		// -- Test Suite -----------------------------------------------------------------------
 		
@@ -158,17 +202,27 @@ class Program
 		
 		foreach(var group in groups) {
 			
-			Console.WriteLine($"\n{group.Header}");
-			Console.WriteLine("─────────────────────────────────────────────────────────────")
-			;
+			Info($"\n{group.Header}");
+			Info("─────────────────────────────────────────────────────────────");
 			
 			try {
 				
 				foreach(var tc in group.Tests) {
 					
-					Console.Write($"  {tc.Name,-55} ");
+					if(!quiet)
+						Console.Write($"  {tc.Name,-55} ");
+					
 					var (pass, msg) = await tc.Run();
-					Console.WriteLine($"{msg}  [{++done}/{total}]");
+					
+					done++;
+					
+					// Quiet mode names a failure as it happens, with its group — the group headers
+					// that would otherwise say where it belongs are not printed.
+					if(!quiet)
+						Console.WriteLine($"{msg}  [{done}/{total}]");
+					else if(!pass)
+						Console.WriteLine($"FAIL  {group.Header} › {tc.Name}: {msg}");
+					
 					results.Add((tc.Name, pass, msg));
 				}
 			}
@@ -186,27 +240,39 @@ class Program
 		var failed   = results.Count - passed;
 		var failures = results.Where(r => !r.pass).ToArray();
 		
-		Console.WriteLine("\n═══════════════════════════════════════════════════════════════");
-		Console.WriteLine("  Test Summary");
-		Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
-		
-		if(failed == 0) {
+		if(quiet) {
 			
-			Console.WriteLine($"  All {total} tests passed! ✓");
+			// The failures were printed as they happened; the server's stderr explains them.
+			if(failed > 0)
+				FlushServerErrors();
+			
+			// The one line a caller needs.
+			Console.WriteLine(failed == 0 ? $"PASS  {passed} passed" : $"FAIL  {passed} passed, {failed} failed");
 		}
 		else {
 			
-			Console.WriteLine($"  {passed} passed, {failed} failed\n");
-			Console.WriteLine("  Failures:");
+			Console.WriteLine("\n═══════════════════════════════════════════════════════════════");
+			Console.WriteLine("  Test Summary");
+			Console.WriteLine("═══════════════════════════════════════════════════════════════\n");
 			
-			foreach(var (name, _, msg) in failures) {
+			if(failed == 0) {
 				
-				Console.WriteLine($"    ✗ {name}");
-				Console.WriteLine($"      {msg}");
+				Console.WriteLine($"  All {total} tests passed! ✓");
 			}
+			else {
+				
+				Console.WriteLine($"  {passed} passed, {failed} failed\n");
+				Console.WriteLine("  Failures:");
+				
+				foreach(var (name, _, msg) in failures) {
+					
+					Console.WriteLine($"    ✗ {name}");
+					Console.WriteLine($"      {msg}");
+				}
+			}
+			
+			Console.WriteLine();
 		}
-		
-		Console.WriteLine();
 		
 		ctx.CloseInput();
 		
