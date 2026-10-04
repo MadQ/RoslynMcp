@@ -402,6 +402,12 @@ sealed class ClaudeCodeClient : McpServersDictClient
                 WriteIndented = true,
                 Encoder       = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
             }));
+
+            // The rename puts the temp file in the target's place, mode included. Without this a
+            // settings file the user made private (0600) would come back with the default mode.
+            if(!OperatingSystem.IsWindows() && File.Exists(path))
+                File.SetUnixFileMode(tmp, File.GetUnixFileMode(path));
+
             File.Move(tmp, path, overwrite: true);
 
             return true;

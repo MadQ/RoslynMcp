@@ -235,6 +235,30 @@ static class ClaudeHookSetupTests
 					: $"link kept: {new FileInfo(link).LinkTarget is not null}; target groups: {groups?.ToJsonString() ?? "none"}";
 			}),
 			
+			// The rewrite goes through a temp file and a rename, and a rename carries the temp
+			// file's permissions. A settings file the user restricted to themselves (0600) must
+			// still be 0600 afterwards — it can hold private settings. Unix file modes do not
+			// exist on Windows, so there the case has nothing to check and is passed over.
+			Case("a private settings file keeps its Unix permissions", () => {
+				
+				if(OperatingSystem.IsWindows())
+					return null;
+				
+				const UnixFileMode ownerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+				
+				var path = Path.Combine(dir, "private-settings.json");
+				
+				File.WriteAllText(path, "{ \"model\": \"opus\" }");
+				File.SetUnixFileMode(path, ownerOnly);
+				
+				if(!Upsert(ctx, path))
+					return "UpsertHookIn returned false";
+				
+				var mode = File.GetUnixFileMode(path);
+				
+				return mode == ownerOnly && Groups(path) is not null ? null : $"mode after the install: {mode}";
+			}),
+			
 			// A matcher group someone else left with an empty hooks array is not ours to delete,
 			// in either the install or the cleanup.
 			Case("a foreign group with no hooks is left in place", () => {
