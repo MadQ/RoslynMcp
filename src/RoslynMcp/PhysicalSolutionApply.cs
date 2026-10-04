@@ -426,18 +426,29 @@ internal sealed class PhysicalSolutionApplier
 				if(!OperatingSystem.IsWindows() && file.Operation == PhysicalFileOperation.Write)
 					File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(file.Path));
 				
-				// Innermost stale check: re-verify this one file immediately before the swap. Backups and
-				// the temp write take real wall-clock time during which the target could change on disk;
-				// this is the last TOCTOU gate that still lets us abort without corrupting the file.
-				if(PhysicalSolutionApplyPlan.ValidateCurrentState(file) is { } staleError)
-					throw new IOException(staleError);
-				
 				await workspace.WriteAndInvalidate(projectPath, file.Path, () => {
 					
-					if(file.Operation == PhysicalFileOperation.Create)
-						File.Move(temporaryPath, file.Path);
-					else
-						File.Replace(temporaryPath, file.Path, null);
+					// The swap is retried, like every other disk write. On Windows a virus scanner
+					// or indexer that has the target open for a moment makes File.Replace fail with
+					// "Unable to remove the file to be replaced"; the target is left exactly as it
+					// was and the temp file is still there, so trying again is safe. Without the
+					// retry the whole apply failed on such a blip (#330). Five attempts wait up to
+					// about 750 ms in total — a scan of a source file is over well before that.
+					FileWriter.WriteWithRetry(() => {
+						
+						// Innermost stale check, before every attempt: re-verify this one file
+						// immediately before the swap. Backups, the temp write and a retry's wait
+						// take real wall-clock time during which the target could change on disk;
+						// this is the last TOCTOU gate that still lets us abort without corrupting
+						// the file.
+						if(PhysicalSolutionApplyPlan.ValidateCurrentState(file) is { } staleError)
+							throw new IOException(staleError);
+						
+						if(file.Operation == PhysicalFileOperation.Create)
+							File.Move(temporaryPath, file.Path);
+						else
+							File.Replace(temporaryPath, file.Path, null);
+					}, 5, file.Path);
 					
 					return Task.CompletedTask;
 				});
