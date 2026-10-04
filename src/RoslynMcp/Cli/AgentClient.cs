@@ -374,14 +374,14 @@ sealed class ClaudeCodeClient : McpServersDictClient
     // Temp file plus rename, so an interrupted write never leaves a truncated config behind.
     static bool TryWriteJson(string path, JsonObject root)
     {
+        var tmp = path + ".roslynmcp.tmp";
+
         try
         {
             var dir = Path.GetDirectoryName(path);
 
             if(dir is not null)
                 Directory.CreateDirectory(dir);
-
-            var tmp = path + ".roslynmcp.tmp";
 
             // Relaxed escaping: the default encoder would turn every '&', '<', '>' and quote in
             // the user's own hook commands into \uXXXX, in a file people edit by hand.
@@ -396,6 +396,10 @@ sealed class ClaudeCodeClient : McpServersDictClient
         }
         catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
         {
+            // A failed rename must not leave a full copy of the user's config lying next to it.
+            try { File.Delete(tmp); }
+            catch(Exception cleanup) when(cleanup is IOException or UnauthorizedAccessException) { }
+
             return false;
         }
     }
