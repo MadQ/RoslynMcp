@@ -69,6 +69,10 @@ class Program
 			Console.Error.Write(await buildErrors);
 			Console.Error.WriteLine($"Server build failed (exit code {buildProc.ExitCode}).");
 			
+			// Quiet mode promises a summary line on every path, the early exits included.
+			if(quiet)
+				Console.WriteLine("FAIL  0 passed, 0 failed — the server build failed");
+			
 			return 1;
 		}
 		
@@ -155,6 +159,9 @@ class Program
 			Console.Error.WriteLine("\n[FATAL] Server did not respond to initialize -- check stderr above for crash details.")
 			;
 			proc.Kill(entireProcessTree: true);
+			
+			if(quiet)
+				Console.WriteLine("FAIL  0 passed, 0 failed — the server did not answer initialize");
 			
 			return 1;
 		}
@@ -292,7 +299,13 @@ class Program
 			Console.WriteLine();
 		}
 		
-		ctx.CloseInput();
+		// A server that already died leaves a broken pipe behind; closing it must not replace the
+		// report with an exception.
+		try {
+			ctx.CloseInput();
+		}
+		catch(IOException) { }
+
 		
 		// Give the server up to 5 seconds to exit cleanly; kill it if it does not.
 		try {

@@ -797,7 +797,7 @@ Do not filter the full output with a text match instead — passing tests with "
 - It copies the tree into the WSL filesystem (`~/.roslynmcp-wsl/tree`, without `bin`/`obj`/`.git`) and runs there; running from `/mnt/<drive>` would share build output with Windows and is slow.
 - It needs the SDK version `global.json` pins. If WSL lacks it the script says so; `-InstallSdk` installs it into `~/.roslynmcp-wsl/dotnet` (not on PATH, system SDK untouched).
 - Further harness arguments go through `-HarnessArgs '--only-build-diag'`.
-- Exit codes: 0 — all passed; 1 — the harness reported failures; 2 — the harness could not be run (WSL, the distribution, `rsync` or the pinned SDK is missing).
+- Exit codes: 0 — all passed; 1 — the harness reported failures, or did not build on Linux; 2 — the harness could not be run (WSL, the distribution, `rsync` or the pinned SDK is missing, or a setup step failed).
 
 **When to run it:** the Windows run is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine (the script exits with code 2), say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either run.
 

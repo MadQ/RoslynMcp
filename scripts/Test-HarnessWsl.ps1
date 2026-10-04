@@ -38,8 +38,9 @@
     -HarnessArgs '--only-build-diag'.
 
 .NOTES
-    Exit codes: 0 — every test passed; 1 — the harness ran and reported failures; 2 — the
-    harness could not be run (WSL, the distribution, rsync or the pinned SDK is missing).
+    Exit codes: 0 — every test passed; 1 — the harness reported failures, or did not build on
+    Linux; 2 — the harness could not be run (WSL, the distribution, rsync or the pinned SDK is
+    missing, or a setup step failed).
 
 .EXAMPLE
     .\scripts\Test-HarnessWsl.ps1 -Quiet
@@ -107,6 +108,11 @@ $script = @'
 set -euo pipefail
 
 src="$1"; sdk="$2"; install="$3"; shift 3
+
+# Any setup step that fails (download, SDK install, copy) means the harness was not run: exit 2,
+# not whatever code the failing command happened to return. The exec at the end replaces this
+# shell, so the harness's own exit code is passed through untouched.
+trap 'echo "The harness was not run: a setup step failed." >&2; exit 2' ERR
 
 home_dir="$HOME/.roslynmcp-wsl"
 tree="$home_dir/tree"
