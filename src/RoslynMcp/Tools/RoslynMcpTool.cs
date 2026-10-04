@@ -1027,16 +1027,35 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	
 	/// <summary>
-	///     Cache-miss path: stores <paramref name="allResults"/> in the pagination cache and
-	///     returns a paginated slice with token for subsequent pages.
+	///     Canonical description of the <c>page_token</c> parameter on every tool that pages through
+	///     <see cref="PaginateAndStore"/> — one string, so the wording cannot drift between tools and
+	///     always states what the token actually does.
 	/// </summary>
-	protected PaginatedResult<T> PaginateAndStore<T>(T[] allResults, ref int skip, int take)
+	protected const string PageTokenDescription =
+		"The page_token from the previous response. Pass it alone to get the next page — it carries the position and page size, " +
+		"so skip and take are not needed (a non-zero skip or a non-default take overrides it). " +
+		"A response whose has_more is false returns no page_token: that was the last page."
+	;
+	
+	/// <summary>
+	///     Cache-miss path: returns the page of <paramref name="allResults"/> at <paramref name="skip"/>
+	///     and, when more pages remain, stores the full set with <paramref name="shape"/> and issues the
+	///     token for the next page. The tool builds its response with the same <paramref name="shape"/>,
+	///     which <see cref="ToolScope.TryServeCachedPage"/> reuses for every later page — so all pages of
+	///     one query have the same shape. A result that ends on this page is not stored: nothing can
+	///     ask for it again.
+	/// </summary>
+	protected PaginatedResult<T> PaginateAndStore<T>(T[] allResults, ref int skip, int take, Func<PaginatedResult<T>, object> shape)
 	{
 		activeScope.Value?.SetCacheTag(hit: false);
 		
-		var token   = paginationCache.Store(allResults);
 		var page    = Paginate(allResults, ref skip, take);
 		var hasMore = skip + page.Length < allResults.Length;
+		
+		var token = hasMore
+			? new PageCursor(paginationCache.Store(allResults, shape), skip + page.Length, take).ToString()
+			: null
+		;
 		
 		return new PaginatedResult<T>(page, allResults.Length, skip, take, token, hasMore);
 	}

@@ -68,19 +68,22 @@ static class NavigationTests
 						jsonrpc = "2.0",
 						id      = ctx.NextId(),
 						method  = "tools/call",
-						@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = ctx.TargetPath, skip = 2, take = 2, page_token = pageToken } }
+						@params = new { name = "roslyn_find_references", arguments = new { symbolName = "WorkspaceManager", projectPath = ctx.TargetPath, page_token = pageToken } }
 					});
 					
 					var resp2      = await ctx.ReceiveAsync();
 					sw.Stop();
 					var content2   = resp2?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
 					var page2      = content2 is not null ? JsonNode.Parse(content2) : null;
-					var page2Items = page2?["items"]?.AsArray();
+					var page2Items = page2?["references"]?.AsArray();
 					var page2Token = page2?["page_token"]?.GetValue<string>();
 					
-					return page2Items?.Count > 0 && page2Token == pageToken
+					// The token alone is the cursor (#305): no skip or take is passed, so two references
+					// starting at position 2, in the tool's own shape, prove it carried both. A token
+					// that names a later page cannot equal the one that named this page.
+					return page2Items?.Count == 2 && page2?["skip"]?.GetValue<int>() == 2 && page2?["symbols_searched"] is not null && page2Token != pageToken
 						? (true,  $"PASS  [{sw.ElapsedMilliseconds}ms]")
-						: (false, $"FAIL  (page 2 missing items or wrong token) [{sw.ElapsedMilliseconds}ms]");
+						: (false, $"FAIL  (page 2 is not 2 references at skip 2 in the tool's shape, or the token did not advance) [{sw.ElapsedMilliseconds}ms]");
 				}),
 			
 			new("roslyn_get_symbol_definition: find WorkspaceManager declaration",

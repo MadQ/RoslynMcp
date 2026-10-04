@@ -31,7 +31,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		[Description("Optional type name to disambiguate when multiple types have a member with the same name, e.g. 'WindowTracker'. Without this, all symbols matching symbolName are searched and their references are combined.")] string? containingType = null,
 		[Description("Number of references to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null,
+		[Description(PageTokenDescription)] string? page_token = null,
 		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
 		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
 		[Description("1-based column for position-based resolution. Default: 1.")] int column = 1)
@@ -42,8 +42,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		
-		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -113,18 +112,25 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		
 		string[] symbolsSearched = [.. symbols.Select(s => FormatSymbolName(s)).Distinct()];
 		
-		var result = PaginateAndStore(allResults, ref skip, take);
+		var shape  = PageShape(symbolsSearched, AdhocCaution(projectPath));
+		var result = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", new FindReferencesResult(
-			TotalReferences: result.Total,
-			SymbolsSearched: symbolsSearched,
-			Skip: skip, Take: take,
-			References: result.Items,
-			PageToken: result.PageToken,
-			HasMore:   result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
+	// the function the pagination cache holds never captures a symbol, the compilation, or the solution.
+	static Func<PaginatedResult<string>, object> PageShape(string[] symbolsSearched, string? caution)
+		=> page => new FindReferencesResult(
+			TotalReferences: page.Total,
+			SymbolsSearched: symbolsSearched,
+			Skip: page.Skip, Take: page.Take,
+			References: page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 
 }

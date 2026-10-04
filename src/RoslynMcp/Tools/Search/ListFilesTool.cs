@@ -27,7 +27,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		[Description("Include subdirectories. Default: true.")] bool recursive = true,
 		[Description("Number of files to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of results. Default: 100, max: 500.")] int take = 100,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null
+		[Description(PageTokenDescription)] string? page_token = null
 	)
 	{
 		using var scope = BeginTool("roslyn_list_files", pattern, new { recursive, skip, take });
@@ -38,7 +38,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		
 		pattern ??= "**/*";
 		
-		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 500, out var cached))
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 100, 500, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -87,18 +87,24 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			return scope.Outcome("no files matched", new ListFilesEmptyResult([], 0, closeMatches) { Caution = AdhocCaution(projectPath) });
 		}
 		
-		var result = PaginateAndStore(allResults, ref skip, take);
+		var shape  = PageShape(AdhocCaution(projectPath));
+		var result = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} file(s)", new ListFilesResult(
-			result.Items,
-			result.Total,
-			skip, take,
-			result.PageToken,
-			result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} file(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike, so a cached page has the same fields.
+	static Func<PaginatedResult<string>, object> PageShape(string? caution)
+		=> page => new ListFilesResult(
+			page.Items,
+			page.Total,
+			page.Skip, page.Take,
+			page.PageToken,
+			page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 	
 	static string[]? BuildCloseMatches(string[] allRelativeFiles, string pattern)
 	{

@@ -63,7 +63,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		[Description("Maximum number of results to return. Default: 50, max: 200.")]
 		int take = 50,
 		
-		[Description("Token from a previous response to get the next page without re-executing the query.")]
+		[Description(PageTokenDescription)]
 		string? page_token = null
 	)
 	{
@@ -76,7 +76,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		context     ??= "all";
 		filePattern ??= "*.cs";
 		
-		if(scope.TryServeCachedPage<SemanticMatchResult>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<SemanticMatchResult>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -149,19 +149,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		}
 		
 		var allResults = allMatches.ToArray();
-		var result     = PaginateAndStore(allResults, ref skip, take);
+		var shape      = PageShape(context, ComposeCautions(fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
+		var result     = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Total} match(es)", new SemanticSearchResult(
-			result.Items,
-			result.Total,
-			result.Items.Length,
-			result.PageToken,
-			result.HasMore,
-			context)
-		{
-			Caution = ComposeCautions(fallbackCaution, AdhocCaution(projectPath)),
-			Hint    = fallbackHint
-		});
+		return scope.Outcome($"{result.Total} match(es)", shape(result));
 		
 		async Task<List<SemanticMatchResult>> CollectAsync(Regex rx)
 		{
@@ -242,6 +233,22 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			return collected;
 		}
 	}
+	
+	// Builds every page of one query, first and cached alike, so a cached page keeps the same fields
+	// — the context, caution, and hint included.
+	static Func<PaginatedResult<SemanticMatchResult>, object> PageShape(string context, string? caution, string? hint)
+		=> page => new SemanticSearchResult(
+			page.Items,
+			page.Total,
+			page.Items.Length,
+			page.PageToken,
+			page.HasMore,
+			context)
+		{
+			Caution = caution,
+			Hint    = hint
+		}
+	;
 	
 	bool IsGeneratedCode(SyntaxTree tree)
 	{

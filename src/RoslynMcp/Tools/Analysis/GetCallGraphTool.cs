@@ -26,7 +26,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		[Description("Optional containing type to disambiguate when multiple methods share the same name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		[Description("Number of call sites to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of call sites to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
+		[Description(PageTokenDescription)] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_get_call_graph", symbolName, new { containingType, skip, take });
 		
@@ -34,7 +34,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<CallSiteEntry>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<CallSiteEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -96,30 +96,24 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		if(allResults.Length == 0)
-			
-			return scope.Outcome("no outgoing calls", new GetCallGraphResult(
-				Method:     FormatSymbolName(symbol),
-				TotalCalls: 0,
-				Skip: skip, Take: take,
-				Calls:     [],
-				PageToken: null,
-				HasMore:   false)
-			{
-				Caution = AdhocCaution(projectPath)
-			});
+		var shape  = PageShape(FormatSymbolName(symbol), AdhocCaution(projectPath));
+		var result = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		var result = PaginateAndStore(allResults, ref skip, take);
-		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} call(s)", new GetCallGraphResult(
-			Method:     FormatSymbolName(symbol),
-			TotalCalls: result.Total,
-			Skip: skip, Take: take,
-			Calls:     result.Items,
-			PageToken: result.PageToken,
-			HasMore:   result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome(result.Total == 0 ? "no outgoing calls" : $"{result.Items.Length}/{result.Total} call(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
+	// the function the pagination cache holds never captures a symbol or the compilation.
+	static Func<PaginatedResult<CallSiteEntry>, object> PageShape(string method, string? caution)
+		=> page => new GetCallGraphResult(
+			Method:     method,
+			TotalCalls: page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Calls:     page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 }

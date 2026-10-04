@@ -28,16 +28,6 @@ internal sealed record DiagnosticItem(
 	string[]? TargetFrameworks = null
 );
 
-/// <summary>Cached page response from <see cref="RoslynMcpTool.ToolScope.TryServeCachedPage{T}"/>.</summary>
-internal sealed record CachedPageResult<T>(
-	[property: JsonPropertyName("items")]      T[]     Items,
-	[property: JsonPropertyName("total")]      int     Total,
-	[property: JsonPropertyName("skip")]       int     Skip,
-	[property: JsonPropertyName("take")]       int     Take,
-	[property: JsonPropertyName("page_token")] string? PageToken,
-	[property: JsonPropertyName("has_more")]   bool    HasMore
-) : ToolResult;
-
 // ── Analysis tools ──────────────────────────────────────────────────────────
 
 internal sealed record FileOutlineResult(

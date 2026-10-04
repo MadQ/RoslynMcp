@@ -24,11 +24,11 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 		CancellationToken cancellationToken,
 		[Description("Number of unused symbols to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of unused symbols to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without repeating the reference analysis.")] string? page_token = null)
+		[Description(PageTokenDescription)] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_find_unused", projectPath, new { skip, take });
 		
-		if(scope.TryServeCachedPage<UnusedSymbolEntry>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<UnusedSymbolEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -90,18 +90,25 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		var result = PaginateAndStore(allResults, ref skip, take);
+		var shape  = PageShape(BuildCaution(projectPath));
+		var result = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} unused symbol(s)", new FindUnusedResult(
-			TotalUnused: result.Total,
-			Skip: skip, Take: take,
-			Unused:    result.Items,
-			PageToken: result.PageToken,
-			HasMore:   result.HasMore)
-		{
-			Caution = BuildCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} unused symbol(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
+	// the function the pagination cache holds never captures a symbol, the compilation, or the solution.
+	static Func<PaginatedResult<UnusedSymbolEntry>, object> PageShape(string? caution)
+		=> page => new FindUnusedResult(
+			TotalUnused: page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Unused:    page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 	
 	private static void CollectCandidates(INamespaceSymbol ns, List<ISymbol> candidates, HashSet<ISymbol> seen)
 	{

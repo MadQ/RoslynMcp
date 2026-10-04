@@ -33,7 +33,7 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		[Description("When true (default), returns only direct callers. Set false to include indirect calls via interface dispatch or delegates.")] bool isDirect = true,
 		[Description("Number of callers to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of callers to return. Default: 50, max: 200.")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null,
+		[Description(PageTokenDescription)] string? page_token = null,
 		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
 		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
 		[Description("1-based column for position-based resolution. Default: 1.")] int column = 1)
@@ -44,7 +44,7 @@ internal sealed class FindCallersTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<CallerEntry>(page_token, ref skip, ref take, 200, out var cached))
+		if(scope.TryServeCachedPage<CallerEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -125,17 +125,24 @@ internal sealed class FindCallersTool : RoslynMcpTool
 				Caution = AdhocCaution(projectPath)
 			});
 		
-		var result = PaginateAndStore(allResults, ref skip, take);
+		var shape  = PageShape(symbolName, AdhocCaution(projectPath));
+		var result = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} caller(s)", new FindCallersResult(
-			SymbolSearched: symbolName,
-			TotalCallers:   result.Total,
-			Skip: skip, Take: take,
-			Callers:   result.Items,
-			PageToken: result.PageToken,
-			HasMore:   result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} caller(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
+	// the function the pagination cache holds never captures a symbol, the compilation, or the solution.
+	static Func<PaginatedResult<CallerEntry>, object> PageShape(string symbolSearched, string? caution)
+		=> page => new FindCallersResult(
+			SymbolSearched: symbolSearched,
+			TotalCallers:   page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Callers:   page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 }

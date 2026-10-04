@@ -24,12 +24,11 @@ internal sealed class ListTypesTool : RoslynMcpTool
 		[Description("Optional type kind filter: 'class', 'interface', 'enum', 'struct', 'record'. Omit for all kinds.")] string? kindFilter = null,
 		[Description("Number of types to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum types to return. Default: 100, max: 500.")] int take = 100,
-		[Description("Token from a previous response to get the next page without re-executing the query.")] string? page_token = null)
+		[Description(PageTokenDescription)] string? page_token = null)
 	{
 		using var scope = BeginTool("roslyn_list_types", namespaceFilter, new { kindFilter, skip, take });
 		
-		
-		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 500, out var cached))
+		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 100, 500, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -57,18 +56,25 @@ internal sealed class ListTypesTool : RoslynMcpTool
 			
 			return scope.Outcome("no types", new ListTypesEmptyResult("No types found matching the filters."));
 		
-		var result = PaginateAndStore(allResults, ref skip, take);
+		var shape  = PageShape(AdhocCaution(projectPath));
+		var result = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", new ListTypesResult(
-			TotalTypes: result.Total,
-			Skip: skip, Take: take,
-			Types:      result.Items,
-			PageToken: result.PageToken,
-			HasMore:   result.HasMore)
-		{
-			Caution = AdhocCaution(projectPath)
-		});
+		return scope.Outcome($"{result.Items.Length}/{result.Total} type(s)", shape(result));
 	}
+	
+	// Builds every page of one query, first and cached alike. A static factory, so the function the
+	// pagination cache holds captures only what is passed in — never the compilation.
+	static Func<PaginatedResult<string>, object> PageShape(string? caution)
+		=> page => new ListTypesResult(
+			TotalTypes: page.Total,
+			Skip: page.Skip, Take: page.Take,
+			Types:      page.Items,
+			PageToken: page.PageToken,
+			HasMore:   page.HasMore)
+		{
+			Caution = caution
+		}
+	;
 	
 	private static void CollectTypes(INamespaceSymbol ns, List<INamedTypeSymbol> collector)
 	{
