@@ -125,7 +125,10 @@ static class ClaudeHookSetupTests
 			// awkward-but-real state covered here: it must load as "no settings", not fail.
 			Case("a quoted path with a space is recognised and kept; a blank file loads as empty", () => {
 				
-				const string quoted = "\"C:\\Users\\John Doe\\.dotnet\\tools\\madq-roslynmcp.exe\" hook --log";
+				// Built with the platform's own separator: a backslash is not a directory separator
+				// outside Windows, so a hard-coded Windows path would not yield the file name there.
+				var exe    = Path.Combine($"{Path.DirectorySeparatorChar}Users", "John Doe", ".dotnet", "tools", "madq-roslynmcp.exe");
+				var quoted = $"\"{exe}\" hook --log";
 				
 				var path  = Path.Combine(dir, "quoted.json");
 				var blank = Path.Combine(dir, "blank.json");
