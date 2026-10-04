@@ -69,6 +69,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			
 			return scope.Error(rootError);
 		
+		var matchesFile = GlobMatcher.CreateMatcher(filePattern);
+
 		var allMatches = await CollectAsync(regex);
 		
 		// Chat-reference fallback (#228): a 'sym:'-prefixed pattern that matched nothing verbatim
@@ -122,7 +124,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 					
 					var fileName = Path.GetFileName(document.FilePath);
 					
-					if(!GlobMatcher.Matches(fileName, filePattern))
+					if(!matchesFile(fileName))
 						continue;
 					
 					var text  = await document.GetTextAsync(cancellationToken);
