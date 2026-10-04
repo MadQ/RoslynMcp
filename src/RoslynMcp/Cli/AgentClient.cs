@@ -381,6 +381,15 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
         try
         {
+            // A settings file kept in a dotfiles repository is a symlink. Renaming over the
+            // link would replace it with a regular file and detach it from the repository, so
+            // the write goes to the file the link points at.
+            if(File.Exists(path) && File.ResolveLinkTarget(path, returnFinalTarget: true) is { } target)
+            {
+                path = target.FullName;
+                tmp  = path + ".roslynmcp.tmp";
+            }
+
             var dir = Path.GetDirectoryName(path);
 
             if(dir is not null)

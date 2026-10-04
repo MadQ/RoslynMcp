@@ -179,6 +179,31 @@ static class ClaudeHookSetupTests
 					: $"unexpected groups: {groups?.ToJsonString()}";
 			}),
 			
+			// A settings file kept in a dotfiles repository is a symlink. The install must write
+			// through the link: the link survives and the file it points at receives the hook.
+			// Creating a symlink needs a privilege Windows grants only to administrators or in
+			// developer mode; where it is refused the case cannot be set up and is passed over.
+			Case("a symlinked settings file is written through, not replaced", () => {
+				
+				var real = Path.Combine(dir, "dotfiles-settings.json");
+				var link = Path.Combine(dir, "linked-settings.json");
+				
+				File.WriteAllText(real, "{ \"model\": \"opus\" }");
+				
+				try { File.CreateSymbolicLink(link, real); }
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { return null; }
+				
+				if(!Upsert(ctx, link))
+					return "UpsertHookIn returned false";
+				
+				var groups = Groups(real);
+				
+				return new FileInfo(link).LinkTarget is not null
+					&& groups is not null && Commands(groups).SequenceEqual([HookCommand])
+					? null
+					: $"link kept: {new FileInfo(link).LinkTarget is not null}; target groups: {groups?.ToJsonString() ?? "none"}";
+			}),
+			
 			// A matcher group someone else left with an empty hooks array is not ours to delete,
 			// in either the install or the cleanup.
 			Case("a foreign group with no hooks is left in place", () => {
