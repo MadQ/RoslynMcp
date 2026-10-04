@@ -142,6 +142,20 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records a success detail and returns <paramref name="returnValue"/> for fluent use in return statements.</summary>
 		public T Outcome<T>(string detail, T returnValue)
 		{
+			returnValue = Complete(detail, returnValue);
+			
+			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
+			
+			return returnValue!;
+		}
+		
+		/// <summary>
+		///     Marks the call successful and merges the session note and any pending hint or caution into
+		///     <paramref name="returnValue"/>. Shared by the success terminals, which differ only in how
+		///     they measure the response for the log.
+		/// </summary>
+		T Complete<T>(string detail, T returnValue)
+		{
 			this.detail = detail;
 			completed   = true;
 			
@@ -155,8 +169,6 @@ internal abstract partial class RoslynMcpTool
 			// Non-ToolResult returns (to be phased out) pass through unchanged.
 			if(returnValue is ToolResult tr && (_pendingHint is not null || pendingCaution is not null))
 				returnValue = (T)(object)(tr with { Hint = tr.Hint ?? _pendingHint, Caution = tr.Caution ?? pendingCaution });
-			
-			(estimatedTokens, responsePeek) = SerializeResponse(returnValue);
 			
 			return returnValue!;
 		}
@@ -178,8 +190,9 @@ internal abstract partial class RoslynMcpTool
 		/// </summary>
 		public ContentBlock[] Outcome(string detail, ToolResult header, IReadOnlyList<(object? Header, string Source)> parts)
 		{
-			// The generic terminal applies the session note and any pending hint or caution to the header.
-			header = Outcome(detail, header);
+			// Not the generic terminal: that one would serialize the header a second time for a peek and a
+			// token estimate that are replaced below.
+			header = Complete(detail, header);
 			
 			var texts = new List<string>(1 + parts.Count * 2) { ToJson(header) + "\n" };
 			
