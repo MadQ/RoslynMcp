@@ -37,6 +37,10 @@
     since PowerShell does not bind a bare token that starts with a dash:
     -HarnessArgs '--only-build-diag'.
 
+.NOTES
+    Exit codes: 0 — every test passed; 1 — the harness ran and reported failures; 2 — the
+    harness could not be run (WSL, the distribution, rsync or the pinned SDK is missing).
+
 .EXAMPLE
     .\scripts\Test-HarnessWsl.ps1 -Quiet
 
@@ -53,10 +57,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-if(-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+# Exit code 2 means the harness could not be run at all (no WSL, no SDK), as opposed to 1,
+# which the harness returns for failing tests. Write-Error cannot be used for the message:
+# under ErrorActionPreference 'Stop' it terminates the script with exit code 1 before the
+# exit statement is reached.
+function Stop-NotRun([string] $message)
+{
+    [Console]::Error.WriteLine($message)
 
-    Write-Error 'wsl.exe was not found. This script needs WSL with a Linux distribution installed.'
     exit 2
+}
+
+if(-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+    Stop-NotRun 'wsl.exe was not found. This script needs WSL with a Linux distribution installed.'
 }
 
 $repoRoot   = Split-Path $PSScriptRoot -Parent
@@ -69,13 +82,15 @@ if($Distribution) {
 }
 
 # wslpath turns J:\Projects\RoslynMcp into /mnt/j/Projects/RoslynMcp.
-$source = (& wsl.exe @wsl -e wslpath -a $repoRoot).Trim()
+$source = & wsl.exe @wsl -e wslpath -a $repoRoot
 
+# Checked before the value is used: with no distribution installed, or an unknown -Distribution,
+# the call fails and returns nothing.
 if($LASTEXITCODE -ne 0 -or -not $source) {
-
-    Write-Error "Could not translate '$repoRoot' to a WSL path. Is the WSL distribution set up?"
-    exit 2
+    Stop-NotRun "Could not translate '$repoRoot' to a WSL path. Is the WSL distribution set up?"
 }
+
+$source = "$source".Trim()
 
 $forwarded = @()
 
@@ -97,7 +112,10 @@ home_dir="$HOME/.roslynmcp-wsl"
 tree="$home_dir/tree"
 private_dotnet="$home_dir/dotnet/dotnet"
 
-has_sdk() { [ -x "$1" ] && "$1" --list-sdks 2>/dev/null | grep -q "^$sdk "; }
+# awk reads the whole list and compares the version as text. "grep -q" would stop at the first
+# match and can break the pipe while dotnet is still writing, which pipefail turns into "not
+# found"; it would also read the dots in the version as "any character".
+has_sdk() { [ -x "$1" ] && "$1" --list-sdks 2>/dev/null | awk -v want="$sdk" '$1 == want { found = 1 } END { exit !found }'; }
 
 dotnet_bin=""
 
@@ -154,9 +172,7 @@ $script = ($script -replace "`r`n", "`n") + "`n"
 $script | & wsl.exe @wsl -e bash -c 'mkdir -p ~/.roslynmcp-wsl && cat > ~/.roslynmcp-wsl/run-harness.sh'
 
 if($LASTEXITCODE -ne 0) {
-
-    Write-Error 'Could not write the runner script into the WSL home directory.'
-    exit 2
+    Stop-NotRun 'Could not write the runner script into the WSL home directory.'
 }
 
 $installFlag = if($InstallSdk) { '1' } else { '0' }

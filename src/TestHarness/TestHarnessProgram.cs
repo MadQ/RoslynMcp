@@ -100,13 +100,19 @@ class Program
 		
 		// The server's stderr. Quiet mode holds it back and prints it only if the run fails —
 		// a passing run logs expected errors there too (a cancelled request, for one).
-		var serverErrors = new System.Collections.Concurrent.ConcurrentQueue<string>();
+		var serverErrors       = new System.Collections.Concurrent.ConcurrentQueue<string>();
+		var serverErrorsClosed = new TaskCompletionSource();
 		
 		proc.ErrorDataReceived += (_, e) =>
 		{
 			
-			if(e.Data is null)
+			// A null line is the end of the stream: every line the server wrote has been delivered.
+			if(e.Data is null) {
+				
+				serverErrorsClosed.TrySetResult();
+				
 				return;
+			}
 			
 			if(quiet)
 				serverErrors.Enqueue(e.Data);
@@ -161,78 +167,98 @@ class Program
 		
 		var groups        = new List<TestGroup>();
 		var onlyBuildDiag = args.Contains("--only-build-diag");
+		var total         = 0;
+		var done          = 0;
+		var results       = new List<(string name, bool pass, string msg)>();
 		
-		if(!onlyBuildDiag) {
-			
-			groups.Add(DiscoveryTests.Build(ctx));
-			groups.Add(VsVersionPinTests.Build(ctx));
-			groups.Add(ProjectStyleDetectionTests.Build(ctx));
-			groups.Add(FindStringLiteralTests.Build(ctx));
-			groups.Add(FindUnusedTests.Build(ctx));
-			groups.Add(MemberBodyTests.Build(ctx));
-			groups.Add(TypeTests.Build(ctx));
-			groups.Add(NavigationTests.Build(ctx));
-			groups.Add(CallGraphTests.Build(ctx));
-			groups.Add(CodeGenerationTests.Build(ctx));
-			groups.Add(FileContentTests.Build(ctx));
-			groups.Add(CodeFixTests.Build(ctx));
-		}
+		// What the run was doing when an exception escaped, and the exception. Tests report their
+		// own failures; something escaping means a test, a teardown or a group's setup crashed —
+		// often because the server died. Quiet mode turns that into a FAIL summary line below
+		// instead of ending in a bare stack trace with the server's stderr still unprinted.
+		var        running = "test group setup";
+		Exception? aborted = null;
 		
-		groups.Add(ValidationTests.Build(ctx));
-		
-		if(!onlyBuildDiag) {
+		try {
 			
-			groups.Add(RefactoringTests.Build(ctx));
-			groups.Add(EditingTests.Build(ctx));
-			groups.Add(await ReloadFlaggingTests.BuildAsync(ctx));
-			groups.Add(PaginationTests.Build(ctx));
-			groups.Add(HookHintTests.Build(ctx));
-			groups.Add(ClaudeHookSetupTests.Build(ctx));
-			groups.Add(await IgnoredDirectoryTests.BuildAsync(ctx));
-			groups.Add(await IncrementalAdditionalDocTests.BuildAsync(ctx));
-			groups.Add(await LocalHistoryTests.BuildAsync(ctx));
-			groups.Add(await DefaultWorkspaceTests.BuildAsync(ctx));
-			
-			// Last on purpose: it reads the server log written by everything above.
-			groups.Add(WorkspaceHygieneTests.Build(ctx, serverLogDir, serverLogGlob));
-		}
-		
-		var total   = groups.Sum(g => g.Tests.Count);
-		var done    = 0;
-		var results = new List<(string name, bool pass, string msg)>();
-		
-		foreach(var group in groups) {
-			
-			Info($"\n{group.Header}");
-			Info("─────────────────────────────────────────────────────────────");
-			
-			try {
+			if(!onlyBuildDiag) {
 				
-				foreach(var tc in group.Tests) {
+				groups.Add(DiscoveryTests.Build(ctx));
+				groups.Add(VsVersionPinTests.Build(ctx));
+				groups.Add(ProjectStyleDetectionTests.Build(ctx));
+				groups.Add(FindStringLiteralTests.Build(ctx));
+				groups.Add(FindUnusedTests.Build(ctx));
+				groups.Add(MemberBodyTests.Build(ctx));
+				groups.Add(TypeTests.Build(ctx));
+				groups.Add(NavigationTests.Build(ctx));
+				groups.Add(CallGraphTests.Build(ctx));
+				groups.Add(CodeGenerationTests.Build(ctx));
+				groups.Add(FileContentTests.Build(ctx));
+				groups.Add(CodeFixTests.Build(ctx));
+			}
+			
+			groups.Add(ValidationTests.Build(ctx));
+			
+			if(!onlyBuildDiag) {
+				
+				groups.Add(RefactoringTests.Build(ctx));
+				groups.Add(EditingTests.Build(ctx));
+				groups.Add(await ReloadFlaggingTests.BuildAsync(ctx));
+				groups.Add(PaginationTests.Build(ctx));
+				groups.Add(HookHintTests.Build(ctx));
+				groups.Add(ClaudeHookSetupTests.Build(ctx));
+				groups.Add(await IgnoredDirectoryTests.BuildAsync(ctx));
+				groups.Add(await IncrementalAdditionalDocTests.BuildAsync(ctx));
+				groups.Add(await LocalHistoryTests.BuildAsync(ctx));
+				groups.Add(await DefaultWorkspaceTests.BuildAsync(ctx));
+				
+				// Last on purpose: it reads the server log written by everything above.
+				groups.Add(WorkspaceHygieneTests.Build(ctx, serverLogDir, serverLogGlob));
+			}
+			
+			total = groups.Sum(g => g.Tests.Count);
+			
+			foreach(var group in groups) {
+				
+				Info($"\n{group.Header}");
+				Info("─────────────────────────────────────────────────────────────");
+				
+				try {
 					
-					if(!quiet)
-						Console.Write($"  {tc.Name,-55} ");
+					foreach(var tc in group.Tests) {
+						
+						running = $"{group.Header} › {tc.Name}";
+						
+						if(!quiet)
+							Console.Write($"  {tc.Name,-55} ");
+						
+						var (pass, msg) = await tc.Run();
+						
+						done++;
+						
+						// Quiet mode names a failure as it happens, with its group — the group headers
+						// that would otherwise say where it belongs are not printed.
+						if(!quiet)
+							Console.WriteLine($"{msg}  [{done}/{total}]");
+						else if(!pass)
+							Console.WriteLine($"FAIL  {group.Header} › {tc.Name}: {msg}");
+						
+						results.Add((tc.Name, pass, msg));
+					}
 					
-					var (pass, msg) = await tc.Run();
+					// Only once every test has run: when a test throws, the teardown below still
+					// runs, and the report must keep naming the test, not the teardown.
+					running = $"{group.Header} › teardown";
+				}
+				finally {
 					
-					done++;
-					
-					// Quiet mode names a failure as it happens, with its group — the group headers
-					// that would otherwise say where it belongs are not printed.
-					if(!quiet)
-						Console.WriteLine($"{msg}  [{done}/{total}]");
-					else if(!pass)
-						Console.WriteLine($"FAIL  {group.Header} › {tc.Name}: {msg}");
-					
-					results.Add((tc.Name, pass, msg));
+					if(group.Teardown is not null)
+						await group.Teardown()
+						;
 				}
 			}
-			finally {
-				
-				if(group.Teardown is not null)
-					await group.Teardown()
-					;
-			}
+		}
+		catch(Exception ex) when(quiet) {
+			aborted = ex;
 		}
 		
 		// -- Summary --------------------------------------------------------------------------
@@ -241,16 +267,7 @@ class Program
 		var failed   = results.Count - passed;
 		var failures = results.Where(r => !r.pass).ToArray();
 		
-		if(quiet) {
-			
-			// The failures were printed as they happened; the server's stderr explains them.
-			if(failed > 0)
-				FlushServerErrors();
-			
-			// The one line a caller needs.
-			Console.WriteLine(failed == 0 ? $"PASS  {passed} passed" : $"FAIL  {passed} passed, {failed} failed");
-		}
-		else {
+		if(!quiet) {
 			
 			Console.WriteLine("\n═══════════════════════════════════════════════════════════════");
 			Console.WriteLine("  Test Summary");
@@ -283,9 +300,33 @@ class Program
 		}
 		catch(OperationCanceledException) { }
 		
+		// The whole tree: the server is a child of "dotnet run", and killing only the parent would
+		// leave it running and holding the stderr pipe open.
 		if(!proc.HasExited)
-			proc.Kill();
+			proc.Kill(entireProcessTree: true);
 		
-		return failed == 0 ? 0 : 1;
+		if(quiet) {
+			
+			// Quiet mode reports only now, after the server is gone, so that what it logged while
+			// handling the last request and while shutting down is included. The wait is bounded:
+			// a process that outlives the kill must not hang the harness.
+			await Task.WhenAny(serverErrorsClosed.Task, Task.Delay(TimeSpan.FromSeconds(3)));
+			
+			// The failures were printed as they happened; the server's stderr explains them.
+			if(failed > 0 || aborted is not null)
+				FlushServerErrors();
+			
+			// The one line a caller needs, on every path.
+			if(aborted is not null) {
+				
+				var notRun = total > results.Count ? $", {total - results.Count} not run" : "";
+				
+				Console.WriteLine($"FAIL  {passed} passed, {failed} failed{notRun} — aborted in {running}: {aborted.GetType().Name}: {aborted.Message}");
+			}
+			else
+				Console.WriteLine(failed == 0 ? $"PASS  {passed} passed" : $"FAIL  {passed} passed, {failed} failed");
+		}
+		
+		return failed == 0 && aborted is null ? 0 : 1;
 	}
 }

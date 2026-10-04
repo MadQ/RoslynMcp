@@ -786,6 +786,8 @@ PASS  239 passed
 FAIL  Discovery Tools (12 tests) › roslyn_list_types: enumerate types in RoslynMcp.Tools namespace: FAIL  (validation failed) [2453ms]
 FAIL  238 passed, 1 failed
 ```
+The summary line is always the last line, also when the run is cut short: if a test, a teardown or a group's setup throws, it reads `FAIL  70 passed, 0 failed, 169 not run — aborted in <group> › <test>: <exception>`. The server's stderr is printed after the server has shut down, so it includes what was logged during the last request.
+
 Do not filter the full output with a text match instead — passing tests with "error" or "fail" in their name match too.
 
 **Linux run under WSL (#325).** The harness normally runs on Windows only, so anything that behaves differently on Linux is untested, and a test that skips itself on Windows checks nothing. `scripts/Test-HarnessWsl.ps1` runs the same harness on Linux, against the current working tree including uncommitted changes:
@@ -795,8 +797,9 @@ Do not filter the full output with a text match instead — passing tests with "
 - It copies the tree into the WSL filesystem (`~/.roslynmcp-wsl/tree`, without `bin`/`obj`/`.git`) and runs there; running from `/mnt/<drive>` would share build output with Windows and is slow.
 - It needs the SDK version `global.json` pins. If WSL lacks it the script says so; `-InstallSdk` installs it into `~/.roslynmcp-wsl/dotnet` (not on PATH, system SDK untouched).
 - Further harness arguments go through `-HarnessArgs '--only-build-diag'`.
+- Exit codes: 0 — all passed; 1 — the harness reported failures; 2 — the harness could not be run (WSL, the distribution, `rsync` or the pinned SDK is missing).
 
-**When to run it:** the Windows run is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine, say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either run.
+**When to run it:** the Windows run is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine (the script exits with code 2), say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either run.
 
 **Fixture pattern (#274):** a test that needs real compilable code, or any file to edit, gets a throwaway project under `%TEMP%\RoslynMcp.TestHarness\<label>.<guid>` from `TestFixtures.NewMsBuildProject(label)` (or `NewAdhocDir` for an AdhocWorkspace) and passes `fx.Csproj` as `projectPath`. **Never write a fixture into `src/RoslynMcp`:** a directory target resolves to the repo's `.slnx`, so the FileSystemWatcher of every server with the repo open — the harness's own *and* the developer's live one — covers the whole tree; the SDK glob compiles the file into `RoslynMcp.dll`; and each create/delete forces a full solution reload. A checked-in fixture project elsewhere in the repo, or `<Compile Remove>`, does not help — the file is still an unknown document under the watched root. Example:
 ```csharp
