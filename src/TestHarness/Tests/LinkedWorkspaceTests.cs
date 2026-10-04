@@ -24,7 +24,9 @@ using System.Text.Json.Nodes;
 ///     </para>
 ///     <para>
 ///         Creating a link needs a privilege Windows grants only to administrators or in developer
-///         mode. Where it is refused both tests fail visibly rather than silently passing unchecked.
+///         mode. Where it is refused the fixture cannot be built: both tests are reported as
+///         skipped on a developer's machine and as failed on a CI runner (see <see cref="Skip"/>),
+///         never as passed.
 ///     </para>
 /// </summary>
 static class LinkedWorkspaceTests
@@ -82,7 +84,8 @@ static class LinkedWorkspaceTests
 			return (null, data?["error"]?.GetValue<string>() ?? content);
 		}
 		
-		const string unavailable = "FAIL  (not checked: this machine may not create symbolic links)";
+		// A skip on a developer's machine, a failure on a CI runner — see Skip.
+		const string noLinks = "this machine may not create symbolic links";
 		
 		var tests = new List<TestCase> {
 			
@@ -93,7 +96,7 @@ static class LinkedWorkspaceTests
 					
 					if(!linksMade)
 						
-						return (false, unavailable);
+						return Skip.SetupUnavailable(noLinks);
 					
 					var (notes, notesError) = await ReadAsync("Notes.txt");
 					var (probe, probeError) = await ReadAsync("Probe.cs");
@@ -110,7 +113,7 @@ static class LinkedWorkspaceTests
 					
 					if(!linksMade)
 						
-						return (false, unavailable);
+						return Skip.SetupUnavailable(noLinks);
 					
 					var (text, error) = await ReadAsync("escape/secret.txt");
 					

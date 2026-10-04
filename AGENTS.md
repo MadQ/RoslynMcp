@@ -788,6 +788,8 @@ FAIL  238 passed, 1 failed
 ```
 The summary line is always the last line, also when the run is cut short: if a test, a teardown or a group's setup throws, it reads `FAIL  70 passed, 0 failed, 169 not run — aborted in <group> › <test>: <exception>`. The server's stderr is printed after the server has shut down, so it includes what was logged during the last request.
 
+**Skipped tests.** A test that cannot check anything on the machine is a skip, never a pass. It prints a `SKIP` line in quiet mode too and is counted in the summary: `PASS  240 passed, 1 skipped`. Use `Skip.NotApplicable(reason)` when the thing under test does not exist on this operating system (Unix file modes on Windows) — always a skip. Use `Skip.SetupUnavailable(reason)` when the test applies but the machine will not let the fixture be built (no permission to create symbolic links) — a skip locally, a **failure on a CI runner**, so the release gate cannot pass with a case nobody checked. Never return a plain pass from a test that did not run.
+
 Do not filter the full output with a text match instead — passing tests with "error" or "fail" in their name match too.
 
 **Linux run under WSL (#325).** The harness normally runs on Windows only, so anything that behaves differently on Linux is untested, and a test that skips itself on Windows checks nothing. `scripts/Test-HarnessWsl.ps1` runs the same harness on Linux, against the current working tree including uncommitted changes:

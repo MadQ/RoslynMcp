@@ -304,11 +304,14 @@ sealed class HarnessRun(string[] args)
 					done++;
 					
 					// Quiet mode names a failure as it happens, with its group — the group headers
-					// that would otherwise say where it belongs are not printed.
+					// that would otherwise say where it belongs are not printed. A skipped test
+					// is named too: it passed nothing, and staying silent would hide that.
 					if(!Quiet)
 						Console.WriteLine($"{msg}  [{done}/{total}]");
 					else if(!pass)
 						Console.WriteLine($"FAIL  {group.Header} › {tc.Name}: {OneLine(msg)}");
+					else if(Skip.IsSkip(pass, msg))
+						Console.WriteLine($"SKIP  {group.Header} › {tc.Name}: {OneLine(Skip.Reason(msg))}");
 					
 					results.Add((tc.Name, pass, msg));
 				}
@@ -331,9 +334,11 @@ sealed class HarnessRun(string[] args)
 			
 			return;
 		
-		var passed   = results.Count(r => r.pass);
-		var failed   = results.Count - passed;
+		var skipped  = results.Count(r => Skip.IsSkip(r.pass, r.msg));
+		var passed   = results.Count(r => r.pass) - skipped;
+		var failed   = results.Count - passed - skipped;
 		var failures = results.Where(r => !r.pass).ToArray();
+		var skipNote = skipped > 0 ? $", {skipped} skipped" : "";
 		
 		Console.WriteLine("\n═══════════════════════════════════════════════════════════════");
 		Console.WriteLine("  Test Summary");
@@ -341,11 +346,12 @@ sealed class HarnessRun(string[] args)
 		
 		if(failed == 0) {
 			
-			Console.WriteLine($"  All {total} tests passed! ✓");
+			// A skipped test did not pass, so "all" would overstate it.
+			Console.WriteLine(skipped == 0 ? $"  All {total} tests passed! ✓" : $"  {passed} passed{skipNote} ✓");
 		}
 		else {
 			
-			Console.WriteLine($"  {passed} passed, {failed} failed\n");
+			Console.WriteLine($"  {passed} passed, {failed} failed{skipNote}\n");
 			Console.WriteLine("  Failures:");
 			
 			foreach(var (name, _, msg) in failures) {
@@ -402,9 +408,11 @@ sealed class HarnessRun(string[] args)
 	/// </summary>
 	public async Task<int> ReportAsync()
 	{
-		var passed    = results.Count(r => r.pass);
-		var failed    = results.Count - passed;
+		var skipped   = results.Count(r => Skip.IsSkip(r.pass, r.msg));
+		var passed    = results.Count(r => r.pass) - skipped;
+		var failed    = results.Count - passed - skipped;
 		var succeeded = failed == 0 && stopReason is null;
+		var skipNote  = skipped > 0 ? $", {skipped} skipped" : "";
 		
 		if(Quiet) {
 			
@@ -422,12 +430,12 @@ sealed class HarnessRun(string[] args)
 			}
 			
 			if(stopReason is null)
-				Console.WriteLine(failed == 0 ? $"PASS  {passed} passed" : $"FAIL  {passed} passed, {failed} failed");
+				Console.WriteLine(failed == 0 ? $"PASS  {passed} passed{skipNote}" : $"FAIL  {passed} passed, {failed} failed{skipNote}");
 			else {
 				
 				var notRun = total > results.Count ? $", {total - results.Count} not run" : "";
 				
-				Console.WriteLine($"FAIL  {passed} passed, {failed} failed{notRun} — {stopReason}");
+				Console.WriteLine($"FAIL  {passed} passed, {failed} failed{skipNote}{notRun} — {stopReason}");
 			}
 		}
 		
