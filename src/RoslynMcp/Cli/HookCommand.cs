@@ -7,26 +7,47 @@ namespace RoslynMcp.Cli;
 /// <summary>
 ///     Implements the <c>madq-roslynmcp hook</c> subcommand, used as the target for
 ///     pre-tool-use hooks in Copilot CLI (<c>.github/hooks/roslynmcp.json</c>) and
-///     Claude Code (<c>~/.claude/settings.json</c>). Reads hook event JSON from stdin
-///     and writes an allow/additionalContext response to stdout.
+///     Claude Code (<c>~/.claude/settings.json</c>). Reads hook event JSON from stdin and, when a
+///     built-in file tool targets a <c>.cs</c> file, writes guidance naming the roslyn_* tools
+///     for that kind of operation. It never blocks: every other case answers <c>{}</c>.
 /// </summary>
 internal static class HookCommand
 {
-	// Tools that read or list files — worth redirecting to roslyn_* equivalents.
-	static readonly HashSet<string> fileTools = new(StringComparer.OrdinalIgnoreCase) {
+	// The built-in tools worth redirecting, grouped by what the agent is trying to do so the hint
+	// can name the roslyn_* tools for that job only (#310). Names cover both clients — Copilot CLI
+	// (view, create, edit, grep, glob) and Claude Code (Read, Grep, Glob, Edit, MultiEdit, Write);
+	// matching ignores case, so one spelling serves both.
+	static readonly HashSet<string> readTools   = new(StringComparer.OrdinalIgnoreCase) { "view", "read" };
+	static readonly HashSet<string> searchTools = new(StringComparer.OrdinalIgnoreCase) { "grep", "rg", "findstr" };
+	static readonly HashSet<string> listTools   = new(StringComparer.OrdinalIgnoreCase) { "glob" };
+	static readonly HashSet<string> editTools   = new(StringComparer.OrdinalIgnoreCase) { "edit", "multiedit", "write", "create" };
 
-		"view", "read", "grep", "rg", "glob", "findstr",
-		// Claude Code equivalents
-		"Read", "Grep", "Glob",
-	};
+	// One short list per category. A list of every tool was tried and dropped: it buried the two or
+	// three names that matter for the call at hand, on every hook hit. Only public, release-build
+	// tools belong here, and not roslyn_build_project — compilation is checked with
+	// roslyn_get_diagnostics (#306). "projectPath optional" is stated only for the tools where it is.
+	const string ReadSuggestion   = "roslyn_read_file or roslyn_get_file_outline (projectPath optional), or roslyn_get_member_body for one member";
+	const string SearchSuggestion = "roslyn_search_files or roslyn_semantic_search (projectPath optional), or roslyn_find_references for a symbol's usages";
+	const string ListSuggestion   = "roslyn_list_files (projectPath optional)";
+	const string EditSuggestion   = "roslyn_replace_in_code, roslyn_replace_in_file, roslyn_insert_lines or roslyn_write_file (projectPath optional), then roslyn_get_diagnostics to verify";
 
-	// Tools that write or edit files.
-	static readonly HashSet<string> editTools = new(StringComparer.OrdinalIgnoreCase) {
+	/// <summary>
+	///     The roslyn_* tools to suggest for an intercepted built-in tool, or <see langword="null"/>
+	///     when the tool is not one the hook redirects.
+	/// </summary>
+	static string? SuggestionFor(string toolName)
+	{
+		if(readTools.Contains(toolName))
+			return ReadSuggestion;
 
-		"edit", "write",
-		// Claude Code equivalents
-		"Edit", "MultiEdit", "Write",
-	};
+		if(searchTools.Contains(toolName))
+			return SearchSuggestion;
+
+		if(listTools.Contains(toolName))
+			return ListSuggestion;
+
+		return editTools.Contains(toolName) ? EditSuggestion : null;
+	}
 
 	public static int Run(string[] args)
 	{
@@ -89,7 +110,9 @@ internal static class HookCommand
 			eventName = node["hook_event_name"]?.GetValue<string>()
 				?? (isCopilotFormat ? "copilot-hook" : "claude-code-hook");
 
-			if(toolName is null || !IsFileOperationOnCsFile(toolName, toolArgs)) {
+			var suggestion = toolName is null ? null : SuggestionFor(toolName);
+
+			if(suggestion is null || !TargetsCsFile(toolArgs)) {
 
 				Console.WriteLine("{}");
 				outcome = toolName is null ? "no-tool" : "pass-through";
@@ -97,36 +120,31 @@ internal static class HookCommand
 				return 0;
 			}
 
-			// Allow the operation but inject guidance into the agent's context.
-			// Using additionalContext (Copilot format) — Claude Code's deny path is separate
-			// but allowed here too since their spec accepts empty output as "allow".
-			if(isCopilotFormat) {
+			// Without a live server the roslyn_* tools are not there to prefer.
+			if(!ServerHeartbeat.IsAlive()) {
 
-				if(!ServerHeartbeat.IsAlive()) {
-
-					Console.WriteLine("{}");
-					outcome = "allow (no server)";
-
-					return 0;
-				}
-
-				var response = new {
-
-					permissionDecision = "allow",
-					additionalContext  = "ℹ️ RoslynMcp: for .cs files, roslyn_* tools provide semantic " +
-						"accuracy via the Roslyn compiler. Prefer: roslyn_read_file, roslyn_get_member_body, " +
-						"roslyn_get_file_outline, roslyn_search_files, roslyn_list_files, " +
-						"roslyn_replace_in_code, roslyn_get_diagnostics, roslyn_build_project."
-				};
-
-				Console.WriteLine(JsonSerializer.Serialize(response, RoslynMcpJson.Compact));
-				outcome = "allow + guidance";
-			}
-			else {
-				// Claude Code hooks don't support additionalContext — just allow silently.
 				Console.WriteLine("{}");
-				outcome = "allow (silent)";
+				outcome = "allow (no server)";
+
+				return 0;
 			}
+
+			var hint = $"ℹ️ RoslynMcp: for .cs files prefer {suggestion}. These use the Roslyn compiler, so results are semantically accurate.";
+
+			// The operation always goes ahead; the hook only adds guidance to the agent's context.
+			// Claude Code takes it under hookSpecificOutput, and no permissionDecision is sent
+			// there: "allow" would skip the user's permission prompt, and advice must not grant
+			// permission. The Copilot CLI shape is unchanged from before #310.
+			// TODO: Copilot's hook reference lists no additionalContext output for preToolUse and
+			// describes permissionDecision as deciding whether the tool runs. Does Copilot show
+			// this hint at all, and should "allow" be sent? Open under #310.
+			object response = isCopilotFormat
+				? new { permissionDecision = "allow", additionalContext = hint }
+				: new { hookSpecificOutput = new { hookEventName = "PreToolUse", additionalContext = hint } }
+			;
+
+			Console.WriteLine(JsonSerializer.Serialize(response, RoslynMcpJson.Compact));
+			outcome = "allow + guidance";
 
 			return 0;
 		}
@@ -155,12 +173,8 @@ internal static class HookCommand
 		}
 	}
 
-	static bool IsFileOperationOnCsFile(string toolName, JsonObject? toolArgs)
+	static bool TargetsCsFile(JsonObject? toolArgs)
 	{
-		if(!fileTools.Contains(toolName) && !editTools.Contains(toolName))
-
-			return false;
-
 		if(toolArgs is null)
 
 			return false;
