@@ -44,7 +44,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		"(2) 'dotnet build' when Roslyn is clean — catches what Roslyn cannot see: NuGet restore failures, " +
 		"MSBuild target errors, SDK version issues, and source generator problems. " +
 		"Does not modify source files. " +
-		"For quick C# error checks during editing, use roslyn_get_diagnostics instead. " +
+		"To check whether code compiles, use roslyn_get_diagnostics instead — it answers in-process, without spawning a build. " +
+		"Build once per solution, not once per project: projects in one solution share build output, so omit projectPath " +
+		"to build the whole default solution in a single run. Do not issue several builds in parallel — the server runs " +
+		"one dotnet build/clean/restore at a time and queues the rest, so parallel calls only wait. " +
 		"Requires a .csproj to be present. " +
 		"NuGet/MSBuild errors (NU*, MSB*) without a source location appear in errors[] with line: 0, column: 0. " +
 		"exit_code is null when build_skipped is true (no dotnet build ran). " +
@@ -52,13 +55,15 @@ internal sealed class BuildTool : RoslynMcpTool
 		"output tail (last 30 lines) and explains the failure (e.g. locked output file, linker error). " +
 		"Do NOT run dotnet build in a terminal to investigate — error_details already has the output you need.")]
 	public async Task<object> BuildProject(
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
 		[Description(
 			"Default false: Roslyn errors short-circuit — dotnet build only runs when C# is clean, " +
 			"validating NuGet restore, MSBuild targets, SDK props, and source generators. " +
 			"Set true only when you suspect an MSBuild-specific failure Roslyn cannot see " +
-			"(broken .targets file, generator crash, restore failure) — skips the Roslyn fast-path entirely."
+			"(broken .targets file, generator crash, restore failure), or when roslyn_check_drift reports " +
+			"workspace_healthy: false — skips the Roslyn fast-path entirely. Never set it just to confirm code compiles."
 		)] bool forceBuild = false)
 	{
 		using var scope = BeginTool("roslyn_build_project", null, new { targetFramework, forceBuild });
@@ -151,7 +156,13 @@ internal sealed class BuildTool : RoslynMcpTool
 		int			exitCode;
 		
 		try {
-			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope);
+			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope, cancellationToken);
+		}
+		catch(OperationCanceledException) {
+			
+			// Logged as a cancellation rather than an unhandled exception; the SDK answers the client.
+			scope.Failed("cancelled");
+			throw;
 		}
 		catch(InvalidOperationException ex) {
 			
@@ -227,8 +238,8 @@ internal sealed class BuildTool : RoslynMcpTool
 		return [.. args];
 	}
 	
-	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope)
-		=> await DotnetRunner.RunAsync(args, workingDirectory, scope.Record);
+	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope, CancellationToken cancellationToken)
+		=> await DotnetRunner.RunAsync(args, workingDirectory, scope.Record, cancellationToken);
 	
 	private static DiagnosticItem[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
 	{

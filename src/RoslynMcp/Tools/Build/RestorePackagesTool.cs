@@ -13,8 +13,11 @@ public RestorePackagesTool(WorkspaceResolver workspace, FileLogger logger, Pagin
 "Downloads and restores NuGet packages for the project - makes network calls to NuGet feeds. " +
 "Use after adding or modifying package references in the .csproj, or when packages are missing. " +
 "Does not compile or validate C# source - for a full build after restore, use roslyn_build_project. " +
-"Requires a .csproj to be present.")]
+"Requires a .csproj to be present. " +
+"Omit projectPath to restore the whole default solution in one run rather than one call per project; " +
+"the server runs one dotnet build/clean/restore at a time, so parallel calls only queue.")]
 public async Task<object> RestorePackages(
+CancellationToken cancellationToken,
 [Description(OptionalProjectPathDescription)] string? projectPath = null)
 {
 using var scope = BeginTool("roslyn_restore_packages");
@@ -38,8 +41,13 @@ int exitCode;
 
 try {
 // -tl:off: disable terminal logger for predictable plain-text output.
-		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", target, "/nologo", "-tl:off"], rootPath, scope.Record)
+		(output, _, exitCode) = await DotnetRunner.RunAsync(["restore", target, "/nologo", "-tl:off"], rootPath, scope.Record, cancellationToken)
 		;
+}
+catch(OperationCanceledException) {
+// Logged as a cancellation rather than an unhandled exception; the SDK answers the client.
+scope.Failed("cancelled");
+throw;
 }
 catch(InvalidOperationException ex) {
 return scope.Failed(ex.Message, new RestoreResult(false, ex.Message, ex.InnerException?.Message));

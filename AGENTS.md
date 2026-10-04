@@ -95,7 +95,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `BuildTool` | `roslyn_build_project` — check Roslyn diagnostics first (fast), skip build if errors; run `dotnet build` if clean or `forceBuild=true`; diagnostic items include optional `target_frameworks` when MSBuild emits TFM context |
 | `CleanSolutionTool` | `roslyn_clean_solution` — remove all build artifacts (bin/obj directories) |
 | `RestorePackagesTool` | `roslyn_restore_packages` — restore NuGet packages |
-| `DotnetRunner` | Shared helper for spawning `dotnet` CLI commands; strips MSBuild env vars (`MSBUILD_EXE_PATH` etc.) so child builds do clean SDK discovery; drains stdout+stderr concurrently to prevent pipe deadlock; used by `BuildTool`, `CleanSolutionTool`, `RestorePackagesTool` |
+| `DotnetRunner` | Shared helper for spawning `dotnet` CLI commands; strips MSBuild env vars (`MSBUILD_EXE_PATH` etc.) so child builds do clean SDK discovery; drains stdout+stderr concurrently to prevent pipe deadlock; runs one `dotnet` command at a time process-wide (a `SemaphoreSlim` gate — concurrent builds of one solution race on shared `obj\` state, #300/#306), recording `queued N ms behind another dotnet command` when a call waits; used by `BuildTool`, `CleanSolutionTool`, `RestorePackagesTool` |
 | `FileOutlineTool` | `roslyn_get_file_outline` — type/member structure without bodies (token saver) |
 | `TypeHierarchyTool` | `roslyn_get_type_hierarchy` — base types, interfaces, derived types |
 | `FindImplementationsTool` | `roslyn_find_implementations` — concrete implementations of interfaces/abstract members |
@@ -193,7 +193,7 @@ When discovering files/content:
 - `roslyn_find_references` — without `containingType`, searches ALL symbols matching the name (union of results). Use `containingType` to narrow.
 - `roslyn_list_types` — without `namespaceFilter`, returns only project-defined types (not framework). Use `namespaceFilter` for sub-namespace scoping.
 - `roslyn_get_diagnostics` — use `severity: "errors"` or `take: 0` for a fast error-only check during editing
-- `roslyn_build_project` — checks Roslyn diagnostics first (fast, in-process). Only runs `dotnet build` if Roslyn is clean.
+- `roslyn_build_project` — checks Roslyn diagnostics first (fast, in-process). Only runs `dotnet build` if Roslyn is clean. To check that code compiles, use `roslyn_get_diagnostics` instead. When a build is needed, make **one** call with `projectPath` omitted (whole solution) — never one call per project, never several in parallel (they only queue), and no `forceBuild` unless diagnostics are untrustworthy. Skip it entirely before a TestHarness run, which builds everything itself.
 - `roslyn_preview_rename` / `roslyn_apply_rename` — always call preview first; renames can affect dozens of files. The token from preview is required by apply.
 - `roslyn_change_signature` / `roslyn_apply_signature_change` — same two-step pattern as rename: preview returns a diff + token, apply commits it.
 - Paginated tools return `page_token` + `has_more` — pass the token back to get subsequent pages without re-executing the query.
@@ -563,7 +563,7 @@ These may be called at any point before the terminal call:
 | Method | When to use |
 |--------|-------------|
 | `scope.SetArgs(obj)` | Call early, right after `BeginTool`. Records key input arguments serialized to compact JSON. **Only included in the log entry on failure** — helps diagnose what inputs caused a problem. Truncate large values before passing. |
-| `scope.Record(note)` | Append a mid-scope annotation. Useful for recording intermediate outcomes ("cache hit", "2 workspaces merged") that don't change the final outcome. Appended with `;` to any existing detail. |
+| `scope.Record(note)` | Append a mid-scope annotation. Useful for recording intermediate outcomes ("cache hit", "2 workspaces merged") that don't change the final outcome. Notes are kept apart from the terminal's detail and joined after it (`{detail}; {note}; …`) when the entry is written, so they survive `Outcome`/`Failed`/`Error`; a null or empty note is ignored. |
 | `scope.SetCacheTag(bool hit)` | Record whether a pagination cache hit or miss occurred. Called by `TryServeCachedPage`. |
 | `scope.SetWorkspaceMode(bool isMSBuild)` | Record whether MSBuildWorkspace or AdhocWorkspace was used. Called internally by every resolution guard (`TryGetCompilation`, `TryGetProject`, `TryResolveFileContext`, `TryResolveWorkspaceInfo`, `TryResolveRoot`, `TryResolveSolution`) — tools generally don't call this directly. The scope defaults to MSBuild, so a guard that skipped it would log an Adhoc call with the MSBuild label. |
 
