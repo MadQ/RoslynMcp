@@ -182,24 +182,10 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			return new ErrorResult(failure.ErrorMessage ?? "Restore failed.");
 		}
 		
-		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath, async () => {
-			// Use a Guid-based tmp name to avoid collisions; always clean up on failure.
-			var tmp = Path.Combine(
-				Path.GetDirectoryName(checkedRestore.AbsolutePath)!,
-				$".roslynmcp_restore_{Guid.NewGuid():N}.tmp"
-			);
-			
-			try {
-				
-				await FileWriter.WriteAllBytesAsync(tmp, checkedRestore.Content);
-				FileWriter.Move(tmp, checkedRestore.AbsolutePath, overwrite: true);
-			}
-			catch {
-				
-				try { File.Delete(tmp); } catch { }
-				throw;
-			}
-		});
+		// Temp file plus rename, cleaned up on failure. A file that still exists keeps its Unix
+		// permissions: restoring content must not also reset who may read or run the file.
+		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath,
+			() => FileWriter.ReplaceAtomicAsync(checkedRestore.AbsolutePath, checkedRestore.Content, AtomicReplace.FollowLink));
 		
 		await backups.CompleteRestoreAsync(checkedRestore);
 		

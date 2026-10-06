@@ -113,6 +113,9 @@ internal sealed class BackupStore
 			
 			FileWriter.WriteAllBytes(bakFile, current);
 			
+			// A snapshot must not be readable by more people than the file it was taken from.
+			FileWriter.CopyUnixMode(absolutePath, bakFile);
+			
 			var meta = new BackupMeta {
 				
 				AbsolutePath  = absolutePath,
@@ -176,6 +179,10 @@ internal sealed class BackupStore
 			var metaFile = Path.Combine(dir, MetaFileName);
 			
 			FileWriter.WriteAllBytes(bakFile, content);
+			
+			// Same permissions as the file this content is about to be written to. A file that
+			// does not exist yet has none to copy, and the snapshot keeps the default.
+			FileWriter.CopyUnixMode(absolutePath, bakFile);
 			
 			var meta = new BackupMeta {
 				

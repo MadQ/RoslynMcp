@@ -6,6 +6,30 @@ using System.Threading.Tasks;
 
 namespace RoslynMcp;
 
+/// <summary>What <see cref="FileWriter.ReplaceAtomicAsync(string, byte[], AtomicReplace)"/> does beyond the plain replace.</summary>
+[Flags]
+internal enum AtomicReplace
+{
+    None = 0,
+
+    /// <summary>
+    ///     When the target is a symbolic link, write to the file it points at and leave the link in
+    ///     place. A link is there on purpose — an agent config file living in a dotfiles
+    ///     repository, a source file shared between two folders of a repository — and replacing
+    ///     it with a regular file would silently cut it off. Where the link may lead is not this
+    ///     method's concern: for workspace files the workspace boundary has already refused a
+    ///     link that leaves the workspace.
+    /// </summary>
+    FollowLink = 1,
+
+    /// <summary>
+    ///     When the target does not exist yet, create it readable and writable by its owner only.
+    ///     For config files in the home directory, which can come to hold tokens. An existing file
+    ///     always keeps the mode it has.
+    /// </summary>
+    PrivateWhenNew = 2,
+}
+
 /// <summary>
 ///     Centralised entry point for all file writes in RoslynMcp. Every write is wrapped in
 ///     exponential-backoff retry on transient <see cref="IOException"/> and emits structured
@@ -24,8 +48,9 @@ internal static class FileWriter
     /// <summary>UTF-8 encoding without BOM — RM's standard file encoding.</summary>
     internal static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
-    // null! is safe — Initialize() is always called at startup before any writes are attempted.
-    static FileLogger _logger = null!
+    // Null in the command-line subcommands (setup, setup-project), which write files without
+    // starting the server and so never call Initialize. A retry there is simply not logged.
+    static FileLogger? _logger
 ;
 
     /// <summary>Wires the singleton logger. Must be called once at startup before any writes.</summary>
@@ -56,6 +81,158 @@ internal static class FileWriter
     internal static void Move(string source, string dest, bool overwrite) =>
         WriteWithRetry(() => File.Move(source, dest, overwrite), dest)
 ;
+
+    // ── Atomic replace ────────────────────────────────────────────────────────
+
+    /// <summary>
+    ///     Replaces the content of <paramref name="path"/> so that a reader sees either the old
+    ///     file or the new one, never a half-written one: the bytes go to a temp file beside the
+    ///     target, which is then renamed over it (with the usual retry).
+    ///     <para>
+    ///         A rename puts the temp file in the target's place with the temp file's own
+    ///         attributes, which is wrong in two ways this method corrects (#322). On Linux and
+    ///         macOS the target's permission bits would be replaced by the default mode — a
+    ///         private file becomes readable by others, an executable script stops being
+    ///         executable — so the target's mode is copied onto the temp file first. And a target
+    ///         that is a symbolic link would be replaced by a regular file; see
+    ///         <see cref="AtomicReplace.FollowLink"/>.
+    ///     </para>
+    ///     The temp file is removed when anything fails, and the exception propagates.
+    /// </summary>
+    internal static Task ReplaceAtomicAsync(string path, byte[] bytes) =>
+        ReplaceAtomicAsync(path, bytes, AtomicReplace.None)
+;
+
+    /// <inheritdoc cref="ReplaceAtomicAsync(string, byte[])"/>
+    internal static async Task ReplaceAtomicAsync(string path, byte[] bytes, AtomicReplace options)
+    {
+        var target = ResolveReplaceTarget(path, options);
+        var temp   = TempPathBeside(target);
+
+        EnsureDirectoryOf(target);
+
+        try {
+
+            await WriteAllBytesAsync(temp, bytes);
+            ApplyReplaceMode(temp, target, options);
+            Move(temp, target, overwrite: true);
+        }
+        catch {
+
+            TryDelete(temp);
+            throw;
+        }
+    }
+
+    /// <summary>
+    ///     Synchronous form of <see cref="ReplaceAtomicAsync(string, byte[], AtomicReplace)"/>,
+    ///     for the command-line setup code, which is not asynchronous.
+    /// </summary>
+    internal static void ReplaceAtomic(string path, byte[] bytes, AtomicReplace options)
+    {
+        var target = ResolveReplaceTarget(path, options);
+        var temp   = TempPathBeside(target);
+
+        EnsureDirectoryOf(target);
+
+        try {
+
+            WriteAllBytes(temp, bytes);
+            ApplyReplaceMode(temp, target, options);
+            Move(temp, target, overwrite: true);
+        }
+        catch {
+
+            TryDelete(temp);
+            throw;
+        }
+    }
+
+    /// <summary>
+    ///     Gives <paramref name="copyPath"/> the Unix permission bits of
+    ///     <paramref name="sourcePath"/>, so that a copy of a file is never readable by more
+    ///     people than the file itself. Does nothing on Windows, or when the source does not exist.
+    /// </summary>
+    internal static void CopyUnixMode(string sourcePath, string copyPath)
+    {
+        if(!OperatingSystem.IsWindows() && File.Exists(sourcePath))
+            File.SetUnixFileMode(copyPath, File.GetUnixFileMode(sourcePath));
+    }
+
+    /// <summary>
+    ///     The file a write to <paramref name="path"/> must land in: the file a symbolic link
+    ///     points at, or <paramref name="path"/> itself when it is not a link. For callers that do
+    ///     their own swap and must not replace a link with a regular file.
+    /// </summary>
+    internal static string FollowLink(string path) => ResolveReplaceTarget(path, AtomicReplace.FollowLink);
+
+    /// <summary>
+    ///     The size of the content at <paramref name="path"/>, through a symbolic link. Asking the
+    ///     link itself is wrong on Windows, where a link reports a length of zero whatever the
+    ///     file behind it holds — which made a successful write through a link look truncated.
+    /// </summary>
+    internal static long ContentLength(string path) => new FileInfo(FollowLink(path)).Length;
+
+    // The file the bytes must end up in. For a symbolic link that is the file it points at —
+    // also when that file does not exist yet (a dangling link): the link was put there to say
+    // where the content lives.
+    static string ResolveReplaceTarget(string path, AtomicReplace options)
+    {
+        var target = Path.GetFullPath(path);
+
+        if(options.HasFlag(AtomicReplace.FollowLink)) {
+
+            var info = new FileInfo(target);
+
+            // LinkTarget is null for anything that is not a link, a missing file included.
+            if(info.LinkTarget is { } direct) {
+
+                try {
+
+                    if(info.ResolveLinkTarget(returnFinalTarget: true) is { } final)
+                        target = final.FullName;
+                }
+                catch(IOException) {
+
+                    // The chain cannot be followed to its end. One step is still better than
+                    // overwriting the link itself.
+                    target = Path.GetFullPath(direct, Path.GetDirectoryName(target)!);
+                }
+            }
+        }
+
+        return target;
+    }
+
+    static void EnsureDirectoryOf(string target)
+    {
+        if(Path.GetDirectoryName(target) is { Length: > 0 } directory)
+            Directory.CreateDirectory(directory);
+    }
+
+    // Beside the target, so the rename stays on one volume; unique, so two writers never share it.
+    static string TempPathBeside(string target) =>
+        Path.Combine(Path.GetDirectoryName(target)!, $".{Path.GetFileName(target)}.{Guid.NewGuid():N}.tmp")
+;
+
+    static void ApplyReplaceMode(string temp, string target, AtomicReplace options)
+    {
+        if(OperatingSystem.IsWindows())
+            return;
+
+        if(File.Exists(target))
+            File.SetUnixFileMode(temp, File.GetUnixFileMode(target));
+        else if(options.HasFlag(AtomicReplace.PrivateWhenNew))
+            File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
+
+    static void TryDelete(string path)
+    {
+        try {
+            File.Delete(path);
+        }
+        catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+    }
 
     // ── Core retry implementations ────────────────────────────────────────────
 
@@ -190,12 +367,12 @@ internal static class FileWriter
         {
             if(ex is not IOException and not UnauthorizedAccessException) {
 
-                _logger.LogError("write_retry", $"non-retryable {ex.GetType().Name}{FileLabel}");
+                _logger?.LogError("write_retry", $"non-retryable {ex.GetType().Name}{FileLabel}");
 
                 return false;
             }
 
-            _logger.LogInfo("write_retry", $"attempt={attempt + 1} delay_ms={_delay} hint=\"{ex.Message}\"{FileLabel}");
+            _logger?.LogInfo("write_retry", $"attempt={attempt + 1} delay_ms={_delay} hint=\"{ex.Message}\"{FileLabel}");
             _retries++;
             _totalBackoff += _delay;
 
@@ -205,7 +382,7 @@ internal static class FileWriter
         public void LogRecovered()
         {
             if(_retries > 0)
-                _logger.LogInfo("write_retry", $"recovered after {_retries} retry total_backoff_ms={_totalBackoff}{FileLabel}");
+                _logger?.LogInfo("write_retry", $"recovered after {_retries} retry total_backoff_ms={_totalBackoff}{FileLabel}");
         }
 
         public void LogTerminal(Exception ex)
@@ -214,7 +391,7 @@ internal static class FileWriter
                 ? $"non-retryable {ex.GetType().Name}"
                 : $"exhausted {_retries + 1} attempts";
 
-            _logger.LogError("write_retry", message + FileLabel);
+            _logger?.LogError("write_retry", message + FileLabel);
         }
 
         private string FileLabel => _fileName is null ? "" : $" file=\"{_fileName}\"";

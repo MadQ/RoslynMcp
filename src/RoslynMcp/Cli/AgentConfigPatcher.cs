@@ -33,11 +33,12 @@ static class AgentConfigPatcher
     public static PatchOutcome Patch(string configPath, AgentClient client, string commandPath, ElicitMode elicitMode)
     {
         string? backupPath = null;
-        string? tempPath = null;
 
         try
         {
-            var isNewFile = !File.Exists(configPath);
+            // Through a link: a dangling one "exists" on Windows although there is nothing behind
+            // it to read, and it must count as a config that has not been created yet.
+            var isNewFile = !File.Exists(FileWriter.FollowLink(configPath));
 
             JsonObject root;
 
@@ -59,6 +60,10 @@ static class AgentConfigPatcher
 ;
                 File.WriteAllText(backupPath, json);
 
+                // These files can hold tokens. The backup must not be readable by more people
+                // than the config it copies.
+                FileWriter.CopyUnixMode(configPath, backupPath);
+
                 var parsed = JsonNode.Parse(json, documentOptions: ReadOptions);
 
                 if(parsed is not JsonObject obj)
@@ -71,11 +76,14 @@ static class AgentConfigPatcher
 
             var isUpdate = client.UpsertEntry(root, commandPath, elicitMode);
 
-            // Atomic write: temp → final so a crash mid-write can't corrupt the config.
-            tempPath = configPath + ".roslynmcp.tmp"
-;
-            File.WriteAllText(tempPath, root.ToJsonString(WriteOptions));
-            File.Move(tempPath, configPath, overwrite: true);
+            // Atomic write: temp → final so a crash mid-write can't corrupt the config. A config
+            // that is a symbolic link (kept in a dotfiles repository) is written through, the
+            // link stays; an existing file keeps its permissions; a file created here is
+            // private to its owner, since agent config files come to hold tokens (#322).
+            FileWriter.ReplaceAtomic(
+                configPath,
+                FileWriter.Utf8NoBom.GetBytes(root.ToJsonString(WriteOptions)),
+                AtomicReplace.FollowLink | AtomicReplace.PrivateWhenNew);
 
             return new(isUpdate ? PatchResult.Updated : PatchResult.Added, backupPath, isNewFile);
         }
@@ -87,14 +95,6 @@ static class AgentConfigPatcher
         catch(Exception ex)
         {
             return new(PatchResult.Failed, backupPath, Error: ex.Message);
-        }
-        finally
-        {
-            // Clean up temp file if the move didn't happen (exception path).
-            if(tempPath is not null && File.Exists(tempPath))
-            {
-                try { File.Delete(tempPath); } catch { }
-            }
         }
     }
 }

@@ -378,6 +378,12 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
             return true;
         }
+        catch(Exception ex) when(ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // A dangling link: on Windows the link itself "exists", but there is nothing behind
+            // it to read. That is a file not created yet, the same as a missing one.
+            return true;
+        }
         catch(Exception ex) when(ex is JsonException or IOException or UnauthorizedAccessException)
         {
             return false;
@@ -387,47 +393,27 @@ sealed class ClaudeCodeClient : McpServersDictClient
     // Temp file plus rename, so an interrupted write never leaves a truncated config behind.
     static bool TryWriteJson(string path, JsonObject root)
     {
-        var tmp = path + ".roslynmcp.tmp";
-
         try
         {
-            // A settings file kept in a dotfiles repository is a symlink. Renaming over the
-            // link would replace it with a regular file and detach it from the repository, so
-            // the write goes to the file the link points at.
-            if(File.Exists(path) && File.ResolveLinkTarget(path, returnFinalTarget: true) is { } target)
-            {
-                path = target.FullName;
-                tmp  = path + ".roslynmcp.tmp";
-            }
-
-            var dir = Path.GetDirectoryName(path);
-
-            if(dir is not null)
-                Directory.CreateDirectory(dir);
-
             // Relaxed escaping: the default encoder would turn every '&', '<', '>' and quote in
             // the user's own hook commands into \uXXXX, in a file people edit by hand.
-            File.WriteAllText(tmp, root.ToJsonString(new JsonSerializerOptions {
+            var json = root.ToJsonString(new JsonSerializerOptions {
 
                 WriteIndented = true,
                 Encoder       = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-            }));
+            });
 
-            // The rename puts the temp file in the target's place, mode included. Without this a
-            // settings file the user made private (0600) would come back with the default mode.
-            if(!OperatingSystem.IsWindows() && File.Exists(path))
-                File.SetUnixFileMode(tmp, File.GetUnixFileMode(path));
-
-            File.Move(tmp, path, overwrite: true);
+            // A settings file kept in a dotfiles repository is a symbolic link: the write goes to
+            // the file it points at and the link stays. An existing file keeps its permissions —
+            // one the user made private (0600) stays private — and a file created here is private
+            // from the start, since it can come to hold tokens. A failed write leaves no temp
+            // copy of the config behind. All of that is FileWriter.ReplaceAtomic (#322).
+            FileWriter.ReplaceAtomic(path, FileWriter.Utf8NoBom.GetBytes(json), AtomicReplace.FollowLink | AtomicReplace.PrivateWhenNew);
 
             return true;
         }
         catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
         {
-            // A failed rename must not leave a full copy of the user's config lying next to it.
-            try { File.Delete(tmp); }
-            catch(Exception cleanup) when(cleanup is IOException or UnauthorizedAccessException) { }
-
             return false;
         }
     }

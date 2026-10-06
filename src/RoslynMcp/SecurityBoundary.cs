@@ -4,7 +4,8 @@ namespace RoslynMcp;
 ///     Enforces filesystem access boundaries for a workspace.
 ///     All path validation normalizes with <see cref="Path.GetFullPath"/> before comparison
 ///     to prevent directory traversal via <c>..</c> components or alternate path representations.
-///     Symbolic links inside a trusted root are denied to prevent escape via symlink redirection.
+///     A symbolic link inside a trusted root is followed when it leads to somewhere inside a trusted
+///     root, and denied when it leads out — escape via symlink redirection is what this prevents.
 /// </summary>
 internal sealed class SecurityBoundary
 {
@@ -34,8 +35,9 @@ internal sealed class SecurityBoundary
 	
 	/// <summary>
 	///     Returns true if <paramref name="requestedPath"/> is accessible within this workspace's
-	///     trusted roots. Normalizes the path with <see cref="Path.GetFullPath"/> and denies a path
-	///     that passes through a symbolic link inside a trusted root.
+	///     trusted roots. Normalizes the path with <see cref="Path.GetFullPath"/>. A path that
+	///     passes through a symbolic link inside a trusted root is allowed when the link leads to
+	///     somewhere inside a trusted root, and denied when it leads out.
 	/// </summary>
 	public bool IsPathAllowed(string requestedPath)
 	{
@@ -49,8 +51,41 @@ internal sealed class SecurityBoundary
 			return false;
 		}
 		
+		foreach(var root in allowedRoots.AsSpan()) {
+			
+			if(!IsUnderDirectory(normalized, root))
+				continue;
+			
+			// The common case, and the cheap one: no link on the way, nothing to resolve.
+			if(!HasLinkBelowRoot(normalized, root) || ResolvesInsideARoot(normalized))
+				
+				return true;
+		}
+		
+		return false;
+	}
+	
+	/// <summary>
+	///     Whether <paramref name="path"/>, with every symbolic link in it followed, is still
+	///     inside one of the trusted roots — compared against the roots' own resolved locations,
+	///     because a root can itself sit under a link (#330).
+	///     <para>
+	///         A link inside a workspace is ordinary: a shared folder linked into two projects, a
+	///         file linked from another directory of the same repository. It is followed as long
+	///         as it stays in the workspace (#322). What the boundary exists to stop is a link
+	///         that leads out — <c>secrets -> /home/user/.ssh</c> — and that one still resolves to
+	///         a path under no root. A link that cannot be resolved (a loop, an unreadable
+	///         directory) is treated as leading out.
+	///     </para>
+	/// </summary>
+	bool ResolvesInsideARoot(string path)
+	{
+		if(ResolveLinks(path) is not { } resolved)
+			
+			return false;
+		
 		foreach(var root in allowedRoots.AsSpan())
-			if(IsUnderDirectory(normalized, root) && !HasLinkBelowRoot(normalized, root))
+			if(ResolveLinks(root) is { } resolvedRoot && IsUnderDirectory(resolved, resolvedRoot))
 				
 				return true;
 		
@@ -58,9 +93,69 @@ internal sealed class SecurityBoundary
 	}
 	
 	/// <summary>
+	///     <paramref name="fullPath"/> with every symbolic link or junction along it replaced by
+	///     what it points at, or null when that cannot be worked out. A part of the path that does
+	///     not exist yet is kept as written: a file about to be created has no links to follow.
+	/// </summary>
+	static string? ResolveLinks(string fullPath)
+	{
+		var path = fullPath;
+		
+		try {
+			
+			// Each pass replaces the first link it meets and starts over, since the target can
+			// contain links of its own. The cap is what ends a chain that loops.
+			for(var hop = 0; hop < 40; hop++) {
+				
+				var pathRoot = Path.GetPathRoot(path) ?? "";
+				var segments = path[pathRoot.Length..].Split(
+					[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+					StringSplitOptions.RemoveEmptyEntries);
+				
+				var current  = pathRoot;
+				var replaced = false;
+				
+				for(var i = 0; i < segments.Length; i++) {
+					
+					current = Path.Combine(current, segments[i]);
+					
+					FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+					
+					// LinkTarget is null for everything that is not a link. Something that is not
+					// a link and does not exist ends the walk: the rest of the path is new.
+					if(info.LinkTarget is null) {
+						
+						if(!info.Exists)
+							
+							return path;
+						
+						continue;
+					}
+					
+					if(info.ResolveLinkTarget(returnFinalTarget: true) is not { } target)
+						
+						return null;
+					
+					path     = Path.GetFullPath(Path.Combine([target.FullName, ..segments[(i + 1)..]]));
+					replaced = true;
+					
+					break;
+				}
+				
+				if(!replaced)
+					
+					return path;
+			}
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+		
+		return null;
+	}
+	
+	/// <summary>
 	///     Whether <paramref name="path"/> passes through a symbolic link or junction somewhere
 	///     below <paramref name="root"/>, the path's own last component included. Such a link can
-	///     point anywhere, so following it would leave the boundary.
+	///     point anywhere, so the path has to be resolved before it can be trusted.
 	///     <para>
 	///         The root itself and the directories above it are deliberately not checked. They are
 	///         where the user put the workspace: a link among them moves the whole workspace, it

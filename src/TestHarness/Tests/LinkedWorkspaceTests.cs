@@ -9,18 +9,24 @@ using System.Text.Json.Nodes;
 ///     <c>/private/var</c>; the first harness run there failed 64 tests for this one reason. It is
 ///     the same on Windows or Linux for a checkout under a junction or a symlinked home directory.
 ///     <para>
-///         The rule being pinned has two halves, and each test guards one. A link <b>above or at</b>
-///         the workspace root is where the user put the workspace and must not matter. A link
-///         <b>inside</b> the workspace can point anywhere and must still be refused — loosening the
-///         first half must not open the second.
+///         The rule being pinned has three parts, one test each. A link <b>above or at</b> the
+///         workspace root is where the user put the workspace and must not matter. A link
+///         <b>inside</b> the workspace is followed when it leads to somewhere inside the workspace
+///         (#322) — a folder shared between two places in a repository is ordinary. A link inside
+///         the workspace that leads <b>out</b> of it must still be refused: that is the escape the
+///         boundary exists to stop, and neither of the other two may open it.
 ///     </para>
 ///     <para>
-///         The fixture builds both situations on any operating system instead of relying on the
+///         The fixture builds all three on any operating system instead of relying on the
 ///         platform's temp directory: <c>linked</c> is a directory link to <c>real</c>, and the
-///         workspace is opened as <c>linked/proj</c>, so the link sits above the root. Inside the
-///         workspace, <c>escape</c> is a directory link to <c>outside</c>, which holds a file the
-///         workspace must not reach. Nothing is mocked: the tests call <c>roslyn_read_file</c> on
-///         the real server and look at what comes back.
+///         workspace is opened as <c>linked/proj</c>, so that link sits above the root. Inside the
+///         workspace, <c>alias</c> is a directory link to the workspace's own <c>lib</c> folder,
+///         and <c>escape</c> is a directory link to <c>outside</c>, which holds a file the
+///         workspace must not reach. Opening the workspace through <c>linked</c> also makes the
+///         <c>alias</c> case the hard one: the link's target is written with the real path while
+///         the root is known by its linked path, so the two only compare equal once both are
+///         resolved. Nothing is mocked: the tests call <c>roslyn_read_file</c> on the real server
+///         and look at what comes back.
 ///     </para>
 ///     <para>
 ///         Creating a link needs a privilege Windows grants only to administrators or in developer
@@ -41,15 +47,18 @@ static class LinkedWorkspaceTests
 		fx.Write("real/proj/Probe.cs",   "class Probe { }\n");
 		fx.Write("real/proj/Notes.txt",  "inside-the-workspace\n");
 		fx.Write("outside/secret.txt",   Secret + "\n");
+		fx.Write("real/proj/lib/Inner.txt", "reached-through-the-alias\n");
 		
 		var linkAbove  = fx.PathOf("linked");
 		var linkInside = fx.PathOf("real/proj/escape");
+		var linkAlias  = fx.PathOf("real/proj/alias");
 		var linksMade  = false;
 		
 		try {
 			
 			Directory.CreateSymbolicLink(linkAbove,  fx.PathOf("real"));
 			Directory.CreateSymbolicLink(linkInside, fx.PathOf("outside"));
+			Directory.CreateSymbolicLink(linkAlias,  fx.PathOf("real/proj/lib"));
 			
 			linksMade = true;
 		}
@@ -107,9 +116,25 @@ static class LinkedWorkspaceTests
 						: (false, $"FAIL  (Notes.txt: {notesError ?? "wrong content"}; Probe.cs: {probeError ?? "wrong content"})");
 				}),
 			
-			// The other half of the rule. The read must fail, and the file's content must not
+			// A link that stays inside the workspace is followed. Before #322 every link inside a
+			// workspace was refused, whatever it pointed at.
+			new("linked workspace: a link that stays inside the workspace is followed",
+				async () => {
+					
+					if(!linksMade)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var (text, error) = await ReadAsync("alias/Inner.txt");
+					
+					return text?.Contains("reached-through-the-alias") == true
+						? (true,  "PASS")
+						: (false, $"FAIL  (alias/Inner.txt: {error ?? "wrong content"})");
+				}),
+			
+			// The part that must not give. The read must fail, and the file's content must not
 			// appear anywhere in what comes back.
-			new("linked workspace: a link inside the workspace is still not followed",
+			new("linked workspace: a link that leads out of the workspace is not followed",
 				async () => {
 					
 					if(!linksMade)
@@ -128,7 +153,7 @@ static class LinkedWorkspaceTests
 			
 			// The links first, and only the links: deleting the tree through them would reach
 			// into their targets.
-			foreach(var link in new[] { linkInside, linkAbove })
+			foreach(var link in new[] { linkAlias, linkInside, linkAbove })
 				try {
 					if(Directory.Exists(link))
 						Directory.Delete(link);

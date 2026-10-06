@@ -413,18 +413,22 @@ internal sealed class PhysicalSolutionApplier
 			// failure, which the report already models as partial).
 			cancellationToken.ThrowIfCancellationRequested();
 			
-			var directory = Path.GetDirectoryName(file.Path)
+			// A document that is a symbolic link — allowed when it stays inside the workspace
+			// (#322) — is swapped at the file it points at. Swapping at the link's own path would
+			// replace the link with a regular file and cut it off from where its content lives.
+			var swapPath  = FileWriter.FollowLink(file.Path);
+			var directory = Path.GetDirectoryName(swapPath)
 				?? throw new IOException($"File '{file.Path}' has no parent directory.");
 			var temporaryPath = Path.Combine(
 				directory,
-				$".{Path.GetFileName(file.Path)}.{Guid.NewGuid():N}.tmp");
+				$".{Path.GetFileName(swapPath)}.{Guid.NewGuid():N}.tmp");
 			
 			try {
 				
 				await FileWriter.WriteAllBytesAsync(temporaryPath, file.IntendedBytes!);
 				
 				if(!OperatingSystem.IsWindows() && file.Operation == PhysicalFileOperation.Write)
-					File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(file.Path));
+					File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(swapPath));
 				
 				await workspace.WriteAndInvalidate(projectPath, file.Path, () => {
 					
@@ -445,9 +449,9 @@ internal sealed class PhysicalSolutionApplier
 							throw new IOException(staleError);
 						
 						if(file.Operation == PhysicalFileOperation.Create)
-							File.Move(temporaryPath, file.Path);
+							File.Move(temporaryPath, swapPath);
 						else
-							File.Replace(temporaryPath, file.Path, null);
+							File.Replace(temporaryPath, swapPath, null);
 					}, 5, file.Path);
 					
 					return Task.CompletedTask;
