@@ -16,7 +16,8 @@ using System.Text.Json.Nodes;
 ///         the workspace that leads <b>out</b> of it must still be refused: that is the escape the
 ///         boundary exists to stop, and neither of the other two may open it. A fourth test
 ///         covers the same escape for a write, through a link whose target does not exist yet:
-///         <c>dangling.txt</c> points at a file under <c>outside</c> that nobody created.
+///         <c>dangling.txt</c> points at a file under <c>outside</c> that nobody created. A fifth,
+///         on Linux only, links to a directory whose name differs from the root's in case alone.
 ///     </para>
 ///     <para>
 ///         The fixture builds all three on any operating system instead of relying on the
@@ -59,6 +60,13 @@ static class LinkedWorkspaceTests
 		// would create the target — outside the workspace.
 		var linkDangling   = fx.PathOf("real/proj/dangling.txt");
 		var danglingTarget = fx.PathOf("outside/created-through-the-link.txt");
+		
+		// A directory beside the workspace root whose name differs from the root's only in case.
+		// Only Linux can have one: elsewhere real/PROJ and real/proj are the same directory.
+		var linkCased = fx.PathOf("real/proj/cased");
+		
+		if(OperatingSystem.IsLinux())
+			fx.Write("real/PROJ/secret.txt", Secret + "\n");
 		var linksMade  = false;
 		
 		try {
@@ -67,6 +75,9 @@ static class LinkedWorkspaceTests
 			Directory.CreateSymbolicLink(linkInside, fx.PathOf("outside"));
 			Directory.CreateSymbolicLink(linkAlias,  fx.PathOf("real/proj/lib"));
 			File.CreateSymbolicLink(linkDangling,    danglingTarget);
+			
+			if(OperatingSystem.IsLinux())
+				Directory.CreateSymbolicLink(linkCased, fx.PathOf("real/PROJ"));
 			
 			linksMade = true;
 		}
@@ -185,13 +196,36 @@ static class LinkedWorkspaceTests
 						? (true,  "PASS")
 						: (false, $"FAIL  (refused: {refused}; file created outside the workspace: {created}; response: {body})");
 				}),
+			
+			// "Inside the workspace" must mean the same directory, not a name that looks the
+			// same with case ignored. The link points at real/PROJ, a different directory from
+			// the workspace's real/proj on Linux; a comparison that ignores case took it for the
+			// workspace itself and served the file. The other platforms cannot build the
+			// fixture, and their file systems make the two names one directory anyway.
+			new("linked workspace: a link to a directory that differs from the root only in case is not followed",
+				async () => {
+					
+					if(!OperatingSystem.IsLinux())
+						
+						return Skip.NotApplicable("names that differ only in case are one directory on this platform");
+					
+					if(!linksMade)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var (text, error) = await ReadAsync("cased/secret.txt");
+					
+					return text is null && error?.Contains(Secret) != true
+						? (true,  "PASS")
+						: (false, $"FAIL  (the file outside the workspace was served: {text ?? error})");
+				}),
 		};
 		
 		return new TestGroup($"Linked Workspace ({tests.Count} tests)", tests, Teardown: () => {
 			
 			// The links first, and only the links: deleting the tree through them would reach
 			// into their targets.
-			foreach(var link in new[] { linkAlias, linkInside, linkAbove })
+			foreach(var link in new[] { linkCased, linkAlias, linkInside, linkAbove })
 				try {
 					if(Directory.Exists(link))
 						Directory.Delete(link);

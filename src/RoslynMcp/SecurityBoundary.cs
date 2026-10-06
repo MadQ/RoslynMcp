@@ -11,6 +11,15 @@ internal sealed class SecurityBoundary
 {
 	readonly string[] allowedRoots;
 	
+	// How two paths are compared. On Linux names that differ only in case are different files,
+	// and ignoring case there would count /work/ROOT/secrets as inside /work/root — a way out
+	// for a link that points at it, or for a path that simply names it. Windows and macOS
+	// file systems ignore case as a rule, and there the same file can arrive in either spelling.
+	static readonly StringComparison pathComparison = OperatingSystem.IsLinux()
+		? StringComparison.Ordinal
+		: StringComparison.OrdinalIgnoreCase
+	;
+	
 	// Computed once at startup — SpecialFolder lookups involve platform invocation and filesystem access.
 	static readonly string[] systemDirectories = BuildSystemDirectories()
 	;
@@ -21,7 +30,7 @@ internal sealed class SecurityBoundary
 	/// <param name="referencedProjectRoots">Roots of directly referenced projects; each becomes a trusted root.</param>
 	public SecurityBoundary(string workspaceRoot, string? solutionRoot = null, IEnumerable<string>? referencedProjectRoots = null)
 	{
-		var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { workspaceRoot };
+		var roots = new HashSet<string>(StringComparer.FromComparison(pathComparison)) { workspaceRoot };
 		
 		if(solutionRoot is not null)
 			roots.Add(solutionRoot);
@@ -245,14 +254,14 @@ internal sealed class SecurityBoundary
 		
 		var rootNorm = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		
-		if(string.Equals(path, rootNorm, StringComparison.OrdinalIgnoreCase))
+		if(string.Equals(path, rootNorm, pathComparison))
 			
 			return true;
 		
 		// Check both separator styles for cross-platform compatibility.
 		
-		return path.StartsWith(rootNorm + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-			|| path.StartsWith(rootNorm + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+		return path.StartsWith(rootNorm + Path.DirectorySeparatorChar, pathComparison)
+			|| path.StartsWith(rootNorm + Path.AltDirectorySeparatorChar, pathComparison);
 	}
 	
 	static bool IsDriveRoot(string fullPath)
@@ -268,7 +277,7 @@ internal sealed class SecurityBoundary
 		;
 		var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		
-		return string.Equals(normalizedFull, normalizedRoot, StringComparison.OrdinalIgnoreCase);
+		return string.Equals(normalizedFull, normalizedRoot, pathComparison);
 	}
 	
 	static string[] BuildSystemDirectories()

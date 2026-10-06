@@ -222,6 +222,9 @@ internal static class FileWriter
         try {
 
             // Makes the mode exact: gives back what the umask removed. Still before any content.
+            // Deliberately not repeated after the write: the kernel clears set-user-ID and
+            // set-group-ID bits when a file's content changes, and rewritten content should
+            // not get them back from here.
             File.SetUnixFileMode(stream.SafeFileHandle, unixMode);
         }
         catch {
