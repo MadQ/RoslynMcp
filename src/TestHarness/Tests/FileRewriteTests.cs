@@ -56,6 +56,12 @@ static class FileRewriteTests
 		var link    = fx.PathOf("linked.txt");
 		var linked  = false;
 		
+		// A file that is swapped for a link to outside the workspace after its backup is taken,
+		// and the file outside that the restore must not reach.
+		var outside = TestFixtures.NewAdhocDir("FileRewriteOutside");
+		var swapped = fx.Write("swapped.txt",       "original\n");
+		var victim  = outside.Write("victim.txt",   "untouched\n");
+		
 		if(!OperatingSystem.IsWindows()) {
 			
 			File.SetUnixFileMode(script, Executable);
@@ -190,6 +196,36 @@ static class FileRewriteTests
 						? (true,  "PASS")
 						: (false, $"FAIL  (link kept: {stillLink}; file behind it: '{content.Trim()}'; result: {result?.ToJsonString() ?? "none"})");
 				}),
+			
+			// A backup names a path, not a file. Between the backup and the restore the file is
+			// replaced by a link that leads out of the workspace — a checkout or a script can do
+			// that. A restore that writes through whatever link it finds would put the old
+			// content into the file outside. The restore is forced, as a caller would after the
+			// conflict warning; whatever it reports, the file outside must be unchanged.
+			new("file rewrite: a restore does not write through a link that leads out of the workspace",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable("this machine may not create symbolic links");
+					
+					var written = await Write("swapped.txt", "edited\n");
+					var token   = written?["backupToken"]?.GetValue<string>();
+					
+					if(token is null)
+						
+						return (false, $"FAIL  (no backup token: {written?.ToJsonString() ?? "no result"})");
+					
+					File.Delete(swapped);
+					File.CreateSymbolicLink(swapped, victim);
+					
+					var result  = await Call("roslyn_local_history", new { action = "apply", token, force = true, projectPath = fx.Dir });
+					var outcome = File.ReadAllText(victim);
+					
+					return outcome == "untouched\n"
+						? (true,  "PASS")
+						: (false, $"FAIL  (the file outside the workspace now holds '{outcome.Trim()}'; result: {result?.ToJsonString() ?? "none"})");
+				}),
 		};
 		
 		return new TestGroup($"File Rewrite ({tests.Count} tests)", tests, Teardown: () => {
@@ -201,7 +237,14 @@ static class FileRewriteTests
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
+			try {
+				if(new FileInfo(swapped).LinkTarget is not null)
+					File.Delete(swapped);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			
 			fx.Dispose();
+			outside.Dispose();
 			
 			return Task.CompletedTask;
 		});

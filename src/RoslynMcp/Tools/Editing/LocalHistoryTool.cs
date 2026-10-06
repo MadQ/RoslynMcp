@@ -182,10 +182,20 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			return new ErrorResult(failure.ErrorMessage ?? "Restore failed.");
 		}
 		
+		// The backup names an absolute path, and what sits there now need not be what was
+		// there when the backup was taken: it can be a symbolic link put in the file's place
+		// since. The restore writes through a link only where the workspace boundary allows
+		// the path, as for any other write. Otherwise it replaces what is at the path itself
+		// and never reaches the link's target.
+		var options = TryResolveFileContext(projectPath, out _, out var boundary, out _) && boundary.IsPathAllowed(checkedRestore!.AbsolutePath)
+			? AtomicReplace.FollowLink
+			: AtomicReplace.None
+		;
+		
 		// Temp file plus rename, cleaned up on failure. A file that still exists keeps its Unix
 		// permissions: restoring content must not also reset who may read or run the file.
 		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath,
-			() => FileWriter.ReplaceAtomicAsync(checkedRestore.AbsolutePath, checkedRestore.Content, AtomicReplace.FollowLink));
+			() => FileWriter.ReplaceAtomicAsync(checkedRestore.AbsolutePath, checkedRestore.Content, options));
 		
 		await backups.CompleteRestoreAsync(checkedRestore);
 		
