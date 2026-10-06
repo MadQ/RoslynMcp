@@ -103,62 +103,115 @@ internal sealed class SecurityBoundary
 	
 	/// <summary>
 	///     <paramref name="fullPath"/> with every symbolic link or junction along it replaced by
-	///     what it points at, or null when that cannot be worked out. A part of the path that does
-	///     not exist yet is kept as written: a file about to be created has no links to follow.
+	///     what it points at, or null when that cannot be worked out — a chain that loops, an
+	///     unreadable directory, a link target with a <c>..</c> after a name. A part of the path
+	///     that does not exist yet is kept as written: a file about to be created has no links
+	///     to follow.
 	/// </summary>
 	static string? ResolveLinks(string fullPath)
 	{
-		var path = fullPath;
-		
 		try {
 			
-			// Each pass replaces the first link it meets and starts over, since the target can
-			// contain links of its own. The cap is what ends a chain that loops.
-			for(var hop = 0; hop < 40; hop++) {
+			// The path is walked one component at a time, a link replaced by its own target
+			// the moment it is met, so that ".." is only ever applied to a place that has
+			// been resolved. Asking for a link's final target and tidying the result as text
+			// gets ".." wrong — in "d/../x" with d a link out of the workspace, ".." is the
+			// parent of where d leads, not of where d sits — and that mistake reported a path
+			// outside the workspace as one inside it.
+			var pathRoot = Path.GetPathRoot(fullPath) ?? "";
+			var pending  = new Stack<string>();
+			var current  = pathRoot;
+			var hops     = 0;
+			
+			if(!TryPushSegments(pending, fullPath[pathRoot.Length..]))
 				
-				var pathRoot = Path.GetPathRoot(path) ?? "";
-				var segments = path[pathRoot.Length..].Split(
-					[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-					StringSplitOptions.RemoveEmptyEntries);
+				return null;
+			
+			while(pending.TryPop(out var segment)) {
 				
-				var current  = pathRoot;
-				var replaced = false;
+				if(segment == ".")
+					continue;
 				
-				for(var i = 0; i < segments.Length; i++) {
+				if(segment == "..") {
 					
-					current = Path.Combine(current, segments[i]);
+					// Everything in current has been resolved, so its parent is its real parent.
+					current = Path.GetDirectoryName(current) ?? current;
 					
-					FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
-					
-					// LinkTarget is null for everything that is not a link. Something that is not
-					// a link and does not exist ends the walk: the rest of the path is new.
-					if(info.LinkTarget is null) {
-						
-						if(!info.Exists)
-							
-							return path;
-						
-						continue;
-					}
-					
-					if(info.ResolveLinkTarget(returnFinalTarget: true) is not { } target)
-						
-						return null;
-					
-					path     = Path.GetFullPath(Path.Combine([target.FullName, ..segments[(i + 1)..]]));
-					replaced = true;
-					
-					break;
+					continue;
 				}
 				
-				if(!replaced)
+				var candidate = Path.Combine(current, segment);
+				
+				FileSystemInfo info = Directory.Exists(candidate) ? new DirectoryInfo(candidate) : new FileInfo(candidate);
+				
+				// LinkTarget is null for everything that is not a link, and for what does not
+				// exist: a part of the path that is still to be created is kept as written.
+				if(info.LinkTarget is not { } target) {
 					
-					return path;
+					current = candidate;
+					
+					continue;
+				}
+				
+				// The cap is what ends a chain of links that loops.
+				if(++hops > 40)
+					
+					return null;
+				
+				if(Path.IsPathFullyQualified(target)) {
+					
+					var targetRoot = Path.GetPathRoot(target) ?? "";
+					
+					current = targetRoot;
+					target  = target[targetRoot.Length..];
+				}
+				else if(Path.IsPathRooted(target))
+					current = Path.GetPathRoot(current) ?? current;
+				
+				// A relative target continues from the directory that holds the link, which is
+				// current as it stands.
+				if(!TryPushSegments(pending, target))
+					
+					return null;
 			}
+			
+			return current;
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
 		
 		return null;
+	}
+	
+	// Queues the segments of a path or link target, last segment first so that the first one is
+	// the next to be popped. False for a ".." that comes after a name, as in "d/../x": where
+	// that leads depends on whether d is a link and on whether the system applies ".." to the
+	// text or to the place d leads to — Unix does the latter, Windows the former. Nothing is
+	// lost by refusing to guess. Leading ".." segments are fine: they start from the directory
+	// that holds the link, which is already resolved.
+	static bool TryPushSegments(Stack<string> pending, string path)
+	{
+		var segments = path.Split(
+			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+			StringSplitOptions.RemoveEmptyEntries);
+		
+		var nameSeen = false;
+		
+		foreach(var segment in segments.AsSpan()) {
+			
+			if(segment == "..") {
+				
+				if(nameSeen)
+					
+					return false;
+			}
+			else if(segment != ".")
+				nameSeen = true;
+		}
+		
+		for(var i = segments.Length - 1; i >= 0; i--)
+			pending.Push(segments[i]);
+		
+		return true;
 	}
 	
 	/// <summary>

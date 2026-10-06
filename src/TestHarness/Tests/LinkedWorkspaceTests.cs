@@ -16,8 +16,10 @@ using System.Text.Json.Nodes;
 ///         the workspace that leads <b>out</b> of it must still be refused: that is the escape the
 ///         boundary exists to stop, and neither of the other two may open it. A fourth test
 ///         covers the same escape for a write, through a link whose target does not exist yet:
-///         <c>dangling.txt</c> points at a file under <c>outside</c> that nobody created. A fifth,
-///         on Linux only, links to a directory whose name differs from the root's in case alone.
+///         <c>dangling.txt</c> points at a file under <c>outside</c> that nobody created. A fifth
+///         reads through <c>leak.txt</c>, whose target climbs out through <c>escape</c> and
+///         <c>..</c>. A sixth, on Linux only, links to a directory whose name differs from the
+///         root's in case alone.
 ///     </para>
 ///     <para>
 ///         The fixture builds all three on any operating system instead of relying on the
@@ -61,6 +63,14 @@ static class LinkedWorkspaceTests
 		var linkDangling   = fx.PathOf("real/proj/dangling.txt");
 		var danglingTarget = fx.PathOf("outside/created-through-the-link.txt");
 		
+		// A file link whose target goes through the escape link and back up: escape/../x. Read
+		// as text that is x beside the link, inside the workspace, where nothing exists. Followed
+		// the way Linux and macOS follow it, ".." is the parent of where escape leads, and the
+		// file is the one written here, beside the outside directory.
+		var linkLeak = fx.PathOf("real/proj/leak.txt");
+		
+		fx.Write("sibling-secret.txt", Secret + "\n");
+		
 		// A directory beside the workspace root whose name differs from the root's only in case.
 		// Only Linux can have one: elsewhere real/PROJ and real/proj are the same directory.
 		var linkCased = fx.PathOf("real/proj/cased");
@@ -75,6 +85,7 @@ static class LinkedWorkspaceTests
 			Directory.CreateSymbolicLink(linkInside, fx.PathOf("outside"));
 			Directory.CreateSymbolicLink(linkAlias,  fx.PathOf("real/proj/lib"));
 			File.CreateSymbolicLink(linkDangling,    danglingTarget);
+			File.CreateSymbolicLink(linkLeak,        Path.Combine("escape", "..", "sibling-secret.txt"));
 			
 			if(OperatingSystem.IsLinux())
 				Directory.CreateSymbolicLink(linkCased, fx.PathOf("real/PROJ"));
@@ -197,6 +208,26 @@ static class LinkedWorkspaceTests
 						: (false, $"FAIL  (refused: {refused}; file created outside the workspace: {created}; response: {body})");
 				}),
 			
+			// A link whose target climbs back out through another link. Working out where it
+			// leads by tidying the target as text says "inside the workspace"; the operating
+			// system, on Linux and macOS, opens a file outside it. The boundary must not take
+			// the text's word for it: the read must fail and the content must not come back.
+			// On Windows the system reads such a target as text, so nothing outside is reached
+			// either way and the test only confirms that nothing is served.
+			new("linked workspace: a link that climbs out through another link is not followed",
+				async () => {
+					
+					if(!linksMade)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var (text, error) = await ReadAsync("leak.txt");
+					
+					return text is null && error?.Contains(Secret) != true
+						? (true,  "PASS")
+						: (false, $"FAIL  (the file outside the workspace was served: {text ?? error})");
+				}),
+			
 			// "Inside the workspace" must mean the same directory, not a name that looks the
 			// same with case ignored. The link points at real/PROJ, a different directory from
 			// the workspace's real/proj on Linux; a comparison that ignores case took it for the
@@ -234,6 +265,7 @@ static class LinkedWorkspaceTests
 			
 			try {
 				File.Delete(linkDangling);
+				File.Delete(linkLeak);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
