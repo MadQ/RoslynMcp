@@ -14,7 +14,9 @@ using System.Text.Json.Nodes;
 ///         <b>inside</b> the workspace is followed when it leads to somewhere inside the workspace
 ///         (#322) — a folder shared between two places in a repository is ordinary. A link inside
 ///         the workspace that leads <b>out</b> of it must still be refused: that is the escape the
-///         boundary exists to stop, and neither of the other two may open it.
+///         boundary exists to stop, and neither of the other two may open it. A fourth test
+///         covers the same escape for a write, through a link whose target does not exist yet:
+///         <c>dangling.txt</c> points at a file under <c>outside</c> that nobody created.
 ///     </para>
 ///     <para>
 ///         The fixture builds all three on any operating system instead of relying on the
@@ -30,7 +32,7 @@ using System.Text.Json.Nodes;
 ///     </para>
 ///     <para>
 ///         Creating a link needs a privilege Windows grants only to administrators or in developer
-///         mode. Where it is refused the fixture cannot be built: both tests are reported as
+///         mode. Where it is refused the fixture cannot be built: the tests are reported as
 ///         skipped on a developer's machine and as failed on a CI runner (see <see cref="Skip"/>),
 ///         never as passed.
 ///     </para>
@@ -52,6 +54,11 @@ static class LinkedWorkspaceTests
 		var linkAbove  = fx.PathOf("linked");
 		var linkInside = fx.PathOf("real/proj/escape");
 		var linkAlias  = fx.PathOf("real/proj/alias");
+		
+		// A file link whose target does not exist. Nothing can be read through it, but a write
+		// would create the target — outside the workspace.
+		var linkDangling   = fx.PathOf("real/proj/dangling.txt");
+		var danglingTarget = fx.PathOf("outside/created-through-the-link.txt");
 		var linksMade  = false;
 		
 		try {
@@ -59,6 +66,7 @@ static class LinkedWorkspaceTests
 			Directory.CreateSymbolicLink(linkAbove,  fx.PathOf("real"));
 			Directory.CreateSymbolicLink(linkInside, fx.PathOf("outside"));
 			Directory.CreateSymbolicLink(linkAlias,  fx.PathOf("real/proj/lib"));
+			File.CreateSymbolicLink(linkDangling,    danglingTarget);
 			
 			linksMade = true;
 		}
@@ -147,6 +155,36 @@ static class LinkedWorkspaceTests
 						? (true,  "PASS")
 						: (false, $"FAIL  (the file outside the workspace was served: {text ?? error})");
 				}),
+			
+			// The same escape for a write. The link's target does not exist, so there is nothing
+			// to read and the link is easy to mistake for a file that is about to be created;
+			// writing through it would create a file outside the workspace. The write must be
+			// refused, and the proof is on disk: the target must still not exist.
+			new("linked workspace: a write through a dangling link that leads out is refused",
+				async () => {
+					
+					if(!linksMade)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
+						@params = new { name = "roslyn_write_file", arguments = new {
+							filePath = "dangling.txt", content = "written-through-the-link\n", createNew = true, projectPath } } });
+					
+					var resp = await ctx.ReceiveAsync();
+					var body = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? "";
+					
+					bool refused;
+					
+					try { refused = JsonNode.Parse(body)?["error"] is not null; }
+					catch { refused = false; }
+					
+					var created = File.Exists(danglingTarget);
+					
+					return refused && !created
+						? (true,  "PASS")
+						: (false, $"FAIL  (refused: {refused}; file created outside the workspace: {created}; response: {body})");
+				}),
 		};
 		
 		return new TestGroup($"Linked Workspace ({tests.Count} tests)", tests, Teardown: () => {
@@ -159,6 +197,11 @@ static class LinkedWorkspaceTests
 						Directory.Delete(link);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			
+			try {
+				File.Delete(linkDangling);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			fx.Dispose();
 			

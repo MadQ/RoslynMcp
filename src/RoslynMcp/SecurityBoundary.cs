@@ -175,8 +175,7 @@ internal sealed class SecurityBoundary
 			// Strictly longer than the root: the walk stops when it reaches the root itself.
 			while(current.Length > rootLength) {
 				
-				if((File.Exists(current) || Directory.Exists(current)) &&
-					File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+				if(IsLink(current))
 					
 					return true;
 				
@@ -188,9 +187,28 @@ internal sealed class SecurityBoundary
 				current = parent;
 			}
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) { }
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
+			
+			// A component that cannot be examined may be a link. Saying so sends the path
+			// through resolution instead of letting it pass unlooked-at.
+			return true;
+		}
 		
 		return false;
+	}
+	
+	// Asks the entry itself and never what it points at, so a link whose target does not exist
+	// is still a link: a write through it would create that target, wherever it is. A path
+	// that does not exist is not a link — a file about to be created.
+	static bool IsLink(string path)
+	{
+		try {
+			return File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+		}
+		catch(Exception ex) when(ex is FileNotFoundException or DirectoryNotFoundException) {
+			
+			return false;
+		}
 	}
 	
 	/// <summary>

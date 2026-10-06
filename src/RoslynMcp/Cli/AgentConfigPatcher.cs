@@ -58,11 +58,9 @@ static class AgentConfigPatcher
                 // overwritten on each run so it always holds the last pre-roslynmcp state.
                 backupPath = configPath + ".roslynmcp.bak"
 ;
-                File.WriteAllText(backupPath, json);
-
-                // These files can hold tokens. The backup must not be readable by more people
-                // than the config it copies.
-                FileWriter.CopyUnixMode(configPath, backupPath);
+                // These files can hold tokens. The backup is created with the permissions of the
+                // config it copies, so it is at no moment readable by more people than that.
+                FileWriter.WriteAllBytes(backupPath, FileWriter.Utf8NoBom.GetBytes(json), FileWriter.UnixModeOf(configPath));
 
                 var parsed = JsonNode.Parse(json, documentOptions: ReadOptions);
 

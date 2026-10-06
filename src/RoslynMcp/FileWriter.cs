@@ -93,7 +93,9 @@ internal static class FileWriter
     ///         attributes, which is wrong in two ways this method corrects (#322). On Linux and
     ///         macOS the target's permission bits would be replaced by the default mode — a
     ///         private file becomes readable by others, an executable script stops being
-    ///         executable — so the target's mode is copied onto the temp file first. And a target
+    ///         executable — so the temp file is created with the target's mode. Created with it, not
+    ///         given it afterwards: content that is written first and restricted later is
+    ///         readable by others in between. And a target
     ///         that is a symbolic link would be replaced by a regular file; see
     ///         <see cref="AtomicReplace.FollowLink"/>.
     ///     </para>
@@ -108,13 +110,13 @@ internal static class FileWriter
     {
         var target = ResolveReplaceTarget(path, options);
         var temp   = TempPathBeside(target);
+        var mode   = ReplaceMode(target, options);
 
         EnsureDirectoryOf(target);
 
         try {
 
-            await WriteAllBytesAsync(temp, bytes);
-            ApplyReplaceMode(temp, target, options);
+            await WriteAllBytesAsync(temp, bytes, mode);
             Move(temp, target, overwrite: true);
         }
         catch {
@@ -132,13 +134,13 @@ internal static class FileWriter
     {
         var target = ResolveReplaceTarget(path, options);
         var temp   = TempPathBeside(target);
+        var mode   = ReplaceMode(target, options);
 
         EnsureDirectoryOf(target);
 
         try {
 
-            WriteAllBytes(temp, bytes);
-            ApplyReplaceMode(temp, target, options);
+            WriteAllBytes(temp, bytes, mode);
             Move(temp, target, overwrite: true);
         }
         catch {
@@ -149,20 +151,88 @@ internal static class FileWriter
     }
 
     /// <summary>
-    ///     Gives <paramref name="copyPath"/> the Unix permission bits of
-    ///     <paramref name="sourcePath"/>, so that a copy of a file is never readable by more
-    ///     people than the file itself. Does nothing on Windows, or when the source does not exist.
+    ///     The Unix permission bits of the content at <paramref name="path"/>, or null on Windows
+    ///     and when there is nothing there. Read through a symbolic link: a link has permission
+    ///     bits of its own, wide open, that say nothing about the file behind it.
+    ///     <para>
+    ///         Pass the result to <see cref="WriteAllBytes(string, byte[], UnixFileMode?)"/> when
+    ///         writing a copy of a file — a backup, a snapshot — so the copy is never readable by
+    ///         more people than the file itself.
+    ///     </para>
     /// </summary>
-    internal static void CopyUnixMode(string sourcePath, string copyPath)
+    internal static UnixFileMode? UnixModeOf(string path)
     {
-        if(!OperatingSystem.IsWindows() && File.Exists(sourcePath))
-            File.SetUnixFileMode(copyPath, File.GetUnixFileMode(sourcePath));
+        if(OperatingSystem.IsWindows())
+            return null;
+
+        var target = FollowLink(path);
+
+        return File.Exists(target) ? File.GetUnixFileMode(target) : null;
+    }
+
+    /// <summary>
+    ///     Writes <paramref name="bytes"/> to <paramref name="path"/>, which has the permission
+    ///     bits <paramref name="mode"/> from before its first byte is written. A null mode — and
+    ///     any mode on Windows — is the plain write with the platform's default.
+    /// </summary>
+    internal static void WriteAllBytes(string path, byte[] bytes, UnixFileMode? mode) =>
+        WriteWithRetry(() => {
+
+            using var stream = OpenForWrite(path, mode, FileOptions.None);
+
+            stream.Write(bytes);
+        }, path)
+    ;
+
+    /// <inheritdoc cref="WriteAllBytes(string, byte[], UnixFileMode?)"/>
+    internal static Task WriteAllBytesAsync(string path, byte[] bytes, UnixFileMode? mode) =>
+        WriteWithRetryAsync(async () => {
+
+            await using var stream = OpenForWrite(path, mode, FileOptions.Asynchronous);
+
+            await stream.WriteAsync(bytes);
+        }, path)
+    ;
+
+    // Opens the file empty and with its final permissions. Setting them after the content is
+    // written would leave the content readable under the default mode until then (#322).
+    static FileStream OpenForWrite(string path, UnixFileMode? mode, FileOptions fileOptions)
+    {
+        var options = new FileStreamOptions {
+            Mode    = FileMode.Create,
+            Access  = FileAccess.Write,
+            Share   = FileShare.Read,
+            Options = fileOptions,
+        };
+
+        if(mode is not { } unixMode || OperatingSystem.IsWindows())
+            return new FileStream(path, options);
+
+        // Applies when the file is created, and the process umask can only take bits away
+        // from it, so a new file is never wider than asked for.
+        options.UnixCreateMode = unixMode;
+
+        var stream = new FileStream(path, options);
+
+        try {
+
+            // Makes the mode exact: gives back what the umask removed, and narrows a file that
+            // already existed and was only emptied. Still before any content.
+            File.SetUnixFileMode(stream.SafeFileHandle, unixMode);
+        }
+        catch {
+
+            stream.Dispose();
+            throw;
+        }
+
+        return stream;
     }
 
     /// <summary>
     ///     The file a write to <paramref name="path"/> must land in: the file a symbolic link
-    ///     points at, or <paramref name="path"/> itself when it is not a link. For callers that do
-    ///     their own swap and must not replace a link with a regular file.
+    ///     points at, or <paramref name="path"/> itself when it is not a link. For callers that
+    ///     need to look at the file behind a link — whether it exists, how large it is.
     /// </summary>
     internal static string FollowLink(string path) => ResolveReplaceTarget(path, AtomicReplace.FollowLink);
 
@@ -215,15 +285,20 @@ internal static class FileWriter
         Path.Combine(Path.GetDirectoryName(target)!, $".{Path.GetFileName(target)}.{Guid.NewGuid():N}.tmp")
 ;
 
-    static void ApplyReplaceMode(string temp, string target, AtomicReplace options)
+    // The mode the temp file is created with, and so the mode the target ends up with: the one
+    // it has now, or owner-only for a new file that asks for it. Null leaves the default.
+    static UnixFileMode? ReplaceMode(string target, AtomicReplace options)
     {
         if(OperatingSystem.IsWindows())
-            return;
+            return null;
 
         if(File.Exists(target))
-            File.SetUnixFileMode(temp, File.GetUnixFileMode(target));
-        else if(options.HasFlag(AtomicReplace.PrivateWhenNew))
-            File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            return File.GetUnixFileMode(target);
+
+        return options.HasFlag(AtomicReplace.PrivateWhenNew)
+            ? UnixFileMode.UserRead | UnixFileMode.UserWrite
+            : null
+        ;
     }
 
     static void TryDelete(string path)

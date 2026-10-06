@@ -413,22 +413,23 @@ internal sealed class PhysicalSolutionApplier
 			// failure, which the report already models as partial).
 			cancellationToken.ThrowIfCancellationRequested();
 			
-			// A document that is a symbolic link — allowed when it stays inside the workspace
-			// (#322) — is swapped at the file it points at. Swapping at the link's own path would
-			// replace the link with a regular file and cut it off from where its content lives.
-			var swapPath  = FileWriter.FollowLink(file.Path);
-			var directory = Path.GetDirectoryName(swapPath)
+			// The swap is at the document's own path. A document that is a symbolic link is
+			// therefore replaced by a regular file, as it always was: following the link here
+			// needs a check of where it leads, which this step has no boundary to make, and a
+			// link and its target in one plan would trip each other's stale check (#322).
+			var directory = Path.GetDirectoryName(file.Path)
 				?? throw new IOException($"File '{file.Path}' has no parent directory.");
 			var temporaryPath = Path.Combine(
 				directory,
-				$".{Path.GetFileName(swapPath)}.{Guid.NewGuid():N}.tmp");
+				$".{Path.GetFileName(file.Path)}.{Guid.NewGuid():N}.tmp");
 			
 			try {
 				
-				await FileWriter.WriteAllBytesAsync(temporaryPath, file.IntendedBytes!);
+				// Created with the permissions of the file it replaces: the swap puts the temp
+				// file in the target's place with the temp file's own mode.
+				var mode = file.Operation == PhysicalFileOperation.Write ? FileWriter.UnixModeOf(file.Path) : null;
 				
-				if(!OperatingSystem.IsWindows() && file.Operation == PhysicalFileOperation.Write)
-					File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(swapPath));
+				await FileWriter.WriteAllBytesAsync(temporaryPath, file.IntendedBytes!, mode);
 				
 				await workspace.WriteAndInvalidate(projectPath, file.Path, () => {
 					
@@ -449,9 +450,9 @@ internal sealed class PhysicalSolutionApplier
 							throw new IOException(staleError);
 						
 						if(file.Operation == PhysicalFileOperation.Create)
-							File.Move(temporaryPath, swapPath);
+							File.Move(temporaryPath, file.Path);
 						else
-							File.Replace(temporaryPath, swapPath, null);
+							File.Replace(temporaryPath, file.Path, null);
 					}, 5, file.Path);
 					
 					return Task.CompletedTask;
