@@ -208,6 +208,11 @@ internal static class FileWriter
         if(mode is not { } unixMode || OperatingSystem.IsWindows())
             return new FileStream(path, options);
 
+        // Always a new file. One left by a failed attempt may be read-only by now — the mode
+        // asked for can be exactly that — and could not be opened for writing again, and one
+        // from an earlier run keeps whatever mode it had until the handle is open.
+        File.Delete(path);
+
         // Applies when the file is created, and the process umask can only take bits away
         // from it, so a new file is never wider than asked for.
         options.UnixCreateMode = unixMode;
@@ -216,13 +221,13 @@ internal static class FileWriter
 
         try {
 
-            // Makes the mode exact: gives back what the umask removed, and narrows a file that
-            // already existed and was only emptied. Still before any content.
+            // Makes the mode exact: gives back what the umask removed. Still before any content.
             File.SetUnixFileMode(stream.SafeFileHandle, unixMode);
         }
         catch {
 
             stream.Dispose();
+            TryDelete(path);
             throw;
         }
 
