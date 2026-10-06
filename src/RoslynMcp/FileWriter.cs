@@ -263,20 +263,11 @@ internal static class FileWriter
             var info = new FileInfo(target);
 
             // LinkTarget is null for anything that is not a link, a missing file included.
-            if(info.LinkTarget is { } direct) {
-
-                try {
-
-                    if(info.ResolveLinkTarget(returnFinalTarget: true) is { } final)
-                        target = final.FullName;
-                }
-                catch(IOException) {
-
-                    // The chain cannot be followed to its end. One step is still better than
-                    // overwriting the link itself.
-                    target = Path.GetFullPath(direct, Path.GetDirectoryName(target)!);
-                }
-            }
+            // A chain that cannot be followed to its end — it loops, or is too deep — throws,
+            // and the write fails. Settling for one hop would overwrite another link, or the
+            // link itself when it points at itself.
+            if(info.LinkTarget is not null && info.ResolveLinkTarget(returnFinalTarget: true) is { } final)
+                target = final.FullName;
         }
 
         return target;

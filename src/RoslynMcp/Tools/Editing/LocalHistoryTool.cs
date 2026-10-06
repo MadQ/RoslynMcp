@@ -182,15 +182,32 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			return new ErrorResult(failure.ErrorMessage ?? "Restore failed.");
 		}
 		
-		// The backup names an absolute path, and what sits there now need not be what was
-		// there when the backup was taken: it can be a symbolic link put in the file's place
-		// since. The restore writes through a link only where the workspace boundary allows
-		// the path, as for any other write. Otherwise it replaces what is at the path itself
-		// and never reaches the link's target.
-		var options = TryResolveFileContext(projectPath, out _, out var boundary, out _) && boundary.IsPathAllowed(checkedRestore!.AbsolutePath)
-			? AtomicReplace.FollowLink
-			: AtomicReplace.None
-		;
+		// The backup names an absolute path, and what is on the way to it now need not be what
+		// was there when the backup was taken: the file, or a directory above it, can have been
+		// replaced by a symbolic link since. So the path is put to the workspace boundary like
+		// the path of any other write.
+		if(!TryResolveFileContext(projectPath, out _, out var boundary, out var resolveError))
+			
+			return resolveError;
+		
+		var restorePath = checkedRestore!.AbsolutePath;
+		AtomicReplace options;
+		
+		if(boundary.IsPathAllowed(restorePath))
+			options = AtomicReplace.FollowLink;
+		
+		// The file itself is a link that leads out, in a directory that is inside: the link is
+		// replaced where it sits and its target is never reached.
+		else if(Path.GetDirectoryName(restorePath) is { } directory && boundary.IsPathAllowed(directory))
+			options = AtomicReplace.None;
+		
+		// Anything else would be written outside the workspace — a directory on the way is a
+		// link that leads out, or the backup belongs to a file of another workspace.
+		else
+			
+			return new ErrorResult(
+				$"'{restorePath}' is outside this workspace, or reaches it through a symbolic link that leads out of it. Nothing was restored.",
+				"Pass the projectPath of the workspace the file belongs to.");
 		
 		// Temp file plus rename, cleaned up on failure. A file that still exists keeps its Unix
 		// permissions: restoring content must not also reset who may read or run the file.

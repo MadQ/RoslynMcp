@@ -62,6 +62,12 @@ static class FileRewriteTests
 		var swapped = fx.Write("swapped.txt",       "original\n");
 		var victim  = outside.Write("victim.txt",   "untouched\n");
 		
+		// The same for a directory: nested is swapped for a link to a directory outside that
+		// holds a file of the same name.
+		var nested       = fx.PathOf("nested");
+		var nestedFile   = fx.Write("nested/inner.txt",        "original\n");
+		var nestedVictim = outside.Write("elsewhere/inner.txt", "untouched\n");
+		
 		if(!OperatingSystem.IsWindows()) {
 			
 			File.SetUnixFileMode(script, Executable);
@@ -226,6 +232,38 @@ static class FileRewriteTests
 						? (true,  "PASS")
 						: (false, $"FAIL  (the file outside the workspace now holds '{outcome.Trim()}'; result: {result?.ToJsonString() ?? "none"})");
 				}),
+			
+			// The link need not be the file itself. Here the directory above it is replaced by a
+			// link that leads out; a restore that only refuses to follow a link in the last
+			// component still walks through the directory link and overwrites the file of the
+			// same name outside. That file must be unchanged, and the restore must say it did
+			// nothing rather than report success.
+			new("file rewrite: a restore does not write through a linked directory that leads out of the workspace",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable("this machine may not create symbolic links");
+					
+					var written = await Write("nested/inner.txt", "edited\n");
+					var token   = written?["backupToken"]?.GetValue<string>();
+					
+					if(token is null)
+						
+						return (false, $"FAIL  (no backup token: {written?.ToJsonString() ?? "no result"})");
+					
+					File.Delete(nestedFile);
+					Directory.Delete(nested);
+					Directory.CreateSymbolicLink(nested, Path.GetDirectoryName(nestedVictim)!);
+					
+					var result  = await Call("roslyn_local_history", new { action = "apply", token, force = true, projectPath = fx.Dir });
+					var outcome = File.ReadAllText(nestedVictim);
+					var refused = result?["error"] is not null;
+					
+					return outcome == "untouched\n" && refused
+						? (true,  "PASS")
+						: (false, $"FAIL  (file outside: '{outcome.Trim()}'; refused: {refused}; result: {result?.ToJsonString() ?? "none"})");
+				}),
 		};
 		
 		return new TestGroup($"File Rewrite ({tests.Count} tests)", tests, Teardown: () => {
@@ -240,6 +278,9 @@ static class FileRewriteTests
 			try {
 				if(new FileInfo(swapped).LinkTarget is not null)
 					File.Delete(swapped);
+				
+				if(new DirectoryInfo(nested).LinkTarget is not null)
+					Directory.Delete(nested);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
