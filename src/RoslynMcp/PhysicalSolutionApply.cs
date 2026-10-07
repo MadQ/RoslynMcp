@@ -413,7 +413,7 @@ internal sealed class PhysicalSolutionApplier
 	///     Where one plan entry is written. <paramref name="Path"/> is the file the swap happens at.
 	/// </summary>
 	/// <param name="FollowsLink">The document is a link and <paramref name="Path"/> is where it leads.</param>
-	/// <param name="ReplacesLink">The document is a link that leads out of the workspace, and is replaced where it sits.</param>
+	/// <param name="ReplacesLink">The document is a link the boundary does not allow to be followed — it leads out of the workspace, or where it leads cannot be worked out — and is replaced where it sits.</param>
 	/// <param name="SharedWithEarlier">An earlier entry writes this same file with the same content; this one writes nothing.</param>
 	sealed record WriteTarget(string Path, bool FollowsLink, bool ReplacesLink, bool SharedWithEarlier);
 	
@@ -437,9 +437,27 @@ internal sealed class PhysicalSolutionApplier
 	/// <exception cref="PhysicalApplyPlanException">Two entries propose different contents for one file.</exception>
 	WriteTarget?[] ResolveWriteTargets(PhysicalSolutionApplyPlan plan, string projectPath)
 	{
-		var boundary = workspace.GetSecurityBoundary(projectPath);
-		var targets  = new WriteTarget?[plan.Files.Length];
-		var writers  = new Dictionary<string, PhysicalFilePlan>(SecurityBoundary.PathComparer);
+		var boundary    = workspace.GetSecurityBoundary(projectPath);
+		var targets     = new WriteTarget?[plan.Files.Length];
+		var writers     = new Dictionary<string, PhysicalFilePlan>(SecurityBoundary.PathComparer);
+		var directories = new Dictionary<string, string>(SecurityBoundary.PathComparer);
+		
+		// Where a file really is: its directory with every link followed, and its own name. The
+		// directory is resolved once per directory — a change touches many files in few of them.
+		string Located(string path)
+		{
+			if(Path.GetDirectoryName(path) is not { } directory)
+				
+				return path;
+			
+			if(!directories.TryGetValue(directory, out var resolved)) {
+				
+				resolved = SecurityBoundary.ResolveLinks(directory) ?? directory;
+				directories.Add(directory, resolved);
+			}
+			
+			return Path.Combine(resolved, Path.GetFileName(path));
+		}
 		
 		for(var index = 0; index < plan.Files.Length; index++) {
 			
@@ -454,18 +472,26 @@ internal sealed class PhysicalSolutionApplier
 			
 			if(file.Operation == PhysicalFileOperation.Write && FileWriter.IsLink(path)) {
 				
-				if(boundary.IsPathAllowed(path)) {
+				// Two questions, because they are answered at two moments: may the link be
+				// followed, and is the place it was then found to lead to inside the workspace.
+				// The second one is asked about the very path the write will use, so a link
+				// that is pointed elsewhere between the two cannot slip an unchecked
+				// destination through.
+				if(boundary.IsPathAllowed(path)
+					&& FileWriter.FollowLink(path) is var destination
+					&& boundary.IsPathAllowed(destination)) {
 					
-					path    = FileWriter.FollowLink(path);
+					path    = destination;
 					follows = true;
 				}
 				else
 					replaces = true;
 			}
 			
-			// A replaced link is its own file from here on. Everything else is known by where it
-			// really is, with links in the directories above it followed too.
-			var identity = replaces ? path : SecurityBoundary.ResolveLinks(path) ?? path;
+			// A followed link is known by the file it leads to, a replaced one by the link
+			// itself. Either way the directory is resolved, so one file reached along two
+			// routes — through a linked directory and directly — is recognised as one.
+			var identity = Located(path);
 			var shared   = false;
 			
 			if(writers.TryGetValue(identity, out var writer)) {
@@ -506,7 +532,14 @@ internal sealed class PhysicalSolutionApplier
 		string projectPath,
 		CancellationToken cancellationToken)
 	{
-		for(var index = 0; index < plan.Files.Length; index++) {
+		// Links that are replaced where they sit go first. Their stale check reads through the
+		// link, so it would take a write to the file behind it — when that file is part of the
+		// same change — for an outside edit. Once replaced, the link is a file of its own.
+		var order = Enumerable.Range(0, plan.Files.Length)
+			.OrderBy(index => targets[index] is { ReplacesLink: true } ? 0 : 1)
+		;
+		
+		foreach(var index in order) {
 			
 			var file = plan.Files[index];
 			
@@ -561,11 +594,14 @@ internal sealed class PhysicalSolutionApplier
 						if(PhysicalSolutionApplyPlan.ValidateCurrentState(file) is { } staleError)
 							throw new IOException(staleError);
 						
-						// The boundary approved one place. A link that has been pointed somewhere
-						// else since then has not been checked, even when the content still matches.
-						if(target.FollowsLink
-							&& !string.Equals(FileWriter.FollowLink(file.Path), target.Path, StringComparison.Ordinal))
-							throw new IOException($"Apply aborted — the symbolic link '{file.Path}' was changed after preview.");
+						// Where to write was decided for the file as it was then: a link that is
+						// followed to one place, a link that is replaced, or no link at all. A file
+						// that has become something else since has not been checked, even when
+						// its content still matches.
+						if(FileWriter.IsLink(file.Path) != (target.FollowsLink || target.ReplacesLink)
+							|| target.FollowsLink
+								&& !string.Equals(FileWriter.FollowLink(file.Path), target.Path, StringComparison.Ordinal))
+							throw new IOException($"Apply aborted — '{file.Path}' became, stopped being, or was repointed as a symbolic link after preview.");
 						
 						// A link that is replaced where it sits needs a move: on Windows File.Replace
 						// refuses a target that is a symbolic link, and the apply failed there (#334).
@@ -581,9 +617,10 @@ internal sealed class PhysicalSolutionApplier
 					return Task.CompletedTask;
 				});
 				
-				// The file behind the link can be a document of its own, at its own path.
-				if(target.FollowsLink)
-					workspace.InvalidateFile(projectPath, target.Path);
+				// The file behind a followed link is not invalidated here. When it is a document
+				// of its own, the file watcher sees the swap at its path and refreshes it, as
+				// for every other write through a link; invalidating it by hand would take a
+				// source file that no project compiles for a new document and force a reload.
 			}
 			finally {
 				
@@ -678,7 +715,7 @@ internal static class PhysicalApplyResultMapper
 		
 		var links = string.Join(", ", report.ReplacedLinks.Select(path => $"'{toRelativePath(path)}'"));
 		
-		return $"Symbolic links that lead out of the workspace were replaced by regular files holding the new content: {links}. " +
+		return $"Symbolic links that lead out of the workspace, or whose target could not be checked, were replaced by regular files holding the new content: {links}. " +
 			"The files they pointed at were not changed, and restoring a backup does not bring the links back.";
 	}
 	
