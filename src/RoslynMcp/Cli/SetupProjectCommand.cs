@@ -313,27 +313,17 @@ internal class SetupProjectCommand : CliCommand
 			File.Copy(configPath, backupPath, overwrite: true);
 		}
 		
-		// Atomic write: temp → final so a crash mid-write can't corrupt the config.
-		var tempPath = configPath + ".roslynmcp.tmp";
-		
-		try {
-			
-			File.WriteAllText(tempPath, root.ToJsonString(new JsonSerializerOptions {
+		// Atomic write: temp → final so a crash mid-write can't corrupt the config. An existing
+		// file keeps its permissions, and a config that is a symbolic link is written through.
+		// No PrivateWhenNew: this file is committed and shared, so it takes the usual mode.
+		FileWriter.ReplaceAtomic(
+			configPath,
+			FileWriter.Utf8NoBom.GetBytes(root.ToJsonString(new JsonSerializerOptions {
 				
 				WriteIndented = true,
 				Encoder       = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-			}));
-			
-			File.Move(tempPath, configPath, overwrite: true);
-		}
-		finally {
-			
-			// Clean up temp file if the move didn't happen (exception path).
-			if(File.Exists(tempPath)) {
-				
-				try { File.Delete(tempPath); } catch { }
-			}
-		}
+			})),
+			AtomicReplace.FollowLink);
 		
 		var relativeConfig = Path.GetRelativePath(Environment.CurrentDirectory, configPath);
 		

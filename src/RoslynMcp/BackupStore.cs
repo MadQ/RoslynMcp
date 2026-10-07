@@ -111,7 +111,9 @@ internal sealed class BackupStore
 			var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.pre.bak");
 			var metaFile = Path.Combine(dir, MetaFileName);
 			
-			FileWriter.WriteAllBytes(bakFile, current);
+			// A snapshot must not be readable by more people than the file it was taken from —
+			// from its first byte on, so it is created with that file's permissions.
+			FileWriter.WriteAllBytes(bakFile, current, FileWriter.UnixModeOf(absolutePath));
 			
 			var meta = new BackupMeta {
 				
@@ -175,7 +177,9 @@ internal sealed class BackupStore
 			var bakFile  = Path.Combine(dir, $"{Path.GetFileName(absolutePath)}_{unixMs}_{nonce}.post.bak");
 			var metaFile = Path.Combine(dir, MetaFileName);
 			
-			FileWriter.WriteAllBytes(bakFile, content);
+			// Created with the permissions of the file this content is about to be written to. A
+			// file that does not exist yet has none, and the snapshot gets the default.
+			FileWriter.WriteAllBytes(bakFile, content, FileWriter.UnixModeOf(absolutePath));
 			
 			var meta = new BackupMeta {
 				

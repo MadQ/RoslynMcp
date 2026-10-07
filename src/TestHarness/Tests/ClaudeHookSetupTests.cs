@@ -262,6 +262,51 @@ static class ClaudeHookSetupTests
 				return mode == ownerOnly && Groups(path) is not null ? null : $"mode after the install: {mode}";
 			}),
 			
+			// A dangling link: the link exists, the file it points at does not yet (a dotfiles
+			// repository linked into place before the tool ever wrote a setting). The link says
+			// where the settings live, so the file must be created there and the link kept —
+			// before #322 the link was replaced by a regular file.
+			Case("a dangling settings link gets its file created and stays a link", () => {
+				
+				var real = Path.Combine(dir, "dotfiles", "not-yet-settings.json");
+				var link = Path.Combine(dir, "dangling-settings.json");
+				
+				Directory.CreateDirectory(Path.GetDirectoryName(real)!);
+				
+				try { File.CreateSymbolicLink(link, real); }
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					throw new SkipTest(Skip.SetupUnavailable("this machine may not create symbolic links"));
+				}
+				
+				if(!Upsert(ctx, link))
+					return "UpsertHookIn returned false";
+				
+				var stillLink = new FileInfo(link).LinkTarget is not null;
+				var groups    = File.Exists(real) ? Groups(real) : null;
+				
+				return stillLink && groups is not null && Commands(groups).SequenceEqual([HookCommand])
+					? null
+					: $"link kept: {stillLink}; file behind it created: {File.Exists(real)}";
+			}),
+			
+			// A settings file that setup creates is private from the start (#322): it lives in the
+			// home directory and can come to hold tokens. Only a file created here — the test
+			// above pins that an existing one keeps whatever mode it has.
+			Case("a settings file created by the install is private to its owner", () => {
+				
+				if(OperatingSystem.IsWindows())
+					throw new SkipTest(Skip.NotApplicable("Unix file modes do not exist on Windows"));
+				
+				var path = Path.Combine(dir, "created", "settings.json");
+				
+				if(!Upsert(ctx, path))
+					return "UpsertHookIn returned false";
+				
+				var mode = File.GetUnixFileMode(path);
+				
+				return mode == (UnixFileMode.UserRead | UnixFileMode.UserWrite) ? null : $"mode of the new file: {mode}";
+			}),
+			
 			// A matcher group someone else left with an empty hooks array is not ours to delete,
 			// in either the install or the cleanup.
 			Case("a foreign group with no hooks is left in place", () => {

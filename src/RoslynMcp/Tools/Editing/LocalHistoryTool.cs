@@ -182,24 +182,37 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 			return new ErrorResult(failure.ErrorMessage ?? "Restore failed.");
 		}
 		
-		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath, async () => {
-			// Use a Guid-based tmp name to avoid collisions; always clean up on failure.
-			var tmp = Path.Combine(
-				Path.GetDirectoryName(checkedRestore.AbsolutePath)!,
-				$".roslynmcp_restore_{Guid.NewGuid():N}.tmp"
-			);
+		// The backup names an absolute path, and what is on the way to it now need not be what
+		// was there when the backup was taken: the file, or a directory above it, can have been
+		// replaced by a symbolic link since. So the path is put to the workspace boundary like
+		// the path of any other write.
+		if(!TryResolveFileContext(projectPath, out _, out var boundary, out var resolveError))
 			
-			try {
-				
-				await FileWriter.WriteAllBytesAsync(tmp, checkedRestore.Content);
-				FileWriter.Move(tmp, checkedRestore.AbsolutePath, overwrite: true);
-			}
-			catch {
-				
-				try { File.Delete(tmp); } catch { }
-				throw;
-			}
-		});
+			return resolveError;
+		
+		var restorePath = checkedRestore!.AbsolutePath;
+		AtomicReplace options;
+		
+		if(boundary.IsPathAllowed(restorePath))
+			options = AtomicReplace.FollowLink;
+		
+		// The file itself is a link that leads out, in a directory that is inside: the link is
+		// replaced where it sits and its target is never reached.
+		else if(Path.GetDirectoryName(restorePath) is { } directory && boundary.IsPathAllowed(directory))
+			options = AtomicReplace.None;
+		
+		// Anything else would be written outside the workspace — a directory on the way is a
+		// link that leads out, or the backup belongs to a file of another workspace.
+		else
+			
+			return new ErrorResult(
+				$"'{restorePath}' is outside this workspace, or reaches it through a symbolic link that leads out of it. Nothing was restored.",
+				"Pass the projectPath of the workspace the file belongs to.");
+		
+		// Temp file plus rename, cleaned up on failure. A file that still exists keeps its Unix
+		// permissions: restoring content must not also reset who may read or run the file.
+		await workspace.WriteAndInvalidate(projectPath, checkedRestore!.AbsolutePath,
+			() => FileWriter.ReplaceAtomicAsync(checkedRestore.AbsolutePath, checkedRestore.Content, options));
 		
 		await backups.CompleteRestoreAsync(checkedRestore);
 		

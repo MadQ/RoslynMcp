@@ -113,24 +113,17 @@ internal sealed class WriteFileTool : RoslynMcpTool
 			
 			return scope.Error(backupErr);
 		
-		// Atomic write: temp file in the same directory → rename.
-		var dir     = Path.GetDirectoryName(fullPath)!
-		;
-		var tmpFile = Path.Combine(dir, $".roslynmcp_write_{Guid.NewGuid():N}.tmp");
-		
+		// Atomic write: temp file in the same directory → rename. ReplaceAtomicAsync creates a
+		// missing directory, keeps an existing file's Unix permissions (an executable script stays
+		// executable), writes through a symbolic link instead of replacing it, and removes its
+		// temp file when the write fails. A link is only reachable here when it stays inside
+		// the workspace — the boundary refuses the others.
 		try {
 			
-			Directory.CreateDirectory(dir);
-			
-			await workspace.WriteAndInvalidate(projectPath, fullPath, async () => {
-				
-				await FileWriter.WriteAllBytesAsync(tmpFile, writeBytes);
-				FileWriter.Move(tmpFile, fullPath, overwrite: true);
-			});
+			await workspace.WriteAndInvalidate(projectPath, fullPath,
+				() => FileWriter.ReplaceAtomicAsync(fullPath, writeBytes, AtomicReplace.FollowLink));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			
-			TryDeleteTemp(tmpFile);
 			
 			return scope.Error(new ErrorResult(
 				$"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.",
@@ -138,7 +131,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		}
 		
 		// Verify the rename produced a non-empty file — filesystem/AV interference can silently empty it.
-		if(writeBytes.Length > 4 && new FileInfo(fullPath).Length <= 4)
+		if(writeBytes.Length > 4 && FileWriter.ContentLength(fullPath) <= 4)
 			
 			return scope.Error(new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
@@ -180,14 +173,7 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		
 		return count;
 	}
-	
-	static void TryDeleteTemp(string tmpFile)
-	{
-		try {
-			File.Delete(tmpFile);
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) { }
-	}
+
 }
 
 internal sealed record WriteFileResult(

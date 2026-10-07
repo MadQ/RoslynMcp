@@ -1233,7 +1233,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     (empty-to-empty writes are non-events).
 	/// </summary>
 	protected static ErrorResult? CheckForTruncation(string filePath, string fullPath, int expectedLength) =>
-		expectedLength > 0 && new FileInfo(fullPath).Length <= 4
+		expectedLength > 0 && FileWriter.ContentLength(fullPath) <= 4
 			? new ErrorResult(
 				$"Write appeared to succeed but '{filePath}' is empty on disk — filesystem or antivirus interference is suspected.",
 				BackupRecoveryHint(filePath))
@@ -1253,24 +1253,20 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		// Skip if there's nothing to write, or if the file exists with content
 		// (no truncation). Use FileInfo to check both existence and length in one
 		// stat call — FileInfo.Length throws FileNotFoundException if the file is
-		// absent, so existence must be checked first.
-		var fi = new FileInfo(fullPath)
+		// absent, so existence must be checked first. Through a symbolic link: on Windows the
+		// link itself reports a length of zero, which would read as a truncation every time.
+		var fi = new FileInfo(FileWriter.FollowLink(fullPath))
 		;
 		
 		if(contentBytes.Length == 0 || (fi.Exists && fi.Length > 0))
 			
 			return null;
 		
-		var dir = Path.GetDirectoryName(fullPath)!;
-		var tmp = Path.Combine(dir, $".roslynmcp_recover_{Guid.NewGuid():N}.tmp");
-		
 		try {
-			// WriteAndInvalidate handles FSW suppression and workspace resync atomically.
-			await workspace.WriteAndInvalidate(projectPath, fullPath, async () => {
-				
-				await FileWriter.WriteAllBytesAsync(tmp, contentBytes);
-				FileWriter.Move(tmp, fullPath, overwrite: true);
-			});
+			// WriteAndInvalidate handles FSW suppression and workspace resync atomically. The
+			// truncated file is still there, so ReplaceAtomicAsync keeps its Unix permissions.
+			await workspace.WriteAndInvalidate(projectPath, fullPath,
+				() => FileWriter.ReplaceAtomicAsync(fullPath, contentBytes, AtomicReplace.FollowLink));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
@@ -1279,7 +1275,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				BackupRecoveryHint(filePath));
 		}
 		
-		return new FileInfo(fullPath).Length == 0
+		return FileWriter.ContentLength(fullPath) == 0
 			? new ErrorResult(
 				$"Workspace write truncated '{filePath}' to 0 bytes; self-healing also produced an empty file — filesystem or antivirus interference is suspected.",
 				BackupRecoveryHint(filePath))
