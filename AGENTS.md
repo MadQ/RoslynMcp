@@ -652,17 +652,28 @@ I trust you and I have git.
 
 ### Per-Issue Loop
 
-For every GitHub issue, in order:
+**Starting the loop.** Any prompt that says to start work on an issue starts this loop — there is no fixed phrase. "#334 next", a plain "#334.", and "let's start on that issue" (the issue last mentioned, by either side) all count. Work out the issue from context; ask only when it is ambiguous which issue is meant. Starting the loop is the go-ahead for the commits and pushes on that issue's branch.
 
-1. **Create a plan** — outline the approach before writing code; get it approved for anything non-trivial
+**The usual shape.** Steps in parentheses are the user's:
+
+> plan → (approval) → branch off `dev` → implement → commit → push → (local review loop) → create the PR → (full review loop) → (merge)
+
+**It is a default, not a contract.** Scale it to the change and use judgement, in the spirit of the Agile values: working software over ceremony, talking to the user over following the process, responding to what the work turns up over sticking to the plan. A change to the workspace boundary needs every step. A one-line fix in a `.md` file needs none of them — see the trivial-change exception below.
+
+**Trivial changes go straight to `dev`.** `dev` is protected, and a pull request is the rule. The one exception: a trivial change — a typo, a one-line doc or comment fix, nothing that alters behaviour and nothing the user would want to review — may be committed on `dev` and pushed directly, using the admin bypass. Name the commit in the next report, so it is never silent. The exception exists to keep a small fix from costing a whole PR; it is **not** a way to get something in without review. When in doubt whether a change is trivial, it is not: open a PR, or ask. When a shortcut would hide something the user would want to see, ask first; when a deviation was taken, say so in the report.
+
+The steps in full:
+
+1. **Create a plan** — read the issue and outline the approach before writing code. For anything non-trivial (more than a small, local change; anything touching security, the workspace boundary, concurrency or persistence), **stop and wait for approval** before implementing
 2. `git checkout dev && git checkout -b feat/issue-NNN-short-description`
 3. Implement
 4. `roslyn_get_diagnostics(severity: "errors")` — must be zero before continuing
 5. **First critic pass** — apply "Right Code" filter (see below); fix real bugs inline, discard noise; re-check diagnostics if anything was changed
 6. **Second critic pass** — same filter; anything remaining goes to **todos** (not implemented inline), unless it's a real correctness bug — those always get fixed regardless of pass number
 7. Commit with descriptive message + `Co-authored-by` trailer
-8. Push the feature branch and **submit a PR** targeting `dev` (`gh pr create`) — do not merge locally
-9. Reference the issue in the PR description (e.g. `Fixes #NNN`) so merging closes it automatically; open follow-up issues for deferred todos and link them back to the original
+8. Push the feature branch and report: what changed, the verify results, any deviation from this loop. This is where the user may start a local review loop (see *Review loops*)
+9. **Submit a PR** targeting `dev` (`gh pr create`) — do not merge locally. The user may then start a full review loop on the PR, and the user merges
+10. Reference the issue in the PR description (e.g. `Fixes #NNN`) so merging closes it automatically; open follow-up issues for deferred todos and link them back to the original
 
 ### Critic Integration
 
@@ -684,6 +695,10 @@ For every GitHub issue, in order:
 | Design improvements, performance, low-risk edge cases | Todo + follow-up issue |
 | Style opinions, formatting, purely theoretical concerns | Discard |
 
+### Review loops
+
+Two review loops sit around the PR: a **local** one after the push and before the PR, and a **full** one on the PR (reviewer rounds, e.g. Copilot). Both are the user's to start — a `cr-loop` or `copilot-round` skill, or a plain request. Do not start one unprompted; for a change that is risky or large, recommend one in the report instead. Once started, a loop may commit and push its fixes to that branch without asking again. It never merges.
+
 ### Issue Scope Management
 
 - **Close the original issue when its defined scope is done** — not when everything is theoretically perfect.
@@ -698,12 +713,12 @@ For every GitHub issue, in order:
 |-----------|------|
 | Create / switch branch | ✅ Free |
 | Stage files | ✅ Free |
-| Commit | ✅ Free once user says "go for it" on an issue — no per-commit approval needed |
-| Push | ✅ Free as part of the per-issue loop PR step |
+| Commit | ✅ Free once the user starts work on an issue (see *Starting the loop*) — no per-commit approval needed |
+| Push a feature branch | ✅ Free as part of the per-issue loop |
 | Open a PR | ✅ Free as part of the per-issue loop — no local merge to `dev` |
-| Commit outside issue work | ❌ Ask first |
-
-**Shorthand:** `c/p` = commit and push now.
+| Commit outside issue work | ❌ Ask first — except a trivial change (next row) |
+| Push to `dev` | ❌ Not for anything that deserves review. ✅ A trivial change only (see *Trivial changes go straight to `dev`*), reported afterwards |
+| Merge, force-push | ❌ Never — the user merges |
 
 **Branch naming:** `feat/issue-NNN-short-description` for issue work; `fix/`, `chore/`, `docs/` prefixes for other change types.
 
@@ -711,7 +726,7 @@ For every GitHub issue, in order:
 ```powershell
 git checkout dev && git checkout -b feat/issue-NNN-short-description
 ```
-Never commit implementation work directly to `dev`. Push the feature branch and open a PR (`gh pr create`) targeting `dev` — do not merge locally with `git merge`.
+Never commit implementation work directly to `dev` (only the trivial-change exception goes there). Push the feature branch and open a PR (`gh pr create`) targeting `dev` — do not merge locally with `git merge`.
 
 **⚠️ Zero-byte check — required before every commit.** A known working-tree rollback issue can silently empty `.cs` files on disk while the Roslyn in-memory workspace still shows the correct content. Always run this before `git commit`:
 ```powershell
