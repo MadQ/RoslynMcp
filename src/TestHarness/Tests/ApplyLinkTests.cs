@@ -8,7 +8,7 @@ using System.Text.Json.Nodes;
 ///     replaced by a regular file and silently cut off from the file it pointed at, while every
 ///     other write tool wrote through the link (#322).
 ///     <para>
-///         Three rules are pinned, one test each, all through <c>roslyn_apply_rename</c> because
+///         Four rules are pinned, one test each, all through <c>roslyn_apply_rename</c> because
 ///         the three tools share the one apply step:
 ///     </para>
 ///     <list type="bullet">
@@ -32,6 +32,15 @@ using System.Text.Json.Nodes;
 ///             only shape in which one file can be compiled twice without errors. A rename
 ///             changes both documents. Before the fix the second entry's stale check saw the
 ///             first entry's write and reported a partial apply that had not happened.
+///         </item>
+///         <item>
+///             A link whose target passes <b>through a linked directory</b> is written through as
+///             well. <c>LinkVia.cs</c> points at <c>alias/Via.source</c>, and <c>alias</c> is a
+///             directory link to <c>store</c>. The apply step writes to the place the workspace
+///             boundary resolved — <c>store/Via.source</c>, with no link left in the path — not
+///             to the link's target as text, which a repointed <c>alias</c> would send somewhere
+///             else. The repointing itself cannot be staged through a tool call; what the test
+///             pins is that the resolved path is the right file and both links survive.
 ///         </item>
 ///     </list>
 ///     <para>
@@ -61,10 +70,15 @@ static class ApplyLinkTests
 		var outsideLink = fx.PathOf("LinkOutside.cs");
 		var sharedReal  = fx.Write("Shared.cs", "partial class SharedPairOld { }\n");
 		var sharedLink  = fx.PathOf("SharedLink.cs");
+		var viaReal     = fx.Write("store/Via.source", "class ViaTargetOld { }\n");
+		var alias       = fx.PathOf("alias");
+		var viaLink     = fx.PathOf("LinkVia.cs");
 		var linked      = false;
 		
 		try {
 			
+			Directory.CreateSymbolicLink(alias,  fx.PathOf("store"));
+			File.CreateSymbolicLink(viaLink,     Path.Combine(alias, "Via.source"));
 			File.CreateSymbolicLink(insideLink,  insideReal);
 			File.CreateSymbolicLink(outsideLink, outsideReal);
 			File.CreateSymbolicLink(sharedLink,  sharedReal);
@@ -178,13 +192,40 @@ static class ApplyLinkTests
 						? (true,  "PASS")
 						: (false, $"FAIL  (both documents written: {bothWritten}; still a link: {stillLink}; file: {content.Trim()}; result: {Show(result)})");
 				}),
+			
+			// The file is reached through two links: the file link, and the directory link in
+			// its target. Both must still be links, and the content must have arrived in the
+			// one real file.
+			new("apply through links: a link whose target passes through a linked directory is written through",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var result = await Rename("ViaTargetOld", "ViaTargetNew");
+					
+					var fileLinkKept = IsLink(viaLink);
+					var dirLinkKept  = new DirectoryInfo(alias).LinkTarget is not null;
+					var content      = File.ReadAllText(viaReal);
+					
+					return result?["error"] is null && fileLinkKept && dirLinkKept && content.Contains("ViaTargetNew")
+						? (true,  "PASS")
+						: (false, $"FAIL  (file link kept: {fileLinkKept}; directory link kept: {dirLinkKept}; file behind them: {content.Trim()}; result: {Show(result)})");
+				}),
 		};
 		
 		return new TestGroup($"Apply Through Links ({tests.Count} tests)", tests, Teardown: () => {
 			
+			try {
+				if(new DirectoryInfo(alias).LinkTarget is not null)
+					Directory.Delete(alias);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			
 			// The links first, and only the links: the file one of them points at is in the
 			// other fixture.
-			foreach(var link in new[] { insideLink, outsideLink, sharedLink })
+			foreach(var link in new[] { insideLink, outsideLink, sharedLink, viaLink })
 				try {
 					if(IsLink(link))
 						File.Delete(link);

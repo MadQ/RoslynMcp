@@ -472,14 +472,12 @@ internal sealed class PhysicalSolutionApplier
 			
 			if(file.Operation == PhysicalFileOperation.Write && FileWriter.IsLink(path)) {
 				
-				// Two questions, because they are answered at two moments: may the link be
-				// followed, and is the place it was then found to lead to inside the workspace.
-				// The second one is asked about the very path the write will use, so a link
-				// that is pointed elsewhere between the two cannot slip an unchecked
-				// destination through.
-				if(boundary.IsPathAllowed(path)
-					&& FileWriter.FollowLink(path) is var destination
-					&& boundary.IsPathAllowed(destination)) {
+				// One resolution decides and is kept: the boundary hands back the place the link
+				// leads to with every link along the way followed, and that path — which has
+				// no links left in it — is where the write goes. Asking yes or no about the
+				// link and resolving it again for the write left room for a link, or a linked
+				// directory in its target, to be pointed elsewhere in between.
+				if(boundary.ResolveAllowed(path) is { } destination) {
 					
 					path    = destination;
 					follows = true;
@@ -532,6 +530,8 @@ internal sealed class PhysicalSolutionApplier
 		string projectPath,
 		CancellationToken cancellationToken)
 	{
+		var boundary = workspace.GetSecurityBoundary(projectPath);
+		
 		// Links that are replaced where they sit go first. Their stale check reads through the
 		// link, so it would take a write to the file behind it — when that file is part of the
 		// same change — for an outside edit. Once replaced, the link is a file of its own.
@@ -602,7 +602,7 @@ internal sealed class PhysicalSolutionApplier
 						if(file.Operation == PhysicalFileOperation.Write
 							&& (FileWriter.IsLink(file.Path) != (target.FollowsLink || target.ReplacesLink)
 								|| target.FollowsLink
-									&& !string.Equals(FileWriter.FollowLink(file.Path), target.Path, StringComparison.Ordinal)))
+									&& !string.Equals(boundary.ResolveAllowed(file.Path), target.Path, StringComparison.Ordinal)))
 							throw new IOException($"Apply aborted — '{file.Path}' became, stopped being, or was repointed as a symbolic link after preview.");
 						
 						// A link that is replaced where it sits needs a move: on Windows File.Replace
