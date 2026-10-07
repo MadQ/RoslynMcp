@@ -171,6 +171,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 				path => TryMakeRelative(path, rootPath) ?? path,
 				backups.IsEnabled,
 				"signature change");
+			var linkCaution = PhysicalApplyResultMapper.LinkCaution(report, path => TryMakeRelative(path, rootPath) ?? path);
 			
 			if(report.Succeeded) {
 				
@@ -178,7 +179,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 				
 				return scope.Outcome($"{report.FilesWritten} file(s) written", new ApplySignatureChangeResult(
 					$"Signature change applied.{sessionNote} Files written to disk.",
-					report.FilesWritten, null, files));
+					report.FilesWritten, null, files) { Caution = linkCaution });
 			}
 			
 			var error = report.AllFilesReachedIntendedState
@@ -199,7 +200,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 				"Review each files[].state and files[].recovery value before deciding whether to roll back or complete the change.",
 				report.FilesWritten,
 				error,
-				files));
+				files) { Caution = linkCaution });
 		}
 		finally {
 			
@@ -216,4 +217,11 @@ internal sealed record ApplySignatureChangeResult(
 	int?               FilesWritten,
 	string?            Error,
 	ApplyFileResult[]? Files
-);
+)
+{
+	/// <summary>Set when the apply replaced a symbolic link that leads out of the workspace (#334).</summary>
+	[System.Text.Json.Serialization.JsonPropertyName("_caution")]
+	[System.Text.Json.Serialization.JsonPropertyOrder(int.MaxValue)]
+	[System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+	public string? Caution { get; init; }
+}

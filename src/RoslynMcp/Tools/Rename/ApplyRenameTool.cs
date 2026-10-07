@@ -171,6 +171,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 				path => TryMakeRelative(path, rootPath) ?? path,
 				backups.IsEnabled,
 				"rename");
+			var linkCaution = PhysicalApplyResultMapper.LinkCaution(report, path => TryMakeRelative(path, rootPath) ?? path);
 			
 			if(!report.Succeeded) {
 				
@@ -195,7 +196,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 					report.FilesDeleted > 0 ? report.FilesDeleted : null,
 					error,
 					null,
-					files));
+					files) { Caution = linkCaution });
 			}
 			
 			// Content writes succeeded — now handle the type-matching file-rename step. Physical
@@ -219,7 +220,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 						new ApplyRenameResult(
 							$"Symbol renamed, but file rename failed: '{Path.GetFileName(newFilePath)}' already exists. " +
 							"Rename the file manually.",
-							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename conflict", null, files));
+							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename conflict", null, files) { Caution = linkCaution });
 				
 				try {
 					
@@ -246,7 +247,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 					return scope.Failed("file rename failed",
 						new ApplyRenameResult(
 							$"Symbol renamed, but file rename failed: {ex.Message}. Rename the file manually.",
-							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename failed", null, files));
+							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename failed", null, files) { Caution = linkCaution });
 				}
 			}
 			
@@ -258,7 +259,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 				report.FilesDeleted > 0 ? report.FilesDeleted : null,
 				null,
 				filesRenamed > 0 ? filesRenamed : null,
-				files));
+				files) { Caution = linkCaution });
 		}
 		finally {
 			
@@ -277,4 +278,11 @@ internal sealed record ApplyRenameResult(
 	string?          Error,
 	int?             FilesRenamed,
 	ApplyFileResult[]? Files
-);
+)
+{
+	/// <summary>Set when the apply replaced a symbolic link that leads out of the workspace (#334).</summary>
+	[System.Text.Json.Serialization.JsonPropertyName("_caution")]
+	[System.Text.Json.Serialization.JsonPropertyOrder(int.MaxValue)]
+	[System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+	public string? Caution { get; init; }
+}

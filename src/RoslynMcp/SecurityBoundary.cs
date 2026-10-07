@@ -20,6 +20,10 @@ internal sealed class SecurityBoundary
 		: StringComparison.OrdinalIgnoreCase
 	;
 	
+	/// <summary>The same comparison, for a set or dictionary keyed by path.</summary>
+	internal static readonly StringComparer PathComparer = StringComparer.FromComparison(pathComparison)
+	;
+	
 	// Computed once at startup — SpecialFolder lookups involve platform invocation and filesystem access.
 	static readonly string[] systemDirectories = BuildSystemDirectories()
 	;
@@ -108,7 +112,7 @@ internal sealed class SecurityBoundary
 	///     that does not exist yet is kept as written: a file about to be created has no links
 	///     to follow.
 	/// </summary>
-	static string? ResolveLinks(string fullPath)
+	internal static string? ResolveLinks(string fullPath)
 	{
 		try {
 			
