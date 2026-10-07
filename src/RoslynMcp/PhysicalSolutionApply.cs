@@ -597,10 +597,12 @@ internal sealed class PhysicalSolutionApplier
 						// Where to write was decided for the file as it was then: a link that is
 						// followed to one place, a link that is replaced, or no link at all. A file
 						// that has become something else since has not been checked, even when
-						// its content still matches.
-						if(FileWriter.IsLink(file.Path) != (target.FollowsLink || target.ReplacesLink)
-							|| target.FollowsLink
-								&& !string.Equals(FileWriter.FollowLink(file.Path), target.Path, StringComparison.Ordinal))
+						// its content still matches. Only an existing file was looked at that way;
+						// a file about to be created fails on its own when something is in its place.
+						if(file.Operation == PhysicalFileOperation.Write
+							&& (FileWriter.IsLink(file.Path) != (target.FollowsLink || target.ReplacesLink)
+								|| target.FollowsLink
+									&& !string.Equals(FileWriter.FollowLink(file.Path), target.Path, StringComparison.Ordinal)))
 							throw new IOException($"Apply aborted — '{file.Path}' became, stopped being, or was repointed as a symbolic link after preview.");
 						
 						// A link that is replaced where it sits needs a move: on Windows File.Replace
