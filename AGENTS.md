@@ -660,7 +660,7 @@ I trust you and I have git.
 
 **It is a default, not a contract.** Scale it to the change and use judgement, in the spirit of the Agile values: working software over ceremony, talking to the user over following the process, responding to what the work turns up over sticking to the plan. A change to the workspace boundary needs every step. A one-line fix in a `.md` file needs none of them — see the trivial-change exception below.
 
-**Trivial changes go straight to `dev`.** `dev` is protected, and a pull request is the rule. The one exception: a trivial change — a typo, a one-line doc or comment fix, nothing that alters behaviour and nothing the user would want to review — may be committed on `dev` and pushed directly, using the admin bypass. Name the commit in the next report, so it is never silent. The exception exists to keep a small fix from costing a whole PR; it is **not** a way to get something in without review. When in doubt whether a change is trivial, it is not: open a PR, or ask. When a shortcut would hide something the user would want to see, ask first; when a deviation was taken, say so in the report.
+**Trivial changes go straight to `dev`.** `dev` is protected, and a pull request is the rule. The one exception: a trivial change — a typo, a one-line doc or comment fix, nothing that alters behaviour and nothing the user would want to review — may be committed on `dev` and pushed directly, using the admin bypass. This applies **only to the repo owner** and to an agent working in the owner's session; every other contributor, and their agents, opens a PR for everything. Name the commit in the next report, so it is never silent. The exception exists to keep a small fix from costing a whole PR; it is **not** a way to get something in without review. When in doubt whether a change is trivial, it is not: open a PR, or ask. When a shortcut would hide something the user would want to see, ask first; when a deviation was taken, say so in the report.
 
 The steps in full:
 
@@ -717,7 +717,7 @@ Two review loops sit around the PR: a **local** one after the push and before th
 | Push a feature branch | ✅ Free as part of the per-issue loop |
 | Open a PR | ✅ Free as part of the per-issue loop — no local merge to `dev` |
 | Commit outside issue work | ❌ Ask first — except a trivial change (next row) |
-| Push to `dev` | ❌ Not for anything that deserves review. ✅ A trivial change only (see *Trivial changes go straight to `dev`*), reported afterwards |
+| Push to `dev` | ❌ Not for anything that deserves review. ✅ A trivial change only, and only for the repo owner (see *Trivial changes go straight to `dev`*), reported afterwards |
 | Merge, force-push | ❌ Never — the user merges |
 
 **Branch naming:** `feat/issue-NNN-short-description` for issue work; `fix/`, `chore/`, `docs/` prefixes for other change types.
