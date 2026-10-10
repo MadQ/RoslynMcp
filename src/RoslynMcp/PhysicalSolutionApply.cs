@@ -341,6 +341,60 @@ internal sealed class PhysicalSolutionApplier
 		this.backups   = backups;
 	}
 	
+	/// <summary>
+	///     Why <paramref name="plan"/> cannot be applied because of how its files are linked, or
+	///     null when nothing stands in the way: two documents that are one file on disk, with
+	///     different contents proposed for them. Nothing is written.
+	///     <para>
+	///         Asked before anything is spent on the change — by the preview tools before they
+	///         hand out a token, and by the apply tools before they prepare backups — so that a
+	///         change that can never be applied costs neither (#338).
+	///     </para>
+	/// </summary>
+	public static string? FindTargetConflict(PhysicalSolutionApplyPlan plan, SecurityBoundary boundary)
+	{
+		try {
+			
+			ResolveWriteTargets(plan, boundary);
+			
+			return null;
+		}
+		catch(PhysicalApplyPlanException ex) {
+			
+			return ex.Message;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
+			// A file that cannot be examined is not a conflict. The apply itself will say so.
+			return null;
+		}
+	}
+	
+	/// <summary>
+	///     The same for a change that has no plan yet: a preview's two solutions and file states.
+	///     A change no plan can be built from has no conflict to report here; the apply tool
+	///     reports why it cannot be planned.
+	/// </summary>
+	public static async Task<string?> FindTargetConflictAsync(
+		Solution baseSolution,
+		Solution newSolution,
+		IReadOnlyDictionary<string, PreviewFileState> previewFileStates,
+		SecurityBoundary boundary,
+		CancellationToken cancellationToken)
+	{
+		PhysicalSolutionApplyPlan plan;
+		
+		try {
+			plan = await PhysicalSolutionApplyPlan.BuildAsync(baseSolution, newSolution, previewFileStates, cancellationToken);
+		}
+		catch(PhysicalApplyPlanException) {
+			
+			return null;
+		}
+		
+		return FindTargetConflict(plan, boundary);
+	}
+	
 	public async Task PrepareBackupsAsync(
 		PhysicalSolutionApplyPlan plan,
 		string projectPath,
@@ -377,9 +431,16 @@ internal sealed class PhysicalSolutionApplier
 					
 					// Worked out for the whole plan before the first write: two entries that
 					// disagree about one file must fail the apply while nothing has changed yet.
-					targets = ResolveWriteTargets(plan, projectPath);
+					targets = ResolveWriteTargets(plan, workspace.GetSecurityBoundary(projectPath));
 					
 					await ApplyWritesAsync(plan, targets, projectPath, cancellationToken);
+				}
+				catch(PhysicalApplyPlanException ex) {
+					
+					// Thrown while working out the targets, so before the first write. The tools
+					// ask FindTargetConflict before they prepare backups; reaching this means a
+					// link changed between that check and now.
+					executionError = $"Apply aborted — {ex.Message} No files were modified.";
 				}
 				catch(Exception ex) when(ex is not OutOfMemoryException and not OperationCanceledException) {
 					
@@ -435,9 +496,8 @@ internal sealed class PhysicalSolutionApplier
 	///     </para>
 	/// </summary>
 	/// <exception cref="PhysicalApplyPlanException">Two entries propose different contents for one file.</exception>
-	WriteTarget?[] ResolveWriteTargets(PhysicalSolutionApplyPlan plan, string projectPath)
+	static WriteTarget?[] ResolveWriteTargets(PhysicalSolutionApplyPlan plan, SecurityBoundary boundary)
 	{
-		var boundary    = workspace.GetSecurityBoundary(projectPath);
 		var targets     = new WriteTarget?[plan.Files.Length];
 		var writers     = new Dictionary<string, PhysicalFilePlan>(SecurityBoundary.PathComparer);
 		var directories = new Dictionary<string, string>(SecurityBoundary.PathComparer);
@@ -496,8 +556,8 @@ internal sealed class PhysicalSolutionApplier
 				
 				if(!string.Equals(writer.IntendedHash, file.IntendedHash, StringComparison.OrdinalIgnoreCase))
 					throw new PhysicalApplyPlanException(
-						$"Apply aborted — '{writer.Path}' and '{file.Path}' are one file on disk, reached through a symbolic link, " +
-						"and the change proposes different contents for them. No files were modified.");
+						$"'{writer.Path}' and '{file.Path}' are one file on disk, reached through a symbolic link, " +
+						"and the change proposes different contents for them.");
 				
 				shared = true;
 			}
@@ -619,10 +679,9 @@ internal sealed class PhysicalSolutionApplier
 					return Task.CompletedTask;
 				});
 				
-				// The file behind a followed link is not invalidated here. When it is a document
-				// of its own, the file watcher sees the swap at its path and refreshes it, as
-				// for every other write through a link; invalidating it by hand would take a
-				// source file that no project compiles for a new document and force a reload.
+				// The file behind a followed link needs nothing more here: WriteAndInvalidate
+				// sees that file.Path is a link and brings the document at its target up to
+				// date in the same step (#338).
 			}
 			finally {
 				

@@ -1201,7 +1201,16 @@ internal sealed partial class WorkspaceManager
 		// and not trigger a full reload — the new path's InvalidateFile handles workspace sync.
 		internal async Task WriteAndInvalidate(string fullPath, string? movedFromPath, Func<Task> write)
 		{
+			// A write through a symbolic link lands in the file the link leads to, and that is
+			// the path the file system reports the change at. Worked out before the write: a
+			// write may replace the link, and afterwards there is nothing left to follow (#338).
+			var linkTarget        = LinkTargetOf(fullPath);
+			var linkTargetExisted = linkTarget is not null && File.Exists(linkTarget);
+			
 			ignoredPaths.AddOrUpdate(fullPath, 1, (_, count) => count + 1);
+			
+			if(linkTarget is not null)
+				ignoredPaths.AddOrUpdate(linkTarget, 1, (_, count) => count + 1);
 			
 			if(movedFromPath != null)
 				ownedDeletePaths.AddOrUpdate(movedFromPath, 1, (_, count) => count + 1);
@@ -1215,11 +1224,113 @@ internal sealed partial class WorkspaceManager
 				// event fired unsuppressed between the decrement and the workspace invalidation.
 				InvalidateFile(fullPath)
 				;
+				
+				// Inside the same window, for the same reason as above.
+				if(linkTarget is not null)
+					InvalidateLinkTarget(linkTarget, linkTargetExisted);
+				
 				MarkSynced();
 			}
 			finally {
 				ignoredPaths.AddOrUpdate(fullPath, 0, (_, count) => count - 1);
+				
+				if(linkTarget is not null)
+					ignoredPaths.AddOrUpdate(linkTarget, 0, (_, count) => count - 1);
 			}
+		}
+		
+		/// <summary>
+		///     The file a write to <paramref name="fullPath"/> lands in when that path is a
+		///     symbolic link, or null when it is not a link or where it leads cannot be worked out.
+		///     <para>
+		///         The path is given the way the watcher and the workspace's documents name it:
+		///         under <see cref="rootPath"/> as it was opened. Resolving links gives the real
+		///         location, which is spelled differently when the root itself sits under a link —
+		///         on macOS every temp directory does (<c>/var</c> is <c>/private/var</c>) — and a
+		///         path in that spelling matches neither a watcher event nor a document.
+		///     </para>
+		/// </summary>
+		string? LinkTargetOf(string fullPath)
+		{
+			try {
+				
+				if(!FileWriter.IsLink(fullPath) || SecurityBoundary.ResolveLinks(fullPath) is not { } resolved)
+					
+					return null;
+				
+				if(SecurityBoundary.ResolveLinks(rootPath) is { } resolvedRoot && SecurityBoundary.IsUnderDirectory(resolved, resolvedRoot))
+					
+					return Path.Combine(rootPath, Path.GetRelativePath(resolvedRoot, resolved));
+				
+				return resolved;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
+				
+				return null;
+			}
+		}
+		
+		/// <summary>
+		///     Brings the workspace up to date with a file that was written through a link.
+		///     <para>
+		///         A file that existed before and is an unknown <c>.cs</c> is left alone. To
+		///         <see cref="InvalidateFile"/> an unknown <c>.cs</c> is a new compilation input and
+		///         costs a full reload, which is right for a file that has just appeared and wrong
+		///         for one that was there all along and that no project compiles — a shared source
+		///         kept outside the project and linked into it. Everything else goes through
+		///         <see cref="InvalidateFile"/>: a tracked document gets its new text, an evaluation
+		///         input flags its reload, and a file the write created is treated as new.
+		///     </para>
+		/// </summary>
+		void InvalidateLinkTarget(string linkTarget, bool existedBefore)
+		{
+			if(existedBefore) {
+				
+				Solution currentSolution;
+				
+				@lock.EnterReadLock();
+				
+				try {
+					currentSolution = workspace.CurrentSolution;
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
+				// An adhoc workspace takes any .cs it is handed for a document, so there the
+				// question is simply whether it already has this one.
+				var unknownSource = isMSBuild
+					? ClassifyEditImpact(currentSolution, linkTarget, out _, out var reason) is WorkspaceEditImpact.Reload
+						&& reason == ReasonNewDocument
+					: currentSolution.GetDocumentIdsWithFilePath(linkTarget).IsEmpty
+				;
+				
+				if(unknownSource) {
+					
+					// The watcher can report this write after the suppression window has
+					// closed — its events arrive on their own time. Recording the size lets
+					// the flush recognise the late event as this write, the way it does for
+					// the files TryApplyChanges writes, instead of taking it for a new document.
+					lock(debounceLock) {
+						
+						if(rmOwnedWriteSizes.Count >= MaxRmOwnedWriteSizes)
+							rmOwnedWriteSizes.Clear();
+						
+						try {
+							rmOwnedWriteSizes[linkTarget] = new FileInfo(linkTarget).Length;
+						}
+						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+							// Gone or locked — the flush handles the event the normal way.
+							_ = ex
+							;
+						}
+					}
+					
+					return;
+				}
+			}
+			
+			InvalidateFile(linkTarget);
 		}
 		
 		

@@ -129,6 +129,13 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 					$"{staleError} Re-run roslyn_preview_rename.",
 					null, null, "stale preview", null, null));
 			
+			// Before any backup is written: a change that proposes different contents for two
+			// documents that are one file on disk can never be applied (#338).
+			if(PhysicalSolutionApplier.FindTargetConflict(plan, workspace.GetSecurityBoundary(boundProjectPath)) is { } conflict)
+				return scope.Failed("conflicting link contents", new ApplyRenameResult(
+					$"Rename cannot be applied: {conflict} No files were modified.",
+					null, null, "conflicting link contents", null, null));
+			
 			try {
 				
 				await physicalApplier.PrepareBackupsAsync(plan, boundProjectPath, "roslyn_apply_rename");
@@ -271,18 +278,29 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 	}
 }
 
-internal sealed record ApplyRenameResult(
-	string           Message,
-	int?             FilesWritten,
-	int?             FilesDeleted,
-	string?          Error,
-	int?             FilesRenamed,
-	ApplyFileResult[]? Files
-)
+// Derives from ToolResult like every other result, so error and _caution are the shared
+// properties and serialize the same way as everywhere else (#338).
+internal sealed record ApplyRenameResult : ToolResult, IToolError
 {
-	/// <summary>Set when the apply replaced a symbolic link that leads out of the workspace (#334).</summary>
-	[System.Text.Json.Serialization.JsonPropertyName("_caution")]
-	[System.Text.Json.Serialization.JsonPropertyOrder(int.MaxValue)]
-	[System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-	public string? Caution { get; init; }
+	public ApplyRenameResult(
+		string message,
+		int? filesWritten,
+		int? filesDeleted,
+		string? error,
+		int? filesRenamed,
+		ApplyFileResult[]? files)
+	{
+		Message      = message;
+		FilesWritten = filesWritten;
+		FilesDeleted = filesDeleted;
+		FilesRenamed = filesRenamed;
+		Files        = files;
+		Error        = error;
+	}
+	
+	public string             Message      { get; }
+	public int?               FilesWritten { get; }
+	public int?               FilesDeleted { get; }
+	public int?               FilesRenamed { get; }
+	public ApplyFileResult[]? Files        { get; }
 }

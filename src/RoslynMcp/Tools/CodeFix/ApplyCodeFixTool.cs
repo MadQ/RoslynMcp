@@ -141,6 +141,13 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					null,
 					"stale preview"));
 			
+			// Before any backup is written: a change that proposes different contents for two
+			// documents that are one file on disk can never be applied (#338).
+			if(PhysicalSolutionApplier.FindTargetConflict(plan, workspace.GetSecurityBoundary(boundProjectPath)) is { } conflict)
+				return scope.Failed("conflicting link contents", new ApplyCodeFixResult(
+					$"Code fix cannot be applied: {conflict} No files were modified.",
+					null, "conflicting link contents"));
+			
 			try {
 				
 				await physicalApplier.PrepareBackupsAsync(plan, boundProjectPath, "roslyn_apply_code_fix");

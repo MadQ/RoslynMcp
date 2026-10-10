@@ -159,6 +159,31 @@ for all rename/refactoring operations. It:
 
 All `ApplyRenameTool` and `ApplySignatureChangeTool` write calls go through this method.
 
+### A write through a symbolic link (#338)
+
+When `fullPath` is a symbolic link, the write lands in the file the link leads to, and the
+file system reports the change at **that** path. The caller only knows the link, so
+`WriteAndInvalidate` works the second path out itself, before the write (a write may replace
+the link, and then there is nothing left to follow):
+
+1. `LinkTargetOf(fullPath)` resolves the link and spells the result under the workspace root
+   as it was opened — the form watcher events and document paths use. The fully resolved form
+   differs when the root sits under a link (on macOS `/var` is `/private/var`).
+2. The target is added to `ignoredPaths` for the same window as `fullPath`, and released in the
+   same `finally`.
+3. After `InvalidateFile(fullPath)`, still inside the window, `InvalidateLinkTarget` brings the
+   target up to date:
+   - a tracked document gets its new text, whether or not a watcher covers it;
+   - an evaluation input flags its reload;
+   - a file the write created is treated as new;
+   - a `.cs` file that existed before and that no project compiles is **left alone**. To
+     `InvalidateFile` it would be a new document and cost a full reload. Its size is recorded
+     in `rmOwnedWriteSizes`, so a watcher event that arrives after the window has closed is
+     recognised as this write.
+
+The ordering rules above are unchanged: suppress before the write, invalidate inside the
+window, release in `finally`.
+
 ---
 
 ## `InvalidateFile` Contract

@@ -129,6 +129,13 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 					$"{staleError} Re-run roslyn_change_signature.",
 					null, "stale preview", null));
 			
+			// Before any backup is written: a change that proposes different contents for two
+			// documents that are one file on disk can never be applied (#338).
+			if(PhysicalSolutionApplier.FindTargetConflict(plan, workspace.GetSecurityBoundary(boundProjectPath)) is { } conflict)
+				return scope.Failed("conflicting link contents", new ApplySignatureChangeResult(
+					$"Signature change cannot be applied: {conflict} No files were modified.",
+					null, "conflicting link contents", null));
+			
 			try {
 				
 				await physicalApplier.PrepareBackupsAsync(plan, boundProjectPath, "roslyn_apply_signature_change");
@@ -212,16 +219,23 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 	}
 }
 
-internal sealed record ApplySignatureChangeResult(
-	string             Message,
-	int?               FilesWritten,
-	string?            Error,
-	ApplyFileResult[]? Files
-)
+// Derives from ToolResult like every other result, so error and _caution are the shared
+// properties and serialize the same way as everywhere else (#338).
+internal sealed record ApplySignatureChangeResult : ToolResult, IToolError
 {
-	/// <summary>Set when the apply replaced a symbolic link that leads out of the workspace (#334).</summary>
-	[System.Text.Json.Serialization.JsonPropertyName("_caution")]
-	[System.Text.Json.Serialization.JsonPropertyOrder(int.MaxValue)]
-	[System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-	public string? Caution { get; init; }
+	public ApplySignatureChangeResult(
+		string message,
+		int? filesWritten,
+		string? error,
+		ApplyFileResult[]? files)
+	{
+		Message      = message;
+		FilesWritten = filesWritten;
+		Files        = files;
+		Error        = error;
+	}
+	
+	public string             Message      { get; }
+	public int?               FilesWritten { get; }
+	public ApplyFileResult[]? Files        { get; }
 }

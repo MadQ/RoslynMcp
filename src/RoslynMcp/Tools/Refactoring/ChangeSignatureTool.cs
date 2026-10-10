@@ -129,6 +129,13 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 				$"Could not capture a safe file state for this preview: {ex.Message} Re-run roslyn_change_signature."));
 		}
 		
+		// A change that proposes different contents for two documents that are one file on disk
+		// can never be applied, so it gets no token (#338).
+		if(await PhysicalSolutionApplier.FindTargetConflictAsync(result.BaseSolution, result.NewSolution, fileStates, workspace.GetSecurityBoundary(projectPath), cancellationToken) is { } conflict)
+			
+			return scope.Failed("conflicting link contents", new ErrorResult(
+				$"This signature change cannot be applied: {conflict} No approval token was created."));
+		
 		if(!TryResolveWorkspaceInfo(projectPath, out var workspaceRoot, out var isMSBuild, out var csprojPath, out var wsInfoError))
 			
 			return scope.Error(wsInfoError);
