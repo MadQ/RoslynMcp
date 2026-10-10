@@ -64,6 +64,7 @@ static class LinkWriteSyncTests
 		
 		var sharedReal = fx.Write("Shared.cs",        "partial class SyncPair { }\n");
 		var sharedLink = fx.PathOf("SharedLink.cs");
+		var secondLink = fx.PathOf("SharedLinkToo.cs");
 		var keptReal   = apart.Write("store/Kept.cs", "class KeptApart { }\n");
 		var keptLink   = apart.PathOf("Stored.cs");
 		var dirReal    = fx.Write("lib/Dir.cs",       "partial class DirPair { }\n");
@@ -74,6 +75,7 @@ static class LinkWriteSyncTests
 			
 			Directory.CreateSymbolicLink(dirAlias, fx.PathOf("lib"));
 			File.CreateSymbolicLink(sharedLink, sharedReal);
+			File.CreateSymbolicLink(secondLink, sharedReal);
 			File.CreateSymbolicLink(keptLink,   keptReal);
 			
 			linked = true;
@@ -218,6 +220,34 @@ static class LinkWriteSyncTests
 						: (false, $"FAIL  (served from: {source ?? "nothing"}; workspace has the edit: {current}; file behind the link has it: {onDisk}; still a link: {IsLink(sharedLink)}; edit: {edited?.ToJsonString() ?? "none"})");
 				}),
 			
+			// One file, three documents: Shared.cs and two links to it. A write through the one
+			// link is reported under that link's name and, at best, seen by the watcher under
+			// the file's own; the document at the other link hears of it from nobody. It must
+			// be current all the same.
+			new("link write sync: a second link to the same file is current after a write through the first",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var written = await Write(fx.Csproj, "SharedLink.cs", "partial class SyncPair { public int SeenThroughEveryLink; }\n");
+					var blocks  = await CallBlocks("roslyn_read_file", new { filePath = "SharedLinkToo.cs", projectPath = fx.Csproj });
+					
+					JsonNode? header = null;
+					
+					try { header = blocks.Length > 0 ? JsonNode.Parse(blocks[0]) : null; }
+					catch { }
+					
+					var source  = header?["source"]?.GetValue<string>();
+					var text    = blocks.Length > 1 ? blocks[1] : "";
+					var current = text.Contains("SeenThroughEveryLink");
+					
+					return written?["written"]?.GetValue<bool>() == true && source == "roslyn" && current && IsLink(secondLink)
+						? (true,  "PASS")
+						: (false, $"FAIL  (served from: {source ?? "nothing"}; has the new member: {current}; still a link: {IsLink(secondLink)}; write: {written?.ToJsonString() ?? "none"})");
+				}),
+			
 			// The link can also be a directory above the file. alias is a directory link to lib,
 			// so alias/Dir.cs and lib/Dir.cs are one file under two names, and the project
 			// compiles both. A write to the one name must leave the document at the other
@@ -294,7 +324,7 @@ static class LinkWriteSyncTests
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
-			foreach(var link in new[] { sharedLink, keptLink })
+			foreach(var link in new[] { sharedLink, secondLink, keptLink })
 				try {
 					if(IsLink(link))
 						File.Delete(link);

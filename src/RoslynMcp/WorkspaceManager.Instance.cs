@@ -182,7 +182,12 @@ internal sealed partial class WorkspaceManager
 		// the link's target, any number of times and on its own schedule; FlushMSBuild drops
 		// those reports for as long as the file still has this stamp, and forgets the entry the
 		// moment it does not — someone else has written the file since. Guarded by debounceLock.
-		private readonly Dictionary<string, (long Length, DateTime WriteUtc)> ownedLinkTargets = new(StringComparer.OrdinalIgnoreCase)
+		// An entry also lapses on its own after OwnedLinkTargetWindow: long enough for any report
+		// of the write to arrive, short enough that a stamp cannot go on vouching for a file
+		// that someone has since rewritten to the same length and the same write time.
+		private readonly Dictionary<string, (long Length, DateTime WriteUtc, DateTime UntilUtc)> ownedLinkTargets = new(StringComparer.OrdinalIgnoreCase)
+		;
+		private static readonly TimeSpan OwnedLinkTargetWindow = TimeSpan.FromSeconds(30)
 		;
 		// Per-file FSW suppression — ref-counted for concurrent-write safety.
 		// A path is added before each RM-owned write and decremented in the finally block.
@@ -1324,10 +1329,12 @@ internal sealed partial class WorkspaceManager
 					
 					var respelled = Path.Combine(above, Path.GetRelativePath(resolvedAbove, resolved));
 					
-					return PathEquals(respelled, fullPath) ? null : respelled;
+					// The same name the way the file system compares names, which on Linux is
+					// to the letter: Foo.cs leading to foo.cs leads somewhere else.
+					return SecurityBoundary.PathComparer.Equals(respelled, fullPath) ? null : respelled;
 				}
 				
-				return PathEquals(resolved, fullPath) ? null : resolved;
+				return SecurityBoundary.PathComparer.Equals(resolved, fullPath) ? null : resolved;
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
 				
@@ -1344,7 +1351,9 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		void SyncLinkTarget(LinkedWrite linked)
 		{
-			if(!PathEquals(LinkTargetOf(linked.Path), linked.Target))
+			// Compared the way the file system compares names: on Linux a link Foo.cs to a
+			// file foo.cs is a link to another file, not a path that leads to itself.
+			if(LinkTargetOf(linked.Path) is not { } target || !SecurityBoundary.PathComparer.Equals(target, linked.Target))
 				
 				return;
 			
@@ -1353,6 +1362,94 @@ internal sealed partial class WorkspaceManager
 				return;
 			
 			InvalidateLinkTarget(linked.Target, linked.TargetExisted);
+			SyncOtherAliases(linked);
+		}
+		
+		// Set while SyncOtherAliases is at work on this thread. Refreshing an alias writes it
+		// through TryApplyChanges, which comes back here for that alias; without the mark every
+		// alias would start a scan of its own.
+		[ThreadStatic] static bool syncingAliases;
+		
+		/// <summary>
+		///     After a write through a link: refreshes every other tracked document that is the
+		///     same file on disk — a second link to it, or a link earlier in a chain. The write
+		///     was reported under one name and, at most, seen by the watcher under the file's
+		///     own; a document under a third name hears of it from nobody.
+		///     <para>
+		///         Done the plain way: every document path of the solution is resolved and
+		///         compared. That is one file-system query per document plus one resolution per
+		///         directory, paid only by a write that went through a link — an ordinary write
+		///         never gets here. An index of documents by physical file would make it cheap
+		///         and would also cover a write made straight to a file that has links to it,
+		///         which this does not (#341).
+		///     </para>
+		/// </summary>
+		void SyncOtherAliases(LinkedWrite linked)
+		{
+			if(syncingAliases)
+				
+				return;
+			
+			syncingAliases = true;
+			
+			try {
+				
+				Solution currentSolution;
+				
+				@lock.EnterReadLock();
+				
+				try {
+					currentSolution = workspace.CurrentSolution;
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
+				var same        = SecurityBoundary.PathComparer;
+				var directories = new Dictionary<string, string>(same);
+				
+				// Where a path really is. The directory is resolved once per directory; the file
+				// itself only costs a full resolution when it is a link.
+				string Physical(string path)
+				{
+					if(Path.GetDirectoryName(path) is not { } directory)
+						
+						return path;
+					
+					if(!directories.TryGetValue(directory, out var resolved)) {
+						
+						resolved = SecurityBoundary.ResolveLinks(directory) ?? directory;
+						directories.Add(directory, resolved);
+					}
+					
+					var located = Path.Combine(resolved, Path.GetFileName(path));
+					
+					return FileWriter.IsLink(located) ? SecurityBoundary.ResolveLinks(located) ?? located : located;
+				}
+				
+				var written = Physical(linked.Target);
+				var aliases = currentSolution.Projects
+					.SelectMany(project => project.Documents)
+					.Select(document => document.FilePath)
+					.OfType<string>()
+					.Distinct(same)
+					.Where(path => !same.Equals(path, linked.Path) && !same.Equals(path, linked.Target) && same.Equals(Physical(path), written))
+					.ToArray()
+				;
+				
+				foreach(var alias in aliases)
+					InvalidateLinkTarget(alias, existedBefore: true);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
+				
+				// A path that cannot be examined. The aliases that were not reached stay as they
+				// are until the next reload; the write itself and its target are already in step.
+				_ = ex
+				;
+			}
+			finally {
+				syncingAliases = false;
+			}
 		}
 		
 		/// <summary>
@@ -1405,7 +1502,7 @@ internal sealed partial class WorkspaceManager
 							
 							var info = new FileInfo(linkTarget);
 							
-							ownedLinkTargets[linkTarget] = (info.Length, info.LastWriteTimeUtc);
+							ownedLinkTargets[linkTarget] = (info.Length, info.LastWriteTimeUtc, DateTime.UtcNow + OwnedLinkTargetWindow);
 						}
 						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 							// Gone or locked — the flush handles the event the normal way.
@@ -1473,7 +1570,8 @@ internal sealed partial class WorkspaceManager
 					
 					var info = new FileInfo(path);
 					
-					if(info.Exists && info.Length == stamp.Length && info.LastWriteTimeUtc == stamp.WriteUtc)
+					if(DateTime.UtcNow <= stamp.UntilUtc
+						&& info.Exists && info.Length == stamp.Length && info.LastWriteTimeUtc == stamp.WriteUtc)
 						
 						return true;
 				}

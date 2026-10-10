@@ -194,6 +194,16 @@ write may replace the link, and then there is nothing left to follow):
      `rmOwnedWriteSizes`, would be used up by the first report and leave a second one to be
      taken for a new document.
 
+4. `SyncOtherAliases` then refreshes every **other** tracked document that is the same file on
+   disk: a second link to it, a link earlier in a chain. It resolves every document path of the
+   solution (one query per document, one resolution per directory) and is reached only by a
+   write that went through a link. A write made straight to a file that has links to it does
+   not get here; an index of documents by physical file would cover that and make this cheap
+   (#341).
+
+A stamp in `ownedLinkTargets` also lapses on its own after 30 seconds, so it cannot go on
+vouching for a file that someone has since rewritten to the same length and write time.
+
 There are **two** places a tool's write goes through, and both do this:
 
 - `WriteAndInvalidate` — whole-file writes (`roslyn_write_file`, untracked files, the apply
