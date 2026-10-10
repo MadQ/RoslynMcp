@@ -140,6 +140,13 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 				false));
 		}
 		
+		// A change that proposes different contents for two documents that are one file on disk
+		// can never be applied, so it gets no token (#338).
+		if(await PhysicalSolutionApplier.FindTargetConflictAsync(solution, newSolution, fileStates, workspace.GetSecurityBoundary(projectPath), cancellationToken) is { } conflict)
+			
+			return scope.Failed("conflicting link contents", new PreviewRenameResult(
+				null, null, $"This rename cannot be applied: {conflict} No approval token was created.", false));
+		
 		if(!TryResolveWorkspaceInfo(projectPath, out var workspaceRoot, out var isMSBuild, out var csprojPath, out var wsInfoError))
 			
 			return scope.Error(wsInfoError);

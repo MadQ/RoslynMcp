@@ -159,6 +159,68 @@ for all rename/refactoring operations. It:
 
 All `ApplyRenameTool` and `ApplySignatureChangeTool` write calls go through this method.
 
+### A write through a symbolic link (#338)
+
+When the written path is a symbolic link, or lies under a linked directory, the write lands in
+another file, and the file system reports the change at **that** path. The caller only knows
+the path it wrote, so the workspace works the second path out itself, before the write (a
+write may replace the link, and then there is nothing left to follow):
+
+1. `LinkTargetOf(path)` first asks the cheap question — is there any link below the workspace
+   root on the way to `path`? — and stops there for the usual answer, no. It is asked for
+   every document of every change the workspace applies. Only otherwise does it resolve the
+   links, and it spells the result the way watcher events and
+   document paths are spelled: the resolved location is re-spelled through the workspace
+   root, or the nearest directory above the root that contains it. The fully resolved form
+   differs whenever a directory above sits under a link (on macOS `/var` is `/private/var`).
+   A link at or above the root is where the user put the workspace and stays as written; a
+   link below it is the one being followed. (Anchoring at the written path's own directory
+   instead finds a linked directory first and spells the target straight back as the path
+   that was written.) For a path with no link below the anchor this gives the path back, and
+   there is no second path.
+2. The target is added to `ignoredPaths` for the same window as the write, and released in the
+   same `finally`.
+3. After the write, still inside the window, `SyncLinkTarget` brings the target up to date —
+   if the write landed there. A write can also replace the link where it sits; then the path
+   no longer leads to the target and nothing is done. Otherwise `InvalidateLinkTarget`:
+   - a tracked document gets its new text, whether or not a watcher covers it (skipped when it
+     already has that text);
+   - an evaluation input flags its reload;
+   - a file the write created is treated as new, and stamped like the next case, so the
+     watcher's own report of it does not flag a second reload after the first has finished;
+   - a `.cs` file that existed before and that no project compiles is **left alone**. To
+     `InvalidateFile` it would be a new document and cost a full reload. Its size and write
+     time are recorded in `ownedLinkTargets`. The watcher reports such a write on its own
+     schedule — after the window has closed, and on Windows more than once for a replaced
+     file — and `FlushPendingChanges` drops every report for the path while the file still has
+     that stamp, or while another write to it is in flight. The entry is forgotten as soon as
+     the stamp no longer matches: someone else has written the file. A one-shot record, like
+     `rmOwnedWriteSizes`, would be used up by the first report and leave a second one to be
+     taken for a new document.
+
+4. `SyncOtherAliases` then refreshes every **other** tracked document that is the same file on
+   disk: a second link to it, a link earlier in a chain. It resolves every document path of the
+   solution (one query per document, one resolution per directory) and is reached only by a
+   write that went through a link. A write made straight to a file that has links to it does
+   not get here; an index of documents by physical file would cover that and make this cheap
+   (#341).
+
+A stamp in `ownedLinkTargets` also lapses on its own after 30 seconds, so it cannot go on
+vouching for a file that someone has since rewritten to the same length and write time.
+
+There are **two** places a tool's write goes through, and both do this:
+
+- `WriteAndInvalidate` — whole-file writes (`roslyn_write_file`, untracked files, the apply
+  step, the local-history restore).
+- `ApplyChangesWithFswSuppressed` — edits handed to the workspace as text or as a solution
+  (`roslyn_replace_in_file`, `roslyn_insert_lines`, `roslyn_replace_in_code` on a tracked
+  document). `TryApplyChanges` writes each changed document at its own path, so a document
+  that is a link is written into the file behind it, with the watch set suspended. Without
+  the sync nothing would ever tell the workspace about that file.
+
+The ordering rules above are unchanged: suppress before the write, invalidate inside the
+window, release in `finally`.
+
 ---
 
 ## `InvalidateFile` Contract
@@ -233,7 +295,9 @@ FSW fires (Changed/Created/Deleted/Renamed)
   │
   └─ otherwise → ScheduleDebounced(300ms)
        │
-       └─ on debounce timer fire (FlushMSBuild):
+       └─ on debounce timer fire (FlushPendingChanges → FlushMSBuild):
+            ├─ reported deleted, but the file is there under that exact name
+            │     → it was replaced, not removed: handled as changed (below)
             ├─ deleted tracked document      → FlagReload("tracked document deleted")
             ├─ changed tracked source doc     → WithDocumentText, incremental — no reload
             ├─ changed tracked additional doc → WithAdditionalDocumentText, incremental — no reload (#276)
@@ -253,6 +317,25 @@ second rule. The classifier (`ClassifyTrackedDocument`) is shared with `Invalida
 
 The debounce window (300ms) prevents rapid successive FSW events from triggering multiple
 reloads during a batch write operation.
+
+**A delete report for a file that exists.** Every atomic write ends by replacing the file,
+and on Windows the watcher sometimes reports the old file's removal as `Deleted`. Deletes are
+not covered by `ignoredPaths`, so that report used to reach the flush as "tracked document
+deleted" and cost a full reload after one of the server's own writes — and after an editor's
+atomic save. `FlushPendingChanges` now checks each deleted path before dispatching: a file that
+is there under exactly that name was replaced, and is handled as changed (text compared,
+applied incrementally if it differs). The name is compared exactly (`ExistsAsNamed`) because a
+case-only rename, `Foo.cs` → `foo.cs`, is reported as a delete of the old name on a file system
+that ignores case, and that one must still reload. `File.Exists` is asked first: it settles
+a file that is simply gone without listing the directory, and it says no to a symbolic link
+whose target is missing, which could not be read as a change. On Windows the file system is
+then asked for the one entry; elsewhere the directory is read once per flush. Linux gets no
+shortcut for being case-sensitive: a mounted Windows drive or a casefold directory is not.
+
+A delete report for a path that is in `ignoredPaths` at that moment is put back for the next
+flush before any of this: it is the server's own replace in progress, and the write syncs the
+path itself when it is done. It is not dropped, because if the write fails and leaves the file
+gone, the report is the only word of that.
 
 ---
 

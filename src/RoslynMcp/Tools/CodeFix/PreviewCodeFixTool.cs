@@ -210,6 +210,15 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"preview file state changed"));
 		}
 		
+		// A change that proposes different contents for two documents that are one file on disk
+		// can never be applied, so it gets no token (#338).
+		if(await PhysicalSolutionApplier.FindTargetConflictAsync(document.Project.Solution, newSolution, fileStates, workspace.GetSecurityBoundary(projectPath), cancellationToken) is { } conflict)
+			
+			return scope.Failed("conflicting link contents", new PreviewCodeFixResult(
+				null, diagnostic.Id, diff, [choices[selectedIndex]],
+				$"This fix cannot be applied: {conflict} No approval token was created.",
+				"conflicting link contents"));
+		
 		if(!TryResolveWorkspaceInfo(projectPath, out var workspaceRoot, out var isMSBuild, out var csprojPath, out var wsInfoError))
 			
 			return scope.Error(wsInfoError);

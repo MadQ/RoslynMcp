@@ -177,6 +177,20 @@ internal sealed partial class WorkspaceManager
 		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase)
 		;
 		private const    int                       MaxRmOwnedWriteSizes = 50;
+		// Files RM wrote through a symbolic link that are sources no project compiles, with the
+		// size and write time they were left with (#338). The watcher reports such a write at
+		// the link's target, any number of times and on its own schedule; FlushMSBuild drops
+		// those reports for as long as the file still has this stamp, and forgets the entry the
+		// moment it does not — someone else has written the file since. Guarded by debounceLock.
+		// An entry also lapses on its own after OwnedLinkTargetWindow: long enough for any report
+		// of the write to arrive, short enough that a stamp cannot go on vouching for a file
+		// that someone has since rewritten to the same length and the same write time.
+		// Keyed the way the file system compares names: on Linux Foo.cs and foo.cs are two files
+		// and must not share a stamp.
+		private readonly Dictionary<string, (long Length, DateTime WriteUtc, DateTime UntilUtc)> ownedLinkTargets = new(SecurityBoundary.PathComparer)
+		;
+		private static readonly TimeSpan OwnedLinkTargetWindow = TimeSpan.FromSeconds(30)
+		;
 		// Per-file FSW suppression — ref-counted for concurrent-write safety.
 		// A path is added before each RM-owned write and decremented in the finally block.
 		// ScheduleDebounced skips non-Deleted events where the count is > 0 (Deleted events
@@ -1072,15 +1086,34 @@ internal sealed partial class WorkspaceManager
 			
 			if(isMSBuild) {
 				
-				ownedPaths = newSolution.GetChanges(baseSolution)
+				// Source documents and AdditionalFiles items: TryApplyChanges writes both kinds to
+				// disk, and either can be a link whose target has to be brought up to date.
+				var projectChanges = newSolution.GetChanges(baseSolution)
 					.GetProjectChanges()
+					.ToArray()
+				;
+				
+				ownedPaths = projectChanges
 					.SelectMany(p => p.GetChangedDocuments())
 					.Select(id => newSolution.GetDocument(id)?.FilePath)
-					.Where(p => p is not null)
-					.Cast<string>()
+					.Concat(projectChanges
+						.SelectMany(p => p.GetChangedAdditionalDocuments())
+						.Select(id => newSolution.GetAdditionalDocument(id)?.FilePath))
+					.OfType<string>()
 					.ToArray()
 				;
 			}
+			
+			// TryApplyChanges writes each changed document at its own path. A document that is
+			// reached through a link is thereby written into another file, and that file gets
+			// the same treatment as in WriteAndInvalidate: captured before the write and
+			// brought up to date afterwards (#338). It needs no entry in ignoredPaths for the
+			// write itself — the watch set is suspended for that — only for the sync below.
+			var linkedWrites = ownedPaths
+				.Select(LinkedWriteFor)
+				.OfType<LinkedWrite>()
+				.ToArray()
+			;
 			
 			// Ref-counted inside the watch set: events stop before TryApplyChanges and resume
 			// only when the last concurrent suppressor finishes. See issue #145 item 3.
@@ -1127,6 +1160,26 @@ internal sealed partial class WorkspaceManager
 						}
 					}
 				}
+			}
+			
+			// Counted directly before the try that uncounts: nothing may come between the two,
+			// or an exception leaves a file ignored for good.
+			foreach(var linked in linkedWrites)
+				ignoredPaths.AddOrUpdate(linked.Target, 1, (_, count) => count + 1);
+			
+			try {
+				
+				if(applied)
+					foreach(var linked in linkedWrites) {
+						
+						SyncLinkTarget(linked);
+						syncedByApply = linked.Path;
+					}
+			}
+			finally {
+				
+				foreach(var linked in linkedWrites)
+					ignoredPaths.AddOrUpdate(linked.Target, 0, (_, count) => count - 1);
 			}
 			
 			InvalidateCompilation();
@@ -1201,7 +1254,15 @@ internal sealed partial class WorkspaceManager
 		// and not trigger a full reload — the new path's InvalidateFile handles workspace sync.
 		internal async Task WriteAndInvalidate(string fullPath, string? movedFromPath, Func<Task> write)
 		{
+			// A write through a symbolic link lands in the file the link leads to, and that is
+			// the path the file system reports the change at. Worked out before the write: a
+			// write may replace the link, and afterwards there is nothing left to follow (#338).
+			var linked = LinkedWriteFor(fullPath);
+			
 			ignoredPaths.AddOrUpdate(fullPath, 1, (_, count) => count + 1);
+			
+			if(linked is { } beforeWrite)
+				ignoredPaths.AddOrUpdate(beforeWrite.Target, 1, (_, count) => count + 1);
 			
 			if(movedFromPath != null)
 				ownedDeletePaths.AddOrUpdate(movedFromPath, 1, (_, count) => count + 1);
@@ -1213,12 +1274,390 @@ internal sealed partial class WorkspaceManager
 				// Bug #3 fix: InvalidateFile must run while ignoredPaths is still incremented.
 				// Moving it after the finally decrement opened a race window where a late FSW
 				// event fired unsuppressed between the decrement and the workspace invalidation.
+				syncedByApply = null;
+				
 				InvalidateFile(fullPath)
 				;
+				
+				// Inside the same window, for the same reason as above. Not a second time when
+				// InvalidateFile applied the text through TryApplyChanges: that path has done
+				// the sync, alias scan included. A target the write created is the exception —
+				// by then it exists, the nested sync took it for a file that was there all
+				// along, and only this call knows that it is new.
+				if(linked is { } afterWrite
+					&& !(afterWrite.TargetExisted && SecurityBoundary.PathComparer.Equals(syncedByApply, fullPath)))
+					SyncLinkTarget(afterWrite);
+				
 				MarkSynced();
 			}
 			finally {
 				ignoredPaths.AddOrUpdate(fullPath, 0, (_, count) => count - 1);
+				
+				if(linked is { } released)
+					ignoredPaths.AddOrUpdate(released.Target, 0, (_, count) => count - 1);
+			}
+		}
+		
+		/// <summary>
+		///     A write that goes through a link, as it stood before the write: the path that was
+		///     written, the file that path led to, and whether that file was there.
+		/// </summary>
+		readonly record struct LinkedWrite(string Path, string Target, bool TargetExisted);
+		
+		// The linked path ApplyChangesWithFswSuppressed last synced on this thread. Lets
+		// WriteAndInvalidate see that its InvalidateFile call has already done the sync.
+		[ThreadStatic] static string? syncedByApply;
+		
+		// Null for the ordinary case: the path leads nowhere else.
+		LinkedWrite? LinkedWriteFor(string fullPath)
+			=> LinkTargetOf(fullPath) is { } target
+				? new LinkedWrite(fullPath, target, File.Exists(target))
+				: null
+		;
+		
+		/// <summary>
+		///     The file a write to <paramref name="fullPath"/> lands in when that is a different
+		///     file from the one the path names — the path is a symbolic link, or lies under a
+		///     linked directory — and null when it is not, or when it cannot be worked out.
+		///     <para>
+		///         The result is spelled the way the watcher and the workspace's documents spell
+		///         paths, not the way the file system resolves them. Resolving links gives the
+		///         real location, and that differs from the path as it was opened whenever a
+		///         directory above sits under a link — on macOS every temp directory does
+		///         (<c>/var</c> is <c>/private/var</c>). A path in that spelling matches neither a
+		///         watcher event nor a document. So the resolved path is re-spelled through the
+		///         workspace root, or the nearest directory above the root that contains it: the
+		///         part up to that directory is kept as written, the rest is the real location.
+		///         For a path with no link below that directory this gives the path back, and the
+		///         answer is null.
+		///     </para>
+		/// </summary>
+		string? LinkTargetOf(string fullPath)
+		{
+			try {
+				
+				// The usual case by far, and it has to be cheap: this is asked for every
+				// document of every change the workspace applies, a thousand at a time when a
+				// branch is switched. A path under the root with no link below the root leads
+				// nowhere else, and finding that out is one attribute query per directory
+				// level — no resolution of the path or of the root.
+				if(SecurityBoundary.IsUnderDirectory(fullPath, rootPath) && !SecurityBoundary.HasLinkBelowRoot(fullPath, rootPath))
+					
+					return null;
+				
+				if(SecurityBoundary.ResolveLinks(fullPath) is not { } resolved)
+					
+					return null;
+				
+				// From the workspace root upwards — not from the written path. A link at or above
+				// the root is where the user put the workspace and stays as written; a link
+				// below it is what is being followed. Starting at the written path's own
+				// directory would find a linked directory first and spell the target straight
+				// back through it, as the path that was written.
+				for(var above = (string?) rootPath; above is not null; above = Path.GetDirectoryName(above)) {
+					
+					if(SecurityBoundary.ResolveLinks(above) is not { } resolvedAbove
+						|| !SecurityBoundary.IsUnderDirectory(resolved, resolvedAbove))
+						continue;
+					
+					var respelled = Path.Combine(above, Path.GetRelativePath(resolvedAbove, resolved));
+					
+					// The same name the way the file system compares names, which on Linux is
+					// to the letter: Foo.cs leading to foo.cs leads somewhere else.
+					return SecurityBoundary.PathComparer.Equals(respelled, fullPath) ? null : respelled;
+				}
+				
+				return SecurityBoundary.PathComparer.Equals(resolved, fullPath) ? null : resolved;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
+				
+				return null;
+			}
+		}
+		
+		/// <summary>
+		///     After a write through a link: brings the workspace up to date with the file the
+		///     write landed in — if it landed there. A write can also replace the link where it
+		///     sits (a link that leads out of the workspace, a restore that must not follow one),
+		///     and then the file behind it was never touched: the path no longer leads to it, and
+		///     nothing is done. The same when the link was dangling and still is.
+		/// </summary>
+		void SyncLinkTarget(LinkedWrite linked)
+		{
+			// Compared the way the file system compares names: on Linux a link Foo.cs to a
+			// file foo.cs is a link to another file, not a path that leads to itself.
+			if(LinkTargetOf(linked.Path) is not { } target || !SecurityBoundary.PathComparer.Equals(target, linked.Target))
+				
+				return;
+			
+			if(!linked.TargetExisted && !File.Exists(linked.Target))
+				
+				return;
+			
+			InvalidateLinkTarget(linked.Target, linked.TargetExisted);
+			SyncOtherAliases(linked);
+		}
+		
+		// Set while SyncOtherAliases is at work on this thread. Refreshing an alias writes it
+		// through TryApplyChanges, which comes back here for that alias; without the mark every
+		// alias would start a scan of its own.
+		[ThreadStatic] static bool syncingAliases;
+		
+		/// <summary>
+		///     After a write through a link: refreshes every other tracked document that is the
+		///     same file on disk — a second link to it, or a link earlier in a chain. The write
+		///     was reported under one name and, at most, seen by the watcher under the file's
+		///     own; a document under a third name hears of it from nobody.
+		///     <para>
+		///         Done the plain way: every document path of the solution is resolved and
+		///         compared. That is one file-system query per document plus one resolution per
+		///         directory, paid only by a write that went through a link — an ordinary write
+		///         never gets here. An index of documents by physical file would make it cheap
+		///         and would also cover a write made straight to a file that has links to it,
+		///         which this does not (#341).
+		///     </para>
+		/// </summary>
+		void SyncOtherAliases(LinkedWrite linked)
+		{
+			if(syncingAliases)
+				
+				return;
+			
+			syncingAliases = true;
+			
+			try {
+				
+				Solution currentSolution;
+				
+				@lock.EnterReadLock();
+				
+				try {
+					currentSolution = workspace.CurrentSolution;
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
+				var same        = SecurityBoundary.PathComparer;
+				var directories = new Dictionary<string, string>(same);
+				
+				// Where a path really is. The directory is resolved once per directory; the file
+				// itself only costs a full resolution when it is a link. A path that cannot be
+				// examined stays as written — it is then simply not found to be an alias, and
+				// the scan goes on to the next one.
+				string Physical(string path)
+				{
+					try {
+						
+						if(Path.GetDirectoryName(path) is not { } directory)
+							
+							return path;
+						
+						if(!directories.TryGetValue(directory, out var resolved)) {
+							
+							resolved = SecurityBoundary.ResolveLinks(directory) ?? directory;
+							directories.Add(directory, resolved);
+						}
+						
+						var located = Path.Combine(resolved, Path.GetFileName(path));
+						
+						return FileWriter.IsLink(located) ? SecurityBoundary.ResolveLinks(located) ?? located : located;
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
+						
+						return path;
+					}
+				}
+				
+				// Every kind of document a file can be: source, an AdditionalFiles item, an
+				// analyzer-config file. InvalidateFile knows what to do with each.
+				var written = Physical(linked.Target);
+				var aliases = currentSolution.Projects
+					.SelectMany(project => project.Documents
+						.Concat<TextDocument>(project.AdditionalDocuments)
+						.Concat(project.AnalyzerConfigDocuments))
+					.Select(document => document.FilePath)
+					.OfType<string>()
+					.Distinct(same)
+					.Where(path => !same.Equals(path, linked.Path) && !same.Equals(path, linked.Target) && same.Equals(Physical(path), written))
+				;
+				
+				// One alias that cannot be refreshed must not cost the others their turn.
+				foreach(var alias in aliases)
+					try {
+						InvalidateLinkTarget(alias, existedBefore: true);
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						_ = ex
+						;
+					}
+			}
+			finally {
+				syncingAliases = false;
+			}
+		}
+		
+		/// <summary>
+		///     Brings the workspace up to date with a file that was written through a link.
+		///     <para>
+		///         A file that existed before and is an unknown <c>.cs</c> is left alone. To
+		///         <see cref="InvalidateFile"/> an unknown <c>.cs</c> is a new compilation input and
+		///         costs a full reload, which is right for a file that has just appeared and wrong
+		///         for one that was there all along and that no project compiles — a shared source
+		///         kept outside the project and linked into it. Everything else goes through
+		///         <see cref="InvalidateFile"/>: a tracked document gets its new text, an evaluation
+		///         input flags its reload, and a file the write created is treated as new.
+		///     </para>
+		/// </summary>
+		void InvalidateLinkTarget(string linkTarget, bool existedBefore)
+		{
+			if(existedBefore) {
+				
+				Solution currentSolution;
+				
+				@lock.EnterReadLock();
+				
+				try {
+					currentSolution = workspace.CurrentSolution;
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
+				// An adhoc workspace takes any .cs it is handed for a document, so there the
+				// question is simply whether it already has this one.
+				var unknownSource = isMSBuild
+					? ClassifyEditImpact(currentSolution, linkTarget, out _, out var reason) is WorkspaceEditImpact.Reload
+						&& reason == ReasonNewDocument
+					: currentSolution.GetDocumentIdsWithFilePath(linkTarget).IsEmpty
+				;
+				
+				if(unknownSource) {
+					
+					StampOwnLinkTarget(linkTarget);
+					
+					return;
+				}
+				
+				// Already has this text: an edit applied through TryApplyChanges syncs the
+				// target once on its own, and a second pass would only write the file again.
+				if(HasCurrentText(currentSolution, linkTarget))
+					
+					return;
+			}
+			
+			InvalidateFile(linkTarget);
+			
+			// A file the write created is new to the workspace, and InvalidateFile has said so.
+			// The watcher will say it again, at this path, on its own time — possibly after
+			// the reload it caused has finished, when it would cause a second one.
+			if(!existedBefore)
+				StampOwnLinkTarget(linkTarget);
+		}
+		
+		/// <summary>
+		///     Records that RM has just written <paramref name="path"/> through a link, so that
+		///     the watcher's reports of that write are recognised as such
+		///     (see <see cref="IsOwnLinkTargetWrite"/>). The watcher can report a write after the
+		///     suppression window has closed — its events arrive on their own time, and on
+		///     Windows a replaced file is reported more than once.
+		/// </summary>
+		void StampOwnLinkTarget(string path)
+		{
+			lock(debounceLock) {
+				
+				// Room is made by dropping what has lapsed. Only when the table is full of live
+				// stamps is it cleared, which costs those files a reload if a report still comes.
+				if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes) {
+					
+					var now    = DateTime.UtcNow;
+					var lapsed = ownedLinkTargets
+						.Where(entry => entry.Value.UntilUtc < now)
+						.Select(entry => entry.Key)
+						.ToArray()
+					;
+					
+					foreach(var key in lapsed)
+						ownedLinkTargets.Remove(key);
+					
+					if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes)
+						ownedLinkTargets.Clear();
+				}
+				
+				try {
+					
+					var info = new FileInfo(path);
+					
+					ownedLinkTargets[path] = (info.Length, info.LastWriteTimeUtc, DateTime.UtcNow + OwnedLinkTargetWindow);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					// Gone or locked — the flush handles the event the normal way.
+					_ = ex
+					;
+				}
+			}
+		}
+		
+		// Whether the workspace's document at this path already holds what is on disk — whatever
+		// kind of document it is: source, an AdditionalFiles item, analyzer config. False when
+		// there is no such document, its text is not loaded, or the file cannot be read.
+		static bool HasCurrentText(Solution solution, string path)
+		{
+			try {
+				
+				if(WorkspaceTextDocumentInfo.Resolve(solution, path).GetDocument(solution) is not { } document
+					|| !document.TryGetText(out var held))
+					
+					return false;
+				
+				using var stream = File.OpenRead(path);
+				
+				return held.ContentEquals(SourceText.From(stream, FileWriter.Utf8NoBom));
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				
+				return false;
+			}
+		}
+		
+		/// <summary>
+		///     Whether a watcher report for <paramref name="path"/> is of a write RM itself made
+		///     through a link, to a source no project compiles (see <see cref="ownedLinkTargets"/>).
+		///     True while the file still has the stamp it was left with, and while another such
+		///     write is in flight — that one is about to leave a new stamp, and judging the file
+		///     against the old one in between would take RM's own write for someone else's.
+		///     Otherwise the entry is forgotten: the file has been written by someone else.
+		/// </summary>
+		bool IsOwnLinkTargetWrite(string path)
+		{
+			lock(debounceLock) {
+				
+				if(!ownedLinkTargets.TryGetValue(path, out var stamp))
+					
+					return false;
+				
+				if(ignoredPaths.TryGetValue(path, out var writing) && writing > 0)
+					
+					return true;
+				
+				try {
+					
+					var info = new FileInfo(path);
+					
+					if(DateTime.UtcNow <= stamp.UntilUtc
+						&& info.Exists && info.Length == stamp.Length && info.LastWriteTimeUtc == stamp.WriteUtc)
+						
+						return true;
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					// Cannot tell — treat it as changed.
+					_ = ex
+					;
+				}
+				
+				ownedLinkTargets.Remove(path);
+				
+				return false;
 			}
 		}
 		
@@ -1680,6 +2119,54 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		// Whether a readable file exists under exactly this name.
+		// File.Exists comes first and settles the usual case of a file that is simply gone
+		// without listing its directory — a checkout that removes a thousand files asks a
+		// thousand times. It also says no to a symbolic link whose target is missing: such a
+		// "file" cannot be read, and treating its delete report as a change would leave the
+		// document's old text in place with nothing to correct it.
+		// The exact name matters because File.Exists ignores case on Windows and macOS, and a
+		// file renamed in case only (Foo.cs to foo.cs) is reported as a delete of the old name:
+		// that one really is gone, and the workspace has to learn the new name.
+		//
+		// How the exact name is checked depends on what the platform makes cheap. On Windows the
+		// file system is asked for the one entry. Elsewhere a name filter is applied after
+		// reading the whole directory, so the directory is read once per flush and kept in
+		// listings — a checkout that rewrites two thousand files in one directory would
+		// otherwise read it two thousand times. Linux gets no shortcut for being case-sensitive:
+		// a mounted Windows drive or a casefold directory is not.
+		static bool ExistsAsNamed(string path, Dictionary<string, HashSet<string>> listings)
+		{
+			try {
+				
+				if(!File.Exists(path))
+					
+					return false;
+				
+				var name = Path.GetFileName(path);
+				
+				if(Path.GetDirectoryName(path) is not { } directory)
+					
+					return false;
+				
+				if(OperatingSystem.IsWindows())
+					
+					return Directory.EnumerateFiles(directory, name).Any(found => Path.GetFileName(found) == name);
+				
+				if(!listings.TryGetValue(directory, out var names)) {
+					
+					names = new HashSet<string>(Directory.EnumerateFiles(directory).Select(found => Path.GetFileName(found)), StringComparer.Ordinal);
+					listings.Add(directory, names);
+				}
+				
+				return names.Contains(name);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException) {
+				
+				return false;
+			}
+		}
+		
 		void FlushPendingChanges(object? _)
 		{
 			// Timer callbacks must never throw — unhandled exceptions crash the process.
@@ -1699,6 +2186,50 @@ internal sealed partial class WorkspaceManager
 					pendingChanges.Clear();
 					pendingDeletes.Clear();
 				}
+				
+				// A file reported as deleted that is there when the flush runs was replaced, not
+				// removed. Replacing a file is how every atomic write ends, and on Windows the
+				// watcher sometimes reports the old file's removal as a delete. Taken at its word
+				// that is "tracked document deleted", a full reload, for a document that only
+				// needs its text compared — and in an adhoc workspace the document is dropped
+				// although its file exists. Such a report is a change.
+				// A delete report for a path RM is writing at this moment is the replace in
+				// progress. Acting on it now would race the write — as a change it gets in the
+				// way of the sync the write does when it is done, as a delete it reloads the
+				// workspace for a file that is about to be there again. It is put back for the
+				// next flush, not dropped: should the write fail and leave the file gone, the
+				// report is the only word of that.
+				var inFlight = deleted
+					.Where(path => ignoredPaths.TryGetValue(path, out var writing) && writing > 0)
+					.ToArray()
+				;
+				
+				if(inFlight.Any()) {
+					
+					deleted = [.. deleted.Except(inFlight, SecurityBoundary.PathComparer)];
+					
+					foreach(var path in inFlight)
+						ScheduleDebounced(path, true);
+				}
+				
+				var listings = new Dictionary<string, HashSet<string>>(SecurityBoundary.PathComparer);
+				var replaced = deleted
+					.Where(path => ExistsAsNamed(path, listings))
+					.ToArray()
+				;
+				
+				// Compared the way the file system compares names: ignoring case here would, on
+				// Linux, take the real delete of foo.cs along with a replaced Foo.cs.
+				if(replaced.Any()) {
+					
+					deleted = [.. deleted.Except(replaced, SecurityBoundary.PathComparer)];
+					changed = [.. changed.Union(replaced, SecurityBoundary.PathComparer)];
+				}
+				
+				// Reports of RM's own writes through a link to a source no project compiles.
+				// Dropped here, ahead of both flushes: to either of them such a file is an
+				// unknown .cs — a reload in an MSBuild workspace, a new document in an adhoc one.
+				changed = [.. changed.Where(path => !IsOwnLinkTargetWrite(path))];
 				
 				// True when the flush could only flag a reload. The workspace is then behind disk
 				// until that reload completes, so the sync clock must not advance — otherwise

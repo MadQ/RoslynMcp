@@ -274,6 +274,7 @@ sealed class HarnessRun(string[] args)
 			groups.Add(LinkedWorkspaceTests.Build(ctx));
 			groups.Add(FileRewriteTests.Build(ctx));
 			groups.Add(ApplyLinkTests.Build(ctx));
+			groups.Add(LinkWriteSyncTests.Build(ctx));
 			groups.Add(HookHintTests.Build(ctx));
 			groups.Add(ClaudeHookSetupTests.Build(ctx));
 			groups.Add(await IgnoredDirectoryTests.BuildAsync(ctx));
