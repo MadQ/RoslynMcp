@@ -166,7 +166,10 @@ another file, and the file system reports the change at **that** path. The calle
 the path it wrote, so the workspace works the second path out itself, before the write (a
 write may replace the link, and then there is nothing left to follow):
 
-1. `LinkTargetOf(path)` resolves the links and spells the result the way watcher events and
+1. `LinkTargetOf(path)` first asks the cheap question — is there any link below the workspace
+   root on the way to `path`? — and stops there for the usual answer, no. It is asked for
+   every document of every change the workspace applies. Only otherwise does it resolve the
+   links, and it spells the result the way watcher events and
    document paths are spelled: the resolved location is re-spelled through the workspace
    root, or the nearest directory above the root that contains it. The fully resolved form
    differs whenever a directory above sits under a link (on macOS `/var` is `/private/var`).
@@ -183,7 +186,8 @@ write may replace the link, and then there is nothing left to follow):
    - a tracked document gets its new text, whether or not a watcher covers it (skipped when it
      already has that text);
    - an evaluation input flags its reload;
-   - a file the write created is treated as new;
+   - a file the write created is treated as new, and stamped like the next case, so the
+     watcher's own report of it does not flag a second reload after the first has finished;
    - a `.cs` file that existed before and that no project compiles is **left alone**. To
      `InvalidateFile` it would be a new document and cost a full reload. Its size and write
      time are recorded in `ownedLinkTargets`. The watcher reports such a write on its own
@@ -324,7 +328,13 @@ applied incrementally if it differs). The name is compared exactly (`ExistsAsNam
 case-only rename, `Foo.cs` → `foo.cs`, is reported as a delete of the old name on a file system
 that ignores case, and that one must still reload. `File.Exists` is asked first: it settles
 a file that is simply gone without listing the directory, and it says no to a symbolic link
-whose target is missing, which could not be read as a change.
+whose target is missing, which could not be read as a change. On Linux that is the whole
+check, since names are exact there; on Windows the file system is asked for the one entry;
+elsewhere the directory is read once per flush.
+
+A delete report for a path that is in `ignoredPaths` at that moment is dropped before any of
+this: it is the server's own replace in progress, and the write syncs the path itself when it
+is done.
 
 ---
 

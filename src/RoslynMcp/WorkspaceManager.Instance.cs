@@ -1170,8 +1170,11 @@ internal sealed partial class WorkspaceManager
 			try {
 				
 				if(applied)
-					foreach(var linked in linkedWrites)
+					foreach(var linked in linkedWrites) {
+						
 						SyncLinkTarget(linked);
+						syncedByApply = linked.Path;
+					}
 			}
 			finally {
 				
@@ -1271,11 +1274,18 @@ internal sealed partial class WorkspaceManager
 				// Bug #3 fix: InvalidateFile must run while ignoredPaths is still incremented.
 				// Moving it after the finally decrement opened a race window where a late FSW
 				// event fired unsuppressed between the decrement and the workspace invalidation.
+				syncedByApply = null;
+				
 				InvalidateFile(fullPath)
 				;
 				
-				// Inside the same window, for the same reason as above.
-				if(linked is { } afterWrite)
+				// Inside the same window, for the same reason as above. Not a second time when
+				// InvalidateFile applied the text through TryApplyChanges: that path has done
+				// the sync, alias scan included. A target the write created is the exception —
+				// by then it exists, the nested sync took it for a file that was there all
+				// along, and only this call knows that it is new.
+				if(linked is { } afterWrite
+					&& !(afterWrite.TargetExisted && SecurityBoundary.PathComparer.Equals(syncedByApply, fullPath)))
 					SyncLinkTarget(afterWrite);
 				
 				MarkSynced();
@@ -1293,6 +1303,10 @@ internal sealed partial class WorkspaceManager
 		///     written, the file that path led to, and whether that file was there.
 		/// </summary>
 		readonly record struct LinkedWrite(string Path, string Target, bool TargetExisted);
+		
+		// The linked path ApplyChangesWithFswSuppressed last synced on this thread. Lets
+		// WriteAndInvalidate see that its InvalidateFile call has already done the sync.
+		[ThreadStatic] static string? syncedByApply;
 		
 		// Null for the ordinary case: the path leads nowhere else.
 		LinkedWrite? LinkedWriteFor(string fullPath)
@@ -1321,6 +1335,15 @@ internal sealed partial class WorkspaceManager
 		string? LinkTargetOf(string fullPath)
 		{
 			try {
+				
+				// The usual case by far, and it has to be cheap: this is asked for every
+				// document of every change the workspace applies, a thousand at a time when a
+				// branch is switched. A path under the root with no link below the root leads
+				// nowhere else, and finding that out is one attribute query per directory
+				// level — no resolution of the path or of the root.
+				if(SecurityBoundary.IsUnderDirectory(fullPath, rootPath) && !SecurityBoundary.HasLinkBelowRoot(fullPath, rootPath))
+					
+					return null;
 				
 				if(SecurityBoundary.ResolveLinks(fullPath) is not { } resolved)
 					
@@ -1457,7 +1480,6 @@ internal sealed partial class WorkspaceManager
 					.OfType<string>()
 					.Distinct(same)
 					.Where(path => !same.Equals(path, linked.Path) && !same.Equals(path, linked.Target) && same.Equals(Physical(path), written))
-					.ToArray()
 				;
 				
 				// One alias that cannot be refreshed must not cost the others their turn.
@@ -1512,27 +1534,7 @@ internal sealed partial class WorkspaceManager
 				
 				if(unknownSource) {
 					
-					// The watcher can report this write after the suppression window has
-					// closed — its events arrive on their own time, and on Windows a replaced
-					// file is reported more than once. The stamp lets the flush recognise every
-					// such report as this write instead of taking it for a new document.
-					lock(debounceLock) {
-						
-						if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes)
-							ownedLinkTargets.Clear();
-						
-						try {
-							
-							var info = new FileInfo(linkTarget);
-							
-							ownedLinkTargets[linkTarget] = (info.Length, info.LastWriteTimeUtc, DateTime.UtcNow + OwnedLinkTargetWindow);
-						}
-						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-							// Gone or locked — the flush handles the event the normal way.
-							_ = ex
-							;
-						}
-					}
+					StampOwnLinkTarget(linkTarget);
 					
 					return;
 				}
@@ -1545,16 +1547,65 @@ internal sealed partial class WorkspaceManager
 			}
 			
 			InvalidateFile(linkTarget);
+			
+			// A file the write created is new to the workspace, and InvalidateFile has said so.
+			// The watcher will say it again, at this path, on its own time — possibly after
+			// the reload it caused has finished, when it would cause a second one.
+			if(!existedBefore)
+				StampOwnLinkTarget(linkTarget);
 		}
 		
-		// Whether the workspace's document at this path already holds what is on disk. False when
+		/// <summary>
+		///     Records that RM has just written <paramref name="path"/> through a link, so that
+		///     the watcher's reports of that write are recognised as such
+		///     (see <see cref="IsOwnLinkTargetWrite"/>). The watcher can report a write after the
+		///     suppression window has closed — its events arrive on their own time, and on
+		///     Windows a replaced file is reported more than once.
+		/// </summary>
+		void StampOwnLinkTarget(string path)
+		{
+			lock(debounceLock) {
+				
+				// Room is made by dropping what has lapsed. Only when the table is full of live
+				// stamps is it cleared, which costs those files a reload if a report still comes.
+				if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes) {
+					
+					var now    = DateTime.UtcNow;
+					var lapsed = ownedLinkTargets
+						.Where(entry => entry.Value.UntilUtc < now)
+						.Select(entry => entry.Key)
+						.ToArray()
+					;
+					
+					foreach(var key in lapsed)
+						ownedLinkTargets.Remove(key);
+					
+					if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes)
+						ownedLinkTargets.Clear();
+				}
+				
+				try {
+					
+					var info = new FileInfo(path);
+					
+					ownedLinkTargets[path] = (info.Length, info.LastWriteTimeUtc, DateTime.UtcNow + OwnedLinkTargetWindow);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					// Gone or locked — the flush handles the event the normal way.
+					_ = ex
+					;
+				}
+			}
+		}
+		
+		// Whether the workspace's document at this path already holds what is on disk — whatever
+		// kind of document it is: source, an AdditionalFiles item, analyzer config. False when
 		// there is no such document, its text is not loaded, or the file cannot be read.
 		static bool HasCurrentText(Solution solution, string path)
 		{
 			try {
 				
-				if(solution.GetDocumentIdsWithFilePath(path) is not [var id, ..]
-					|| solution.GetDocument(id) is not { } document
+				if(WorkspaceTextDocumentInfo.Resolve(solution, path).GetDocument(solution) is not { } document
 					|| !document.TryGetText(out var held))
 					
 					return false;
@@ -2077,7 +2128,14 @@ internal sealed partial class WorkspaceManager
 		// The exact name matters because File.Exists ignores case on Windows and macOS, and a
 		// file renamed in case only (Foo.cs to foo.cs) is reported as a delete of the old name:
 		// that one really is gone, and the workspace has to learn the new name.
-		static bool ExistsAsNamed(string path)
+		//
+		// How the exact name is checked depends on what the platform makes cheap. On Linux names
+		// are exact to begin with and File.Exists has answered. On Windows the file system is
+		// asked for the one entry. Elsewhere a name filter is applied after reading the whole
+		// directory, so the directory is read once per flush and kept in listings — a checkout
+		// that rewrites two thousand files in one directory would otherwise read it two
+		// thousand times.
+		static bool ExistsAsNamed(string path, Dictionary<string, HashSet<string>> listings)
 		{
 			try {
 				
@@ -2085,11 +2143,27 @@ internal sealed partial class WorkspaceManager
 					
 					return false;
 				
-				var directory = Path.GetDirectoryName(path);
-				var name      = Path.GetFileName(path);
+				if(OperatingSystem.IsLinux())
+					
+					return true;
 				
-				return directory is not null
-					&& Directory.EnumerateFiles(directory, name).Any(found => Path.GetFileName(found) == name);
+				var name = Path.GetFileName(path);
+				
+				if(Path.GetDirectoryName(path) is not { } directory)
+					
+					return false;
+				
+				if(OperatingSystem.IsWindows())
+					
+					return Directory.EnumerateFiles(directory, name).Any(found => Path.GetFileName(found) == name);
+				
+				if(!listings.TryGetValue(directory, out var names)) {
+					
+					names = new HashSet<string>(Directory.EnumerateFiles(directory).Select(found => Path.GetFileName(found)), StringComparer.Ordinal);
+					listings.Add(directory, names);
+				}
+				
+				return names.Contains(name);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException) {
 				
@@ -2123,8 +2197,15 @@ internal sealed partial class WorkspaceManager
 				// that is "tracked document deleted", a full reload, for a document that only
 				// needs its text compared — and in an adhoc workspace the document is dropped
 				// although its file exists. Such a report is a change.
+				// A delete report for a path RM is writing at this moment is the replace in
+				// progress. The write syncs the path itself when it is done; acting on the
+				// report now would race it — as a change it gets in the way of that sync, as a
+				// delete it reloads the workspace for a file that is about to be there again.
+				deleted = [.. deleted.Where(path => !(ignoredPaths.TryGetValue(path, out var writing) && writing > 0))];
+				
+				var listings = new Dictionary<string, HashSet<string>>(SecurityBoundary.PathComparer);
 				var replaced = deleted
-					.Where(ExistsAsNamed)
+					.Where(path => ExistsAsNamed(path, listings))
 					.ToArray()
 				;
 				

@@ -266,7 +266,7 @@ internal sealed class SecurityBoundary
 	///         directory, since <c>/var</c> is a link to <c>/private/var</c> (#330).
 	///     </para>
 	/// </summary>
-	static bool HasLinkBelowRoot(string path, string root)
+	internal static bool HasLinkBelowRoot(string path, string root)
 	{
 		var rootLength = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Length;
 		
