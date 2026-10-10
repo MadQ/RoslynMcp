@@ -328,13 +328,14 @@ applied incrementally if it differs). The name is compared exactly (`ExistsAsNam
 case-only rename, `Foo.cs` → `foo.cs`, is reported as a delete of the old name on a file system
 that ignores case, and that one must still reload. `File.Exists` is asked first: it settles
 a file that is simply gone without listing the directory, and it says no to a symbolic link
-whose target is missing, which could not be read as a change. On Linux that is the whole
-check, since names are exact there; on Windows the file system is asked for the one entry;
-elsewhere the directory is read once per flush.
+whose target is missing, which could not be read as a change. On Windows the file system is
+then asked for the one entry; elsewhere the directory is read once per flush. Linux gets no
+shortcut for being case-sensitive: a mounted Windows drive or a casefold directory is not.
 
-A delete report for a path that is in `ignoredPaths` at that moment is dropped before any of
-this: it is the server's own replace in progress, and the write syncs the path itself when it
-is done.
+A delete report for a path that is in `ignoredPaths` at that moment is put back for the next
+flush before any of this: it is the server's own replace in progress, and the write syncs the
+path itself when it is done. It is not dropped, because if the write fails and leaves the file
+gone, the report is the only word of that.
 
 ---
 

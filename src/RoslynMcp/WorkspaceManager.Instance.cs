@@ -2129,12 +2129,12 @@ internal sealed partial class WorkspaceManager
 		// file renamed in case only (Foo.cs to foo.cs) is reported as a delete of the old name:
 		// that one really is gone, and the workspace has to learn the new name.
 		//
-		// How the exact name is checked depends on what the platform makes cheap. On Linux names
-		// are exact to begin with and File.Exists has answered. On Windows the file system is
-		// asked for the one entry. Elsewhere a name filter is applied after reading the whole
-		// directory, so the directory is read once per flush and kept in listings — a checkout
-		// that rewrites two thousand files in one directory would otherwise read it two
-		// thousand times.
+		// How the exact name is checked depends on what the platform makes cheap. On Windows the
+		// file system is asked for the one entry. Elsewhere a name filter is applied after
+		// reading the whole directory, so the directory is read once per flush and kept in
+		// listings — a checkout that rewrites two thousand files in one directory would
+		// otherwise read it two thousand times. Linux gets no shortcut for being case-sensitive:
+		// a mounted Windows drive or a casefold directory is not.
 		static bool ExistsAsNamed(string path, Dictionary<string, HashSet<string>> listings)
 		{
 			try {
@@ -2142,10 +2142,6 @@ internal sealed partial class WorkspaceManager
 				if(!File.Exists(path))
 					
 					return false;
-				
-				if(OperatingSystem.IsLinux())
-					
-					return true;
 				
 				var name = Path.GetFileName(path);
 				
@@ -2198,10 +2194,23 @@ internal sealed partial class WorkspaceManager
 				// needs its text compared — and in an adhoc workspace the document is dropped
 				// although its file exists. Such a report is a change.
 				// A delete report for a path RM is writing at this moment is the replace in
-				// progress. The write syncs the path itself when it is done; acting on the
-				// report now would race it — as a change it gets in the way of that sync, as a
-				// delete it reloads the workspace for a file that is about to be there again.
-				deleted = [.. deleted.Where(path => !(ignoredPaths.TryGetValue(path, out var writing) && writing > 0))];
+				// progress. Acting on it now would race the write — as a change it gets in the
+				// way of the sync the write does when it is done, as a delete it reloads the
+				// workspace for a file that is about to be there again. It is put back for the
+				// next flush, not dropped: should the write fail and leave the file gone, the
+				// report is the only word of that.
+				var inFlight = deleted
+					.Where(path => ignoredPaths.TryGetValue(path, out var writing) && writing > 0)
+					.ToArray()
+				;
+				
+				if(inFlight.Any()) {
+					
+					deleted = [.. deleted.Except(inFlight, SecurityBoundary.PathComparer)];
+					
+					foreach(var path in inFlight)
+						ScheduleDebounced(path, true);
+				}
 				
 				var listings = new Dictionary<string, HashSet<string>>(SecurityBoundary.PathComparer);
 				var replaced = deleted
