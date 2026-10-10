@@ -161,29 +161,44 @@ All `ApplyRenameTool` and `ApplySignatureChangeTool` write calls go through this
 
 ### A write through a symbolic link (#338)
 
-When `fullPath` is a symbolic link, the write lands in the file the link leads to, and the
-file system reports the change at **that** path. The caller only knows the link, so
-`WriteAndInvalidate` works the second path out itself, before the write (a write may replace
-the link, and then there is nothing left to follow):
+When the written path is a symbolic link, or lies under a linked directory, the write lands in
+another file, and the file system reports the change at **that** path. The caller only knows
+the path it wrote, so the workspace works the second path out itself, before the write (a
+write may replace the link, and then there is nothing left to follow):
 
-1. `LinkTargetOf(fullPath)` resolves the link and spells the result under the workspace root
-   as it was opened — the form watcher events and document paths use. The fully resolved form
-   differs when the root sits under a link (on macOS `/var` is `/private/var`).
-2. The target is added to `ignoredPaths` for the same window as `fullPath`, and released in the
+1. `LinkTargetOf(path)` resolves the links and spells the result the way watcher events and
+   document paths are spelled: the resolved location is re-spelled through the nearest
+   directory above `path` that contains it. The fully resolved form differs whenever a
+   directory above sits under a link (on macOS `/var` is `/private/var`). For a path with no
+   link in it this gives the path back, and there is no second path.
+2. The target is added to `ignoredPaths` for the same window as the write, and released in the
    same `finally`.
-3. After `InvalidateFile(fullPath)`, still inside the window, `InvalidateLinkTarget` brings the
-   target up to date:
-   - a tracked document gets its new text, whether or not a watcher covers it;
+3. After the write, still inside the window, `SyncLinkTarget` brings the target up to date —
+   if the write landed there. A write can also replace the link where it sits; then the path
+   no longer leads to the target and nothing is done. Otherwise `InvalidateLinkTarget`:
+   - a tracked document gets its new text, whether or not a watcher covers it (skipped when it
+     already has that text);
    - an evaluation input flags its reload;
    - a file the write created is treated as new;
    - a `.cs` file that existed before and that no project compiles is **left alone**. To
      `InvalidateFile` it would be a new document and cost a full reload. Its size and write
      time are recorded in `ownedLinkTargets`. The watcher reports such a write on its own
      schedule — after the window has closed, and on Windows more than once for a replaced
-     file — and `FlushMSBuild` drops every report for the path while the file still has that
-     stamp. The entry is forgotten as soon as the stamp no longer matches: someone else has
-     written the file. A one-shot record, like `rmOwnedWriteSizes`, would be used up by the
-     first report and leave a second one to be taken for a new document.
+     file — and `FlushPendingChanges` drops every report for the path while the file still has
+     that stamp, or while another write to it is in flight. The entry is forgotten as soon as
+     the stamp no longer matches: someone else has written the file. A one-shot record, like
+     `rmOwnedWriteSizes`, would be used up by the first report and leave a second one to be
+     taken for a new document.
+
+There are **two** places a tool's write goes through, and both do this:
+
+- `WriteAndInvalidate` — whole-file writes (`roslyn_write_file`, untracked files, the apply
+  step, the local-history restore).
+- `ApplyChangesWithFswSuppressed` — edits handed to the workspace as text or as a solution
+  (`roslyn_replace_in_file`, `roslyn_insert_lines`, `roslyn_replace_in_code` on a tracked
+  document). `TryApplyChanges` writes each changed document at its own path, so a document
+  that is a link is written into the file behind it, with the watch set suspended. Without
+  the sync nothing would ever tell the workspace about that file.
 
 The ordering rules above are unchanged: suppress before the write, invalidate inside the
 window, release in `finally`.
@@ -293,7 +308,9 @@ atomic save. `FlushPendingChanges` now checks each deleted path before dispatchi
 is there under exactly that name was replaced, and is handled as changed (text compared,
 applied incrementally if it differs). The name is compared exactly (`ExistsAsNamed`) because a
 case-only rename, `Foo.cs` → `foo.cs`, is reported as a delete of the old name on a file system
-that ignores case, and that one must still reload.
+that ignores case, and that one must still reload. `File.Exists` is asked first: it settles
+a file that is simply gone without listing the directory, and it says no to a symbolic link
+whose target is missing, which could not be read as a change.
 
 ---
 

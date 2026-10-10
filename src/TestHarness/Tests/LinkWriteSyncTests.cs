@@ -6,7 +6,8 @@ using System.Text.Json.Nodes;
 ///     things for that path: it ignores the file watcher's report of the write, and it refreshes
 ///     the document at that path. When the path is a link, the file system reports the change at
 ///     the file the link leads to — a path the workspace was never told about. Two things went
-///     wrong there, one test each:
+///     wrong there. The first is tested for both ways a tool writes — replacing the file, and
+///     editing it in place through the workspace — and the second once:
 ///     <list type="bullet">
 ///         <item>
 ///             <b>A stale document.</b> When the file behind the link is a document of its own,
@@ -43,6 +44,9 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class LinkWriteSyncTests
 {
+	// Unknown: the probe itself failed, which is neither of the other two.
+	enum Reload { Unknown, None, Pending }
+	
 	internal static TestGroup Build(TestContext ctx)
 	{
 		
@@ -106,17 +110,19 @@ static class LinkWriteSyncTests
 		Task<JsonNode?> Write(string? projectPath, string filePath, string content)
 			=> Call("roslyn_write_file", new { filePath, content, projectPath });
 		
-		// Null means the probe itself failed. reload_pending is omitted from the JSON when false.
-		async Task<bool?> ReloadPendingAsync(string? projectPath)
+		// What roslyn_check_drift says about a pending reload. Three answers, so an enum: a probe
+		// that failed must not read as "nothing pending". reload_pending is omitted from the
+		// JSON when false.
+		async Task<Reload> ReloadStateAsync(string? projectPath)
 		{
 			
 			var data = await Call("roslyn_check_drift", new { projectPath });
 			
 			if(data?["drifted"] is null)
 				
-				return null;
+				return Reload.Unknown;
 			
-			return data["reload_pending"]?.GetValue<bool>() ?? false;
+			return data["reload_pending"]?.GetValue<bool>() == true ? Reload.Pending : Reload.None;
 		}
 		
 		// Loads the workspace and waits until no reload is pending, so that a flag seen later
@@ -130,7 +136,7 @@ static class LinkWriteSyncTests
 				
 				await Call("roslyn_get_diagnostics", new { projectPath, take = 0, severity = "errors" });
 				
-				if(await ReloadPendingAsync(projectPath) == false)
+				if(await ReloadStateAsync(projectPath) == Reload.None)
 					
 					return true;
 				
@@ -177,6 +183,38 @@ static class LinkWriteSyncTests
 						: (false, $"FAIL  (served from: {source ?? "nothing"}; has the new member: {current}; still a link: {IsLink(sharedLink)}; write: {written?.ToJsonString() ?? "none"})");
 				}),
 			
+			// The same through the other way a tool writes. roslyn_write_file replaces the file;
+			// roslyn_replace_in_file hands the new text to the workspace, which writes the
+			// document at its own path — through the link — with the watcher switched off for
+			// the duration. Nothing would ever tell the workspace about the file behind the
+			// link: without the sync it stayed stale until something else touched it. Runs
+			// after the test above and edits the member that one added.
+			new("link write sync: the document behind a link is current straight after an in-place edit through the link",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var edited = await Call("roslyn_replace_in_file", new {
+						filePath = "SharedLink.cs", pattern = "AddedThroughLink", replacement = "EditedThroughLink", projectPath = fx.Csproj });
+					var blocks = await CallBlocks("roslyn_read_file", new { filePath = "Shared.cs", projectPath = fx.Csproj });
+					
+					JsonNode? header = null;
+					
+					try { header = blocks.Length > 0 ? JsonNode.Parse(blocks[0]) : null; }
+					catch { }
+					
+					var source  = header?["source"]?.GetValue<string>();
+					var text    = blocks.Length > 1 ? blocks[1] : "";
+					var current = text.Contains("EditedThroughLink");
+					var onDisk  = File.ReadAllText(sharedReal).Contains("EditedThroughLink");
+					
+					return edited?["applied"]?.GetValue<bool>() == true && source == "roslyn" && current && onDisk && IsLink(sharedLink)
+						? (true,  "PASS")
+						: (false, $"FAIL  (served from: {source ?? "nothing"}; workspace has the edit: {current}; file behind the link has it: {onDisk}; still a link: {IsLink(sharedLink)}; edit: {edited?.ToJsonString() ?? "none"})");
+				}),
+			
 			// The file behind the link was there all along and is not a compilation input.
 			// Writing it must not look like a new source file.
 			new("link write sync: a write through a link to a source no project compiles flags no reload",
@@ -195,12 +233,12 @@ static class LinkWriteSyncTests
 					// Longer than the watcher's debounce, so a report of the write has been handled.
 					await Task.Delay(1000);
 					
-					var pending = await ReloadPendingAsync(apart.Csproj);
+					var reload  = await ReloadStateAsync(apart.Csproj);
 					var arrived = File.ReadAllText(keptReal).Contains("Changed");
 					
-					return written?["written"]?.GetValue<bool>() == true && pending == false && arrived && IsLink(keptLink)
+					return written?["written"]?.GetValue<bool>() == true && reload == Reload.None && arrived && IsLink(keptLink)
 						? (true,  "PASS")
-						: (false, $"FAIL  (reload_pending: {pending?.ToString() ?? "no result"}; content arrived behind the link: {arrived}; still a link: {IsLink(keptLink)}; write: {written?.ToJsonString() ?? "none"})");
+						: (false, $"FAIL  (reload: {reload}; content arrived behind the link: {arrived}; still a link: {IsLink(keptLink)}; write: {written?.ToJsonString() ?? "none"})");
 				}),
 		};
 		
