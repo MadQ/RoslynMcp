@@ -262,7 +262,9 @@ FSW fires (Changed/Created/Deleted/Renamed)
   │
   └─ otherwise → ScheduleDebounced(300ms)
        │
-       └─ on debounce timer fire (FlushMSBuild):
+       └─ on debounce timer fire (FlushPendingChanges → FlushMSBuild):
+            ├─ reported deleted, but the file is there under that exact name
+            │     → it was replaced, not removed: handled as changed (below)
             ├─ deleted tracked document      → FlagReload("tracked document deleted")
             ├─ changed tracked source doc     → WithDocumentText, incremental — no reload
             ├─ changed tracked additional doc → WithAdditionalDocumentText, incremental — no reload (#276)
@@ -282,6 +284,16 @@ second rule. The classifier (`ClassifyTrackedDocument`) is shared with `Invalida
 
 The debounce window (300ms) prevents rapid successive FSW events from triggering multiple
 reloads during a batch write operation.
+
+**A delete report for a file that exists.** Every atomic write ends by replacing the file,
+and on Windows the watcher sometimes reports the old file's removal as `Deleted`. Deletes are
+not covered by `ignoredPaths`, so that report used to reach the flush as "tracked document
+deleted" and cost a full reload after one of the server's own writes — and after an editor's
+atomic save. `FlushPendingChanges` now checks each deleted path before dispatching: a file that
+is there under exactly that name was replaced, and is handled as changed (text compared,
+applied incrementally if it differs). The name is compared exactly (`ExistsAsNamed`) because a
+case-only rename, `Foo.cs` → `foo.cs`, is reported as a delete of the old name on a file system
+that ignores case, and that one must still reload.
 
 ---
 

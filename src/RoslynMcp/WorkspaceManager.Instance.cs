@@ -1801,6 +1801,25 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		// Whether a file exists under exactly this name. File.Exists ignores case on Windows and
+		// macOS, and a file renamed in case only (Foo.cs to foo.cs) is reported as a delete of
+		// the old name: that one really is gone, and the workspace has to learn the new name.
+		static bool ExistsAsNamed(string path)
+		{
+			try {
+				
+				var directory = Path.GetDirectoryName(path);
+				var name      = Path.GetFileName(path);
+				
+				return directory is not null
+					&& Directory.EnumerateFiles(directory, name).Any(found => Path.GetFileName(found) == name);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException) {
+				
+				return false;
+			}
+		}
+		
 		void FlushPendingChanges(object? _)
 		{
 			// Timer callbacks must never throw — unhandled exceptions crash the process.
@@ -1819,6 +1838,23 @@ internal sealed partial class WorkspaceManager
 					deleted = [.. pendingDeletes];
 					pendingChanges.Clear();
 					pendingDeletes.Clear();
+				}
+				
+				// A file reported as deleted that is there when the flush runs was replaced, not
+				// removed. Replacing a file is how every atomic write ends, and on Windows the
+				// watcher sometimes reports the old file's removal as a delete. Taken at its word
+				// that is "tracked document deleted", a full reload, for a document that only
+				// needs its text compared — and in an adhoc workspace the document is dropped
+				// although its file exists. Such a report is a change.
+				var replaced = deleted
+					.Where(ExistsAsNamed)
+					.ToArray()
+				;
+				
+				if(replaced.Any()) {
+					
+					deleted = [.. deleted.Except(replaced, StringComparer.OrdinalIgnoreCase)];
+					changed = [.. changed.Union(replaced, StringComparer.OrdinalIgnoreCase)];
 				}
 				
 				// True when the flush could only flag a reload. The workspace is then behind disk
