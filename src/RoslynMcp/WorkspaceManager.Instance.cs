@@ -1086,12 +1086,20 @@ internal sealed partial class WorkspaceManager
 			
 			if(isMSBuild) {
 				
-				ownedPaths = newSolution.GetChanges(baseSolution)
+				// Source documents and AdditionalFiles items: TryApplyChanges writes both kinds to
+				// disk, and either can be a link whose target has to be brought up to date.
+				var projectChanges = newSolution.GetChanges(baseSolution)
 					.GetProjectChanges()
+					.ToArray()
+				;
+				
+				ownedPaths = projectChanges
 					.SelectMany(p => p.GetChangedDocuments())
 					.Select(id => newSolution.GetDocument(id)?.FilePath)
-					.Where(p => p is not null)
-					.Cast<string>()
+					.Concat(projectChanges
+						.SelectMany(p => p.GetChangedAdditionalDocuments())
+						.Select(id => newSolution.GetAdditionalDocument(id)?.FilePath))
+					.OfType<string>()
 					.ToArray()
 				;
 			}

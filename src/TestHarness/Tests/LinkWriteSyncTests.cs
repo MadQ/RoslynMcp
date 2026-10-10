@@ -55,7 +55,11 @@ static class LinkWriteSyncTests
 		// reports a replaced file as deleted, and a tracked document reported as deleted flags
 		// a reload. That is a separate matter from what is tested here, and in a shared
 		// workspace it would decide the second test.
-		var fx    = TestFixtures.NewMsBuildProject("LinkWriteSync");
+		var fx    = TestFixtures.NewMsBuildProject("LinkWriteSync", extraProjectXml: """
+			<ItemGroup>
+			  <AdditionalFiles Include="notes/*.txt" />
+			</ItemGroup>
+			""");
 		var apart = TestFixtures.NewMsBuildProject("LinkWriteSyncApart", extraProjectXml: """
 			<ItemGroup>
 			  <Compile Remove="store/**" />
@@ -65,6 +69,8 @@ static class LinkWriteSyncTests
 		var sharedReal = fx.Write("Shared.cs",        "partial class SyncPair { }\n");
 		var sharedLink = fx.PathOf("SharedLink.cs");
 		var secondLink = fx.PathOf("SharedLinkToo.cs");
+		var notesReal  = fx.Write("notes/Real.txt",   "first\n");
+		var notesLink  = fx.PathOf("notes/Linked.txt");
 		var keptReal   = apart.Write("store/Kept.cs", "class KeptApart { }\n");
 		var keptLink   = apart.PathOf("Stored.cs");
 		var dirReal    = fx.Write("lib/Dir.cs",       "partial class DirPair { }\n");
@@ -76,6 +82,7 @@ static class LinkWriteSyncTests
 			Directory.CreateSymbolicLink(dirAlias, fx.PathOf("lib"));
 			File.CreateSymbolicLink(sharedLink, sharedReal);
 			File.CreateSymbolicLink(secondLink, sharedReal);
+			File.CreateSymbolicLink(notesLink,  notesReal);
 			File.CreateSymbolicLink(keptLink,   keptReal);
 			
 			linked = true;
@@ -248,6 +255,42 @@ static class LinkWriteSyncTests
 						: (false, $"FAIL  (served from: {source ?? "nothing"}; has the new member: {current}; still a link: {IsLink(secondLink)}; write: {written?.ToJsonString() ?? "none"})");
 				}),
 			
+			// The same for the other kind of document the workspace writes itself: an
+			// AdditionalFiles item. notes/Real.txt and the link notes/Linked.txt are both
+			// declared, so both are documents. Nothing watches a .txt, which makes this the
+			// case with no second chance: what the edit does not sync stays stale for good.
+			new("link write sync: an AdditionalFiles item behind a link is current after an edit through the link",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var probe = await Call("roslyn_read_file", new { filePath = "notes/Real.txt", projectPath = fx.Csproj });
+					
+					if(probe?["source"]?.GetValue<string>() != "roslyn")
+						
+						return (false, $"FAIL  (precondition: notes/Real.txt is not a tracked document; read header: {probe?.ToJsonString() ?? "none"})");
+					
+					var edited = await Call("roslyn_replace_in_file", new {
+						filePath = "notes/Linked.txt", pattern = "first", replacement = "second", projectPath = fx.Csproj });
+					var blocks = await CallBlocks("roslyn_read_file", new { filePath = "notes/Real.txt", projectPath = fx.Csproj });
+					
+					JsonNode? header = null;
+					
+					try { header = blocks.Length > 0 ? JsonNode.Parse(blocks[0]) : null; }
+					catch { }
+					
+					var source  = header?["source"]?.GetValue<string>();
+					var text    = blocks.Length > 1 ? blocks[1] : "";
+					var current = text.Contains("second");
+					var onDisk  = File.ReadAllText(notesReal).Contains("second");
+					
+					return edited?["applied"]?.GetValue<bool>() == true && source == "roslyn" && current && onDisk && IsLink(notesLink)
+						? (true,  "PASS")
+						: (false, $"FAIL  (served from: {source ?? "nothing"}; workspace has the edit: {current}; file behind the link has it: {onDisk}; still a link: {IsLink(notesLink)}; edit: {edited?.ToJsonString() ?? "none"})");
+				}),
+			
 			// The link can also be a directory above the file. alias is a directory link to lib,
 			// so alias/Dir.cs and lib/Dir.cs are one file under two names, and the project
 			// compiles both. A write to the one name must leave the document at the other
@@ -324,7 +367,7 @@ static class LinkWriteSyncTests
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
-			foreach(var link in new[] { sharedLink, secondLink, keptLink })
+			foreach(var link in new[] { sharedLink, secondLink, notesLink, keptLink })
 				try {
 					if(IsLink(link))
 						File.Delete(link);
