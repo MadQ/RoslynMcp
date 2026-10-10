@@ -425,6 +425,9 @@ internal sealed class PhysicalSolutionApplier
 			
 			WriteTarget?[] targets = [];
 			
+			// Two steps, each with its own catch. Working out the targets writes nothing, so a
+			// failure there can say "no files were modified"; a failure while writing cannot,
+			// and the two must not share a handler that says it for both.
 			if(executionError is null) {
 				
 				try {
@@ -432,15 +435,21 @@ internal sealed class PhysicalSolutionApplier
 					// Worked out for the whole plan before the first write: two entries that
 					// disagree about one file must fail the apply while nothing has changed yet.
 					targets = ResolveWriteTargets(plan, workspace.GetSecurityBoundary(projectPath));
+				}
+				catch(Exception ex) when(ex is not OutOfMemoryException and not OperationCanceledException) {
+					
+					// A conflict between two entries (PhysicalApplyPlanException), or a link
+					// that could not be examined. The tools ask FindTargetConflict before they
+					// prepare backups; a conflict here means a link changed since that check.
+					executionError = $"Apply aborted — {ex.Message} No files were modified.";
+				}
+			}
+			
+			if(executionError is null) {
+				
+				try {
 					
 					await ApplyWritesAsync(plan, targets, projectPath, cancellationToken);
-				}
-				catch(PhysicalApplyPlanException ex) {
-					
-					// Thrown while working out the targets, so before the first write. The tools
-					// ask FindTargetConflict before they prepare backups; reaching this means a
-					// link changed between that check and now.
-					executionError = $"Apply aborted — {ex.Message} No files were modified.";
 				}
 				catch(Exception ex) when(ex is not OutOfMemoryException and not OperationCanceledException) {
 					
