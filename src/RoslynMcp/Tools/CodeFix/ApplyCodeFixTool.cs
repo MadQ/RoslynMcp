@@ -185,6 +185,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 				path => TryMakeRelative(path, rootPath) ?? path,
 				backups.IsEnabled,
 				"fix");
+			var linkCaution = PhysicalApplyResultMapper.LinkCaution(report, path => TryMakeRelative(path, rootPath) ?? path);
 			
 			if(report.Succeeded)
 				return scope.Outcome($"{report.FilesWritten} file(s) written, {report.FilesDeleted} deleted", new ApplyCodeFixResult(
@@ -192,7 +193,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 					report.FilesWritten,
 					null,
 					report.FilesDeleted,
-					files));
+					files) { Caution = linkCaution });
 			
 			var error = report.AllFilesReachedIntendedState
 				? "apply state uncertain"
@@ -213,7 +214,7 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 				report.FilesWritten,
 				error,
 				report.FilesDeleted,
-				files));
+				files) { Caution = linkCaution });
 		}
 		finally {
 			

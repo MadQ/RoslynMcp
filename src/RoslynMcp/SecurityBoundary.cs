@@ -20,6 +20,10 @@ internal sealed class SecurityBoundary
 		: StringComparison.OrdinalIgnoreCase
 	;
 	
+	/// <summary>The same comparison, for a set or dictionary keyed by path.</summary>
+	internal static readonly StringComparer PathComparer = StringComparer.FromComparison(pathComparison)
+	;
+	
 	// Computed once at startup — SpecialFolder lookups involve platform invocation and filesystem access.
 	static readonly string[] systemDirectories = BuildSystemDirectories()
 	;
@@ -88,11 +92,13 @@ internal sealed class SecurityBoundary
 	///     </para>
 	/// </summary>
 	bool ResolvesInsideARoot(string path)
+		=> ResolveLinks(path) is { } resolved && IsInsideAResolvedRoot(resolved)
+	;
+	
+	// Whether a path that has already been resolved is inside a trusted root, the root's own
+	// location resolved the same way.
+	bool IsInsideAResolvedRoot(string resolved)
 	{
-		if(ResolveLinks(path) is not { } resolved)
-			
-			return false;
-		
 		foreach(var root in allowedRoots.AsSpan())
 			if(ResolveLinks(root) is { } resolvedRoot && IsUnderDirectory(resolved, resolvedRoot))
 				
@@ -102,13 +108,47 @@ internal sealed class SecurityBoundary
 	}
 	
 	/// <summary>
+	///     Where <paramref name="requestedPath"/> really is — every symbolic link along it
+	///     followed — when that place is inside a trusted root; null when it is not, or when it
+	///     cannot be worked out.
+	///     <para>
+	///         For a caller that goes on to write: <see cref="IsPathAllowed"/> answers yes or no
+	///         about a path that still has its links in it, and a link can be pointed somewhere
+	///         else between the answer and the write. The path returned here has no links left,
+	///         and it is the very path the answer was given for — write to it, and the two
+	///         cannot come apart (#334).
+	///     </para>
+	/// </summary>
+	public string? ResolveAllowed(string requestedPath)
+	{
+		string normalized;
+		
+		try {
+			normalized = Path.GetFullPath(requestedPath);
+		}
+		catch(Exception ex) when(ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException) {
+			
+			return null;
+		}
+		
+		// The same first condition as IsPathAllowed: the path as written is under a root. Only
+		// then does where it leads matter.
+		foreach(var root in allowedRoots.AsSpan())
+			if(IsUnderDirectory(normalized, root))
+				
+				return ResolveLinks(normalized) is { } resolved && IsInsideAResolvedRoot(resolved) ? resolved : null;
+		
+		return null;
+	}
+	
+	/// <summary>
 	///     <paramref name="fullPath"/> with every symbolic link or junction along it replaced by
 	///     what it points at, or null when that cannot be worked out — a chain that loops, an
 	///     unreadable directory, a link target with a <c>..</c> after a name. A part of the path
 	///     that does not exist yet is kept as written: a file about to be created has no links
 	///     to follow.
 	/// </summary>
-	static string? ResolveLinks(string fullPath)
+	internal static string? ResolveLinks(string fullPath)
 	{
 		try {
 			

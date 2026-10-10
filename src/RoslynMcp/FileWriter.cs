@@ -245,6 +245,12 @@ internal static class FileWriter
     internal static string FollowLink(string path) => ResolveReplaceTarget(path, AtomicReplace.FollowLink);
 
     /// <summary>
+    ///     Whether <paramref name="path"/> itself is a symbolic link — the last component, not a
+    ///     directory above it. False for a file that does not exist.
+    /// </summary>
+    internal static bool IsLink(string path) => new FileInfo(path).LinkTarget is not null;
+
+    /// <summary>
     ///     The size of the content at <paramref name="path"/>, through a symbolic link. Asking the
     ///     link itself is wrong on Windows, where a link reports a length of zero whatever the
     ///     file behind it holds — which made a successful write through a link look truncated.
