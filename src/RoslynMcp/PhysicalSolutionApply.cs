@@ -718,7 +718,7 @@ internal static class PhysicalApplyResultMapper
 		var links = string.Join(", ", report.ReplacedLinks.Select(path => $"'{toRelativePath(path)}'"));
 		
 		return $"Symbolic links that lead out of the workspace, or whose target could not be checked, were replaced by regular files holding the new content: {links}. " +
-			"The files they pointed at were not changed, and restoring a backup does not bring the links back.";
+			"The files they pointed at were not changed through these links, and restoring a backup does not bring the links back.";
 	}
 	
 	public static string RecoveryGuidance(
