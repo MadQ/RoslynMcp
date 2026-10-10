@@ -66,10 +66,13 @@ static class LinkWriteSyncTests
 		var sharedLink = fx.PathOf("SharedLink.cs");
 		var keptReal   = apart.Write("store/Kept.cs", "class KeptApart { }\n");
 		var keptLink   = apart.PathOf("Stored.cs");
+		var dirReal    = fx.Write("lib/Dir.cs",       "partial class DirPair { }\n");
+		var dirAlias   = fx.PathOf("alias");
 		var linked     = false;
 		
 		try {
 			
+			Directory.CreateSymbolicLink(dirAlias, fx.PathOf("lib"));
 			File.CreateSymbolicLink(sharedLink, sharedReal);
 			File.CreateSymbolicLink(keptLink,   keptReal);
 			
@@ -215,6 +218,45 @@ static class LinkWriteSyncTests
 						: (false, $"FAIL  (served from: {source ?? "nothing"}; workspace has the edit: {current}; file behind the link has it: {onDisk}; still a link: {IsLink(sharedLink)}; edit: {edited?.ToJsonString() ?? "none"})");
 				}),
 			
+			// The link can also be a directory above the file. alias is a directory link to lib,
+			// so alias/Dir.cs and lib/Dir.cs are one file under two names, and the project
+			// compiles both. A write to the one name must leave the document at the other
+			// current. The test only says something when alias/Dir.cs is a document of its
+			// own — otherwise writing it is adding a new file, which reloads the workspace and
+			// makes everything current whatever the code under test does. That is checked
+			// first, and where the project system does not compile through a linked directory
+			// the test is a skip, not a pass.
+			new("link write sync: a write to a file under a linked directory leaves the real file's document current",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var probe = await Call("roslyn_read_file", new { filePath = "alias/Dir.cs", projectPath = fx.Csproj });
+					
+					if(probe?["source"]?.GetValue<string>() != "roslyn")
+						
+						return Skip.NotApplicable("the project system does not compile files under a linked directory here");
+					
+					var written = await Write(fx.Csproj, "alias/Dir.cs", "partial class DirPair { public int AddedThroughDirectory; }\n");
+					var blocks  = await CallBlocks("roslyn_read_file", new { filePath = "lib/Dir.cs", projectPath = fx.Csproj });
+					
+					JsonNode? header = null;
+					
+					try { header = blocks.Length > 0 ? JsonNode.Parse(blocks[0]) : null; }
+					catch { }
+					
+					var source   = header?["source"]?.GetValue<string>();
+					var text     = blocks.Length > 1 ? blocks[1] : "";
+					var current  = text.Contains("AddedThroughDirectory");
+					var linkKept = new DirectoryInfo(dirAlias).LinkTarget is not null;
+					
+					return written?["written"]?.GetValue<bool>() == true && source == "roslyn" && current && linkKept
+						? (true,  "PASS")
+						: (false, $"FAIL  (served from: {source ?? "nothing"}; has the new member: {current}; directory link kept: {linkKept}; file: {File.ReadAllText(dirReal).Trim()}; write: {written?.ToJsonString() ?? "none"})");
+				}),
+			
 			// The file behind the link was there all along and is not a compilation input.
 			// Writing it must not look like a new source file.
 			new("link write sync: a write through a link to a source no project compiles flags no reload",
@@ -243,6 +285,14 @@ static class LinkWriteSyncTests
 		};
 		
 		return new TestGroup($"Link Write Sync ({tests.Count} tests)", tests, Teardown: () => {
+			
+			// The directory link first, and only the link: deleting the tree through it would
+			// reach into lib.
+			try {
+				if(new DirectoryInfo(dirAlias).LinkTarget is not null)
+					Directory.Delete(dirAlias);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			foreach(var link in new[] { sharedLink, keptLink })
 				try {

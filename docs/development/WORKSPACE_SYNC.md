@@ -167,10 +167,14 @@ the path it wrote, so the workspace works the second path out itself, before the
 write may replace the link, and then there is nothing left to follow):
 
 1. `LinkTargetOf(path)` resolves the links and spells the result the way watcher events and
-   document paths are spelled: the resolved location is re-spelled through the nearest
-   directory above `path` that contains it. The fully resolved form differs whenever a
-   directory above sits under a link (on macOS `/var` is `/private/var`). For a path with no
-   link in it this gives the path back, and there is no second path.
+   document paths are spelled: the resolved location is re-spelled through the workspace
+   root, or the nearest directory above the root that contains it. The fully resolved form
+   differs whenever a directory above sits under a link (on macOS `/var` is `/private/var`).
+   A link at or above the root is where the user put the workspace and stays as written; a
+   link below it is the one being followed. (Anchoring at the written path's own directory
+   instead finds a linked directory first and spells the target straight back as the path
+   that was written.) For a path with no link below the anchor this gives the path back, and
+   there is no second path.
 2. The target is added to `ignoredPaths` for the same window as the write, and released in the
    same `finally`.
 3. After the write, still inside the window, `SyncLinkTarget` brings the target up to date —

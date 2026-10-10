@@ -1091,16 +1091,14 @@ internal sealed partial class WorkspaceManager
 			
 			// TryApplyChanges writes each changed document at its own path. A document that is
 			// reached through a link is thereby written into another file, and that file gets
-			// the same treatment as in WriteAndInvalidate: captured before the write, ignored
-			// while it is in flight, brought up to date afterwards (#338).
+			// the same treatment as in WriteAndInvalidate: captured before the write and
+			// brought up to date afterwards (#338). It needs no entry in ignoredPaths for the
+			// write itself — the watch set is suspended for that — only for the sync below.
 			var linkedWrites = ownedPaths
 				.Select(LinkedWriteFor)
 				.OfType<LinkedWrite>()
 				.ToArray()
 			;
-			
-			foreach(var linked in linkedWrites)
-				ignoredPaths.AddOrUpdate(linked.Target, 1, (_, count) => count + 1);
 			
 			// Ref-counted inside the watch set: events stop before TryApplyChanges and resume
 			// only when the last concurrent suppressor finishes. See issue #145 item 3.
@@ -1148,6 +1146,11 @@ internal sealed partial class WorkspaceManager
 					}
 				}
 			}
+			
+			// Counted directly before the try that uncounts: nothing may come between the two,
+			// or an exception leaves a file ignored for good.
+			foreach(var linked in linkedWrites)
+				ignoredPaths.AddOrUpdate(linked.Target, 1, (_, count) => count + 1);
 			
 			try {
 				
@@ -1294,9 +1297,10 @@ internal sealed partial class WorkspaceManager
 		///         directory above sits under a link — on macOS every temp directory does
 		///         (<c>/var</c> is <c>/private/var</c>). A path in that spelling matches neither a
 		///         watcher event nor a document. So the resolved path is re-spelled through the
-		///         nearest directory above <paramref name="fullPath"/> that contains it: the part
-		///         up to that directory is kept as written, the rest is the real location. For a
-		///         path with no link in it that gives the path back, and the answer is null.
+		///         workspace root, or the nearest directory above the root that contains it: the
+		///         part up to that directory is kept as written, the rest is the real location.
+		///         For a path with no link below that directory this gives the path back, and the
+		///         answer is null.
 		///     </para>
 		/// </summary>
 		string? LinkTargetOf(string fullPath)
@@ -1307,7 +1311,12 @@ internal sealed partial class WorkspaceManager
 					
 					return null;
 				
-				for(var above = Path.GetDirectoryName(fullPath); above is not null; above = Path.GetDirectoryName(above)) {
+				// From the workspace root upwards — not from the written path. A link at or above
+				// the root is where the user put the workspace and stays as written; a link
+				// below it is what is being followed. Starting at the written path's own
+				// directory would find a linked directory first and spell the target straight
+				// back through it, as the path that was written.
+				for(var above = (string?) rootPath; above is not null; above = Path.GetDirectoryName(above)) {
 					
 					if(SecurityBoundary.ResolveLinks(above) is not { } resolvedAbove
 						|| !SecurityBoundary.IsUnderDirectory(resolved, resolvedAbove))
