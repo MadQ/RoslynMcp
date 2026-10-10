@@ -703,6 +703,13 @@ Two review loops sit around the PR: a **local** one after the push and before th
 
 - **Close the original issue when its defined scope is done** — not when everything is theoretically perfect.
 - **Open fresh follow-up issues** for deferred findings — do not reopen the original. Each follow-up gets its own label, milestone, and scope.
+- **A small fix may ride along instead of becoming an issue.** The moment a problem is found is the cheapest moment to fix it, and an issue list that grows by one for every small finding stops being read. Something found while working on a branch — related to the issue or not — is fixed on that branch when **all** of these hold:
+  1. It is small: one place, roughly 30 lines or fewer.
+  2. It is in code the branch already changes and tests, or it is plainly low-risk (not the workspace boundary, concurrency or persistence).
+  3. It can be verified, by a test or by the existing harness.
+  4. The branch is not in review yet. Once a review loop has started, new scope waits for the next branch.
+
+  Each such fix gets its own commit, its own changelog entry, and a line under "Also in this PR" in the description — PRs are squash-merged, and the title alone would hide it. Say what was bundled in the report. Anything that fails one of the four becomes an issue; when in doubt, ask.
 - Rationale: clean history, accurate velocity, independent prioritization. "Done" means the stated problem is fixed, not that the universe is in order.
 
 ---
