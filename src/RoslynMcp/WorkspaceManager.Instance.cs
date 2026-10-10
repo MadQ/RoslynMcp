@@ -177,6 +177,13 @@ internal sealed partial class WorkspaceManager
 		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase)
 		;
 		private const    int                       MaxRmOwnedWriteSizes = 50;
+		// Files RM wrote through a symbolic link that are sources no project compiles, with the
+		// size and write time they were left with (#338). The watcher reports such a write at
+		// the link's target, any number of times and on its own schedule; FlushMSBuild drops
+		// those reports for as long as the file still has this stamp, and forgets the entry the
+		// moment it does not — someone else has written the file since. Guarded by debounceLock.
+		private readonly Dictionary<string, (long Length, DateTime WriteUtc)> ownedLinkTargets = new(StringComparer.OrdinalIgnoreCase)
+		;
 		// Per-file FSW suppression — ref-counted for concurrent-write safety.
 		// A path is added before each RM-owned write and decremented in the finally block.
 		// ScheduleDebounced skips non-Deleted events where the count is > 0 (Deleted events
@@ -1308,16 +1315,19 @@ internal sealed partial class WorkspaceManager
 				if(unknownSource) {
 					
 					// The watcher can report this write after the suppression window has
-					// closed — its events arrive on their own time. Recording the size lets
-					// the flush recognise the late event as this write, the way it does for
-					// the files TryApplyChanges writes, instead of taking it for a new document.
+					// closed — its events arrive on their own time, and on Windows a replaced
+					// file is reported more than once. The stamp lets the flush recognise every
+					// such report as this write instead of taking it for a new document.
 					lock(debounceLock) {
 						
-						if(rmOwnedWriteSizes.Count >= MaxRmOwnedWriteSizes)
-							rmOwnedWriteSizes.Clear();
+						if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes)
+							ownedLinkTargets.Clear();
 						
 						try {
-							rmOwnedWriteSizes[linkTarget] = new FileInfo(linkTarget).Length;
+							
+							var info = new FileInfo(linkTarget);
+							
+							ownedLinkTargets[linkTarget] = (info.Length, info.LastWriteTimeUtc);
 						}
 						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 							// Gone or locked — the flush handles the event the normal way.
@@ -1922,6 +1932,28 @@ internal sealed partial class WorkspaceManager
 				// Skip reload if this is a write RM made itself — workspace is already up to date
 				// from the TryApplyChanges call that triggered the FSW event.
 				lock(debounceLock) {
+					
+					// A source no project compiles that RM itself wrote through a link, and that
+					// nobody has written since: the report is of that write, however late and
+					// however often it comes. Without this it is an unknown .cs, and an unknown
+					// .cs is a new document and a full reload (#338).
+					if(ownedLinkTargets.TryGetValue(path, out var stamp)) {
+						
+						try {
+							
+							var info = new FileInfo(path);
+							
+							if(info.Exists && info.Length == stamp.Length && info.LastWriteTimeUtc == stamp.WriteUtc)
+								continue;
+						}
+						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+							// Cannot tell — treat it as changed.
+							_ = ex
+							;
+						}
+						
+						ownedLinkTargets.Remove(path);
+					}
 					
 					if(rmOwnedWriteSizes.TryGetValue(path, out var expected)) {
 						

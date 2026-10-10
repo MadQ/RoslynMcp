@@ -46,16 +46,22 @@ static class LinkWriteSyncTests
 	internal static TestGroup Build(TestContext ctx)
 	{
 		
-		var fx = TestFixtures.NewMsBuildProject("LinkWriteSync", extraProjectXml: """
+		// One project per test. The second test reads a flag that belongs to a whole workspace,
+		// and a write in the first one can raise it late: on Windows the watcher sometimes
+		// reports a replaced file as deleted, and a tracked document reported as deleted flags
+		// a reload. That is a separate matter from what is tested here, and in a shared
+		// workspace it would decide the second test.
+		var fx    = TestFixtures.NewMsBuildProject("LinkWriteSync");
+		var apart = TestFixtures.NewMsBuildProject("LinkWriteSyncApart", extraProjectXml: """
 			<ItemGroup>
 			  <Compile Remove="store/**" />
 			</ItemGroup>
 			""");
 		
-		var sharedReal = fx.Write("Shared.cs",     "partial class SyncPair { }\n");
+		var sharedReal = fx.Write("Shared.cs",        "partial class SyncPair { }\n");
 		var sharedLink = fx.PathOf("SharedLink.cs");
-		var keptReal   = fx.Write("store/Kept.cs", "class KeptApart { }\n");
-		var keptLink   = fx.PathOf("Stored.cs");
+		var keptReal   = apart.Write("store/Kept.cs", "class KeptApart { }\n");
+		var keptLink   = apart.PathOf("Stored.cs");
 		var linked     = false;
 		
 		try {
@@ -97,14 +103,14 @@ static class LinkWriteSyncTests
 			catch { return null; }
 		}
 		
-		Task<JsonNode?> Write(string filePath, string content)
-			=> Call("roslyn_write_file", new { filePath, content, projectPath = fx.Csproj });
+		Task<JsonNode?> Write(string? projectPath, string filePath, string content)
+			=> Call("roslyn_write_file", new { filePath, content, projectPath });
 		
 		// Null means the probe itself failed. reload_pending is omitted from the JSON when false.
-		async Task<bool?> ReloadPendingAsync()
+		async Task<bool?> ReloadPendingAsync(string? projectPath)
 		{
 			
-			var data = await Call("roslyn_check_drift", new { projectPath = fx.Csproj });
+			var data = await Call("roslyn_check_drift", new { projectPath });
 			
 			if(data?["drifted"] is null)
 				
@@ -115,16 +121,16 @@ static class LinkWriteSyncTests
 		
 		// Loads the workspace and waits until no reload is pending, so that a flag seen later
 		// was raised by the test's own write.
-		async Task<bool> SettleAsync()
+		async Task<bool> SettleAsync(string? projectPath)
 		{
 			
 			var deadline = DateTime.UtcNow.AddSeconds(15);
 			
 			while(DateTime.UtcNow < deadline) {
 				
-				await Call("roslyn_get_diagnostics", new { projectPath = fx.Csproj, take = 0, severity = "errors" });
+				await Call("roslyn_get_diagnostics", new { projectPath, take = 0, severity = "errors" });
 				
-				if(await ReloadPendingAsync() == false)
+				if(await ReloadPendingAsync(projectPath) == false)
 					
 					return true;
 				
@@ -150,11 +156,11 @@ static class LinkWriteSyncTests
 						
 						return Skip.SetupUnavailable(noLinks);
 					
-					if(!await SettleAsync())
+					if(!await SettleAsync(fx.Csproj))
 						
 						return (false, "FAIL  (precondition: the workspace never settled)");
 					
-					var written = await Write("SharedLink.cs", "partial class SyncPair { public int AddedThroughLink; }\n");
+					var written = await Write(fx.Csproj, "SharedLink.cs", "partial class SyncPair { public int AddedThroughLink; }\n");
 					var blocks  = await CallBlocks("roslyn_read_file", new { filePath = "Shared.cs", projectPath = fx.Csproj });
 					
 					JsonNode? header = null;
@@ -180,16 +186,16 @@ static class LinkWriteSyncTests
 						
 						return Skip.SetupUnavailable(noLinks);
 					
-					if(!await SettleAsync())
+					if(!await SettleAsync(apart.Csproj))
 						
 						return (false, "FAIL  (precondition: reload_pending never cleared before the write)");
 					
-					var written = await Write("Stored.cs", "class KeptApart { public int Changed; }\n");
+					var written = await Write(apart.Csproj, "Stored.cs", "class KeptApart { public int Changed; }\n");
 					
 					// Longer than the watcher's debounce, so a report of the write has been handled.
 					await Task.Delay(1000);
 					
-					var pending = await ReloadPendingAsync();
+					var pending = await ReloadPendingAsync(apart.Csproj);
 					var arrived = File.ReadAllText(keptReal).Contains("Changed");
 					
 					return written?["written"]?.GetValue<bool>() == true && pending == false && arrived && IsLink(keptLink)
@@ -208,6 +214,7 @@ static class LinkWriteSyncTests
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			fx.Dispose();
+			apart.Dispose();
 			
 			return Task.CompletedTask;
 		});

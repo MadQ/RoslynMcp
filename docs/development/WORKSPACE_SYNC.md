@@ -177,9 +177,13 @@ the link, and then there is nothing left to follow):
    - an evaluation input flags its reload;
    - a file the write created is treated as new;
    - a `.cs` file that existed before and that no project compiles is **left alone**. To
-     `InvalidateFile` it would be a new document and cost a full reload. Its size is recorded
-     in `rmOwnedWriteSizes`, so a watcher event that arrives after the window has closed is
-     recognised as this write.
+     `InvalidateFile` it would be a new document and cost a full reload. Its size and write
+     time are recorded in `ownedLinkTargets`. The watcher reports such a write on its own
+     schedule — after the window has closed, and on Windows more than once for a replaced
+     file — and `FlushMSBuild` drops every report for the path while the file still has that
+     stamp. The entry is forgotten as soon as the stamp no longer matches: someone else has
+     written the file. A one-shot record, like `rmOwnedWriteSizes`, would be used up by the
+     first report and leave a second one to be taken for a new document.
 
 The ordering rules above are unchanged: suppress before the write, invalidate inside the
 window, release in `finally`.
