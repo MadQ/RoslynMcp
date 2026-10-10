@@ -185,7 +185,9 @@ internal sealed partial class WorkspaceManager
 		// An entry also lapses on its own after OwnedLinkTargetWindow: long enough for any report
 		// of the write to arrive, short enough that a stamp cannot go on vouching for a file
 		// that someone has since rewritten to the same length and the same write time.
-		private readonly Dictionary<string, (long Length, DateTime WriteUtc, DateTime UntilUtc)> ownedLinkTargets = new(StringComparer.OrdinalIgnoreCase)
+		// Keyed the way the file system compares names: on Linux Foo.cs and foo.cs are two files
+		// and must not share a stamp.
+		private readonly Dictionary<string, (long Length, DateTime WriteUtc, DateTime UntilUtc)> ownedLinkTargets = new(SecurityBoundary.PathComparer)
 		;
 		private static readonly TimeSpan OwnedLinkTargetWindow = TimeSpan.FromSeconds(30)
 		;
@@ -1409,27 +1411,40 @@ internal sealed partial class WorkspaceManager
 				var directories = new Dictionary<string, string>(same);
 				
 				// Where a path really is. The directory is resolved once per directory; the file
-				// itself only costs a full resolution when it is a link.
+				// itself only costs a full resolution when it is a link. A path that cannot be
+				// examined stays as written — it is then simply not found to be an alias, and
+				// the scan goes on to the next one.
 				string Physical(string path)
 				{
-					if(Path.GetDirectoryName(path) is not { } directory)
+					try {
+						
+						if(Path.GetDirectoryName(path) is not { } directory)
+							
+							return path;
+						
+						if(!directories.TryGetValue(directory, out var resolved)) {
+							
+							resolved = SecurityBoundary.ResolveLinks(directory) ?? directory;
+							directories.Add(directory, resolved);
+						}
+						
+						var located = Path.Combine(resolved, Path.GetFileName(path));
+						
+						return FileWriter.IsLink(located) ? SecurityBoundary.ResolveLinks(located) ?? located : located;
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
 						
 						return path;
-					
-					if(!directories.TryGetValue(directory, out var resolved)) {
-						
-						resolved = SecurityBoundary.ResolveLinks(directory) ?? directory;
-						directories.Add(directory, resolved);
 					}
-					
-					var located = Path.Combine(resolved, Path.GetFileName(path));
-					
-					return FileWriter.IsLink(located) ? SecurityBoundary.ResolveLinks(located) ?? located : located;
 				}
 				
+				// Every kind of document a file can be: source, an AdditionalFiles item, an
+				// analyzer-config file. InvalidateFile knows what to do with each.
 				var written = Physical(linked.Target);
 				var aliases = currentSolution.Projects
-					.SelectMany(project => project.Documents)
+					.SelectMany(project => project.Documents
+						.Concat<TextDocument>(project.AdditionalDocuments)
+						.Concat(project.AnalyzerConfigDocuments))
 					.Select(document => document.FilePath)
 					.OfType<string>()
 					.Distinct(same)
@@ -1437,15 +1452,15 @@ internal sealed partial class WorkspaceManager
 					.ToArray()
 				;
 				
+				// One alias that cannot be refreshed must not cost the others their turn.
 				foreach(var alias in aliases)
-					InvalidateLinkTarget(alias, existedBefore: true);
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
-				
-				// A path that cannot be examined. The aliases that were not reached stay as they
-				// are until the next reload; the write itself and its target are already in step.
-				_ = ex
-				;
+					try {
+						InvalidateLinkTarget(alias, existedBefore: true);
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						_ = ex
+						;
+					}
 			}
 			finally {
 				syncingAliases = false;
