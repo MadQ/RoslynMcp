@@ -131,7 +131,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 
 **Data flow:** stdio MCP request → tool → `RoslynMcpTool.TryGetCompilation(projectPath, ...)` → `WorkspaceResolver.GetCompilation()` → `WorkspaceManager` (resolve path, load/cache workspace) → Roslyn API → JSON response.
 
-**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging), `LogEntry.cs` (shared NDJSON log schema — linked into both `RoslynMcp` and `RoslynMcp.LogViewer`).
+**Key files:** `Program.cs` (MCP protocol), `WorkspaceManager.cs` + `.Resolution.cs` + `.Instance.cs` (workspace caching, path resolution, workspace lifecycle; the nested `WorkspaceInstance` is one partial class over `.Instance.cs` — state, construction, queries, disposal — and `.Instance.Loading.cs`, `.Instance.Reload.cs`, `.Instance.Adhoc.cs`, `.Instance.Writes.cs`, `.Instance.Links.cs`, `.Instance.EditImpact.cs`, `.Instance.Watcher.cs`), `WorkspaceResolver.cs` (tool facade), `RoslynMcpTool.cs` + `RoslynMcpTool.ToolScope.cs` + `RoslynMcpTool.Discovery.cs` (base class), `FileLogger.cs` (file logging), `LogEntry.cs` (shared NDJSON log schema — linked into both `RoslynMcp` and `RoslynMcp.LogViewer`).
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
 - `Tools/Analysis/` — 24 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, drift, …)

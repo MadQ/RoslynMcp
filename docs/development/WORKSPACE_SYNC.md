@@ -2,14 +2,16 @@
 
 > ⚠️ **DO NOT CHANGE THE CODE THIS DOCUMENT DESCRIBES WITHOUT READING IT FIRST.**
 >
-> The logic in `WorkspaceManager.Instance.cs` around FSW suppression, `InvalidateFile`,
+> The logic in `WorkspaceManager.Instance.Writes.cs`, `.Instance.Watcher.cs` and
+> `.Instance.Links.cs` (parts of the nested `WorkspaceInstance` class; one file,
+> `WorkspaceManager.Instance.cs`, until it was split) around FSW suppression, `InvalidateFile`,
 > and `WriteAndInvalidate` is the result of a 5-stage disciplined analysis (Stages 1–5 of
 > the FSW sync investigation, issues #179). The code is subtle, counter-intuitive in places,
 > and was arrived at by carefully tracing every write path and every FSW trigger. Casual
 > edits have a high probability of re-introducing the race conditions described below.
 >
 > If you need to change it, read this document completely, re-read
-> `WorkspaceManager.Instance.cs`, and consider opening a discussion issue first.
+> those files, and consider opening a discussion issue first.
 
 ---
 
@@ -86,7 +88,7 @@ When provided, it adds `movedFromPath` to `ownedDeletePaths` before the write. T
 FSW `Deleted(oldPath)` callback consumes that entry inside `ScheduleDebounced` and returns
 without scheduling a reload.
 
-See `WorkspaceManager.Instance.cs` — `WriteAndInvalidate` overloads and `ownedDeletePaths`.
+See `WorkspaceManager.Instance.Writes.cs` — `WriteAndInvalidate` overloads — and `ownedDeletePaths`.
 
 ---
 

@@ -288,7 +288,7 @@ RoslynMcp/
 │   ├── RoslynMcp/              # Main MCP server project
 │   │   ├── Tools/              # Tool implementations
 │   │   ├── Program.cs          # MCP protocol + DI setup
-│   │   ├── WorkspaceManager*.cs # Workspace caching (partial: .cs, .Resolution.cs, .Instance.cs)
+│   │   ├── WorkspaceManager*.cs # Workspace caching (partial: .cs, .Resolution.cs, .Instance.cs, .Instance.*.cs)
 │   │   ├── ApprovalStore.cs    # Rename approval state
 │   │   └── SolutionDiff.cs     # Unified diff generation
 │   └── TestHarness/            # Test suite
