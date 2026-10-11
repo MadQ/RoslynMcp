@@ -1,14 +1,5 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Collections.Frozen;
-using System.IO.Enumeration;
-using System.Xml.Linq;
 
 namespace RoslynMcp;
 
@@ -38,7 +29,7 @@ internal sealed partial class WorkspaceManager
 			
 			if(isMSBuild) {
 				
-				var impact = ClassifyEditImpact(currentSolution, fullPath, out var info, out var reason);
+				var impact = edits.Classify(currentSolution, fullPath, out var info, out var reason);
 				
 				if(impact is WorkspaceEditImpact.Incremental) {
 					
@@ -71,7 +62,7 @@ internal sealed partial class WorkspaceManager
 					
 					// Unconditional bump, unlike FlagReload's == 0 guard: a genuinely new input must move
 					// the generation so an in-flight reload that predates it is discarded. Also reached for
-					// an existing analyzer-config document, which ClassifyEditImpact never reports as
+					// an existing analyzer-config document, which EditClassifier.Classify never reports as
 					// Incremental — TryApplyChanges throws for ChangeAnalyzerConfigDocument, so
 					// .editorconfig/.globalconfig edits always reload rather than apply incrementally (#276).
 					logger.LogInfo("Reload", $"Flagged ({reason}): {fullPath}");

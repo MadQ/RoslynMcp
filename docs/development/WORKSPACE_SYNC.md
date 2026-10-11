@@ -168,7 +168,7 @@ another file, and the file system reports the change at **that** path. The calle
 the path it wrote, so the workspace works the second path out itself, before the write (a
 write may replace the link, and then there is nothing left to follow):
 
-1. `LinkTargetOf(path)` first asks the cheap question — is there any link below the workspace
+1. `LinkResolver.TargetOf(path)` first asks the cheap question — is there any link below the workspace
    root on the way to `path`? — and stops there for the usual answer, no. It is asked for
    every document of every change the workspace applies. Only otherwise does it resolve the
    links, and it spells the result the way watcher events and
@@ -208,7 +208,7 @@ write may replace the link, and then there is nothing left to follow):
 
 One file on disk can be several documents: the file under its own name, a link to it, a second
 link, the same file under a linked directory. `PhysicalFileIndex` holds the documents that are
-another file's name, keyed by the file they lead to, in the spelling `LinkTargetOf` gives. A
+another file's name, keyed by the file they lead to, in the spelling `LinkResolver.TargetOf` gives. A
 workspace without links has an empty index and every lookup in it returns at once.
 
 - **Built** from the solution when the workspace loads and again on every reload, on the
@@ -323,7 +323,7 @@ i.e. not a tracked source or additional document (see [`InvalidateFile` Contract
 
 | # | Test | Result |
 |---|------|--------|
-| 1 | under `bin`/`obj`/`.git`/`.vs`/`node_modules`/`packages` (`IsExcludedDirectoryName`) | no-op — runs first because `obj/` holds NuGet's generated `*.nuget.g.props` and `*.GeneratedMSBuildEditorConfig.editorconfig` |
+| 1 | under `bin`/`obj`/`.git`/`.vs`/`node_modules`/`packages` (`EditClassifier.IsUnderExcludedDirectory`) | no-op — runs first because `obj/` holds NuGet's generated `*.nuget.g.props` and `*.GeneratedMSBuildEditorConfig.editorconfig` |
 | 2 | extension `.cs` | reload — `new document` |
 | 3 | extension `.csproj` `.props` `.targets` `.sln` `.slnx` `.slnf` `.editorconfig` `.globalconfig` `.ruleset` `.resx`, or file name `global.json` `nuget.config` `packages.lock.json` `packages.config` | reload — `evaluation input` |
 | 4 | path in any `Project.AdditionalDocuments` | reload — `additional document`. Reachable only for a brand-new `AdditionalFiles` match the workspace has not loaded yet (no `DocumentId` yet, so `ClassifyTrackedDocument` never gets a chance to run) — an *already-tracked* additional document is routed incrementally before this predicate runs (#276) |

@@ -1,14 +1,6 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.MSBuild;
-using Microsoft.CodeAnalysis.Text;
-using System.Text;
-using System.Text.RegularExpressions;
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Collections.Frozen;
-using System.IO.Enumeration;
-using System.Xml.Linq;
 
 namespace RoslynMcp;
 
@@ -33,6 +25,13 @@ internal sealed partial class WorkspaceManager
 		// Which directories this workspace stays out of. Fixed for the life of the instance, like
 		// the rest of the project configuration: read once the root is known, before any walk.
 		private          IgnoreRules          ignoreRules = IgnoreRules.BuiltIn;
+		
+		// Two parts of the work that need none of this instance's state, only what is fixed at
+		// construction, and are nested types for that reason: what a changed path means for the
+		// workspace, and where a path leads when links are followed. Each is given what it
+		// needs and cannot reach back into the instance.
+		private readonly EditClassifier       edits;
+		private readonly LinkResolver         links;
 		
 		// When construction began. Changes made on disk after this and before the watchers are
 		// live produced no event; ReconcileMissedChanges picks them up by timestamp.
@@ -235,6 +234,8 @@ internal sealed partial class WorkspaceManager
 					
 					rootPath = Path.GetDirectoryName(path)!;
 					ignoreRules = IgnoreRules.ForRoot(rootPath, logger);
+					edits       = new(rootPath, ignoreRules);
+					links       = new(rootPath);
 					AutoDetectAndBootstrap(path, logger);
 					
 					logger.LogInfo("Load", $"Loading solution: {path}");
@@ -272,6 +273,8 @@ internal sealed partial class WorkspaceManager
 					
 					rootPath = Path.GetDirectoryName(path)!;
 					ignoreRules = IgnoreRules.ForRoot(rootPath, logger);
+					edits       = new(rootPath, ignoreRules);
+					links       = new(rootPath);
 					AutoDetectAndBootstrap(path, logger);
 					
 					logger.LogInfo("Load", $"Loading project: {path}");
@@ -320,6 +323,8 @@ internal sealed partial class WorkspaceManager
 						throw new InvalidOperationException($"Cannot create AdhocWorkspace for root directory '{path}'. Specify a subdirectory or use a .csproj file.");
 					
 					ignoreRules = IgnoreRules.ForRoot(rootPath, logger);
+					edits       = new(rootPath, ignoreRules);
+					links       = new(rootPath);
 					
 					var (adhocWs, adhocPid) = LoadAdhocWorkspace();
 					workspace        = adhocWs;

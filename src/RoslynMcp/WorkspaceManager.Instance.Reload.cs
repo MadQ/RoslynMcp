@@ -1,14 +1,5 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.MSBuild;
-using Microsoft.CodeAnalysis.Text;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Collections.Frozen;
-using System.IO.Enumeration;
-using System.Xml.Linq;
 
 namespace RoslynMcp;
 
