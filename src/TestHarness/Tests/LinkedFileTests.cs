@@ -58,12 +58,26 @@ static class LinkedFileTests
 		var generated = fading.Write("obj/Made.cs",    "class MadeElsewhere { }\n");
 		var stored    = project.Write("store/Gone.cs", "class StoredApart { }\n");
 		
+		// For the links that change while the server runs. Both targets are kept out of the
+		// compilation, so that only the link is a document.
+		var moving = TestFixtures.NewMsBuildProject("LinkedFilesRepoint", extraProjectXml: """
+			<ItemGroup>
+			  <Compile Remove="store/**" />
+			</ItemGroup>
+			""");
+		
+		var first   = moving.Write("store/One.cs", "class FirstTarget { }\n");
+		var second  = moving.Write("store/Two.cs", "class SecondTarget { }\n");
+		var plain   = moving.Write("Plain.cs",     "class PlainFile { }\n");
+		var pointer = moving.PathOf("Pointer.cs");
+		
 		var links = new[] {
 			(Link: loose.PathOf("Alias.cs"),  Target: real),
 			(Link: loose.PathOf("OutA.cs"),   Target: apart),
 			(Link: loose.PathOf("OutB.cs"),   Target: apart),
 			(Link: fading.PathOf("Made.cs"),  Target: generated),
 			(Link: project.PathOf("Here.cs"), Target: stored),
+			(Link: pointer,                   Target: first),
 		};
 		
 		var linked = false;
@@ -123,6 +137,64 @@ static class LinkedFileTests
 				return "unknown";
 			
 			return data["reload_pending"]?.GetValue<bool>() == true ? "pending" : "none";
+		}
+		
+		// Loads the workspace and waits until no reload is pending, so that a flag seen later
+		// was raised by the test's own change. Then waits a little longer: the watchers of
+		// a workspace start on a background thread, and a change made before they are live
+		// is reported by nobody. A project gives no way to probe for that without causing a
+		// reload, so it is a plain wait, generous for what macOS needs.
+		async Task<bool> SettleAsync(string? projectPath)
+		{
+			
+			var deadline = DateTime.UtcNow.AddSeconds(20);
+			
+			while(DateTime.UtcNow < deadline) {
+				
+				await Call("roslyn_get_diagnostics", new { projectPath, take = 0, severity = "errors" });
+				
+				if(await ReloadStateAsync(projectPath) == "none") {
+					
+					await Task.Delay(2000);
+					
+					return true;
+				}
+				
+				await Task.Delay(250);
+			}
+			
+			return false;
+		}
+		
+		// Polls until a reload is pending, for at most ten seconds.
+		async Task<string> AwaitReloadAsync(string? projectPath)
+		{
+			
+			var deadline = DateTime.UtcNow.AddSeconds(10);
+			var state    = "none";
+			
+			while(DateTime.UtcNow < deadline && state != "pending") {
+				
+				await Task.Delay(250);
+				
+				state = await ReloadStateAsync(projectPath);
+			}
+			
+			return state;
+		}
+		
+		// Puts a link to target at path in one step, whatever is there now: the link is made
+		// under another name and moved over it. Deleting first would leave a moment in which
+		// the path does not exist, and a flush that falls into it sees a deleted document —
+		// a reload for a reason that is not the one under test. The other name does not end
+		// in .cs, so that it is not a new source file either.
+		static void PointAt(string path, string target)
+		{
+			
+			var staged = path + ".staged";
+			
+			File.CreateSymbolicLink(staged, target);
+			File.Move(staged, path, overwrite: true);
 		}
 		
 		// A skip on a developer's machine, a failure on a CI runner — see Skip.
@@ -251,6 +323,57 @@ static class LinkedFileTests
 						? (true,  "PASS")
 						: (false, "FAIL  (Made.cs is still a document ten seconds after the file behind it was deleted)");
 				}),
+			
+			// A link that someone else changes while the server runs (#343). The index says
+			// where each linked document led when the workspace loaded; after this it is
+			// wrong for Pointer.cs, and a change to the file it leads to now would not reach
+			// the document. The workspace has to notice and reload. Only the link is a
+			// document here — both files it points at are kept out of the compilation — so
+			// nothing but the link itself can raise the flag: its text changes too, but a
+			// changed text is applied in place and reloads nothing.
+			new("linked files: repointing a link while the server runs flags a reload",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					if(!await SettleAsync(moving.Csproj) || !await IsDocumentAsync(moving.Csproj, "Pointer.cs"))
+						
+						return (false, "FAIL  (precondition: the workspace never settled, or Pointer.cs is not a document)");
+					
+					PointAt(pointer, second);
+					
+					var state = await AwaitReloadAsync(moving.Csproj);
+					
+					return state == "pending"
+						? (true,  "PASS")
+						: (false, $"FAIL  (reload state ten seconds after the link was repointed: {state})");
+				}),
+			
+			// The other way a path comes to lead elsewhere: a source file of its own is
+			// replaced by a link, as a branch switch can do. Before, the file was not in
+			// the index at all, so there is no entry to compare with — the check has to
+			// look at a tracked document that the index knows nothing about.
+			new("linked files: a source file that becomes a link while the server runs flags a reload",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					if(!await SettleAsync(moving.Csproj) || !await IsDocumentAsync(moving.Csproj, "Plain.cs"))
+						
+						return (false, "FAIL  (precondition: the workspace never settled, or Plain.cs is not a document)");
+					
+					PointAt(plain, second);
+					
+					var state = await AwaitReloadAsync(moving.Csproj);
+					
+					return state == "pending"
+						? (true,  "PASS")
+						: (false, $"FAIL  (reload state ten seconds after the file became a link: {state})");
+				}),
 		};
 		
 		return new TestGroup($"Linked Files ({tests.Count} tests)", tests, Teardown: () => {
@@ -262,6 +385,16 @@ static class LinkedFileTests
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
+			// Plain.cs is a link once its test has run, and so may a staged link be if a test
+			// stopped half way.
+			foreach(var path in new[] { plain, plain + ".staged", pointer + ".staged" })
+				try {
+					if(new FileInfo(path).LinkTarget is not null)
+						File.Delete(path);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			
+			moving.Dispose();
 			loose.Dispose();
 			outside.Dispose();
 			fading.Dispose();

@@ -279,12 +279,13 @@ internal sealed partial class WorkspaceManager
 				// and are only ever documents to refresh, never news of a file.
 				// The batch has been taken out of the pending sets by now. Whatever goes wrong
 				// in this pass must not cost the batch itself, so it is fenced off.
-				var unreported = new HashSet<string>(SecurityBoundary.PathComparer);
+				var unreported  = new HashSet<string>(SecurityBoundary.PathComparer);
+				var linkChanged = false;
 				
 				try {
 					
 					// An adhoc workspace keeps its index current here. An MSBuild workspace
-					// does not: its index is as the last load built it (see FlagLinkChanged).
+					// never changes its index: it reloads when a link has changed (below).
 					if(!isMSBuild)
 						unreported.UnionWith(RelinkAdhoc(changed));
 					
@@ -302,6 +303,11 @@ internal sealed partial class WorkspaceManager
 					finally {
 						@lock.ExitReadLock();
 					}
+					
+					// A reported path that leads elsewhere than the index says: the workspace
+					// reloads, and the documents that depended on that path are read again.
+					if(isMSBuild)
+						unreported.UnionWith(FindChangedLinks(changed, index, tracked, out linkChanged));
 					
 					if(index.Count > 0) {
 						
@@ -345,7 +351,7 @@ internal sealed partial class WorkspaceManager
 				var reloadFlagged = false;
 
 				if(isMSBuild)
-					reloadFlagged = FlushMSBuild(changed, deleted, unreported);
+					reloadFlagged = FlushMSBuild(changed, deleted, unreported) | linkChanged;
 
 				else {
 					

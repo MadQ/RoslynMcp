@@ -37,7 +37,20 @@ internal sealed partial class WorkspaceManager
 			///     </para>
 			/// </summary>
 			public string? TargetOf(string fullPath)
+				=> TryTargetOf(fullPath, out var target) ? target : null
+			;
+			
+			/// <summary>
+			///     <see cref="TargetOf"/> for a caller that has to tell "leads nowhere else"
+			///     from "could not be worked out": false for the second, and
+			///     <paramref name="target"/> is then null without meaning anything. A caller
+			///     that acts on a <em>change</em> in where a path leads needs the difference —
+			///     a path that cannot be examined for a moment has not changed.
+			/// </summary>
+			public bool TryTargetOf(string fullPath, out string? target)
 			{
+				target = null;
+				
 				try {
 					
 					// The usual case by far, and it has to be cheap: this is asked for every
@@ -47,11 +60,11 @@ internal sealed partial class WorkspaceManager
 					// level — no resolution of the path or of the root.
 					if(SecurityBoundary.IsUnderDirectory(fullPath, rootPath) && !SecurityBoundary.HasLinkBelowRoot(fullPath, rootPath))
 						
-						return null;
+						return true;
 					
 					if(SecurityBoundary.ResolveLinks(fullPath) is not { } resolved)
 						
-						return null;
+						return false;
 					
 					// From the workspace root upwards — not from the written path. A link at or above
 					// the root is where the user put the workspace and stays as written; a link
@@ -68,14 +81,18 @@ internal sealed partial class WorkspaceManager
 						
 						// The same name the way the file system compares names, which on Linux is
 						// to the letter: Foo.cs leading to foo.cs leads somewhere else.
-						return SecurityBoundary.PathComparer.Equals(respelled, fullPath) ? null : respelled;
+						target = SecurityBoundary.PathComparer.Equals(respelled, fullPath) ? null : respelled;
+						
+						return true;
 					}
 					
-					return SecurityBoundary.PathComparer.Equals(resolved, fullPath) ? null : resolved;
+					target = SecurityBoundary.PathComparer.Equals(resolved, fullPath) ? null : resolved;
+					
+					return true;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
 					
-					return null;
+					return false;
 				}
 			}
 			
