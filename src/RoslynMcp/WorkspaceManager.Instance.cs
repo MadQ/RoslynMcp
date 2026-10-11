@@ -1527,50 +1527,53 @@ internal sealed partial class WorkspaceManager
 				
 				return [];
 			
-			Solution currentSolution;
-			
+			// The workspace lock is held to the end, index update included. A reload swaps in
+			// its solution and its index under the write lock; were the lock let go after
+			// reading the solution, a reload could come between, and a name it had just
+			// dropped would be entered in its new index on the word of the old solution.
 			@lock.EnterReadLock();
 			
 			try {
-				currentSolution = workspace.CurrentSolution;
+				
+				var currentSolution = workspace.CurrentSolution;
+				var same            = SecurityBoundary.PathComparer;
+				var index           = physicalIndex;
+				var names           = new HashSet<string>(same);
+				
+				foreach(var path in changed) {
+					
+					// An indexed name: the link may have been repointed. Every name that
+					// reached the same file is looked at with it — some of them reach it
+					// through this one (a link to this link), and follow it wherever it
+					// leads now.
+					if(index.PhysicalOf(path) is { } former) {
+						
+						names.Add(path);
+						names.UnionWith(index.NamesOf(former));
+					}
+					
+					// A document that was a file of its own and is a link now. The links to
+					// it lead on through it.
+					else if(!currentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && LinkTargetOf(path) is not null) {
+						
+						names.Add(path);
+						names.UnionWith(index.NamesOf(path));
+					}
+				}
+				
+				if(names.Count == 0)
+					
+					return [];
+				
+				ReindexNames([.. names]);
+				
+				var current = physicalIndex;
+				
+				return [.. names.Where(name => !same.Equals(index.PhysicalOf(name), current.PhysicalOf(name)))];
 			}
 			finally {
 				@lock.ExitReadLock();
 			}
-			
-			var same  = SecurityBoundary.PathComparer;
-			var index = physicalIndex;
-			var names = new HashSet<string>(same);
-			
-			foreach(var path in changed) {
-				
-				// An indexed name: the link may have been repointed. Every name that reached
-				// the same file is looked at with it — some of them reach it through this one
-				// (a link to this link), and follow it wherever it leads now.
-				if(index.PhysicalOf(path) is { } former) {
-					
-					names.Add(path);
-					names.UnionWith(index.NamesOf(former));
-				}
-				
-				// A document that was a file of its own and is a link now. The links to it
-				// lead on through it.
-				else if(!currentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && LinkTargetOf(path) is not null) {
-					
-					names.Add(path);
-					names.UnionWith(index.NamesOf(path));
-				}
-			}
-			
-			if(names.Count == 0)
-				
-				return [];
-			
-			ReindexNames([.. names]);
-			
-			var current = physicalIndex;
-			
-			return [.. names.Where(name => !same.Equals(index.PhysicalOf(name), current.PhysicalOf(name)))];
 		}
 		
 		// Drops document paths that are no longer documents.
@@ -2423,15 +2426,28 @@ internal sealed partial class WorkspaceManager
 				// become a link — a branch switch does that — without the workspace reloading.
 				// A name that depends on such a path leads to another file with it, and joins
 				// the batch: nobody reports a change at its own path.
-				if(ReindexChanged(changed) is { Length: > 0 } moved)
-					changed = [.. changed.Union(moved, SecurityBoundary.PathComparer)];
+				// The names added this way are kept apart as well. They come from the index,
+				// not from a report, and the index can for a moment be ahead of or behind the
+				// solution a flush works on. Such a name is only ever a document to refresh,
+				// never news of a file (see FlushMSBuild).
+				var unreported = new HashSet<string>(SecurityBoundary.PathComparer);
+				
+				unreported.UnionWith(ReindexChanged(changed));
 				
 				if(physicalIndex.Count > 0) {
 					
-					var index = physicalIndex;
+					var index   = physicalIndex;
+					var tracked = PeekSolution();
 					
-					changed = [.. changed.Union(changed.SelectMany(index.NamesOf), SecurityBoundary.PathComparer)];
+					unreported.UnionWith(changed
+						.SelectMany(index.NamesOf)
+						.Where(name => !tracked.GetDocumentIdsWithFilePath(name).IsEmpty));
 				}
+				
+				unreported.ExceptWith(changed);
+				
+				if(unreported.Count > 0)
+					changed = [.. changed, .. unreported];
 				
 				// True when the flush could only flag a reload. The workspace is then behind disk
 				// until that reload completes, so the sync clock must not advance — otherwise
@@ -2440,7 +2456,7 @@ internal sealed partial class WorkspaceManager
 				var reloadFlagged = false;
 
 				if(isMSBuild)
-					reloadFlagged = FlushMSBuild(changed, deleted);
+					reloadFlagged = FlushMSBuild(changed, deleted, unreported);
 
 				else {
 					
@@ -2476,7 +2492,9 @@ internal sealed partial class WorkspaceManager
 		///     apply the change — meaning the workspace is now behind disk, and the caller must
 		///     not advance the sync clock.
 		/// </summary>
-		bool FlushMSBuild(string[] changed, string[] deleted)
+		// unreported: the paths in changed that no watcher report named — documents the index
+		// lists as other names of a changed file.
+		bool FlushMSBuild(string[] changed, string[] deleted, HashSet<string> unreported)
 		{
 			// Set when this batch left the workspace behind disk.
 			var reloadFlagged = false;
@@ -2579,7 +2597,10 @@ internal sealed partial class WorkspaceManager
 					// (*.AssemblyInfo.cs, *.GlobalUsings.g.cs) are tracked and never reach this branch.
 					if(impact is not WorkspaceEditImpact.Incremental) {
 
-						if(impact is WorkspaceEditImpact.Reload)
+						// A path that came from the index and is no document of this solution is
+						// not a new source file: a reload dropped it between the lookup and
+						// here. It is skipped, not taken for a file that has just appeared.
+						if(impact is WorkspaceEditImpact.Reload && !(reason == ReasonNewDocument && unreported.Contains(path)))
 							FlagReload(reason, path);
 
 						continue;
