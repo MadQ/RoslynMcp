@@ -191,6 +191,11 @@ internal sealed partial class WorkspaceManager
 		;
 		private static readonly TimeSpan OwnedLinkTargetWindow = TimeSpan.FromSeconds(30)
 		;
+		// The tracked documents that are another file's name (#341). Built when the workspace
+		// loads and again on every reload; in between, kept current where a name is seen to
+		// change. Replaced as a whole under indexLock and read without a lock.
+		private volatile PhysicalFileIndex physicalIndex = PhysicalFileIndex.Empty;
+		private readonly object            indexLock     = new();
 		// Per-file FSW suppression — ref-counted for concurrent-write safety.
 		// A path is added before each RM-owned write and decremented in the finally block.
 		// ScheduleDebounced skips non-Deleted events where the count is > 0 (Deleted events
@@ -318,6 +323,8 @@ internal sealed partial class WorkspaceManager
 				default:
 					throw new ArgumentOutOfRangeException(nameof(mode));
 			}
+			
+			physicalIndex = BuildPhysicalIndex(workspace.CurrentSolution);
 			
 			MarkSynced();
 		}
@@ -562,7 +569,7 @@ internal sealed partial class WorkspaceManager
 			// ReloadIfNeeded clears any flag without loading in adhoc mode.
 			else if(ws is AdhocWorkspace adhoc)
 				try {
-					AddOrUpdateDocument(adhoc, adhocProjectId, fullPath);
+					SyncAdhocDocument(adhoc, adhocProjectId, fullPath);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
 				{ }
@@ -1002,8 +1009,42 @@ internal sealed partial class WorkspaceManager
 			InvalidateCompilation();
 		}
 		
+		/// <summary>
+		///     <see cref="AddOrUpdateDocument"/> for a path that was written or reported after
+		///     the load, when it may be another name for a file (#341). The walk that loads an
+		///     adhoc workspace does not enter a linked directory, so a file under one is not a
+		///     document under that name — but it may well be one under its own. Adding the
+		///     written path would put the file into the compilation twice, with every type in
+		///     it declared twice. The document the file already is gets the new text instead.
+		///     A link that becomes a document here is entered in <see cref="physicalIndex"/>.
+		/// </summary>
+		void SyncAdhocDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
+		{
+			if(path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+				&& adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty
+				&& LinkTargetOf(path) is { } target) {
+				
+				if(!adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(target).IsEmpty) {
+					
+					AddOrUpdateDocument(adhocWorkspace, projectId, target);
+					
+					return;
+				}
+				
+				AddOrUpdateDocument(adhocWorkspace, projectId, path);
+				ReindexNames([path]);
+				
+				return;
+			}
+			
+			AddOrUpdateDocument(adhocWorkspace, projectId, path);
+		}
+		
 		void RemoveDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
 		{
+			if(physicalIndex.IsName(path))
+				ForgetNames([path]);
+			
 			var name     = Path.GetRelativePath(rootPath, path);
 			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
 			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
@@ -1182,6 +1223,14 @@ internal sealed partial class WorkspaceManager
 					ignoredPaths.AddOrUpdate(linked.Target, 0, (_, count) => count - 1);
 			}
 			
+			// The other direction: a changed document that is a file with links to it. The
+			// documents at those links are the same file and are refreshed with it (#341).
+			// Asked for every changed path; a path that was itself written through a link has
+			// no names of its own, and neither has any path in a workspace without links.
+			if(applied && physicalIndex.Count > 0)
+				foreach(var path in ownedPaths)
+					SyncAliases(path, null);
+			
 			InvalidateCompilation();
 			
 			return applied;
@@ -1288,6 +1337,11 @@ internal sealed partial class WorkspaceManager
 					&& !(afterWrite.TargetExisted && SecurityBoundary.PathComparer.Equals(syncedByApply, fullPath)))
 					SyncLinkTarget(afterWrite);
 				
+				// A write straight to a file that has links to it: the documents at the links
+				// have new content too, and nobody reports a change at their paths (#341).
+				if(linked is null)
+					SyncAliases(fullPath, null);
+				
 				MarkSynced();
 			}
 			finally {
@@ -1379,47 +1433,129 @@ internal sealed partial class WorkspaceManager
 		///     After a write through a link: brings the workspace up to date with the file the
 		///     write landed in — if it landed there. A write can also replace the link where it
 		///     sits (a link that leads out of the workspace, a restore that must not follow one),
-		///     and then the file behind it was never touched: the path no longer leads to it, and
-		///     nothing is done. The same when the link was dangling and still is.
+		///     and then the file behind it was never touched; see <see cref="SyncReplacedLink"/>.
+		///     Nothing is done when the link was dangling and still is.
 		/// </summary>
 		void SyncLinkTarget(LinkedWrite linked)
 		{
 			// Compared the way the file system compares names: on Linux a link Foo.cs to a
 			// file foo.cs is a link to another file, not a path that leads to itself.
-			if(LinkTargetOf(linked.Path) is not { } target || !SecurityBoundary.PathComparer.Equals(target, linked.Target))
+			if(LinkTargetOf(linked.Path) is not { } target || !SecurityBoundary.PathComparer.Equals(target, linked.Target)) {
+				
+				SyncReplacedLink(linked);
 				
 				return;
+			}
 			
 			if(!linked.TargetExisted && !File.Exists(linked.Target))
 				
 				return;
 			
 			InvalidateLinkTarget(linked.Target, linked.TargetExisted);
-			SyncOtherAliases(linked);
+			SyncAliases(linked.Target, linked.Path);
 		}
 		
-		// Set while SyncOtherAliases is at work on this thread. Refreshing an alias writes it
+		/// <summary>
+		///     After a write that replaced a link where it sat. The written path is now a file
+		///     of its own, and the file it used to lead to was not touched. Any other document
+		///     that reached that file <em>through</em> the written path — a link to the link —
+		///     now reaches the new content, and is refreshed. The names are looked at again
+		///     first, because the index still has all of them under the old file.
+		/// </summary>
+		void SyncReplacedLink(LinkedWrite linked)
+		{
+			if(physicalIndex.NamesOf(linked.Target) is not { Length: > 0 } names)
+				
+				return;
+			
+			ReindexNames(names);
+			SyncAliases(LinkTargetOf(linked.Path) ?? linked.Path, linked.Path);
+		}
+		
+		// Looks at these document paths again and enters each under the file it leads to now.
+		void ReindexNames(IEnumerable<string> names)
+		{
+			lock(indexLock)
+				physicalIndex = physicalIndex.With(names, LinkTargetOf);
+		}
+		
+		// Drops document paths that are no longer documents.
+		void ForgetNames(IEnumerable<string> names)
+		{
+			lock(indexLock)
+				physicalIndex = physicalIndex.With(names, _ => null);
+		}
+		
+		/// <summary>
+		///     Builds <see cref="physicalIndex"/> for a solution. Looks at the file system once
+		///     per directory that holds a document and once per document; a path is resolved
+		///     only when one of those turned up a link. The time is logged, because it is paid
+		///     on every load.
+		/// </summary>
+		PhysicalFileIndex BuildPhysicalIndex(Solution solution)
+		{
+			var watch       = Stopwatch.StartNew();
+			var directories = new Dictionary<string, bool>(SecurityBoundary.PathComparer);
+			
+			// Null without resolving anything for a document under the root with no link on
+			// the way to it — nearly every document there is. HasLinkBelowRoot answers true
+			// for what it cannot examine, and LinkTargetOf then has the last word.
+			string? PhysicalOf(string path)
+			{
+				if(SecurityBoundary.IsUnderDirectory(path, rootPath) && Path.GetDirectoryName(path) is { } directory) {
+					
+					if(!directories.TryGetValue(directory, out var linked)) {
+						
+						linked = SecurityBoundary.HasLinkBelowRoot(directory, rootPath);
+						directories.Add(directory, linked);
+					}
+					
+					// With the directory as the root, only the file itself is looked at.
+					if(!linked && !SecurityBoundary.HasLinkBelowRoot(path, directory))
+						
+						return null;
+				}
+				
+				return LinkTargetOf(path);
+			}
+			
+			var paths = solution.Projects
+				.SelectMany(project => project.Documents
+					.Concat<TextDocument>(project.AdditionalDocuments)
+					.Concat(project.AnalyzerConfigDocuments))
+				.Select(document => document.FilePath)
+				.OfType<string>()
+				.Distinct(SecurityBoundary.PathComparer)
+				.ToArray()
+			;
+			
+			var index = PhysicalFileIndex.Build(paths, PhysicalOf);
+			
+			logger.LogInfo("Links", $"{index.Count} of {paths.Length} document path(s) lead to another file ({watch.ElapsedMilliseconds}ms)");
+			
+			return index;
+		}
+		
+		// Set while SyncAliases is at work on this thread. Refreshing an alias writes it
 		// through TryApplyChanges, which comes back here for that alias; without the mark every
-		// alias would start a scan of its own.
+		// alias would start a round of its own.
 		[ThreadStatic] static bool syncingAliases;
 		
 		/// <summary>
-		///     After a write through a link: refreshes every other tracked document that is the
-		///     same file on disk — a second link to it, or a link earlier in a chain. The write
-		///     was reported under one name and, at most, seen by the watcher under the file's
-		///     own; a document under a third name hears of it from nobody.
+		///     After a change to the file at <paramref name="physical"/>: refreshes every tracked
+		///     document that is that file under another name — a link to it, a link earlier in a
+		///     chain, the same file reached through a linked directory. The change was reported
+		///     under one name and, at most, seen by the watcher under the file's own; a document
+		///     under another name hears of it from nobody else.
 		///     <para>
-		///         Done the plain way: every document path of the solution is resolved and
-		///         compared. That is one file-system query per document plus one resolution per
-		///         directory, paid only by a write that went through a link — an ordinary write
-		///         never gets here. An index of documents by physical file would make it cheap
-		///         and would also cover a write made straight to a file that has links to it,
-		///         which this does not (#341).
+		///         A lookup in <see cref="physicalIndex"/>, which is empty for a workspace
+		///         without links. <paramref name="writtenPath"/> is the name the change was made
+		///         under, which its writer has already brought up to date.
 		///     </para>
 		/// </summary>
-		void SyncOtherAliases(LinkedWrite linked)
+		void SyncAliases(string physical, string? writtenPath)
 		{
-			if(syncingAliases)
+			if(syncingAliases || physicalIndex.NamesOf(physical) is not { Length: > 0 } names)
 				
 				return;
 			
@@ -1427,65 +1563,12 @@ internal sealed partial class WorkspaceManager
 			
 			try {
 				
-				Solution currentSolution;
-				
-				@lock.EnterReadLock();
-				
-				try {
-					currentSolution = workspace.CurrentSolution;
-				}
-				finally {
-					@lock.ExitReadLock();
-				}
-				
-				var same        = SecurityBoundary.PathComparer;
-				var directories = new Dictionary<string, string>(same);
-				
-				// Where a path really is. The directory is resolved once per directory; the file
-				// itself only costs a full resolution when it is a link. A path that cannot be
-				// examined stays as written — it is then simply not found to be an alias, and
-				// the scan goes on to the next one.
-				string Physical(string path)
-				{
-					try {
-						
-						if(Path.GetDirectoryName(path) is not { } directory)
-							
-							return path;
-						
-						if(!directories.TryGetValue(directory, out var resolved)) {
-							
-							resolved = SecurityBoundary.ResolveLinks(directory) ?? directory;
-							directories.Add(directory, resolved);
-						}
-						
-						var located = Path.Combine(resolved, Path.GetFileName(path));
-						
-						return FileWriter.IsLink(located) ? SecurityBoundary.ResolveLinks(located) ?? located : located;
-					}
-					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
-						
-						return path;
-					}
-				}
-				
-				// Every kind of document a file can be: source, an AdditionalFiles item, an
-				// analyzer-config file. InvalidateFile knows what to do with each.
-				var written = Physical(linked.Target);
-				var aliases = currentSolution.Projects
-					.SelectMany(project => project.Documents
-						.Concat<TextDocument>(project.AdditionalDocuments)
-						.Concat(project.AnalyzerConfigDocuments))
-					.Select(document => document.FilePath)
-					.OfType<string>()
-					.Distinct(same)
-					.Where(path => !same.Equals(path, linked.Path) && !same.Equals(path, linked.Target) && same.Equals(Physical(path), written))
-				;
-				
 				// One alias that cannot be refreshed must not cost the others their turn.
-				foreach(var alias in aliases)
+				foreach(var alias in names)
 					try {
-						InvalidateLinkTarget(alias, existedBefore: true);
+						
+						if(!SecurityBoundary.PathComparer.Equals(alias, writtenPath))
+							InvalidateLinkTarget(alias, existedBefore: true);
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 						_ = ex
@@ -2231,6 +2314,21 @@ internal sealed partial class WorkspaceManager
 				// unknown .cs — a reload in an MSBuild workspace, a new document in an adhoc one.
 				changed = [.. changed.Where(path => !IsOwnLinkTargetWrite(path))];
 				
+				// A change is reported under the name the file system knows the file by. Every
+				// document that is that file under another name has changed with it, and is
+				// added here, so that both flushes compare its text like any other (#341).
+				// A report at a name that is itself a link means the link may lead somewhere
+				// else now, and it is looked at again first.
+				if(physicalIndex.Count > 0) {
+					
+					if(changed.Where(physicalIndex.IsName).ToArray() is { Length: > 0 } relinked)
+						ReindexNames(relinked);
+					
+					var index = physicalIndex;
+					
+					changed = [.. changed.Union(changed.SelectMany(index.NamesOf), SecurityBoundary.PathComparer)];
+				}
+				
 				// True when the flush could only flag a reload. The workspace is then behind disk
 				// until that reload completes, so the sync clock must not advance — otherwise
 				// roslyn_check_drift reports "in sync" for changes it has not applied, and a
@@ -2429,7 +2527,7 @@ internal sealed partial class WorkspaceManager
 			
 			foreach(var path in changed)
 				try {
-					AddOrUpdateDocument(adhoc, projectId, path);
+					SyncAdhocDocument(adhoc, projectId, path);
 				}
 				catch(FileNotFoundException) {
 					
@@ -2657,6 +2755,9 @@ internal sealed partial class WorkspaceManager
 			consecutiveDiscards = 0;
 
 			var newProjectMap = BuildProjectMapFor(newWorkspace);
+			
+			// Looks at the file system, so it is done out here and only swapped in under the lock.
+			var newPhysicalIndex = BuildPhysicalIndex(newWorkspace.CurrentSolution);
 
 			Workspace? oldWorkspace = null;
 			int        projectCount = 0;
@@ -2683,6 +2784,9 @@ internal sealed partial class WorkspaceManager
 					projectMap[kvp.Key] = kvp.Value;
 
 				compilationCache.Clear();
+
+				lock(indexLock)
+					physicalIndex = newPhysicalIndex;
 
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.

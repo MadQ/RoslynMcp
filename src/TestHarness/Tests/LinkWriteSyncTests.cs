@@ -75,10 +75,18 @@ static class LinkWriteSyncTests
 		var keptLink   = apart.PathOf("Stored.cs");
 		var dirReal    = fx.Write("lib/Dir.cs",       "partial class DirPair { }\n");
 		var dirAlias   = fx.PathOf("alias");
+		
+		// A directory with no project: an AdhocWorkspace, which takes every .cs it finds for a
+		// document but does not look inside a linked directory.
+		var loose      = TestFixtures.NewAdhocDir("LinkWriteSyncLoose");
+		var looseAlias = loose.PathOf("through");
 		var linked     = false;
+		
+		loose.Write("real/Once.cs", "class DeclaredOnce { }\n");
 		
 		try {
 			
+			Directory.CreateSymbolicLink(looseAlias, loose.PathOf("real"));
 			Directory.CreateSymbolicLink(dirAlias, fx.PathOf("lib"));
 			File.CreateSymbolicLink(sharedLink, sharedReal);
 			File.CreateSymbolicLink(secondLink, sharedReal);
@@ -255,6 +263,67 @@ static class LinkWriteSyncTests
 						: (false, $"FAIL  (served from: {source ?? "nothing"}; has the new member: {current}; still a link: {IsLink(secondLink)}; write: {written?.ToJsonString() ?? "none"})");
 				}),
 			
+			// The other direction (#341). The write goes to the file itself, not through a link,
+			// so nothing about the written path says that other documents are involved. The
+			// two links are documents all the same, and both must be current with no wait:
+			// the watcher reports the change at Shared.cs only, and never at a link.
+			new("link write sync: both links to a file are current straight after a write to the file itself",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					var written = await Write(fx.Csproj, "Shared.cs", "partial class SyncPair { public int WrittenToTheFileItself; }\n");
+					var first   = await CallBlocks("roslyn_read_file", new { filePath = "SharedLink.cs",    projectPath = fx.Csproj });
+					var second  = await CallBlocks("roslyn_read_file", new { filePath = "SharedLinkToo.cs", projectPath = fx.Csproj });
+					
+					static bool Current(string[] blocks) => blocks.Length > 1 && blocks[0].Contains("\"roslyn\"") && blocks[1].Contains("WrittenToTheFileItself");
+					
+					return written?["written"]?.GetValue<bool>() == true && Current(first) && Current(second) && IsLink(sharedLink) && IsLink(secondLink)
+						? (true,  "PASS")
+						: (false, $"FAIL  (first link current: {Current(first)}; second link current: {Current(second)}; still links: {IsLink(sharedLink)}, {IsLink(secondLink)}; write: {written?.ToJsonString() ?? "none"})");
+				}),
+			
+			// The same change made by someone else: the file is edited on disk, behind the
+			// server's back. Only the watcher knows, and it knows the file by its own name.
+			// The documents at the links must follow. There is a wait here, unlike above —
+			// the watcher's report is debounced — so the test polls, and fails only when the
+			// links are still stale after ten seconds. The file is edited in place, the way
+			// an editor without atomic save does it, so that no delete is reported.
+			new("link write sync: both links to a file follow an edit made to the file outside the server",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					if(!await SettleAsync(fx.Csproj))
+						
+						return (false, "FAIL  (precondition: the workspace never settled)");
+					
+					File.WriteAllText(sharedReal, "partial class SyncPair { public int EditedOutside; }\n");
+					
+					static bool Current(string[] blocks) => blocks.Length > 1 && blocks[0].Contains("\"roslyn\"") && blocks[1].Contains("EditedOutside");
+					
+					var deadline = DateTime.UtcNow.AddSeconds(10);
+					var first    = false;
+					var second   = false;
+					
+					while(DateTime.UtcNow < deadline && !(first && second)) {
+						
+						await Task.Delay(250);
+						
+						first  = Current(await CallBlocks("roslyn_read_file", new { filePath = "SharedLink.cs",    projectPath = fx.Csproj }));
+						second = Current(await CallBlocks("roslyn_read_file", new { filePath = "SharedLinkToo.cs", projectPath = fx.Csproj }));
+					}
+					
+					return first && second
+						? (true,  "PASS")
+						: (false, $"FAIL  (after ten seconds — first link current: {first}; second link current: {second})");
+				}),
+			
+
 			// The same for the other kind of document the workspace writes itself: an
 			// AdditionalFiles item. notes/Real.txt and the link notes/Linked.txt are both
 			// declared, so both are documents. Nothing watches a .txt, which makes this the
@@ -355,9 +424,58 @@ static class LinkWriteSyncTests
 						? (true,  "PASS")
 						: (false, $"FAIL  (reload: {reload}; content arrived behind the link: {arrived}; still a link: {IsLink(keptLink)}; write: {written?.ToJsonString() ?? "none"})");
 				}),
+			
+			// A workspace without a project (#341). real/Once.cs is a document; through is a
+			// directory link to real, which the loading walk does not enter, so through/Once.cs
+			// is the same file and not a document. A write under that name used to add it as
+			// one: the file was then compiled twice, and every type in it was an error
+			// (CS0101). The write must reach the document the file already is, and add nothing.
+			new("link write sync: a write through a linked directory adds no second document to a workspace without a project",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					// A workspace without a project has no references, so it never compiles
+					// cleanly. What is looked for is the one error a second document causes.
+					async Task<string> DuplicatesAsync()
+					{
+						var data = await Call("roslyn_get_diagnostics", new { projectPath = loose.Dir, take = 200, severity = "errors" });
+						
+						if(data?["items"] is not JsonArray items)
+							
+							return "unknown";
+						
+						return items.Count(item => item?["code"]?.GetValue<string>() == "CS0101").ToString();
+					}
+					
+					var before = await DuplicatesAsync();
+					
+					if(before != "0")
+						
+						return (false, $"FAIL  (precondition: duplicate-type errors before the write: {before})");
+					
+					var written = await Write(loose.Dir, "through/Once.cs", "class DeclaredOnce { public int Changed; }\n");
+					var errors  = await DuplicatesAsync();
+					var blocks  = await CallBlocks("roslyn_read_file", new { filePath = "real/Once.cs", projectPath = loose.Dir });
+					var current = blocks.Length > 1 && blocks[0].Contains("\"roslyn\"") && blocks[1].Contains("Changed");
+					
+					return written?["written"]?.GetValue<bool>() == true && errors == "0" && current
+						? (true,  "PASS")
+						: (false, $"FAIL  (duplicate-type errors after the write: {errors}; the real file's document is current: {current}; write: {written?.ToJsonString() ?? "none"})");
+				}),
 		};
 		
 		return new TestGroup($"Link Write Sync ({tests.Count} tests)", tests, Teardown: () => {
+			
+			try {
+				if(new DirectoryInfo(looseAlias).LinkTarget is not null)
+					Directory.Delete(looseAlias);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			
+			loose.Dispose();
 			
 			// The directory link first, and only the link: deleting the tree through it would
 			// reach into lib.
