@@ -210,8 +210,9 @@ another file's name, keyed by the file they lead to, in the spelling `LinkTarget
 workspace without links has an empty index and every lookup in it returns at once.
 
 - **Built** from the solution when the workspace loads and again on every reload, on the
-  loading thread. The cost is one look at the file system per directory that holds a document
-  and one per document; a path is resolved only when one of those found a link. The time is
+  loading thread, before the watcher starts. The cost is one look at the file system per
+  directory that holds a document and one per document; a path is resolved only when one of
+  those found a link. A directory outside the workspace root is resolved in full, once. The time is
   logged as `Links — N of M document path(s) lead to another file (X ms)`.
 - **Swapped as a whole.** An index never changes; a change makes a new one, assigned under
   `indexLock`. Readers take no lock.
@@ -223,8 +224,10 @@ workspace without links has an empty index and every lookup in it returns at onc
   - `FlushPendingChanges`: the watcher reports a change under the file's own name only. The
     documents at its other names are added to the batch, and both flushes compare their text
     like any other.
-- **Kept current between reloads** where a name is seen to change: a watcher report at a path
-  that is itself an indexed name (the link was repointed) looks at that name again; so does a
+- **Kept current between reloads** where a name is seen to change: the watcher flush looks
+  again at every changed path that is an indexed name (the link was repointed) or a tracked
+  document that leads to another file now (a file of its own became a link, as a branch
+  switch can do, which reloads nothing); so does a
   write that replaced a link where it sat — the documents that reached the old file *through*
   that link now reach the new content and are refreshed (`SyncReplacedLink`). In an MSBuild
   workspace a new link is a new document, which reloads and rebuilds. An AdhocWorkspace never

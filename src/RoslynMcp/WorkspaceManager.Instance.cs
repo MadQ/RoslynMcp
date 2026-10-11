@@ -257,6 +257,9 @@ internal sealed partial class WorkspaceManager
 						?? throw new InvalidOperationException($"Solution '{path}' contains no projects.")
 					;
 					logger.LogInfo("Load", $"Solution loaded in {slnSw.ElapsedMilliseconds}ms ({workspace.CurrentSolution.Projects.Count()} projects)");
+					// Before the watcher starts: its flush updates the index, and an update made
+					// while the index was still being built would be overwritten by it.
+					physicalIndex = BuildPhysicalIndex(workspace.CurrentSolution);
 					StartWatcher();
 					break;
 				
@@ -290,6 +293,9 @@ internal sealed partial class WorkspaceManager
 					
 					logger.LogInfo("Load", $"Project loaded in {projSw.ElapsedMilliseconds}ms ({workspace.CurrentSolution.Projects.Count()} projects)");
 					
+					// Before the watcher starts: its flush updates the index, and an update made
+					// while the index was still being built would be overwritten by it.
+					physicalIndex = BuildPhysicalIndex(workspace.CurrentSolution);
 					StartWatcher();
 					break;
 				
@@ -317,14 +323,15 @@ internal sealed partial class WorkspaceManager
 					
 					LoadAllFiles((AdhocWorkspace) workspace, defaultProjectId);
 					
+					// Before the watcher starts: its flush updates the index, and an update made
+					// while the index was still being built would be overwritten by it.
+					physicalIndex = BuildPhysicalIndex(workspace.CurrentSolution);
 					StartWatcher();
 					break;
 				
 				default:
 					throw new ArgumentOutOfRangeException(nameof(mode));
 			}
-			
-			physicalIndex = BuildPhysicalIndex(workspace.CurrentSolution);
 			
 			MarkSynced();
 		}
@@ -1031,6 +1038,16 @@ internal sealed partial class WorkspaceManager
 					return;
 				}
 				
+				// The file is not a document under its own name — it lies outside the root, or
+				// in a directory the workspace stays out of — but it may be one under another
+				// link. That document is the file, and gets the new text.
+				if(physicalIndex.NamesOf(target) is [var known, ..]) {
+					
+					AddOrUpdateDocument(adhocWorkspace, projectId, known);
+					
+					return;
+				}
+				
 				AddOrUpdateDocument(adhocWorkspace, projectId, path);
 				ReindexNames([path]);
 				
@@ -1189,7 +1206,14 @@ internal sealed partial class WorkspaceManager
 					if(rmOwnedWriteSizes.Count + ownedPaths.Length > MaxRmOwnedWriteSizes)
 						rmOwnedWriteSizes.Clear();
 					
+					// Not for a path that was written through a link. The record is used up by
+					// the watcher's report at that path, and for a link no such report comes —
+					// the change is reported at the file behind it. The entry would stay, and
+					// vouch for the link the next time someone else changes that file (#341).
 					foreach(var path in ownedPaths) {
+						
+						if(linkedWrites.Any(linked => SecurityBoundary.PathComparer.Equals(linked.Path, path)))
+							continue;
 						
 						try {
 							rmOwnedWriteSizes[path] = new FileInfo(path).Length;
@@ -1479,6 +1503,38 @@ internal sealed partial class WorkspaceManager
 				physicalIndex = physicalIndex.With(names, LinkTargetOf);
 		}
 		
+		// For the watcher flush: looks again at every changed path that is in the index, or
+		// that is a tracked document and leads to another file now. Other paths are left out —
+		// the index holds documents only. For a document with no link on the way to it this
+		// is one look at each directory level, the same that every applied change pays.
+		void ReindexChanged(string[] changed)
+		{
+			if(changed.Length == 0)
+				
+				return;
+			
+			Solution currentSolution;
+			
+			@lock.EnterReadLock();
+			
+			try {
+				currentSolution = workspace.CurrentSolution;
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
+			
+			var index = physicalIndex;
+			var names = changed
+				.Where(path => index.IsName(path)
+					|| (!currentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && LinkTargetOf(path) is not null))
+				.ToArray()
+			;
+			
+			if(names.Any())
+				ReindexNames(names);
+		}
+		
 		// Drops document paths that are no longer documents.
 		void ForgetNames(IEnumerable<string> names)
 		{
@@ -1502,11 +1558,18 @@ internal sealed partial class WorkspaceManager
 			// for what it cannot examine, and LinkTargetOf then has the last word.
 			string? PhysicalOf(string path)
 			{
-				if(SecurityBoundary.IsUnderDirectory(path, rootPath) && Path.GetDirectoryName(path) is { } directory) {
+				if(Path.GetDirectoryName(path) is { } directory) {
 					
+					// Asked once per directory. Under the root that is a look at each level
+					// down to it. A directory elsewhere — a referenced project, when the root
+					// is one project's directory — is resolved in full, which is why it must
+					// not be done per document.
 					if(!directories.TryGetValue(directory, out var linked)) {
 						
-						linked = SecurityBoundary.HasLinkBelowRoot(directory, rootPath);
+						linked = SecurityBoundary.IsUnderDirectory(directory, rootPath)
+							? SecurityBoundary.HasLinkBelowRoot(directory, rootPath)
+							: LinkTargetOf(directory) is not null
+						;
 						directories.Add(directory, linked);
 					}
 					
@@ -2317,12 +2380,12 @@ internal sealed partial class WorkspaceManager
 				// A change is reported under the name the file system knows the file by. Every
 				// document that is that file under another name has changed with it, and is
 				// added here, so that both flushes compare its text like any other (#341).
-				// A report at a name that is itself a link means the link may lead somewhere
-				// else now, and it is looked at again first.
+				// First the changed paths themselves are looked at again: a link may lead
+				// somewhere else now, and a document that was a file of its own may have
+				// become a link — a branch switch does that — without the workspace reloading.
+				ReindexChanged(changed);
+				
 				if(physicalIndex.Count > 0) {
-					
-					if(changed.Where(physicalIndex.IsName).ToArray() is { Length: > 0 } relinked)
-						ReindexNames(relinked);
 					
 					var index = physicalIndex;
 					
@@ -2417,6 +2480,8 @@ internal sealed partial class WorkspaceManager
 			var newSolution     = currentSolution;
 			var modified        = false;
 			string? applyFailed = null;
+			var index           = physicalIndex;
+			var texts           = new Dictionary<string, SourceText>(SecurityBoundary.PathComparer);
 			
 			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument, and clearing
 			// document text then calling TryApplyChanges writes an empty file back to disk,
@@ -2479,8 +2544,18 @@ internal sealed partial class WorkspaceManager
 						continue;
 					}
 
-					using var stream = File.OpenRead(path);
-					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
+					// One read per file on disk, not per name. A batch can hold several names of
+					// one file (see FlushPendingChanges), and a save landing between two reads
+					// would leave documents of the same file with different texts.
+					var physical = index.PhysicalOf(path) ?? path;
+
+					if(!texts.TryGetValue(physical, out var text)) {
+
+						using var stream = File.OpenRead(path);
+
+						text = SourceText.From(stream, FileWriter.Utf8NoBom);
+						texts.Add(physical, text);
+					}
 
 					// Already current. Applying identical text is not free: it still runs a
 					// TryApplyChanges, which writes to disk and flags a full reload if it fails.

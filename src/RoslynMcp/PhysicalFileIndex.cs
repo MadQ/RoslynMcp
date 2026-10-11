@@ -40,6 +40,9 @@ internal sealed class PhysicalFileIndex
 	/// <summary>Whether <paramref name="path"/> is a document that leads to another file.</summary>
 	public bool IsName(string path) => physicalByName.ContainsKey(path);
 	
+	/// <summary>The file the document at <paramref name="name"/> leads to, or null when it leads nowhere else.</summary>
+	public string? PhysicalOf(string name) => physicalByName.GetValueOrDefault(name);
+	
 	/// <summary>
 	///     The documents that lead to the file at <paramref name="physical"/>. The file's own
 	///     path is not among them: it leads nowhere else.
