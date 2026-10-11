@@ -196,6 +196,10 @@ internal sealed partial class WorkspaceManager
 		// change. Replaced as a whole under indexLock and read without a lock.
 		private volatile PhysicalFileIndex physicalIndex = PhysicalFileIndex.Empty;
 		private readonly object            indexLock     = new();
+		// The names looked at again while a reload was building its index, or null when none
+		// is. Guarded by indexLock. A reload that is discarded leaves its set behind; the
+		// next one starts a new one.
+		private HashSet<string>?           reindexedDuringReload;
 		// Per-file FSW suppression — ref-counted for concurrent-write safety.
 		// A path is added before each RM-owned write and decremented in the finally block.
 		// ScheduleDebounced skips non-Deleted events where the count is > 0 (Deleted events
@@ -1041,9 +1045,10 @@ internal sealed partial class WorkspaceManager
 				// The file is not a document under its own name — it lies outside the root, or
 				// in a directory the workspace stays out of — but it may be one under another
 				// link. That document is the file, and gets the new text.
-				if(physicalIndex.NamesOf(target) is [var known, ..]) {
+				if(physicalIndex.NamesOf(target) is { Length: > 0 } known) {
 					
-					AddOrUpdateDocument(adhocWorkspace, projectId, known);
+					foreach(var name in known)
+						AddOrUpdateDocument(adhocWorkspace, projectId, name);
 					
 					return;
 				}
@@ -1497,10 +1502,16 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		// Looks at these document paths again and enters each under the file it leads to now.
-		void ReindexNames(IEnumerable<string> names)
+		void ReindexNames(string[] names)
 		{
-			lock(indexLock)
+			lock(indexLock) {
+				
 				physicalIndex = physicalIndex.With(names, LinkTargetOf);
+				
+				// A reload is building its own index at this moment, from what it saw before
+				// this. It looks at these names once more when it swaps its index in.
+				reindexedDuringReload?.UnionWith(names);
+			}
 		}
 		
 		// For the watcher flush: looks again at every changed path that is in the index, or
@@ -2832,6 +2843,11 @@ internal sealed partial class WorkspaceManager
 			var newProjectMap = BuildProjectMapFor(newWorkspace);
 			
 			// Looks at the file system, so it is done out here and only swapped in under the lock.
+			// A name that is looked at again while this runs is noted, and looked at once more
+			// at the swap: the index built here may have seen it as it was before.
+			lock(indexLock)
+				reindexedDuringReload = new(SecurityBoundary.PathComparer);
+			
 			var newPhysicalIndex = BuildPhysicalIndex(newWorkspace.CurrentSolution);
 
 			Workspace? oldWorkspace = null;
@@ -2860,8 +2876,14 @@ internal sealed partial class WorkspaceManager
 
 				compilationCache.Clear();
 
-				lock(indexLock)
-					physicalIndex = newPhysicalIndex;
+				lock(indexLock) {
+
+					physicalIndex = reindexedDuringReload is { Count: > 0 } late
+						? newPhysicalIndex.With(late, LinkTargetOf)
+						: newPhysicalIndex
+					;
+					reindexedDuringReload = null;
+				}
 
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.
