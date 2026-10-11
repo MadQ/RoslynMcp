@@ -217,16 +217,16 @@ workspace without links has an empty index and every lookup in it returns at onc
 - **An MSBuild workspace never changes its index in place.** The index is built by a load and
   swapped in together with the solution it was built from, under the workspace write lock, so
   the two cannot disagree and nothing has to be kept in step while a reload is under way.
-  When a tracked path is found to lead somewhere else than the index says — a link was
-  repointed, a link was replaced by a file (`SyncReplacedLink`), a file of its own became a
-  link, as a branch switch can do — `FlagLinkChanged` flags a reload, logged as
-  `Reload — Flagged (link changed): <path>`, and the reload builds a new index. It moves the
-  generation unconditionally: a reload already running may have built its index before the
-  link changed. A new link is a new document and reloads anyway.
+  When a write by the server replaces a tracked link with a file (`SyncReplacedLink`),
+  `FlagLinkChanged` flags a reload, logged as `Reload — Flagged (link changed): <path>`, and
+  the reload builds a new index; the documents that reached the old file through that link
+  are read again at once. It moves the generation unconditionally: a reload already running
+  may have built its index before the write. A new link is a new document and reloads anyway.
 
-  An earlier version updated the index in place here and carried updates over a reload. Four
-  reviews in a row each found another way for that to race the swap. Do not bring it back: a
-  link that changes under a running server is rare, and a reload is what it costs.
+  An earlier version updated the index in place here, carried updates over a reload, and
+  looked for changed links in the watcher flush. Four reviews in a row each found another way
+  for that to race the swap or to reload too often. Do not bring it back without a design
+  that is reviewed as a whole (#343).
 - **An AdhocWorkspace updates its index in place**, under `indexLock`, because it never
   reloads and so has no swap to race: `SyncAdhocDocument` and `RemoveDocument` enter and drop
   names as documents come and go, the watcher flush looks again at changed names and the
@@ -244,15 +244,16 @@ workspace without links has an empty index and every lookup in it returns at onc
     lock. The added names are passed on as `unreported`: one that is no document of the
     solution the flush works on is skipped, never taken for a new source file. The whole pass
     is fenced off, so a failure in it costs the added names and not the batch.
-- **The index is never used to decide which file a text belongs to.** `FlushMSBuild` reads
-  each file once per flush and shares the text between the documents that are that file. The
-  key for that is where a document's path leads *at that moment*, asked of the file system.
-  The text is written back through the document's own path, so a text filed under the wrong
-  file — which an index that is behind would do — overwrites a file with another file's
-  content.
-- **Not covered:** a linked *directory* that is repointed after load is noticed only when a
-  document under it is next reported as changed. Deleting a file leaves the documents at its
-  now-dangling links as they are (#343).
+- **The index is never used to decide which file a text belongs to.** Every document is read
+  through its own path and written back through its own path, also when a batch holds
+  several names of one file. An index that is behind can therefore only cost a refresh.
+  Sharing one read between the names of a file was tried: it has to know which file a path
+  leads to, and when that answer is out of date, one file's text is written into another.
+- **Not covered** (#343): in an MSBuild workspace, a link that someone else changes while
+  the server runs — repointed, replaced by a file, a file turned into a link, a linked
+  directory repointed — leaves the index as it was until the next reload; changes to the file
+  the path leads to now do not reach that document. Deleting a file leaves the documents at
+  its now-dangling links as they are.
 
 `SyncAdhocDocument` also keeps one file from becoming two documents: the walk that loads an
 AdhocWorkspace does not enter a linked directory, so a file written under such a path is not a

@@ -193,8 +193,8 @@ internal sealed partial class WorkspaceManager
 		;
 		// The tracked documents that are another file's name (#341). In an MSBuild workspace it
 		// is built by a load and swapped in with the solution it was built from, under the
-		// workspace write lock, and never changed in between: a link that changes flags a
-		// reload (FlagLinkChanged). An adhoc workspace never reloads and updates it in place,
+		// workspace write lock, and never changed in between (see FlagLinkChanged for what
+		// that leaves open). An adhoc workspace never reloads and updates it in place,
 		// under indexLock. Either way an instance is immutable and read without a lock.
 		private volatile PhysicalFileIndex physicalIndex = PhysicalFileIndex.Empty;
 		private readonly object            indexLock     = new();
@@ -1068,20 +1068,25 @@ internal sealed partial class WorkspaceManager
 		
 		void RemoveDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
 		{
-			if(physicalIndex.IsName(path))
-				ForgetNames([path]);
-			
-			var name     = Path.GetRelativePath(rootPath, path);
-			var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
-			var existing = project.Documents.FirstOrDefault(d => d.Name == name);
-			
-			if(existing is null)
+			// Under the same lock as SyncAdhocDocument: both take the current solution, change
+			// it and apply it, and the index is changed along with it.
+			lock(adhocSyncLock) {
 				
-				return;
-			
-			adhocWorkspace.TryApplyChanges(adhocWorkspace.CurrentSolution.RemoveDocument(existing.Id));
-			
-			InvalidateCompilation();
+				if(physicalIndex.IsName(path))
+					ForgetNames([path]);
+				
+				var name     = Path.GetRelativePath(rootPath, path);
+				var project  = adhocWorkspace.CurrentSolution.GetProject(projectId)!;
+				var existing = project.Documents.FirstOrDefault(d => d.Name == name);
+				
+				if(existing is null)
+					
+					return;
+				
+				adhocWorkspace.TryApplyChanges(adhocWorkspace.CurrentSolution.RemoveDocument(existing.Id));
+				
+				InvalidateCompilation();
+			}
 		}
 		
 		// ── FileSystemWatcher ────────────────────────────────────────────────
@@ -1502,38 +1507,51 @@ internal sealed partial class WorkspaceManager
 		void SyncReplacedLink(LinkedWrite linked)
 		{
 			var index = physicalIndex;
-			var names = index.NamesOf(linked.Target);
 			
-			if(names.Length == 0 && !index.IsName(linked.Path))
+			// Only a link that is a tracked document matters here. Replacing any other link
+			// changes nothing about where a document leads.
+			if(!index.IsName(linked.Path))
 				
 				return;
+			
+			var names = index.NamesOf(linked.Target);
 			
 			if(isMSBuild) {
 				
 				FlagLinkChanged(linked.Path);
 				
+				// The reload comes with the next call that needs the workspace. Until then
+				// the documents that reached the old file through the written path would
+				// hold its text; they are read again now, each through its own path.
+				RefreshNames(names, linked.Path);
+				
 				return;
 			}
 			
-			ReindexNames([.. names, linked.Path]);
+			ReindexNames(names);
 			SyncAliases(LinkTargetOf(linked.Path) ?? linked.Path, linked.Path);
 		}
 		
 		/// <summary>
-		///     Flags a reload because a tracked path leads to another file than
-		///     <see cref="physicalIndex"/> says: a link was repointed or replaced, or a file of
-		///     its own became a link.
+		///     Flags a reload because a write by this server replaced a tracked link with a
+		///     file, so that the path leads somewhere else than <see cref="physicalIndex"/> says.
 		///     <para>
 		///         In an MSBuild workspace the index is never changed in place. It is built by
 		///         a load and swapped in together with the solution it was built from, so the
 		///         two cannot disagree, and nothing has to be kept in step while a reload is
-		///         under way. The price is a reload when a link changes under a running
-		///         server, which is rare; a new link is a new document and reloads anyway.
+		///         under way.
+		///     </para>
+		///     <para>
+		///         A link that someone else changes while the server runs is not looked for:
+		///         the index is then behind until the next reload, and a change to the file
+		///         the link leads to now does not reach the link's document (#343). That is a
+		///         missed refresh and nothing worse, because every document is read and
+		///         written through its own path and the index never decides which file a text
+		///         belongs to.
 		///     </para>
 		///     <para>
 		///         The generation is moved unconditionally, like for a new compilation input:
-		///         a reload that is already running may have built its index before the link
-		///         changed, and must not be the one that is kept.
+		///         a reload that is already running may have built its index before the write.
 		///     </para>
 		/// </summary>
 		void FlagLinkChanged(string path)
@@ -1673,8 +1691,14 @@ internal sealed partial class WorkspaceManager
 		///     </para>
 		/// </summary>
 		void SyncAliases(string physical, string? writtenPath)
+			=> RefreshNames(physicalIndex.NamesOf(physical), writtenPath)
+		;
+		
+		// Reads each of these documents again through its own path, except the one a writer
+		// has already brought up to date.
+		void RefreshNames(string[] names, string? writtenPath)
 		{
-			if(syncingAliases || physicalIndex.NamesOf(physical) is not { Length: > 0 } names)
+			if(syncingAliases || names.Length == 0)
 				
 				return;
 			
@@ -1682,12 +1706,12 @@ internal sealed partial class WorkspaceManager
 			
 			try {
 				
-				// One alias that cannot be refreshed must not cost the others their turn.
-				foreach(var alias in names)
+				// One name that cannot be refreshed must not cost the others their turn.
+				foreach(var name in names)
 					try {
 						
-						if(!SecurityBoundary.PathComparer.Equals(alias, writtenPath))
-							InvalidateLinkTarget(alias, existedBefore: true);
+						if(!SecurityBoundary.PathComparer.Equals(name, writtenPath))
+							InvalidateLinkTarget(name, existedBefore: true);
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 						_ = ex
@@ -2445,7 +2469,7 @@ internal sealed partial class WorkspaceManager
 				try {
 					
 					// An adhoc workspace keeps its index current here. An MSBuild workspace
-					// does not: FlushMSBuild flags a reload when a path leads elsewhere.
+					// does not: its index is as the last load built it (see FlagLinkChanged).
 					if(!isMSBuild)
 						unreported.UnionWith(RelinkAdhoc(changed));
 					
@@ -2468,14 +2492,16 @@ internal sealed partial class WorkspaceManager
 						unreported.UnionWith(changed
 							.SelectMany(index.NamesOf)
 							.Where(name => !tracked.GetDocumentIdsWithFilePath(name).IsEmpty));
-					
-					unreported.ExceptWith(changed);
 				}
 				catch(Exception ex) {
 					
+					// What was gathered before the failure is kept: an adhoc workspace may
+					// already have entered those names under another file, and this batch is
+					// the only one that will read them again.
 					logger.LogInfo("Links", $"Other names of changed files were not added to this flush: {ex.GetType().Name}: {ex.Message}");
-					unreported.Clear();
 				}
+				
+				unreported.ExceptWith(changed);
 				
 				if(unreported.Count > 0)
 					changed = [.. changed, .. unreported];
@@ -2555,7 +2581,6 @@ internal sealed partial class WorkspaceManager
 
 			Workspace ws;
 			Solution  currentSolution;
-			PhysicalFileIndex index;
 			
 			@lock.EnterReadLock();
 			
@@ -2563,7 +2588,6 @@ internal sealed partial class WorkspaceManager
 				
 				ws              = workspace;
 				currentSolution = workspace.CurrentSolution;
-				index           = physicalIndex;
 			}
 			finally {
 				@lock.ExitReadLock();
@@ -2572,8 +2596,6 @@ internal sealed partial class WorkspaceManager
 			var newSolution     = currentSolution;
 			var modified        = false;
 			string? applyFailed = null;
-			var texts           = new Dictionary<string, SourceText>(SecurityBoundary.PathComparer);
-			var linkChanged     = false;
 			
 			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument, and clearing
 			// document text then calling TryApplyChanges writes an empty file back to disk,
@@ -2639,33 +2661,15 @@ internal sealed partial class WorkspaceManager
 						continue;
 					}
 
-					// Where this document's path leads right now, asked of the file system. The
-					// index is not asked: it says where the path led when it was built, and a
-					// text read from one file must never be filed under another — it is written
-					// back through the document's own path. Where the two disagree the link
-					// has changed, and the workspace reloads to get an index that is right.
-					var leadsTo = LinkTargetOf(path);
-
-					if(!linkChanged && !SecurityBoundary.PathComparer.Equals(leadsTo, index.PhysicalOf(path))) {
-
-						linkChanged   = true;
-						reloadFlagged = true;
-
-						FlagLinkChanged(path);
-					}
-
-					// One read per file on disk, not per name. A batch can hold several names of
-					// one file (see FlushPendingChanges), and a save landing between two reads
-					// would leave documents of the same file with different texts.
-					var physical = leadsTo ?? path;
-
-					if(!texts.TryGetValue(physical, out var text)) {
-
-						using var stream = File.OpenRead(path);
-
-						text = SourceText.From(stream, FileWriter.Utf8NoBom);
-						texts.Add(physical, text);
-					}
+					// Read through the document's own path, every time — also when the batch
+					// holds several names of one file (see FlushPendingChanges). The text is
+					// written back through that same path, so what is read through a path and
+					// what is written through it are always the same file. Sharing one read
+					// between the names of a file was tried and removed: it needs to know
+					// which file a path leads to, and when that answer is out of date one
+					// file's text is written into another (#341).
+					using var stream = File.OpenRead(path);
+					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 
 					// Already current. Applying identical text is not free: it still runs a
 					// TryApplyChanges, which writes to disk and flags a full reload if it fails.
