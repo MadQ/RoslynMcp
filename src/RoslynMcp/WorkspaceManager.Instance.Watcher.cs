@@ -303,10 +303,27 @@ internal sealed partial class WorkspaceManager
 						@lock.ExitReadLock();
 					}
 					
-					if(index.Count > 0)
+					if(index.Count > 0) {
+						
 						unreported.UnionWith(changed
 							.SelectMany(index.NamesOf)
 							.Where(name => !tracked.GetDocumentIdsWithFilePath(name).IsEmpty));
+						
+						// A deleted file takes the documents at its links with it: each of
+						// them is a link that leads nowhere now. They are handled as deleted
+						// documents — a reload in an MSBuild workspace, a removed document in
+						// an adhoc one. Nobody reports a delete at their paths: the links
+						// themselves are still there (#343).
+						var orphaned = deleted
+							.SelectMany(index.NamesOf)
+							.Where(name => !tracked.GetDocumentIdsWithFilePath(name).IsEmpty)
+							.Except(deleted, SecurityBoundary.PathComparer)
+							.ToArray()
+						;
+						
+						if(orphaned.Length > 0)
+							deleted = [.. deleted, .. orphaned];
+					}
 				}
 				catch(Exception ex) {
 					
