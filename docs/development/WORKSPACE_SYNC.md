@@ -252,7 +252,11 @@ workspace without links has an empty index and every lookup in it returns at onc
 - **Not covered** (#343): in an MSBuild workspace, a link that someone else changes while
   the server runs — repointed, replaced by a file, a file turned into a link, a linked
   directory repointed — leaves the index as it was until the next reload; changes to the file
-  the path leads to now do not reach that document. Deleting a file leaves the documents at
+  the path leads to now do not reach that document. In an AdhocWorkspace, which does keep
+  its index current, the one case left is a linked *directory* that is repointed: the watcher
+  reports the directory, which is neither a document nor an indexed name, and a linked
+  directory is not watched, so the documents under it stay indexed under the old target.
+  Deleting a file leaves the documents at
   its now-dangling links as they are.
 
 `SyncAdhocDocument` also keeps one file from becoming two documents: the walk that loads an
