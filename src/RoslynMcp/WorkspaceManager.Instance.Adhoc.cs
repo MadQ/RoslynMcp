@@ -1,14 +1,6 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Collections.Frozen;
 using System.IO.Enumeration;
-using System.Xml.Linq;
 
 namespace RoslynMcp;
 
@@ -87,7 +79,7 @@ internal sealed partial class WorkspaceManager
 				
 				if(path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
 					&& adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty
-					&& LinkTargetOf(path) is { } target) {
+					&& links.TargetOf(path) is { } target) {
 					
 					if(!adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(target).IsEmpty) {
 						

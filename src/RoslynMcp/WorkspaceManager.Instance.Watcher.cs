@@ -1,14 +1,5 @@
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Collections.Concurrent;
-using System.Diagnostics;
-using System.Collections.Frozen;
-using System.IO.Enumeration;
-using System.Xml.Linq;
 
 namespace RoslynMcp;
 
@@ -91,7 +82,7 @@ internal sealed partial class WorkspaceManager
 				
 				foreach(var path in paths) {
 					
-					if(IsUnderExcludedDirectory(path, IsExcludedDirectoryName))
+					if(edits.IsUnderExcludedDirectory(path))
 						continue;
 					
 					try {
@@ -126,7 +117,7 @@ internal sealed partial class WorkspaceManager
 			// sample in .git, anything — reaches FlushMSBuild as an unknown document and forces a
 			// full workspace reload, which is both slow and the operation that can drop metadata
 			// references (issue #235).
-			if(IsUnderExcludedDirectory(fullPath, IsNeverCompilationInput))
+			if(edits.IsUnderNeverInputDirectory(fullPath))
 
 				return;
 
@@ -463,7 +454,7 @@ internal sealed partial class WorkspaceManager
 				
 				try {
 					
-					var impact = ClassifyEditImpact(newSolution, path, out var info, out var reason);
+					var impact = edits.Classify(newSolution, path, out var info, out var reason);
 
 					// Not an incremental candidate — either no document tracks this path yet (MSBuildWorkspace
 					// doesn't support AddDocument via TryApplyChanges: it modifies the .csproj, conflicting with
@@ -479,7 +470,7 @@ internal sealed partial class WorkspaceManager
 						// A path that came from the index and is no document of this solution is
 						// not a new source file: a reload dropped it between the lookup and
 						// here. It is skipped, not taken for a file that has just appeared.
-						if(impact is WorkspaceEditImpact.Reload && !(reason == ReasonNewDocument && unreported.Contains(path)))
+						if(impact is WorkspaceEditImpact.Reload && !(reason == EditClassifier.ReasonNewDocument && unreported.Contains(path)))
 							FlagReload(reason, path);
 
 						continue;
