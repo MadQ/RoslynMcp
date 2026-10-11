@@ -343,7 +343,7 @@ var project = workspace.AddProject("MyProject", LanguageNames.CSharp);
 
 ### WorkspaceManager
 
-RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.cs`, `.Instance.cs`) loads the full solution when a single `.slnx` or `.sln` is found while walking upward from a resolved `.csproj` path, and caches workspace instances with LRU eviction:
+RoslynMcp's `WorkspaceManager` (split into `WorkspaceManager.cs`, `.Resolution.cs`, `.Instance.cs` and `.Instance.*.cs`) loads the full solution when a single `.slnx` or `.sln` is found while walking upward from a resolved `.csproj` path, and caches workspace instances with LRU eviction:
 
 - **Cache key:** Solution path (or .csproj/directory if no solution found)
 - **Cache size:** Configurable via `ROSLYNMCP_MAX_CACHED_WORKSPACES` (default 5)
