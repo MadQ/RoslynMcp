@@ -1515,14 +1515,17 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		// For the watcher flush: looks again at every changed path that is in the index, or
-		// that is a tracked document and leads to another file now. Other paths are left out —
-		// the index holds documents only. For a document with no link on the way to it this
-		// is one look at each directory level, the same that every applied change pays.
-		void ReindexChanged(string[] changed)
+		// that is a tracked document and leads to another file now, and at the names that
+		// depend on it. Other paths are left out — the index holds documents only. For a
+		// document with no link on the way to it this is one look at each directory level,
+		// the same that every applied change pays.
+		// Returns the names that lead to another file than before. Nobody reports a change at
+		// their paths, and they have other content now.
+		string[] ReindexChanged(string[] changed)
 		{
 			if(changed.Length == 0)
 				
-				return;
+				return [];
 			
 			Solution currentSolution;
 			
@@ -1535,15 +1538,39 @@ internal sealed partial class WorkspaceManager
 				@lock.ExitReadLock();
 			}
 			
+			var same  = SecurityBoundary.PathComparer;
 			var index = physicalIndex;
-			var names = changed
-				.Where(path => index.IsName(path)
-					|| (!currentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && LinkTargetOf(path) is not null))
-				.ToArray()
-			;
+			var names = new HashSet<string>(same);
 			
-			if(names.Any())
-				ReindexNames(names);
+			foreach(var path in changed) {
+				
+				// An indexed name: the link may have been repointed. Every name that reached
+				// the same file is looked at with it — some of them reach it through this one
+				// (a link to this link), and follow it wherever it leads now.
+				if(index.PhysicalOf(path) is { } former) {
+					
+					names.Add(path);
+					names.UnionWith(index.NamesOf(former));
+				}
+				
+				// A document that was a file of its own and is a link now. The links to it
+				// lead on through it.
+				else if(!currentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && LinkTargetOf(path) is not null) {
+					
+					names.Add(path);
+					names.UnionWith(index.NamesOf(path));
+				}
+			}
+			
+			if(names.Count == 0)
+				
+				return [];
+			
+			ReindexNames([.. names]);
+			
+			var current = physicalIndex;
+			
+			return [.. names.Where(name => !same.Equals(index.PhysicalOf(name), current.PhysicalOf(name)))];
 		}
 		
 		// Drops document paths that are no longer documents.
@@ -2394,7 +2421,10 @@ internal sealed partial class WorkspaceManager
 				// First the changed paths themselves are looked at again: a link may lead
 				// somewhere else now, and a document that was a file of its own may have
 				// become a link — a branch switch does that — without the workspace reloading.
-				ReindexChanged(changed);
+				// A name that depends on such a path leads to another file with it, and joins
+				// the batch: nobody reports a change at its own path.
+				if(ReindexChanged(changed) is { Length: > 0 } moved)
+					changed = [.. changed.Union(moved, SecurityBoundary.PathComparer)];
 				
 				if(physicalIndex.Count > 0) {
 					
@@ -2878,7 +2908,15 @@ internal sealed partial class WorkspaceManager
 
 				lock(indexLock) {
 
-					physicalIndex = reindexedDuringReload is { Count: > 0 } late
+					// Only the names the new solution still has. The set was filled against
+					// the old one, and a document this reload dropped must not come back
+					// into the index as a path nobody tracks.
+					var late = reindexedDuringReload?
+						.Where(name => !workspace.CurrentSolution.GetDocumentIdsWithFilePath(name).IsEmpty)
+						.ToArray()
+					;
+
+					physicalIndex = late is { Length: > 0 }
 						? newPhysicalIndex.With(late, LinkTargetOf)
 						: newPhysicalIndex
 					;

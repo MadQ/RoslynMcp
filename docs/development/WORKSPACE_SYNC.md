@@ -227,7 +227,8 @@ workspace without links has an empty index and every lookup in it returns at onc
 - **Kept current between reloads** where a name is seen to change: the watcher flush looks
   again at every changed path that is an indexed name (the link was repointed) or a tracked
   document that leads to another file now (a file of its own became a link, as a branch
-  switch can do, which reloads nothing); so does a
+  switch can do, which reloads nothing), together with every name that shared its file — a
+  link to a repointed link follows it, and joins the batch when it leads elsewhere now; so does a
   write that replaced a link where it sat — the documents that reached the old file *through*
   that link now reach the new content and are refreshed (`SyncReplacedLink`). In an MSBuild
   workspace a new link is a new document, which reloads and rebuilds. An AdhocWorkspace never
