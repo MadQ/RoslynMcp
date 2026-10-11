@@ -212,6 +212,27 @@ static class LinkedFileTests
 						
 						return (false, "FAIL  (precondition: Made.cs, a link to a file under obj, is not a document)");
 					
+					// The call above loaded this workspace, and its watchers start on a
+					// background thread: a delete made right now can come before they are
+					// live, and then nobody reports it (macOS takes long enough for that to
+					// happen). A new file is the probe — once it is a document, a report has
+					// arrived, or the catch-up pass that runs when the watchers go live has.
+					File.WriteAllText(fading.PathOf("Probe.cs"), "class WatcherIsLive { }\n");
+					
+					var live  = DateTime.UtcNow.AddSeconds(15);
+					var probe = false;
+					
+					while(DateTime.UtcNow < live && !probe) {
+						
+						await Task.Delay(250);
+						
+						probe = await IsDocumentAsync(fading.Dir, "Probe.cs");
+					}
+					
+					if(!probe)
+						
+						return (false, "FAIL  (precondition: a file created under the root never became a document — the watcher is not live)");
+					
 					File.Delete(generated);
 					
 					var deadline = DateTime.UtcNow.AddSeconds(10);
