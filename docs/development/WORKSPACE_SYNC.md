@@ -198,12 +198,71 @@ write may replace the link, and then there is nothing left to follow):
      `rmOwnedWriteSizes`, would be used up by the first report and leave a second one to be
      taken for a new document.
 
-4. `SyncOtherAliases` then refreshes every **other** tracked document that is the same file on
-   disk: a second link to it, a link earlier in a chain. It resolves every document path of the
-   solution (one query per document, one resolution per directory) and is reached only by a
-   write that went through a link. A write made straight to a file that has links to it does
-   not get here; an index of documents by physical file would cover that and make this cheap
-   (#341).
+4. `SyncAliases` then refreshes every **other** tracked document that is the same file on
+   disk: a second link to it, a link earlier in a chain. This is a lookup in the index
+   described below, not a look at the file system.
+
+#### One file, several documents: the index (#341)
+
+One file on disk can be several documents: the file under its own name, a link to it, a second
+link, the same file under a linked directory. `PhysicalFileIndex` holds the documents that are
+another file's name, keyed by the file they lead to, in the spelling `LinkTargetOf` gives. A
+workspace without links has an empty index and every lookup in it returns at once.
+
+- **Built** from the solution when the workspace loads and again on every reload, on the
+  loading thread, before the watcher starts. The cost is one look at the file system per
+  directory that holds a document and one per document; a path is resolved only when one of
+  those found a link. A directory outside the workspace root is resolved in full, once. The time is
+  logged as `Links — N of M document path(s) lead to another file (X ms)`.
+- **An MSBuild workspace never changes its index in place.** The index is built by a load and
+  swapped in together with the solution it was built from, under the workspace write lock, so
+  the two cannot disagree and nothing has to be kept in step while a reload is under way.
+  When a write by the server replaces a tracked link with a file (`SyncReplacedLink`),
+  `FlagLinkChanged` flags a reload, logged as `Reload — Flagged (link changed): <path>`, and
+  the reload builds a new index; the documents that reached the old file through that link
+  are read again at once. It moves the generation unconditionally: a reload already running
+  may have built its index before the write. A new link is a new document and reloads anyway.
+
+  An earlier version updated the index in place here, carried updates over a reload, and
+  looked for changed links in the watcher flush. Four reviews in a row each found another way
+  for that to race the swap or to reload too often. Do not bring it back without a design
+  that is reviewed as a whole (#343).
+- **An AdhocWorkspace updates its index in place**, under `indexLock`, because it never
+  reloads and so has no swap to race: `SyncAdhocDocument` and `RemoveDocument` enter and drop
+  names as documents come and go, the watcher flush looks again at changed names and the
+  names that shared their file (`RelinkAdhoc`), and `SyncReplacedLink` does the same after a
+  write. `SyncAdhocDocument` runs under a lock of its own (`adhocSyncLock`): it looks whether
+  a file is already a document and then adds one, from both a tool's write and the flush.
+- **Used in three places**, so that a change to a file refreshes every document that is that
+  file, whoever made the change and under whichever name:
+  - `WriteAndInvalidate` and `ApplyChangesWithFswSuppressed`: a write through a link (step 4
+    above), and a write **straight to a file that has links to it**, which nothing about the
+    written path gives away.
+  - `FlushPendingChanges`: the watcher reports a change under the file's own name only. The
+    documents at its other names are added to the batch, and both flushes compare their text
+    like any other. The index and the solution are read together under the workspace read
+    lock. The added names are passed on as `unreported`: one that is no document of the
+    solution the flush works on is skipped, never taken for a new source file. The whole pass
+    is fenced off, so a failure in it costs the added names and not the batch.
+- **The index is never used to decide which file a text belongs to.** Every document is read
+  through its own path and written back through its own path, also when a batch holds
+  several names of one file. An index that is behind can therefore only cost a refresh.
+  Sharing one read between the names of a file was tried: it has to know which file a path
+  leads to, and when that answer is out of date, one file's text is written into another.
+- **Not covered** (#343): in an MSBuild workspace, a link that someone else changes while
+  the server runs — repointed, replaced by a file, a file turned into a link, a linked
+  directory repointed — leaves the index as it was until the next reload; changes to the file
+  the path leads to now do not reach that document. In an AdhocWorkspace, which does keep
+  its index current, the one case left is a linked *directory* that is repointed: the watcher
+  reports the directory, which is neither a document nor an indexed name, and a linked
+  directory is not watched, so the documents under it stay indexed under the old target.
+  Deleting a file leaves the documents at
+  its now-dangling links as they are.
+
+`SyncAdhocDocument` also keeps one file from becoming two documents: the walk that loads an
+AdhocWorkspace does not enter a linked directory, so a file written under such a path is not a
+document under that name, and adding it would compile the file twice. The document the file
+already is gets the new text instead.
 
 A stamp in `ownedLinkTargets` also lapses on its own after 30 seconds, so it cannot go on
 vouching for a file that someone has since rewritten to the same length and write time.
