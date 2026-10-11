@@ -108,12 +108,12 @@ static class LinkedFileTests
 		}
 		
 		// Whether the workspace serves this file from a document of its own.
-		async Task<bool> IsDocumentAsync(string projectPath, string filePath)
+		async Task<bool> IsDocumentAsync(string? projectPath, string filePath)
 			=> (await Call("roslyn_read_file", new { filePath, projectPath }))?["source"]?.GetValue<string>() == "roslyn";
 		
 		// "pending", "none", or "unknown" when the probe itself failed. reload_pending is
 		// omitted from the JSON when false.
-		async Task<string> ReloadStateAsync(string projectPath)
+		async Task<string> ReloadStateAsync(string? projectPath)
 		{
 			
 			var data = await Call("roslyn_check_drift", new { projectPath });
@@ -213,25 +213,27 @@ static class LinkedFileTests
 						return (false, "FAIL  (precondition: Made.cs, a link to a file under obj, is not a document)");
 					
 					// The call above loaded this workspace, and its watchers start on a
-					// background thread: a delete made right now can come before they are
+					// background thread: a change made right now can come before they are
 					// live, and then nobody reports it (macOS takes long enough for that to
-					// happen). A new file is the probe — once it is a document, a report has
-					// arrived, or the catch-up pass that runs when the watchers go live has.
-					File.WriteAllText(fading.PathOf("Probe.cs"), "class WatcherIsLive { }\n");
-					
-					var live  = DateTime.UtcNow.AddSeconds(15);
+					// happen — the first version of this test deleted the file at once and
+					// failed there, and so did a single probe file). So a new probe file is
+					// created every half second until one of them has become a document:
+					// that one was reported, which only a live watcher does.
+					var live  = DateTime.UtcNow.AddSeconds(20);
 					var probe = false;
 					
-					while(DateTime.UtcNow < live && !probe) {
+					for(var n = 1; DateTime.UtcNow < live && !probe; n++) {
 						
-						await Task.Delay(250);
+						File.WriteAllText(fading.PathOf($"Probe{n}.cs"), $"class WatcherIsLive{n} {{ }}\n");
 						
-						probe = await IsDocumentAsync(fading.Dir, "Probe.cs");
+						await Task.Delay(500);
+						
+						probe = await IsDocumentAsync(fading.Dir, $"Probe{n}.cs");
 					}
 					
 					if(!probe)
 						
-						return (false, "FAIL  (precondition: a file created under the root never became a document — the watcher is not live)");
+						return (false, "FAIL  (precondition: none of the files created under the root over twenty seconds became a document — the watcher is not live)");
 					
 					File.Delete(generated);
 					
