@@ -214,8 +214,25 @@ workspace without links has an empty index and every lookup in it returns at onc
   directory that holds a document and one per document; a path is resolved only when one of
   those found a link. A directory outside the workspace root is resolved in full, once. The time is
   logged as `Links — N of M document path(s) lead to another file (X ms)`.
-- **Swapped as a whole.** An index never changes; a change makes a new one, assigned under
-  `indexLock`. Readers take no lock.
+- **An MSBuild workspace never changes its index in place.** The index is built by a load and
+  swapped in together with the solution it was built from, under the workspace write lock, so
+  the two cannot disagree and nothing has to be kept in step while a reload is under way.
+  When a tracked path is found to lead somewhere else than the index says — a link was
+  repointed, a link was replaced by a file (`SyncReplacedLink`), a file of its own became a
+  link, as a branch switch can do — `FlagLinkChanged` flags a reload, logged as
+  `Reload — Flagged (link changed): <path>`, and the reload builds a new index. It moves the
+  generation unconditionally: a reload already running may have built its index before the
+  link changed. A new link is a new document and reloads anyway.
+
+  An earlier version updated the index in place here and carried updates over a reload. Four
+  reviews in a row each found another way for that to race the swap. Do not bring it back: a
+  link that changes under a running server is rare, and a reload is what it costs.
+- **An AdhocWorkspace updates its index in place**, under `indexLock`, because it never
+  reloads and so has no swap to race: `SyncAdhocDocument` and `RemoveDocument` enter and drop
+  names as documents come and go, the watcher flush looks again at changed names and the
+  names that shared their file (`RelinkAdhoc`), and `SyncReplacedLink` does the same after a
+  write. `SyncAdhocDocument` runs under a lock of its own (`adhocSyncLock`): it looks whether
+  a file is already a document and then adds one, from both a tool's write and the flush.
 - **Used in three places**, so that a change to a file refreshes every document that is that
   file, whoever made the change and under whichever name:
   - `WriteAndInvalidate` and `ApplyChangesWithFswSuppressed`: a write through a link (step 4
@@ -223,20 +240,19 @@ workspace without links has an empty index and every lookup in it returns at onc
     written path gives away.
   - `FlushPendingChanges`: the watcher reports a change under the file's own name only. The
     documents at its other names are added to the batch, and both flushes compare their text
-    like any other.
-- **Kept current between reloads** where a name is seen to change: the watcher flush looks
-  again at every changed path that is an indexed name (the link was repointed) or a tracked
-  document that leads to another file now (a file of its own became a link, as a branch
-  switch can do, which reloads nothing), together with every name that shared its file — a
-  link to a repointed link follows it, and joins the batch when it leads elsewhere now; so does a
-  write that replaced a link where it sat — the documents that reached the old file *through*
-  that link now reach the new content and are refreshed (`SyncReplacedLink`). In an MSBuild
-  workspace a new link is a new document, which reloads and rebuilds. An AdhocWorkspace never
-  reloads, so `SyncAdhocDocument` and `RemoveDocument` enter and drop names as documents come
-  and go.
-- **Not covered:** a linked *directory* that is repointed after load stays as it was indexed
-  until the next reload. Deleting a file leaves the documents at its now-dangling links as
-  they are.
+    like any other. The index and the solution are read together under the workspace read
+    lock. The added names are passed on as `unreported`: one that is no document of the
+    solution the flush works on is skipped, never taken for a new source file. The whole pass
+    is fenced off, so a failure in it costs the added names and not the batch.
+- **The index is never used to decide which file a text belongs to.** `FlushMSBuild` reads
+  each file once per flush and shares the text between the documents that are that file. The
+  key for that is where a document's path leads *at that moment*, asked of the file system.
+  The text is written back through the document's own path, so a text filed under the wrong
+  file — which an index that is behind would do — overwrites a file with another file's
+  content.
+- **Not covered:** a linked *directory* that is repointed after load is noticed only when a
+  document under it is next reported as changed. Deleting a file leaves the documents at its
+  now-dangling links as they are (#343).
 
 `SyncAdhocDocument` also keeps one file from becoming two documents: the walk that loads an
 AdhocWorkspace does not enter a linked directory, so a file written under such a path is not a
