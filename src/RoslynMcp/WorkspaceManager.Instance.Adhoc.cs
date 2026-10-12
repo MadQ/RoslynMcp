@@ -122,6 +122,20 @@ internal sealed partial class WorkspaceManager
 		{
 			lock(adhocSyncLock) {
 				
+				// The file itself, when the documents it has are links to it: it lies outside the
+				// tree the load walks (under obj, say) but inside what the watcher covers, so
+				// a change to it is reported under its own path. Those documents are the file
+				// and get the new text; the path does not become a second document.
+				if(path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
+					&& adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty
+					&& physicalIndex.NamesOf(path) is { Length: > 0 } documents) {
+					
+					foreach(var name in documents)
+						AddOrUpdateDocument(adhocWorkspace, projectId, name);
+					
+					return;
+				}
+				
 				if(path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
 					&& adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty
 					&& links.TargetOf(path) is { } target) {

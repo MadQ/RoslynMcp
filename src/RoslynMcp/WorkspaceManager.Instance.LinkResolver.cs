@@ -37,7 +37,20 @@ internal sealed partial class WorkspaceManager
 			///     </para>
 			/// </summary>
 			public string? TargetOf(string fullPath)
+				=> TryTargetOf(fullPath, out var target) ? target : null
+			;
+			
+			/// <summary>
+			///     <see cref="TargetOf"/> for a caller that has to tell "leads nowhere else"
+			///     from "could not be worked out": false for the second, and
+			///     <paramref name="target"/> is then null without meaning anything. A caller
+			///     that acts on a <em>change</em> in where a path leads needs the difference —
+			///     a path that cannot be examined for a moment has not changed.
+			/// </summary>
+			public bool TryTargetOf(string fullPath, out string? target)
 			{
+				target = null;
+				
 				try {
 					
 					// The usual case by far, and it has to be cheap: this is asked for every
@@ -47,11 +60,11 @@ internal sealed partial class WorkspaceManager
 					// level — no resolution of the path or of the root.
 					if(SecurityBoundary.IsUnderDirectory(fullPath, rootPath) && !SecurityBoundary.HasLinkBelowRoot(fullPath, rootPath))
 						
-						return null;
+						return true;
 					
 					if(SecurityBoundary.ResolveLinks(fullPath) is not { } resolved)
 						
-						return null;
+						return false;
 					
 					// From the workspace root upwards — not from the written path. A link at or above
 					// the root is where the user put the workspace and stays as written; a link
@@ -68,14 +81,18 @@ internal sealed partial class WorkspaceManager
 						
 						// The same name the way the file system compares names, which on Linux is
 						// to the letter: Foo.cs leading to foo.cs leads somewhere else.
-						return SecurityBoundary.PathComparer.Equals(respelled, fullPath) ? null : respelled;
+						target = SecurityBoundary.PathComparer.Equals(respelled, fullPath) ? null : respelled;
+						
+						return true;
 					}
 					
-					return SecurityBoundary.PathComparer.Equals(resolved, fullPath) ? null : resolved;
+					target = SecurityBoundary.PathComparer.Equals(resolved, fullPath) ? null : resolved;
+					
+					return true;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
 					
-					return null;
+					return false;
 				}
 			}
 			
@@ -109,36 +126,43 @@ internal sealed partial class WorkspaceManager
 			{
 				var directories = new Dictionary<string, bool>(SecurityBoundary.PathComparer);
 				
-				// Null without resolving anything for a document under the root with no link on
-				// the way to it — nearly every document there is. HasLinkBelowRoot answers true
-				// for what it cannot examine, and TargetOf then has the last word.
-				string? PhysicalOf(string path)
-				{
-					if(Path.GetDirectoryName(path) is { } directory) {
-						
-						// Asked once per directory. Under the root that is a look at each level
-						// down to it. A directory elsewhere — a referenced project, when the root
-						// is one project's directory — is resolved in full, which is why it must
-						// not be done per document.
-						if(!directories.TryGetValue(directory, out var linked)) {
-							
-							linked = SecurityBoundary.IsUnderDirectory(directory, rootPath)
-								? SecurityBoundary.HasLinkBelowRoot(directory, rootPath)
-								: TargetOf(directory) is not null
-							;
-							directories.Add(directory, linked);
-						}
-						
-						// With the directory as the root, only the file itself is looked at.
-						if(!linked && !SecurityBoundary.HasLinkBelowRoot(path, directory))
-							
-							return null;
-					}
+				// Null without resolving anything for a path with no link on the way to it —
+				// nearly every document there is.
+				return PhysicalFileIndex.Build(paths, path => MayLeadElsewhere(path, directories) ? TargetOf(path) : null);
+			}
+			
+			/// <summary>
+			///     The cheap question to ask before <see cref="TargetOf"/> when many paths are
+			///     looked at in one go: false means the path certainly leads nowhere else —
+			///     there is no link on the way to it. True means it may, and
+			///     <see cref="TargetOf"/> has the last word; that includes what cannot be
+			///     examined.
+			///     <para>
+			///         <paramref name="directories"/> is the caller's memo for the pass, by
+			///         directory. A directory is asked about once: under the root that is a
+			///         look at each level down to it; a directory elsewhere — a referenced
+			///         project, when the root is one project's directory — is resolved in
+			///         full, which is why it must not be done per path. After that a path
+			///         costs one look, at the file itself.
+			///     </para>
+			/// </summary>
+			public bool MayLeadElsewhere(string path, Dictionary<string, bool> directories)
+			{
+				if(Path.GetDirectoryName(path) is not { } directory)
 					
-					return TargetOf(path);
+					return true;
+				
+				if(!directories.TryGetValue(directory, out var linked)) {
+					
+					linked = SecurityBoundary.IsUnderDirectory(directory, rootPath)
+						? SecurityBoundary.HasLinkBelowRoot(directory, rootPath)
+						: TargetOf(directory) is not null
+					;
+					directories.Add(directory, linked);
 				}
 				
-				return PhysicalFileIndex.Build(paths, PhysicalOf);
+				// With the directory as the root, only the file itself is looked at.
+				return linked || SecurityBoundary.HasLinkBelowRoot(path, directory);
 			}
 		}
 	}

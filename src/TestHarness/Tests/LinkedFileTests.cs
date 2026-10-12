@@ -41,7 +41,10 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class LinkedFileTests
 {
-	internal static TestGroup Build(TestContext ctx)
+	/// <param name="ctx">The harness's connection to the server.</param>
+	/// <param name="serverLogDir">Directory the harness pointed ROSLYNMCP_LOG_PATH at.</param>
+	/// <param name="serverLogGlob">File pattern of the server's log in that directory.</param>
+	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
 		
 		var loose   = TestFixtures.NewAdhocDir("LinkedFilesLoad");
@@ -58,12 +61,30 @@ static class LinkedFileTests
 		var generated = fading.Write("obj/Made.cs",    "class MadeElsewhere { }\n");
 		var stored    = project.Write("store/Gone.cs", "class StoredApart { }\n");
 		
+		// For the links that change while the server runs. Both targets are kept out of the
+		// compilation, so that only the link is a document.
+		var moving = TestFixtures.NewMsBuildProject("LinkedFilesRepoint", extraProjectXml: """
+			<ItemGroup>
+			  <Compile Remove="store/**" />
+			</ItemGroup>
+			""");
+		
+		var first   = moving.Write("store/One.cs", "class FirstTarget { }\n");
+		var second  = moving.Write("store/Two.cs", "class SecondTarget { }\n");
+		var plain   = moving.Write("Plain.cs",     "class PlainFile { }\n");
+		var pointer = moving.PathOf("Pointer.cs");
+		
+		// One ordinary source file per project, for SettleAsync to probe the watcher with.
+		var projectBeacon = project.Write("Beacon.cs", "class BeaconOfDelete { }\n");
+		var movingBeacon  = moving.Write("Beacon.cs",  "class BeaconOfRepoint { }\n");
+		
 		var links = new[] {
 			(Link: loose.PathOf("Alias.cs"),  Target: real),
 			(Link: loose.PathOf("OutA.cs"),   Target: apart),
 			(Link: loose.PathOf("OutB.cs"),   Target: apart),
 			(Link: fading.PathOf("Made.cs"),  Target: generated),
 			(Link: project.PathOf("Here.cs"), Target: stored),
+			(Link: pointer,                   Target: first),
 		};
 		
 		var linked = false;
@@ -125,6 +146,113 @@ static class LinkedFileTests
 			return data["reload_pending"]?.GetValue<bool>() == true ? "pending" : "none";
 		}
 		
+		// Loads the workspace and waits until no reload is pending, so that a flag seen later
+		// was raised by the test's own change. Then makes sure the watchers are live: they
+		// start on a background thread, and a change made before that is reported by nobody
+		// (macOS takes long enough for a test to fall into that). The probe is an edit of an
+		// ordinary tracked file, which is applied in place and reloads nothing — once the
+		// workspace serves the edited text, the edit was reported, or picked up by the
+		// catch-up pass that runs the moment the watchers go live. Either way they are live.
+		async Task<bool> SettleAsync(string? projectPath, string beaconPath)
+		{
+			
+			var deadline = DateTime.UtcNow.AddSeconds(30);
+			var settled  = false;
+			
+			while(DateTime.UtcNow < deadline && !settled) {
+				
+				await Call("roslyn_get_diagnostics", new { projectPath, take = 0, severity = "errors" });
+				
+				settled = await ReloadStateAsync(projectPath) == "none";
+				
+				if(!settled)
+					await Task.Delay(250);
+			}
+			
+			if(!settled)
+				
+				return false;
+			
+			var marker = $"// live {Guid.NewGuid():N}";
+			
+			File.AppendAllText(beaconPath, marker + "\n");
+			
+			while(DateTime.UtcNow < deadline) {
+				
+				await Task.Delay(250);
+				
+				var blocks = await CallBlocks("roslyn_read_file", new { filePath = Path.GetFileName(beaconPath), projectPath });
+				
+				if(blocks.Length > 1 && blocks[0].Contains("\"roslyn\"") && blocks[1].Contains(marker))
+					
+					return true;
+			}
+			
+			return false;
+		}
+		
+		// The same for a workspace without a project, where a new file is a new document and
+		// reloads nothing: a probe file is created every half second until one of them has
+		// become a document. A single probe is not enough — created right after the load, it
+		// can itself come before the watchers are live, and the catch-up pass does not look
+		// for new files.
+		async Task<bool> AwaitLiveAsync(FixtureProject fixture)
+		{
+			
+			var deadline = DateTime.UtcNow.AddSeconds(20);
+			
+			for(var n = 1; DateTime.UtcNow < deadline; n++) {
+				
+				File.WriteAllText(fixture.PathOf($"Probe{n}.cs"), $"class WatcherIsLive{n} {{ }}\n");
+				
+				await Task.Delay(500);
+				
+				if(await IsDocumentAsync(fixture.Dir, $"Probe{n}.cs"))
+					
+					return true;
+			}
+			
+			return false;
+		}
+		
+		// Whether the server's log says a reload was flagged because the link at this file
+		// changed. reload_pending alone would be satisfied by any reload reason — a document
+		// reported as deleted, say — and the test is about this one.
+		bool FlaggedAsLinkChange(string fixtureLabel, string fileName)
+			=> WorkspaceHygieneTests.TryReadLog(serverLogDir, serverLogGlob, out var lines, out _)
+				&& lines.Any(line => line.Contains("Flagged (link changed)") && line.Contains(fixtureLabel) && line.Contains(fileName));
+		
+		// Polls until a reload is pending, for at most ten seconds.
+		async Task<string> AwaitReloadAsync(string? projectPath)
+		{
+			
+			var deadline = DateTime.UtcNow.AddSeconds(10);
+			var state    = "none";
+			
+			while(DateTime.UtcNow < deadline && state != "pending") {
+				
+				await Task.Delay(250);
+				
+				state = await ReloadStateAsync(projectPath);
+			}
+			
+			return state;
+		}
+		
+		// Puts a link to target at path in one step, whatever is there now: the link is made
+		// under another name and moved over it. Deleting first would leave a moment in which
+		// the path does not exist, and a flush that falls into it sees a deleted document —
+		// a reload for a reason that is not the one under test. The other name does not end
+		// in .cs, so that it is not a new source file either.
+		static void PointAt(string path, string target)
+		{
+			
+			var staged = path + ".staged";
+			
+			File.CreateSymbolicLink(staged, target);
+			File.Move(staged, path, overwrite: true);
+		}
+		
 		// A skip on a developer's machine, a failure on a CI runner — see Skip.
 		const string noLinks = "this machine may not create symbolic links";
 		
@@ -165,40 +293,56 @@ static class LinkedFileTests
 						
 						return Skip.SetupUnavailable(noLinks);
 					
-					// Loads the workspace, and waits until nothing is pending, so that a flag
-					// seen afterwards was raised by the delete.
-					var settle = DateTime.UtcNow.AddSeconds(15);
-					var before = "unknown";
-					
-					while(DateTime.UtcNow < settle && before != "none") {
+					if(!await SettleAsync(project.Csproj, projectBeacon) || !await IsDocumentAsync(project.Csproj, "Here.cs"))
 						
-						await Call("roslyn_get_diagnostics", new { projectPath = project.Csproj, take = 0, severity = "errors" });
-						
-						before = await ReloadStateAsync(project.Csproj);
-						
-						if(before != "none")
-							await Task.Delay(250);
-					}
-					
-					if(before != "none" || !await IsDocumentAsync(project.Csproj, "Here.cs"))
-						
-						return (false, $"FAIL  (precondition: reload state before the delete: {before}; Here.cs must be a document)");
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers, or Here.cs is not a document)");
 					
 					File.Delete(stored);
 					
-					var deadline = DateTime.UtcNow.AddSeconds(10);
-					var after    = "none";
-					
-					while(DateTime.UtcNow < deadline && after != "pending") {
-						
-						await Task.Delay(250);
-						
-						after = await ReloadStateAsync(project.Csproj);
-					}
+					var after = await AwaitReloadAsync(project.Csproj);
 					
 					return after == "pending"
 						? (true,  "PASS")
 						: (false, $"FAIL  (reload state ten seconds after the delete: {after})");
+				}),
+			
+			// The file behind the link is edited where it lies. It is reported under its own
+			// path, obj/Made.cs — a path that is no document, because the loading walk stays
+			// out of obj. The document it has is the link. The edit must reach that document,
+			// and the path must not become a second one: that would be the file compiled
+			// twice again, by the back door.
+			new("linked files: an edit of the file behind a link adds no second document in a workspace without a project",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					if(!await IsDocumentAsync(fading.Dir, "Made.cs") || !await AwaitLiveAsync(fading))
+						
+						return (false, "FAIL  (precondition: Made.cs is not a document, or the watcher never went live)");
+					
+					File.WriteAllText(generated, "class MadeElsewhere { public int EditedInPlace; }\n");
+					
+					var deadline = DateTime.UtcNow.AddSeconds(10);
+					var current  = false;
+					
+					while(DateTime.UtcNow < deadline && !current) {
+						
+						await Task.Delay(250);
+						
+						var blocks = await CallBlocks("roslyn_read_file", new { filePath = "Made.cs", projectPath = fading.Dir });
+						
+						current = blocks.Length > 1 && blocks[0].Contains("\"roslyn\"") && blocks[1].Contains("EditedInPlace");
+					}
+					
+					var data       = await Call("roslyn_get_diagnostics", new { projectPath = fading.Dir, take = 200, severity = "errors" });
+					var duplicates = data?["items"] is JsonArray items ? items.Count(item => item?["code"]?.GetValue<string>() == "CS0101") : -1;
+					var second     = await IsDocumentAsync(fading.Dir, "obj/Made.cs");
+					
+					return current && duplicates == 0 && !second
+						? (true,  "PASS")
+						: (false, $"FAIL  (the link's document has the edit: {current}; duplicate-type errors: {duplicates}; obj/Made.cs a document of its own: {second})");
 				}),
 			
 			new("linked files: deleting the file behind a link removes the document in a workspace without a project",
@@ -208,32 +352,9 @@ static class LinkedFileTests
 						
 						return Skip.SetupUnavailable(noLinks);
 					
-					if(!await IsDocumentAsync(fading.Dir, "Made.cs"))
+					if(!await IsDocumentAsync(fading.Dir, "Made.cs") || !await AwaitLiveAsync(fading))
 						
-						return (false, "FAIL  (precondition: Made.cs, a link to a file under obj, is not a document)");
-					
-					// The call above loaded this workspace, and its watchers start on a
-					// background thread: a change made right now can come before they are
-					// live, and then nobody reports it (macOS takes long enough for that to
-					// happen — the first version of this test deleted the file at once and
-					// failed there, and so did a single probe file). So a new probe file is
-					// created every half second until one of them has become a document:
-					// that one was reported, which only a live watcher does.
-					var live  = DateTime.UtcNow.AddSeconds(20);
-					var probe = false;
-					
-					for(var n = 1; DateTime.UtcNow < live && !probe; n++) {
-						
-						File.WriteAllText(fading.PathOf($"Probe{n}.cs"), $"class WatcherIsLive{n} {{ }}\n");
-						
-						await Task.Delay(500);
-						
-						probe = await IsDocumentAsync(fading.Dir, $"Probe{n}.cs");
-					}
-					
-					if(!probe)
-						
-						return (false, "FAIL  (precondition: none of the files created under the root over twenty seconds became a document — the watcher is not live)");
+						return (false, "FAIL  (precondition: Made.cs, a link to a file under obj, is not a document, or the watcher never went live)");
 					
 					File.Delete(generated);
 					
@@ -251,6 +372,59 @@ static class LinkedFileTests
 						? (true,  "PASS")
 						: (false, "FAIL  (Made.cs is still a document ten seconds after the file behind it was deleted)");
 				}),
+			
+			// A link that someone else changes while the server runs (#343). The index says
+			// where each linked document led when the workspace loaded; after this it is
+			// wrong for Pointer.cs, and a change to the file it leads to now would not reach
+			// the document. The workspace has to notice and reload. Only the link is a
+			// document here — both files it points at are kept out of the compilation — so
+			// nothing but the link itself can raise the flag: its text changes too, but a
+			// changed text is applied in place and reloads nothing.
+			new("linked files: repointing a link while the server runs flags a reload",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					if(!await SettleAsync(moving.Csproj, movingBeacon) || !await IsDocumentAsync(moving.Csproj, "Pointer.cs"))
+						
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers, or Pointer.cs is not a document)");
+					
+					PointAt(pointer, second);
+					
+					var state  = await AwaitReloadAsync(moving.Csproj);
+					var reason = FlaggedAsLinkChange("LinkedFilesRepoint", "Pointer.cs");
+					
+					return state == "pending" && reason
+						? (true,  "PASS")
+						: (false, $"FAIL  (reload state ten seconds after the link was repointed: {state}; logged as a link change: {reason})");
+				}),
+			
+			// The other way a path comes to lead elsewhere: a source file of its own is
+			// replaced by a link, as a branch switch can do. Before, the file was not in
+			// the index at all, so there is no entry to compare with — the check has to
+			// look at a tracked document that the index knows nothing about.
+			new("linked files: a source file that becomes a link while the server runs flags a reload",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable(noLinks);
+					
+					if(!await SettleAsync(moving.Csproj, movingBeacon) || !await IsDocumentAsync(moving.Csproj, "Plain.cs"))
+						
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers, or Plain.cs is not a document)");
+					
+					PointAt(plain, second);
+					
+					var state  = await AwaitReloadAsync(moving.Csproj);
+					var reason = FlaggedAsLinkChange("LinkedFilesRepoint", "Plain.cs");
+					
+					return state == "pending" && reason
+						? (true,  "PASS")
+						: (false, $"FAIL  (reload state ten seconds after the file became a link: {state}; logged as a link change: {reason})");
+				}),
 		};
 		
 		return new TestGroup($"Linked Files ({tests.Count} tests)", tests, Teardown: () => {
@@ -262,6 +436,16 @@ static class LinkedFileTests
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
+			// Plain.cs is a link once its test has run, and so may a staged link be if a test
+			// stopped half way.
+			foreach(var path in new[] { plain, plain + ".staged", pointer + ".staged" })
+				try {
+					if(new FileInfo(path).LinkTarget is not null)
+						File.Delete(path);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			
+			moving.Dispose();
 			loose.Dispose();
 			outside.Dispose();
 			fading.Dispose();

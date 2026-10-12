@@ -441,7 +441,7 @@ static class WorkspaceHygieneTests
 	///     unreadable, or implausibly short — the last meaning it is not the log this run wrote, in which case
 	///     an assertion over it would pass on missing evidence rather than on a clean run.
 	/// </summary>
-	static bool TryReadLog(string logDir, string logGlob, out string[] lines, out string failure)
+	internal static bool TryReadLog(string logDir, string logGlob, out string[] lines, out string failure)
 	{
 		lines   = [];
 		failure = "";

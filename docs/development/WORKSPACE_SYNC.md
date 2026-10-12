@@ -219,16 +219,41 @@ workspace without links has an empty index and every lookup in it returns at onc
 - **An MSBuild workspace never changes its index in place.** The index is built by a load and
   swapped in together with the solution it was built from, under the workspace write lock, so
   the two cannot disagree and nothing has to be kept in step while a reload is under way.
-  When a write by the server replaces a tracked link with a file (`SyncReplacedLink`),
-  `FlagLinkChanged` flags a reload, logged as `Reload — Flagged (link changed): <path>`, and
-  the reload builds a new index; the documents that reached the old file through that link
-  are read again at once. It moves the generation unconditionally: a reload already running
-  may have built its index before the write. A new link is a new document and reloads anyway.
+  A new link is a new document and reloads anyway.
+- **A link that changes flags a reload** (#343). When a tracked path leads somewhere else
+  than the index says, `FlagLinkChanged` flags a reload, logged as
+  `Reload — Flagged (link changed): <path>`, and the reload builds the next index. Each flag
+  moves the generation, also while a reload is pending: a reload already running may have
+  built its index before the change. Two things find such a path:
+  - `SyncReplacedLink`, after a write by the server replaced a tracked link with a file;
+  - `FindChangedLinks`, in the watcher flush, for a path someone else changed: a link
+    repointed, a link replaced by a file, a file of its own turned into a link.
 
-  An earlier version updated the index in place here, carried updates over a reload, and
-  looked for changed links in the watcher flush. Four reviews in a row each found another way
-  for that to race the swap or to reload too often. Do not bring it back without a design
-  that is reviewed as a whole (#343).
+  In both cases the documents that shared the path's old file, or lead through the path,
+  are read again at once, each through its own path — the reload only comes with the next
+  call that needs the workspace.
+
+  This is the third version. The first updated the index in place and carried updates over
+  a reload; it raced the swap in several ways. The second flagged a reload on every flush
+  that saw the mismatch, resolved every changed document, and took a failed resolution for
+  a change. Three rules came out of that, and `FindChangedLinks` keeps all three:
+  1. **Once per change, not once per flush.** A flush keeps seeing a changed link until the
+     reload has finished, because until then the index is the old one — and a reload whose
+     generation moves is thrown away. `ObserveLink` records where each such path was last
+     seen to lead, for the index the workspace holds, and reports news only when that
+     differs. So the same mismatch seen again is not news; a link repointed a second time
+     before the reload is done is, and so is one pointed back where the index says — the
+     reload under way may have read the state in between. The record starts over when the
+     index is another one. The comparison is always with the index the workspace holds at
+     that moment, looked up under the lock — a flush may still hold the one from before a
+     swap, and what that said settles nothing about the new one.
+  2. **A path that cannot be examined has not changed.** `LinkResolver.TryTargetOf` reports
+     "could not be worked out" apart from "leads nowhere else", and such a path is skipped.
+  3. **No cost outside the root.** Only a reported path that is an indexed name, or a
+     tracked document under the root, is looked at, with one memo of directories for the
+     batch (`LinkResolver.MayLeadElsewhere`, the same the index build uses): a directory is
+     asked about once, and after that a document in it costs one look. A document elsewhere
+     is not resolved, so a file outside the root that becomes a link is not noticed.
 - **An AdhocWorkspace updates its index in place**, under `indexLock`, because it never
   reloads and so has no swap to race: `SyncAdhocDocument` and `RemoveDocument` enter and drop
   names as documents come and go, the watcher flush looks again at changed names and the
@@ -251,18 +276,24 @@ workspace without links has an empty index and every lookup in it returns at onc
   several names of one file. An index that is behind can therefore only cost a refresh.
   Sharing one read between the names of a file was tried: it has to know which file a path
   leads to, and when that answer is out of date, one file's text is written into another.
-- **Not covered** (#343): in an MSBuild workspace, a link that someone else changes while
-  the server runs — repointed, replaced by a file, a file turned into a link, a linked
-  directory repointed — leaves the index as it was until the next reload; changes to the file
-  the path leads to now do not reach that document. In an AdhocWorkspace, which does keep
-  its index current, the one case left is a linked *directory* that is repointed: the watcher
-  reports the directory, which is neither a document nor an indexed name, and a linked
-  directory is not watched, so the documents under it stay indexed under the old target.
+- **Not covered:** a linked *directory* that is repointed while the server runs, in either
+  kind of workspace. The watcher reports the directory, if anything — a path that is neither
+  a document nor an indexed name — and a linked directory is not watched, so the documents
+  under it stay indexed under the old target until the next reload (an AdhocWorkspace: until
+  the server restarts). Changes to the files they lead to now do not reach them. Also not
+  covered: a document outside the workspace root that becomes a link (rule 3 above), and a
+  link that changes in the moment between a workspace's load and its watchers going live.
 - **A deleted file takes the documents at its links with it** (#343). The watcher reports
   the delete under the file's own name; the links are still there and nobody reports them.
   `FlushPendingChanges` adds the indexed names of a deleted file to the deleted set, and the
   existing handling does the rest: an MSBuild workspace flags a reload ("tracked document
-  deleted"), an AdhocWorkspace removes the documents and drops the names.
+  deleted"), an AdhocWorkspace removes the documents and drops the names. A delete
+  report is taken at its word once the flush runs and the file is not there: a tool that
+  rewrites the file by deleting it and creating it again, with a pause longer than the
+  debounce in between, gets the same treatment as a real delete. For a project that is what
+  happens to any tracked file rewritten that way. In an AdhocWorkspace the link's document
+  is removed and does not come back when the file does — the new file is reported under its
+  own path, and the link is no longer in the index — until the server restarts.
 - **Considered and rejected: one apply for all names of a file** (#343). After a write to a
   file with links, each linked document is refreshed by an apply of its own, and
   `MSBuildWorkspace` writes the same content to the same file once per name. Putting the
@@ -282,8 +313,13 @@ that is among the files found, otherwise by the first link to it. `LoadAllFiles`
 at load, from the same look at the paths that builds the index (#343). `SyncAdhocDocument`
 applies the same rule to a path that is written or reported later: the walk does not enter a
 linked directory, so a file written under one is not a document under that name, and the
-document the file already is gets the new text instead (#341). A link is therefore treated
-alike before and after a restart.
+document the file already is gets the new text instead (#341). The same holds the other way
+round: when the file itself is reported — it lies under `obj`, say, which the walk stays out
+of and the watcher covers — and its documents are links to it, those documents get the new
+text and the file's own path does not become one. A link is therefore treated alike before
+and after a restart, with one exception: when the link that represents a file goes away, a
+second link to that file which the load left out is not taken in its place. The file is
+then missing from the compilation until the server restarts.
 
 A stamp in `ownedLinkTargets` also lapses on its own after 30 seconds, so it cannot go on
 vouching for a file that someone has since rewritten to the same length and write time.
