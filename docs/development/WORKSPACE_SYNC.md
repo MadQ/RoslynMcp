@@ -258,13 +258,32 @@ workspace without links has an empty index and every lookup in it returns at onc
   its index current, the one case left is a linked *directory* that is repointed: the watcher
   reports the directory, which is neither a document nor an indexed name, and a linked
   directory is not watched, so the documents under it stay indexed under the old target.
-  Deleting a file leaves the documents at
-  its now-dangling links as they are.
+- **A deleted file takes the documents at its links with it** (#343). The watcher reports
+  the delete under the file's own name; the links are still there and nobody reports them.
+  `FlushPendingChanges` adds the indexed names of a deleted file to the deleted set, and the
+  existing handling does the rest: an MSBuild workspace flags a reload ("tracked document
+  deleted"), an AdhocWorkspace removes the documents and drops the names.
+- **Considered and rejected: one apply for all names of a file** (#343). After a write to a
+  file with links, each linked document is refreshed by an apply of its own, and
+  `MSBuildWorkspace` writes the same content to the same file once per name. Putting the
+  texts of all names into one apply would save the extra applies, not the writes — and it
+  would hand a text to documents on the word of the index, to be written back through their
+  paths. That is the rule above, broken. The cost is paid only by a file that has links.
+- **Considered and rejected: an index that changes without copying** (#343).
+  `PhysicalFileIndex.With` copies the name table on every change. Only an AdhocWorkspace
+  changes its index in place, and its index holds only links to files that are not documents
+  themselves (see below) — a handful of entries. A persistent collection would make every
+  lookup slower to make that copy cheaper.
 
-`SyncAdhocDocument` also keeps one file from becoming two documents: the walk that loads an
-AdhocWorkspace does not enter a linked directory, so a file written under such a path is not a
-document under that name, and adding it would compile the file twice. The document the file
-already is gets the new text instead.
+**One document per file in an AdhocWorkspace.** An AdhocWorkspace takes every `.cs` it finds
+for a document, and a link to a source file is the same file again: loading both compiles it
+twice, with every type declared twice. So a file is represented once — by its own path when
+that is among the files found, otherwise by the first link to it. `LoadAllFiles` decides that
+at load, from the same look at the paths that builds the index (#343). `SyncAdhocDocument`
+applies the same rule to a path that is written or reported later: the walk does not enter a
+linked directory, so a file written under one is not a document under that name, and the
+document the file already is gets the new text instead (#341). A link is therefore treated
+alike before and after a restart.
 
 A stamp in `ownedLinkTargets` also lapses on its own after 30 seconds, so it cannot go on
 vouching for a file that someone has since rewritten to the same length and write time.

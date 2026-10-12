@@ -331,11 +331,11 @@ internal sealed partial class WorkspaceManager
 					defaultProjectId = adhocPid;
 					isMSBuild        = false;
 					
+					// Loads the documents and builds the index in one pass, before the watcher
+					// starts: its flush updates the index, and an update made while the index
+					// was still being built would be overwritten by it.
 					LoadAllFiles((AdhocWorkspace) workspace, defaultProjectId);
 					
-					// Before the watcher starts: its flush updates the index, and an update made
-					// while the index was still being built would be overwritten by it.
-					physicalIndex = BuildPhysicalIndex(workspace.CurrentSolution);
 					StartWatcher();
 					break;
 				

@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
+using System.Diagnostics;
 using System.IO.Enumeration;
 
 namespace RoslynMcp;
@@ -10,12 +11,56 @@ internal sealed partial class WorkspaceManager
 	{
 		// ── AdhocWorkspace file management ───────────────────────────────────
 		
+		/// <summary>
+		///     Loads every source file under the root as a document — one document per file on
+		///     disk — and builds <see cref="physicalIndex"/> from the same look at the paths.
+		///     <para>
+		///         A source file that is a symbolic link is the same file as the one it leads
+		///         to. Loading both puts the file into the compilation twice, with every type
+		///         in it declared twice (#343). So a file is represented once: by its own path
+		///         when that is among the files found, and otherwise — the file lies outside
+		///         the root, or in a directory the walk stays out of — by the first link to it.
+		///         <see cref="SyncAdhocDocument"/> applies the same rule to a path that turns up
+		///         after the load, so a link is treated alike before and after a restart.
+		///     </para>
+		/// </summary>
 		void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId projectId)
 		{
-			var files = EnumerateFilesWithErrorHandling(rootPath, "*.cs");
+			var files   = EnumerateFilesWithErrorHandling(rootPath, "*.cs").ToArray();
+			var watch   = Stopwatch.StartNew();
+			var index   = links.BuildIndex(files);
+			var elapsed = watch.ElapsedMilliseconds;
 			
-			foreach(var path in files)
-				AddOrUpdateDocument(adhocWorkspace, projectId, path);
+			// The usual case: no links, nothing to decide.
+			if(index.Count == 0) {
+				
+				foreach(var path in files)
+					AddOrUpdateDocument(adhocWorkspace, projectId, path);
+			}
+			else {
+				
+				var found       = new HashSet<string>(files, SecurityBoundary.PathComparer);
+				var represented = new HashSet<string>(SecurityBoundary.PathComparer);
+				var leftOut     = new List<string>();
+				
+				foreach(var path in files) {
+					
+					if(index.PhysicalOf(path) is { } physical && (found.Contains(physical) || !represented.Add(physical))) {
+						
+						leftOut.Add(path);
+						continue;
+					}
+					
+					AddOrUpdateDocument(adhocWorkspace, projectId, path);
+				}
+				
+				// The index holds documents only.
+				index = index.With(leftOut, _ => null);
+			}
+			
+			physicalIndex = index;
+			
+			logger.LogInfo("Links", $"{index.Count} of {files.Length} document path(s) lead to another file ({elapsed}ms)");
 		}
 		
 		IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)

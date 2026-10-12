@@ -81,11 +81,31 @@ internal sealed partial class WorkspaceManager
 			
 			/// <summary>
 			///     Builds the index for a solution, and says in <paramref name="documentPaths"/>
-			///     how many document paths were looked at. Looks at the file system once per
-			///     directory that holds a document and once per document; a path is resolved
-			///     only when one of those turned up a link.
+			///     how many document paths were looked at.
 			/// </summary>
 			public PhysicalFileIndex BuildIndex(Solution solution, out int documentPaths)
+			{
+				var paths = solution.Projects
+					.SelectMany(project => project.Documents
+						.Concat<TextDocument>(project.AdditionalDocuments)
+						.Concat(project.AnalyzerConfigDocuments))
+					.Select(document => document.FilePath)
+					.OfType<string>()
+					.Distinct(SecurityBoundary.PathComparer)
+					.ToArray()
+				;
+				
+				documentPaths = paths.Length;
+				
+				return BuildIndex(paths);
+			}
+			
+			/// <summary>
+			///     Builds the index for a set of paths. Looks at the file system once per
+			///     directory that holds one of them and once per path; a path is resolved only
+			///     when one of those turned up a link.
+			/// </summary>
+			public PhysicalFileIndex BuildIndex(string[] paths)
 			{
 				var directories = new Dictionary<string, bool>(SecurityBoundary.PathComparer);
 				
@@ -117,18 +137,6 @@ internal sealed partial class WorkspaceManager
 					
 					return TargetOf(path);
 				}
-				
-				var paths = solution.Projects
-					.SelectMany(project => project.Documents
-						.Concat<TextDocument>(project.AdditionalDocuments)
-						.Concat(project.AnalyzerConfigDocuments))
-					.Select(document => document.FilePath)
-					.OfType<string>()
-					.Distinct(SecurityBoundary.PathComparer)
-					.ToArray()
-				;
-				
-				documentPaths = paths.Length;
 				
 				return PhysicalFileIndex.Build(paths, PhysicalOf);
 			}
