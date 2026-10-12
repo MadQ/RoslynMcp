@@ -1,5 +1,6 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
+using System.IO.Enumeration;
 
 namespace RoslynMcp;
 
@@ -50,15 +51,27 @@ internal sealed partial class WorkspaceManager
 		
 		/// <summary>
 		///     Runs once the watchers are live. The workspace was read from disk before they
-		///     existed — during the load itself, then while they started in the background — so an
-		///     edit made in that window raised no event. Any tracked document written since
-		///     construction began is queued as if the watcher had reported it; an unchanged one is
-		///     dropped by the content comparison in the flush.
+		///     existed — during the load itself, then while they started in the background — so a
+		///     change made in that window raised no event. Three kinds are caught up on:
+		///     <list type="bullet">
+		///         <item>
+		///             A tracked document <b>written</b> since construction began is queued as if
+		///             the watcher had reported it; an unchanged one is dropped by the content
+		///             comparison in the flush.
+		///         </item>
+		///         <item>
+		///             A tracked file that has gone <b>missing</b>: see
+		///             <see cref="QueueMissedDeletes"/>.
+		///         </item>
+		///         <item>
+		///             A file that has <b>appeared</b>: see <see cref="QueueMissedCreates"/>.
+		///         </item>
+		///     </list>
 		///     <para>
 		///         Build output is left out: the design-time build writes generated documents under
 		///         <c>obj</c> during the load, and reporting those would force a reload on every
-		///         start. A missing file is left out too — a generated document that has never been
-		///         built is tracked but not on disk, which is not a deletion.
+		///         start. A generated document that has never been built is tracked but not on
+		///         disk; it lies under <c>obj</c> too, and is not taken for a deletion.
 		///     </para>
 		/// </summary>
 		void ReconcileMissedChanges(DateTime sinceUtc)
@@ -71,9 +84,12 @@ internal sealed partial class WorkspaceManager
 					
 					return;
 				
-				var queued = 0;
+				var solution = PeekSolution();
+				var index    = physicalIndex;
+				var modified = 0;
+				var missing  = new List<string>();
 				
-				var paths = PeekSolution().Projects
+				var paths = solution.Projects
 					.SelectMany(project => project.Documents.Concat<TextDocument>(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments))
 					.Select(document => document.FilePath)
 					.OfType<string>()
@@ -87,11 +103,20 @@ internal sealed partial class WorkspaceManager
 					
 					try {
 						
+						var writtenUtc = File.GetLastWriteTimeUtc(path);
+						
+						// A missing file reports the year 1601. Whether it was deleted in the
+						// window or was never there is settled below, from its directory.
+						if(writtenUtc.Year < 1602) {
+							
+							missing.Add(path);
+							continue;
+						}
+						
 						// Deliberately generous: a file system with coarse timestamps can stamp a
 						// write made just after sinceUtc as earlier. A document caught by the margin
 						// alone is unchanged and is dropped by the content comparison in the flush.
-						// A missing file reports the year 1601, so it never compares as newer.
-						if(File.GetLastWriteTimeUtc(path) <= sinceUtc - ReconcileTolerance)
+						if(writtenUtc <= sinceUtc - ReconcileTolerance)
 							continue;
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -99,16 +124,160 @@ internal sealed partial class WorkspaceManager
 					}
 					
 					ScheduleDebounced(path);
-					queued++;
+					modified++;
 				}
 				
-				if(queued > 0)
-					logger.LogInfo("Watch", $"{queued} document(s) changed on disk while the workspace was loading — queued for sync");
+				// A file that only links represent is no document, and is not in the list above.
+				missing.AddRange(index.Files.Where(file => solution.GetDocumentIdsWithFilePath(file).IsEmpty && !File.Exists(file)));
+				
+				var deleted = QueueMissedDeletes(missing, sinceUtc);
+				var created = QueueMissedCreates(solution, sinceUtc);
+				
+				if(modified + deleted + created > 0)
+					logger.LogInfo("Watch", $"Changed on disk while the workspace was loading — queued for sync: {modified} document(s) written, {created} file(s) created, {deleted} deleted");
 			}
 			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
 				// Disposed mid-flight — nothing left to reconcile.
 			}
 		}
+		
+		/// <summary>
+		///     The deletes the watchers were not yet there to report (#348). A tracked file that
+		///     is not on disk was either deleted in the window, or was never there — a project
+		///     can list a source file that does not exist, and a document for it is tracked all
+		///     the same. Taking the second for the first would flag a reload on every start, and
+		///     again after that reload.
+		///     <para>
+		///         The directory tells them apart. Removing an entry writes the directory, so a
+		///         file can only have gone missing since <paramref name="sinceUtc"/> if the
+		///         nearest directory above it that still exists was written since then. No
+		///         margin is taken off here, unlike for a modified document: a delete that is
+		///         wrongly assumed costs a reload, not a comparison that comes out equal.
+		///     </para>
+		/// </summary>
+		int QueueMissedDeletes(List<string> missing, DateTime sinceUtc)
+		{
+			var queued  = 0;
+			var written = new Dictionary<string, bool>(WatchPlanner.PathComparer);
+			
+			foreach(var path in missing) {
+				
+				try {
+					
+					var directory = Path.GetDirectoryName(path);
+					
+					while(directory is not null && !Directory.Exists(directory))
+						directory = Path.GetDirectoryName(directory);
+					
+					if(directory is null)
+						continue;
+					
+					if(!written.TryGetValue(directory, out var since)) {
+						
+						since = Directory.GetLastWriteTimeUtc(directory) > sinceUtc;
+						written.Add(directory, since);
+					}
+					
+					if(!since)
+						continue;
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					continue;
+				}
+				
+				ScheduleDebounced(path, deleted: true);
+				queued++;
+			}
+			
+			return queued;
+		}
+		
+		/// <summary>
+		///     The new files the watchers were not yet there to report (#348): a file under a
+		///     watched tree that no document tracks, queued as if its creation had been
+		///     reported. The flush decides what it means — a new document, an input of the
+		///     project evaluation, or nothing.
+		///     <para>
+		///         Only a directory that was written since <paramref name="sinceUtc"/> is looked
+		///         into: adding an entry writes the directory, so any other one cannot hold a
+		///         file that appeared in the window. After an ordinary load that is no
+		///         directory at all, and the pass costs one walk of directory entries.
+		///     </para>
+		///     <para>
+		///         In such a directory, an AdhocWorkspace takes every source file it has no
+		///         document for. A project cannot: it may leave source files out on purpose
+		///         (<c>Compile Remove</c>), and those would look new on every start. There a
+		///         file also has to have been created since <paramref name="sinceUtc"/>. A file
+		///         moved in with its old timestamps is therefore not found in a project. No
+		///         margin is taken off either time, for the reason given for deletes.
+		///     </para>
+		/// </summary>
+		int QueueMissedCreates(Solution solution, DateTime sinceUtc)
+		{
+			var queued = 0;
+			
+			// The root, and every project directory outside it — what the watch set covers.
+			var roots = solution.Projects
+				.Select(project => Path.GetDirectoryName(project.FilePath))
+				.OfType<string>()
+				.Where(directory => !SecurityBoundary.IsUnderDirectory(directory, rootPath))
+				.Prepend(rootPath)
+				.Distinct(WatchPlanner.PathComparer)
+				.ToArray()
+			;
+			
+			foreach(var root in roots) {
+				
+				IEnumerable<(string Path, DateTime WrittenUtc)> directories;
+				
+				try {
+					
+					directories = WorkspaceWalker
+						.EnumerateDirectories(root, PruneFromWalk)
+						.Prepend((root, Directory.GetLastWriteTimeUtc(root)))
+					;
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					continue;
+				}
+				
+				foreach(var (directory, writtenUtc) in directories) {
+					
+					if(writtenUtc <= sinceUtc)
+						continue;
+					
+					try {
+						
+						foreach(var file in Directory.EnumerateFiles(directory)) {
+							
+							if(!solution.GetDocumentIdsWithFilePath(file).IsEmpty)
+								continue;
+							
+							if(isMSBuild ? File.GetCreationTimeUtc(file) <= sinceUtc : !file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+								continue;
+							
+							ScheduleDebounced(file);
+							queued++;
+						}
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						// Gone or unreadable since the walk listed it.
+						_ = ex
+						;
+					}
+				}
+			}
+			
+			return queued;
+		}
+		
+		// The directories a walk for source files stays out of. An AdhocWorkspace also leaves
+		// out hidden and system directories, as its loading walk does; a project is walked
+		// the way the watch set watches it.
+		bool PruneFromWalk(ref FileSystemEntry directory)
+			=> ignoreRules.IsExcluded(directory.FileName)
+				|| (!isMSBuild && (directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+		;
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)
 		{
