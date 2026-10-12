@@ -282,7 +282,9 @@ workspace without links has an empty index and every lookup in it returns at onc
   under it stay indexed under the old target until the next reload (an AdhocWorkspace: until
   the server restarts). Changes to the files they lead to now do not reach them. Also not
   covered: a document outside the workspace root that becomes a link (rule 3 above), and a
-  link that changes in the moment between a workspace's load and its watchers going live.
+  link that is repointed in the moment between a workspace's load and its watchers going live
+  (the catch-up pass finds files that were created, deleted or written in that moment, not
+  links that lead elsewhere).
 - **A deleted file takes the documents at its links with it** (#343). The watcher reports
   the delete under the file's own name; the links are still there and nobody reports them.
   `FlushPendingChanges` adds the indexed names of a deleted file to the deleted set, and the
@@ -488,10 +490,29 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
 `WorkspaceWatchSet` starts the planned watchers on a background thread and funnels every event into
 `ScheduleDebounced`, so nothing downstream changed. Three things follow from that:
 
-- **Tool calls do not wait for the watchers.** Once they are live, `ReconcileMissedChanges` queues
-  every tracked document (outside `bin`/`obj`) whose mtime is later than the start of construction,
-  covering edits made during the load and the watcher start. New files created in that window are
-  not detected.
+- **Tool calls do not wait for the watchers.** Once they are live, `ReconcileMissedChanges`
+  catches up on what was changed during the load and the watcher start, when nothing was there
+  to report it. The window is a few milliseconds on Windows and Linux and noticeably longer on
+  macOS. Three kinds of change (#348):
+  - **A document that was written.** Every tracked document (outside `bin`/`obj`) whose mtime
+    is later than the start of construction, less a two-second margin for coarse timestamps,
+    is queued; the flush drops the ones whose content is unchanged.
+  - **A file that was deleted.** A tracked file that is not on disk — a document, or a file
+    that only links represent — is queued as deleted when the nearest existing directory
+    above it was written since construction began. Removing an entry writes the directory;
+    without that condition, a source file a project lists but that never existed would look
+    deleted on every start, flag a reload, and look deleted again after it.
+  - **A file that was created.** Directories under the root, and under project directories
+    outside it, are walked, and only one written since construction began is looked into.
+    There an AdhocWorkspace queues every `.cs` it has no document for; a project queues an
+    untracked file only if the file itself was created since then, because a project may
+    leave sources out on purpose (`Compile Remove`). The flush decides what a queued file
+    means.
+
+  Neither of the last two takes a margin off the time: a delete or create that is wrongly
+  assumed costs a reload. Not found: a file **moved** into a project with its old timestamps;
+  a change on a file system that does not write a directory when its entries change; a new
+  file the flush does not recognise as an input.
 - **Suppression is unchanged in meaning.** `ApplyChangesWithFswSuppressed` calls
   `Suspend`/`Resume`, which disable and re-enable every watcher under the same ref-count rule.
 - **Non-recursive roots adopt new directories.** A directory created or moved under one gets a

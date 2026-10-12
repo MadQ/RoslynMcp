@@ -41,6 +41,9 @@ internal sealed partial class WorkspaceManager
 			/// <summary>The number of documents that are another file's name.</summary>
 			public int Count => physicalByName.Count;
 			
+			/// <summary>The files that documents lead to. Such a file need not be a document itself.</summary>
+			public IEnumerable<string> Files => namesByPhysical.Keys;
+			
 			/// <summary>Whether <paramref name="path"/> is a document that leads to another file.</summary>
 			public bool IsName(string path) => physicalByName.ContainsKey(path);
 			
