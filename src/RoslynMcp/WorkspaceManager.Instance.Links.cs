@@ -76,7 +76,7 @@ internal sealed partial class WorkspaceManager
 			
 			if(isMSBuild) {
 				
-				if(NoteLinkChanged(index, linked.Path))
+				if(ObserveLink(index, linked.Path, index.PhysicalOf(linked.Path), links.TargetOf(linked.Path)))
 					FlagLinkChanged(linked.Path);
 				
 				// The reload comes with the next call that needs the workspace. Until then
@@ -96,7 +96,8 @@ internal sealed partial class WorkspaceManager
 		///     <see cref="physicalIndex"/> says: a write by this server replaced a link with a
 		///     file (<see cref="SyncReplacedLink"/>), or the watcher reported a path whose link
 		///     someone else has changed (<see cref="FindChangedLinks"/>). Callers go through
-		///     <see cref="NoteLinkChanged"/> first, so this runs once per path and index.
+		///     <see cref="ObserveLink"/> first, so this runs once per change of a path, not
+		///     once per report of it.
 		///     <para>
 		///         In an MSBuild workspace the index is never changed in place. It is built by
 		///         a load and swapped in together with the solution it was built from, so the
@@ -107,8 +108,9 @@ internal sealed partial class WorkspaceManager
 		///         belongs to.
 		///     </para>
 		///     <para>
-		///         The generation is moved unconditionally, like for a new compilation input:
-		///         a reload that is already running may have built its index before the change.
+		///         Each call moves the generation, also while a reload is pending — unlike the
+		///         flush's own flag, which leaves a pending reload alone. A reload that is
+		///         already running may have built its index before the change.
 		///     </para>
 		/// </summary>
 		void FlagLinkChanged(string path)
@@ -118,17 +120,19 @@ internal sealed partial class WorkspaceManager
 			InvalidateCompilation();
 		}
 		
-		// The paths a reload has already been flagged for because they lead elsewhere than
-		// linkChangesIn, the index they were compared with, says. Guarded by indexLock. Starts
-		// over when the index is another one: a reload has swapped in a new index, and what
-		// was known about the old one says nothing about it.
-		private PhysicalFileIndex?       linkChangesIn;
-		private readonly HashSet<string> linkChanges = new(SecurityBoundary.PathComparer);
+		// Where each path that was seen to lead elsewhere than linkChangesIn says was last seen
+		// to lead (null: nowhere else). linkChangesIn is the index those observations were
+		// compared with. Guarded by indexLock. Starts over when the workspace has another
+		// index: a reload has swapped in a new one, and what was seen against the old one
+		// says nothing about it.
+		private PhysicalFileIndex?                   linkChangesIn;
+		private readonly Dictionary<string, string?> linkChanges = new(SecurityBoundary.PathComparer);
 		
 		/// <summary>
-		///     Records that <paramref name="path"/> leads elsewhere than
-		///     <paramref name="index"/> says, and tells whether that is news: true the first
-		///     time for this path and this index, false after that.
+		///     Takes note of where <paramref name="path"/> leads now, and tells whether that is
+		///     news the workspace has to reload for: true when it differs from what was last
+		///     seen for this path — or, for a path not seen before, from
+		///     <paramref name="known"/>, what the index says.
 		///     <para>
 		///         A flush that sees a changed link keeps seeing it until the reload it asked
 		///         for has finished, because until then the index is the old one. Flagging
@@ -137,10 +141,29 @@ internal sealed partial class WorkspaceManager
 		///         the reload that is under way, and with steady file activity it would never
 		///         finish.
 		///     </para>
+		///     <para>
+		///         What is remembered is where the path led, not merely that it changed. A
+		///         link that is repointed a second time before the reload is done is news
+		///         again — the reload under way may have read the first target, and must not
+		///         be the one that is kept. So is a link that is pointed back where the index
+		///         says it leads.
+		///     </para>
+		///     <para>
+		///         The record belongs to the index the workspace holds. A caller that
+		///         compared with an index a reload has replaced in the meantime leaves the
+		///         record alone and is told to flag: one reload too many at worst, and none
+		///         of the record of the current index lost.
+		///     </para>
 		/// </summary>
-		bool NoteLinkChanged(PhysicalFileIndex index, string path)
+		bool ObserveLink(PhysicalFileIndex index, string path, string? known, string? leadsTo)
 		{
+			var same = SecurityBoundary.PathComparer;
+			
 			lock(indexLock) {
+				
+				if(!ReferenceEquals(index, physicalIndex))
+					
+					return !same.Equals(leadsTo, known);
 				
 				if(!ReferenceEquals(linkChangesIn, index)) {
 					
@@ -148,7 +171,13 @@ internal sealed partial class WorkspaceManager
 					linkChanges.Clear();
 				}
 				
-				return linkChanges.Add(path);
+				if(same.Equals(linkChanges.TryGetValue(path, out var seen) ? seen : known, leadsTo))
+					
+					return false;
+				
+				linkChanges[path] = leadsTo;
+				
+				return true;
 			}
 		}
 		
@@ -156,31 +185,34 @@ internal sealed partial class WorkspaceManager
 		///     MSBuild only, for the watcher flush: finds the reported paths that lead
 		///     somewhere else than <paramref name="index"/> says — a link was repointed, a link
 		///     was replaced by a file, a file of its own became a link (#343). Flags a reload
-		///     for each such path once, and returns the documents that shared its file before
-		///     or lead through it: they may have other content now, nobody reports a change at
-		///     their paths, and the caller has them read again, each through its own path.
+		///     for each such change once, and returns the documents that shared the path's
+		///     file before or lead through it: they may have other content now, nobody
+		///     reports a change at their paths, and the caller has them read again, each
+		///     through its own path.
 		///     <para>
 		///         The index is not changed. It was built with the solution the workspace
 		///         holds and is replaced with it; the reload builds the next one.
 		///     </para>
 		///     <para>
 		///         Three things an earlier version got wrong, and how they are settled here.
-		///         <b>Once per change, not once per flush</b>: see
-		///         <see cref="NoteLinkChanged"/>. <b>A path that cannot be examined has not
-		///         changed</b>: <see cref="LinkResolver.TryTargetOf"/> reports that apart from
-		///         "leads nowhere else", and such a path is skipped. <b>No cost outside the
-		///         root</b>: only a path that is an indexed name, or a tracked document under
-		///         the root, is looked at — for the usual document that is one look per
-		///         directory level, and a document elsewhere is not resolved at all. A file
-		///         outside the root that becomes a link is therefore not noticed.
+		///         <b>Once per change, not once per flush</b>: see <see cref="ObserveLink"/>.
+		///         <b>A path that cannot be examined has not changed</b>:
+		///         <see cref="LinkResolver.TryTargetOf"/> reports that apart from "leads
+		///         nowhere else", and such a path is skipped. <b>No cost outside the root</b>:
+		///         only a path that is an indexed name, or a tracked document under the root,
+		///         is looked at, with one memo of directories for the whole batch — after a
+		///         directory has been asked about, a document in it costs one look. A
+		///         document elsewhere is not resolved at all, so a file outside the root that
+		///         becomes a link is not noticed.
 		///     </para>
 		/// </summary>
-		string[] FindChangedLinks(string[] reported, PhysicalFileIndex index, Solution tracked, out bool flagged)
+		string[] FindChangedLinks(string[] reported, PhysicalFileIndex index, Solution tracked, out bool pending)
 		{
-			flagged = false;
+			pending = false;
 			
-			var same       = SecurityBoundary.PathComparer;
-			var dependents = new HashSet<string>(same);
+			var same        = SecurityBoundary.PathComparer;
+			var directories = new Dictionary<string, bool>(same);
+			var dependents  = new HashSet<string>(same);
 			
 			foreach(var path in reported) {
 				
@@ -190,13 +222,23 @@ internal sealed partial class WorkspaceManager
 					&& !(SecurityBoundary.IsUnderDirectory(path, rootPath) && !tracked.GetDocumentIdsWithFilePath(path).IsEmpty))
 					continue;
 				
-				if(!links.TryTargetOf(path, out var leadsTo) || same.Equals(leadsTo, known))
+				// A document the index has no entry for, with no link on the way to it: it
+				// leads nowhere else, as certain as it gets, and nothing was resolved for it.
+				string? leadsTo = null;
+				
+				if((known is not null || links.MayLeadElsewhere(path, directories)) && !links.TryTargetOf(path, out leadsTo))
 					continue;
 				
-				flagged = true;
+				var news = ObserveLink(index, path, known, leadsTo);
 				
-				if(NoteLinkChanged(index, path))
+				if(news)
 					FlagLinkChanged(path);
+				
+				else if(same.Equals(leadsTo, known))
+					continue;
+				
+				// The index is behind for this path until the reload has run.
+				pending = true;
 				
 				// Before: the documents that shared its file, some of them through this path.
 				// Now: the documents that lead to this path as a file of its own.

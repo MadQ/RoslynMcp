@@ -126,36 +126,43 @@ internal sealed partial class WorkspaceManager
 			{
 				var directories = new Dictionary<string, bool>(SecurityBoundary.PathComparer);
 				
-				// Null without resolving anything for a document under the root with no link on
-				// the way to it — nearly every document there is. HasLinkBelowRoot answers true
-				// for what it cannot examine, and TargetOf then has the last word.
-				string? PhysicalOf(string path)
-				{
-					if(Path.GetDirectoryName(path) is { } directory) {
-						
-						// Asked once per directory. Under the root that is a look at each level
-						// down to it. A directory elsewhere — a referenced project, when the root
-						// is one project's directory — is resolved in full, which is why it must
-						// not be done per document.
-						if(!directories.TryGetValue(directory, out var linked)) {
-							
-							linked = SecurityBoundary.IsUnderDirectory(directory, rootPath)
-								? SecurityBoundary.HasLinkBelowRoot(directory, rootPath)
-								: TargetOf(directory) is not null
-							;
-							directories.Add(directory, linked);
-						}
-						
-						// With the directory as the root, only the file itself is looked at.
-						if(!linked && !SecurityBoundary.HasLinkBelowRoot(path, directory))
-							
-							return null;
-					}
+				// Null without resolving anything for a path with no link on the way to it —
+				// nearly every document there is.
+				return PhysicalFileIndex.Build(paths, path => MayLeadElsewhere(path, directories) ? TargetOf(path) : null);
+			}
+			
+			/// <summary>
+			///     The cheap question to ask before <see cref="TargetOf"/> when many paths are
+			///     looked at in one go: false means the path certainly leads nowhere else —
+			///     there is no link on the way to it. True means it may, and
+			///     <see cref="TargetOf"/> has the last word; that includes what cannot be
+			///     examined.
+			///     <para>
+			///         <paramref name="directories"/> is the caller's memo for the pass, by
+			///         directory. A directory is asked about once: under the root that is a
+			///         look at each level down to it; a directory elsewhere — a referenced
+			///         project, when the root is one project's directory — is resolved in
+			///         full, which is why it must not be done per path. After that a path
+			///         costs one look, at the file itself.
+			///     </para>
+			/// </summary>
+			public bool MayLeadElsewhere(string path, Dictionary<string, bool> directories)
+			{
+				if(Path.GetDirectoryName(path) is not { } directory)
 					
-					return TargetOf(path);
+					return true;
+				
+				if(!directories.TryGetValue(directory, out var linked)) {
+					
+					linked = SecurityBoundary.IsUnderDirectory(directory, rootPath)
+						? SecurityBoundary.HasLinkBelowRoot(directory, rootPath)
+						: TargetOf(directory) is not null
+					;
+					directories.Add(directory, linked);
 				}
 				
-				return PhysicalFileIndex.Build(paths, PhysicalOf);
+				// With the directory as the root, only the file itself is looked at.
+				return linked || SecurityBoundary.HasLinkBelowRoot(path, directory);
 			}
 		}
 	}
