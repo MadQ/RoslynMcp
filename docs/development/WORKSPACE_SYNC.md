@@ -244,8 +244,9 @@ workspace without links has an empty index and every lookup in it returns at onc
      differs. So the same mismatch seen again is not news; a link repointed a second time
      before the reload is done is, and so is one pointed back where the index says — the
      reload under way may have read the state in between. The record starts over when the
-     index is another one, and a caller that compared with an index a reload has since
-     replaced does not touch it.
+     index is another one. The comparison is always with the index the workspace holds at
+     that moment, looked up under the lock — a flush may still hold the one from before a
+     swap, and what that said settles nothing about the new one.
   2. **A path that cannot be examined has not changed.** `LinkResolver.TryTargetOf` reports
      "could not be worked out" apart from "leads nowhere else", and such a path is skipped.
   3. **No cost outside the root.** Only a reported path that is an indexed name, or a

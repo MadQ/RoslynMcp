@@ -76,7 +76,7 @@ internal sealed partial class WorkspaceManager
 			
 			if(isMSBuild) {
 				
-				if(ObserveLink(index, linked.Path, index.PhysicalOf(linked.Path), links.TargetOf(linked.Path)))
+				if(ObserveLink(linked.Path, links.TargetOf(linked.Path)))
 					FlagLinkChanged(linked.Path);
 				
 				// The reload comes with the next call that needs the workspace. Until then
@@ -131,8 +131,7 @@ internal sealed partial class WorkspaceManager
 		/// <summary>
 		///     Takes note of where <paramref name="path"/> leads now, and tells whether that is
 		///     news the workspace has to reload for: true when it differs from what was last
-		///     seen for this path — or, for a path not seen before, from
-		///     <paramref name="known"/>, what the index says.
+		///     seen for this path — or, for a path not seen before, from what the index says.
 		///     <para>
 		///         A flush that sees a changed link keeps seeing it until the reload it asked
 		///         for has finished, because until then the index is the old one. Flagging
@@ -149,21 +148,21 @@ internal sealed partial class WorkspaceManager
 		///         says it leads.
 		///     </para>
 		///     <para>
-		///         The record belongs to the index the workspace holds. A caller that
-		///         compared with an index a reload has replaced in the meantime leaves the
-		///         record alone and is told to flag: one reload too many at worst, and none
-		///         of the record of the current index lost.
+		///         The comparison is always with the index the workspace holds at this moment,
+		///         looked up here, under the lock — never with what a caller read earlier. A
+		///         flush can still be holding the index from before a reload swapped in a new
+		///         one; what that old index said about the path settles nothing about the
+		///         new one, which may have been built while the link pointed somewhere in
+		///         between.
 		///     </para>
 		/// </summary>
-		bool ObserveLink(PhysicalFileIndex index, string path, string? known, string? leadsTo)
+		bool ObserveLink(string path, string? leadsTo)
 		{
 			var same = SecurityBoundary.PathComparer;
 			
 			lock(indexLock) {
 				
-				if(!ReferenceEquals(index, physicalIndex))
-					
-					return !same.Equals(leadsTo, known);
+				var index = physicalIndex;
 				
 				if(!ReferenceEquals(linkChangesIn, index)) {
 					
@@ -171,7 +170,7 @@ internal sealed partial class WorkspaceManager
 					linkChanges.Clear();
 				}
 				
-				if(same.Equals(linkChanges.TryGetValue(path, out var seen) ? seen : known, leadsTo))
+				if(same.Equals(linkChanges.TryGetValue(path, out var seen) ? seen : index.PhysicalOf(path), leadsTo))
 					
 					return false;
 				
@@ -229,7 +228,7 @@ internal sealed partial class WorkspaceManager
 				if((known is not null || links.MayLeadElsewhere(path, directories)) && !links.TryTargetOf(path, out leadsTo))
 					continue;
 				
-				var news = ObserveLink(index, path, known, leadsTo);
+				var news = ObserveLink(path, leadsTo);
 				
 				if(news)
 					FlagLinkChanged(path);
