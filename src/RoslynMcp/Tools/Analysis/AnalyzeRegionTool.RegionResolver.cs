@@ -155,15 +155,13 @@ internal sealed partial class AnalyzeRegionTool
 				
 				return arrow is not null && arrow.Expression.Span.OverlapsWith(span) ? Single(arrow.Expression) : null;
 			
-			if(!body.Span.OverlapsWith(span))
+			// Against the statements, not the block: a signature line can end in the opening brace.
+			if(body.Statements.Count > 0)
 				
-				return null;
+				return Overlapping(body.Statements, span);
 			
 			// An empty body still has answers: a reachable end in a non-void method is a missing return.
-			return body.Statements is { Count: > 0 } statements
-				? new Region(statements[0], statements[^1])
-				: new Region(body, body)
-			;
+			return body.Span.OverlapsWith(span) ? new Region(body, body) : null;
 		}
 		
 		static Region? Single(ExpressionSyntax? expression)

@@ -107,6 +107,7 @@ static class AnalyzeRegionTests
 		
 		fx.Write("Flow.cs", string.Join("\n", Flow) + "\n");
 		fx.Write("Events.cs", "using System;\n\nclass Events\n{\n\tevent Action Changed = () => { };\n\tstatic Func<int, int> Pick(Func<int, int> f) => f;\n\tFunc<int, int> picked = Pick((int x =\n\t\t1\n\t) => x);\n}\n");
+		fx.Write("Brace.cs", "class Brace\n{\n\tvoid Run() {\n\t\tSystem.Console.WriteLine();\n\t\tSystem.Console.WriteLine();\n\t}\n}\n");
 		fx.Write("Shape.cs", "abstract class Shape\n{\n\tpublic abstract int Area();\n}\n");
 		fx.Write("Broken.cs", "class Broken\n{\n\tvoid Run()\n\t{\n\t\tvar broken = Missing();\n\t\tSystem.Console.WriteLine(broken);\n\t}\n}\n");
 		
@@ -275,6 +276,22 @@ static class AnalyzeRegionTests
 			new("roslyn_analyze_region: a signature line is not the method's body",
 				() => Region(77, 77, data => data?["error"]?.GetValue<string>().Contains("No analyzable code") == true)),
 			
+			// The opening brace is on the signature line here, so it touches the block without touching
+			// a single statement.
+			new("roslyn_analyze_region: a signature line ending in the opening brace is not the body",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Brace.cs", startLine = 3, endLine = 3, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>().Contains("No analyzable code") == true)),
+			
+			// A range holding the signature and one statement answers for that statement alone.
+			new("roslyn_analyze_region: a range over a signature and one statement stops at that statement",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Brace.cs", startLine = 3, endLine = 4, projectPath = fx.Csproj },
+					data => Lines(data, 4, 4))),
+			
+
 			// Its accessors are separate bodies, so the hint has to say to narrow the range rather
 			// than claim there is nothing there.
 			new("roslyn_analyze_region: a whole property asks for a narrower range",
