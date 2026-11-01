@@ -78,7 +78,7 @@ internal sealed partial class AnalyzeRegionTool
 					
 					case ArrowExpressionClauseSyntax arrow:
 						
-						return Single(arrow.Expression);
+						return Single(arrow.Expression, span);
 					
 					// Only a fallback: the initializer of a local belongs to its statement, which comes
 					// next on the way up. The outermost clause wins, because a lambda inside an
@@ -98,7 +98,7 @@ internal sealed partial class AnalyzeRegionTool
 					
 					case BasePropertyDeclarationSyntax property when ExpressionBodyOf(property) is { } propertyArrow:
 						
-						return Single(propertyArrow.Expression);
+						return Single(propertyArrow.Expression, span);
 					
 					case GlobalStatementSyntax:
 						
@@ -106,7 +106,7 @@ internal sealed partial class AnalyzeRegionTool
 					
 					case MemberDeclarationSyntax member:
 						
-						return Single(initializer ?? InitializerOf(member));
+						return Single(initializer ?? InitializerOf(member), span);
 				}
 			}
 			
@@ -153,7 +153,7 @@ internal sealed partial class AnalyzeRegionTool
 		{
 			if(body is null)
 				
-				return arrow is not null && arrow.Expression.Span.OverlapsWith(span) ? Single(arrow.Expression) : null;
+				return Single(arrow?.Expression, span);
 			
 			// Against the statements, not the block: a signature line can end in the opening brace.
 			if(body.Statements.Count > 0)
@@ -164,8 +164,10 @@ internal sealed partial class AnalyzeRegionTool
 			return body.Span.OverlapsWith(span) ? new Region(body, body) : null;
 		}
 		
-		static Region? Single(ExpressionSyntax? expression)
-			=> expression is null ? null : new Region(expression, expression)
+		// The range must touch the expression: an attribute line reaches a member's initializer on
+		// the way up, and an answer about code outside the range is worse than no answer.
+		static Region? Single(ExpressionSyntax? expression, TextSpan span)
+			=> expression is not null && expression.Span.OverlapsWith(span) ? new Region(expression, expression) : null
 		;
 		
 		// A line holding a whole field, event or property lands on the member, not on its

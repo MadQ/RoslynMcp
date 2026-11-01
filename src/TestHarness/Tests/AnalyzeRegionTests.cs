@@ -108,6 +108,7 @@ static class AnalyzeRegionTests
 		fx.Write("Flow.cs", string.Join("\n", Flow) + "\n");
 		fx.Write("Events.cs", "using System;\n\nclass Events\n{\n\tevent Action Changed = () => { };\n\tstatic Func<int, int> Pick(Func<int, int> f) => f;\n\tFunc<int, int> picked = Pick((int x =\n\t\t1\n\t) => x);\n}\n");
 		fx.Write("Brace.cs", "class Brace\n{\n\tvoid Run() {\n\t\tSystem.Console.WriteLine();\n\t\tSystem.Console.WriteLine();\n\t}\n}\n");
+		fx.Write("Header.cs", "using System;\n\nclass Header\n{\n\t[Obsolete]\n\tint marked = 1;\n\t\n\t[Obsolete]\n\tint Doubled => 2;\n}\n");
 		fx.Write("Shape.cs", "abstract class Shape\n{\n\tpublic abstract int Area();\n}\n");
 		fx.Write("Broken.cs", "class Broken\n{\n\tvoid Run()\n\t{\n\t\tvar broken = Missing();\n\t\tSystem.Console.WriteLine(broken);\n\t}\n}\n");
 		
@@ -290,6 +291,33 @@ static class AnalyzeRegionTests
 					"roslyn_analyze_region",
 					new { filePath = "Brace.cs", startLine = 3, endLine = 4, projectPath = fx.Csproj },
 					data => Lines(data, 4, 4))),
+			
+
+			// An attribute line walks up to the member, whose initializer or expression body lies on
+			// the next line. The same member's own line must keep working.
+			new("roslyn_analyze_region: an attribute line is not a field's initializer",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Header.cs", startLine = 5, endLine = 5, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>().Contains("No analyzable code") == true)),
+			
+			new("roslyn_analyze_region: a field's own line is its initializer",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Header.cs", startLine = 6, endLine = 6, projectPath = fx.Csproj },
+					data => Lines(data, 6, 6))),
+			
+			new("roslyn_analyze_region: an attribute line is not a property's expression body",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Header.cs", startLine = 8, endLine = 8, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>().Contains("No analyzable code") == true)),
+			
+			new("roslyn_analyze_region: a property's own line is its expression body",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Header.cs", startLine = 9, endLine = 9, projectPath = fx.Csproj },
+					data => Lines(data, 9, 9))),
 			
 
 			// Its accessors are separate bodies, so the hint has to say to narrow the range rather
