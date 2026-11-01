@@ -534,11 +534,14 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
   are milliseconds apart.
 - **A directory that moves is one event.** Nothing is raised for the files in it, so recursive
   roots ask for directory events too. One that arrives has its files reported, as above. One
-  that leaves is reported as a delete of its own path, and the flush adds the tracked documents
-  below that path whose files are gone (`DocumentsGoneWith`). Both halves are needed: a rename
-  inside the workspace is one of each, and reporting only the arrival would leave every document
-  of the directory there twice. The `projects` shape of non-recursive roots has no directory
-  events, so a directory moved in or out under it goes unnoticed.
+  that leaves is reported as a delete of its own path, and the flush adds the tracked files below
+  that path that went with it (`FilesGoneWith`) — documents, and files only links represent, so
+  the documents at those links go too. A file counts as gone when it cannot be found, or when the
+  directory no longer exists under exactly the reported name: after a case-only rename on Windows
+  or macOS the file still opens under the old spelling. Both halves are needed: a rename inside
+  the workspace is one of each, and reporting only the arrival would leave every document of the
+  directory there twice. The `projects` shape of non-recursive roots has no directory events, so
+  a directory moved in or out under it goes unnoticed.
 
 A workspace never holds more than 32 watchers: when adopting a directory would pass that, the
 watch set plans again instead, which moves it to the `projects` or `fallback` shape.

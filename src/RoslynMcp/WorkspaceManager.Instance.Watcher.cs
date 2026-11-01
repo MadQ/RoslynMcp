@@ -411,17 +411,18 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
-		// The tracked documents below one of the given paths whose files are gone. Which of those
-		// paths were directories can no longer be asked of the disk, so each document's ancestors
-		// are looked up instead: one pass, however many paths a checkout reports.
-		static IEnumerable<string> DocumentsGoneWith(HashSet<string> paths, Solution solution)
+		// The tracked files below one of the given paths that went with it: documents, and files
+		// only links represent, whose documents the flush finds through the index. Which of those
+		// paths were directories can no longer be asked of the disk, so each file's ancestors are
+		// looked up instead: one pass, however many paths a checkout reports.
+		static IEnumerable<string> FilesGoneWith(HashSet<string> paths, Solution solution, PhysicalFileIndex index)
 		{
-			static bool IsBelow(string document, HashSet<string> paths)
+			static bool IsGone(string file, HashSet<string> paths)
 			{
-				for(var directory = Path.GetDirectoryName(document); directory is not null; directory = Path.GetDirectoryName(directory))
+				for(var directory = Path.GetDirectoryName(file); directory is not null; directory = Path.GetDirectoryName(directory))
 					if(paths.Contains(directory))
 						
-						return true;
+						return !File.Exists(file) || !DirectoryExistsAsNamed(directory);
 				
 				return false;
 			}
@@ -430,9 +431,34 @@ internal sealed partial class WorkspaceManager
 				.SelectMany(project => project.Documents.Concat<TextDocument>(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments))
 				.Select(document => document.FilePath)
 				.OfType<string>()
+				.Concat(index.Files)
 				.Distinct(SecurityBoundary.PathComparer)
-				.Where(document => IsBelow(document, paths) && !File.Exists(document))
+				.Where(file => IsGone(file, paths))
 			;
+		}
+		
+		// Whether a directory exists under exactly this name. A directory renamed in case only is
+		// reported as gone under the old name, and on Windows and macOS the files below it can
+		// still be opened by that name, so asking for the file says nothing. Unlike a file's
+		// delete report, a wrong answer here costs a document, so what cannot be read counts as
+		// still there.
+		static bool DirectoryExistsAsNamed(string path)
+		{
+			try {
+				
+				if(!Directory.Exists(path))
+					
+					return false;
+				
+				var name = Path.GetFileName(path);
+				
+				return Path.GetDirectoryName(path) is not { } parent
+					|| Directory.EnumerateDirectories(parent, name).Any(found => Path.GetFileName(found) == name);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException) {
+				
+				return true;
+			}
 		}
 		
 		void FlushPendingChanges(object? _)
@@ -537,11 +563,12 @@ internal sealed partial class WorkspaceManager
 						unreported.UnionWith(FindChangedLinks(changed, index, tracked, out linkChanged));
 					
 					// A directory moved away is reported once, as itself. Nothing reports the
-					// documents that went with it. Handled as deleted documents like any other.
+					// files that went with it. Handled as deleted files like any other, so that
+					// the pass over the index below takes the documents at their links too.
 					var unknown = new HashSet<string>(deleted.Where(path => tracked.GetDocumentIdsWithFilePath(path).IsEmpty), SecurityBoundary.PathComparer);
 					
 					if(unknown.Count > 0)
-						deleted = [.. deleted.Union(DocumentsGoneWith(unknown, tracked), SecurityBoundary.PathComparer)];
+						deleted = [.. deleted.Union(FilesGoneWith(unknown, tracked, index), SecurityBoundary.PathComparer)];
 					
 					if(index.Count > 0) {
 						

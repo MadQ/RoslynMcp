@@ -27,18 +27,34 @@ static class MovedDirectoryTests
 		var adhocIn     = TestFixtures.NewAdhocDir("MoveAdhocIn");
 		var adhocOut    = TestFixtures.NewAdhocDir("MoveAdhocOut");
 		var adhocRename = TestFixtures.NewAdhocDir("MoveAdhocRename");
+		var adhocCase   = TestFixtures.NewAdhocDir("MoveAdhocCase");
+		var adhocLink   = TestFixtures.NewAdhocDir("MoveAdhocLink");
 		var projIn      = TestFixtures.NewMsBuildProject("MoveProjectIn");
 		var projOut     = TestFixtures.NewMsBuildProject("MoveProjectOut");
 		var elsewhere   = TestFixtures.NewAdhocDir("MoveElsewhere");
 		
-		foreach(var fixture in new[] { adhocIn, adhocOut, adhocRename, projIn, projOut })
+		foreach(var fixture in new[] { adhocIn, adhocOut, adhocRename, adhocCase, adhocLink, projIn, projOut })
 			fixture.Write("Beacon.cs", "class Beacon { }\n");
 		
 		adhocOut.Write("Moved/Inside.cs",    "class Leaves { }\n");
 		projOut.Write("Moved/Inside.cs",     "class Leaves { }\n");
 		adhocRename.Write("Old/Inside.cs",   "class Renamed { }\n");
+		adhocCase.Write("Cased/Inside.cs",   "class CaseRenamed { }\n");
 		elsewhere.Write("ForAdhoc/Inside.cs", "class Arrives { }\n");
 		elsewhere.Write("ForProject/Inside.cs", "class Arrives { }\n");
+		
+		// The file lies under obj, which the load does not walk but the watcher covers, so it
+		// is a document only under its link.
+		var stored = adhocLink.Write("obj/store/Real.cs", "class OnlyLinked { }\n");
+		var linked = false;
+		
+		try {
+			
+			File.CreateSymbolicLink(adhocLink.PathOf("Alias.cs"), stored);
+			
+			linked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
 		// Calls a tool and returns the first content block parsed as JSON.
 		async Task<JsonNode?> Call(string tool, object args)
@@ -89,23 +105,28 @@ static class MovedDirectoryTests
 		async Task<bool> ReloadPendingAsync(string? projectPath)
 			=> (await Call("roslyn_check_drift", new { projectPath }))?["reload_pending"]?.GetValue<bool>() == true;
 		
+		// How many lines of the workspace's documents hold this text. Null when the call failed.
+		async Task<int?> MatchesAsync(string projectPath, string pattern)
+			=> (await Call("roslyn_search_files", new { pattern, projectPath }))?["total_matches"]?.GetValue<int>();
+		
 		// Returns once the watchers are live. An edit to a tracked file reaches the workspace
 		// either through a watcher or through the catch-up pass, and that pass runs once the
 		// watchers are live, so seeing the edit means they are, whichever brought it.
+		// The old text is searched for first: a project reads a document's text when it is first
+		// asked for, so a first search after the edit would read it from disk and prove nothing.
 		async Task<bool> SettleAsync(FixtureProject fixture)
 		{
 			
 			var projectPath = fixture.ProjectPath;
 			var marker      = $"Beacon{Guid.NewGuid():N}";
 			
-			if(await Call("roslyn_check_drift", new { projectPath }) is null)
+			if(await MatchesAsync(projectPath, "class Beacon ") is not > 0)
 				
 				return false;
 			
 			fixture.Write("Beacon.cs", $"class {marker} {{ }}\n");
 			
-			return await EventuallyAsync(async () =>
-				(await Call("roslyn_search_files", new { pattern = marker, projectPath }))?["total_matches"]?.GetValue<int>() > 0);
+			return await EventuallyAsync(async () => await MatchesAsync(projectPath, marker) > 0);
 		}
 		
 		var tests = new List<TestCase> {
@@ -160,6 +181,50 @@ static class MovedDirectoryTests
 						: (false, "FAIL  (fifteen seconds after the rename, the type is not declared exactly once, under New)");
 				}),
 			
+			// On Windows and macOS the file still opens under the old spelling, so its existence
+			// says nothing. On Linux these are two names and the test is an ordinary rename.
+			new("moved directory: a directory renamed in case only leaves one document for each file in a workspace without a project",
+				async () => {
+					
+					if(!await SettleAsync(adhocCase))
+						
+						return (false, "FAIL  (precondition: the watchers did not go live)");
+					
+					Directory.Move(adhocCase.PathOf("Cased"), adhocCase.PathOf("cased"));
+					
+					var expected = $"cased{Path.DirectorySeparatorChar}Inside.cs";
+					
+					return await EventuallyAsync(async () => {
+							
+							var found = await Call("roslyn_search_files", new { pattern = "class CaseRenamed", projectPath = adhocCase.Dir });
+							
+							return found?["total_matches"]?.GetValue<int>() == 1
+								&& found["matches"]?[0]?["file"]?.GetValue<string>().EndsWith(expected, StringComparison.Ordinal) == true;
+						})
+						? (true,  "PASS")
+						: (false, "FAIL  (fifteen seconds after the rename, the type is not declared exactly once, under the new spelling)");
+				}),
+			
+			// Nothing reports Real.cs, and Alias.cs is still there: it is a link that leads
+			// nowhere now. Searched, because a read of such a link is an error of its own.
+			new("moved directory: a directory moved out takes the documents at links to its files along",
+				async () => {
+					
+					if(!linked)
+						
+						return Skip.SetupUnavailable("cannot create symbolic links on this machine");
+					
+					if(!await SettleAsync(adhocLink) || await MatchesAsync(adhocLink.Dir, "class OnlyLinked") != 1)
+						
+						return (false, "FAIL  (precondition: the watchers did not go live, or the link was not loaded once)");
+					
+					Directory.Move(adhocLink.PathOf("obj/store"), elsewhere.PathOf("FromLink"));
+					
+					return await EventuallyAsync(async () => await MatchesAsync(adhocLink.Dir, "class OnlyLinked") == 0)
+						? (true,  "PASS")
+						: (false, "FAIL  (the link's document is still there fifteen seconds after the directory of its file was moved out)");
+				}),
+			
 			new("moved directory: a directory moved in flags a reload in a project",
 				async () => {
 					
@@ -194,6 +259,8 @@ static class MovedDirectoryTests
 			adhocIn.Dispose();
 			adhocOut.Dispose();
 			adhocRename.Dispose();
+			adhocCase.Dispose();
+			adhocLink.Dispose();
 			projIn.Dispose();
 			projOut.Dispose();
 			elsewhere.Dispose();
