@@ -117,7 +117,7 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 		Names(flow.DefinitelyAssignedOnExit),
 		Names(flow.ReadInside),
 		Names(flow.WrittenInside),
-		Names(flow.Captured)
+		Names(flow.CapturedInside)
 	);
 	
 	static ControlFlowFacts ToFacts(ControlFlowAnalysis flow, SyntaxNode root, SyntaxTree tree, TextSpan span)

@@ -71,7 +71,11 @@ static class AnalyzeRegionTests
 		/* 57 */ "\t\treturn 1;",
 		/* 58 */ "\t\tConsole.WriteLine();",
 		/* 59 */ "\t}",
-		/* 60 */ "}",
+		/* 60 */ "\t",
+		/* 61 */ "\tint Empty()",
+		/* 62 */ "\t{",
+		/* 63 */ "\t}",
+		/* 64 */ "}",
 	];
 	
 	internal static TestGroup Build(TestContext ctx)
@@ -80,6 +84,7 @@ static class AnalyzeRegionTests
 		var fx = TestFixtures.NewMsBuildProject("AnalyzeRegion", targetFrameworks: "net10.0");
 		
 		fx.Write("Flow.cs", string.Join("\n", Flow) + "\n");
+		fx.Write("Shape.cs", "abstract class Shape\n{\n\tpublic abstract int Area();\n}\n");
 		fx.Write("Broken.cs", "class Broken\n{\n\tvoid Run()\n\t{\n\t\tvar broken = Missing();\n\t\tSystem.Console.WriteLine(broken);\n\t}\n}\n");
 		
 		var exe   = TestFixtures.NewMsBuildProject("AnalyzeRegionExe", targetFrameworks: "net10.0", extraProjectXml: "<PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>");
@@ -110,6 +115,16 @@ static class AnalyzeRegionTests
 						&& Has(flow?["captured"], "int total");
 				})),
 			
+			// Roslyn's Captured covers the whole method, so line 9 would list 'total' although the
+			// lambda capturing it is on line 10. A region answers for what it contains.
+			new("roslyn_analyze_region: a capture outside the region is not reported",
+				() => Region(9, 9, data => Has(data?["data_flow"]?["variables_declared"], "int total")
+					&& data?["data_flow"]?["captured"] is null)),
+			
+			new("roslyn_analyze_region: a capture inside the region is reported",
+				() => Region(10, 10, data => Has(data?["data_flow"]?["captured"], "int total"))),
+			
+
 			// Roslyn tracks 'this', not the field read through it. The tool description promises
 			// this, and an agent relies on it: the field must not appear, and 'this' must.
 			new("roslyn_analyze_region: a field read reports 'this' and not the field",
@@ -149,6 +164,19 @@ static class AnalyzeRegionTests
 				() => Region(7, 13, data => Lines(data, 9, 12)
 					&& data?["control_flow"]?["end_reachable"]?.GetValue<bool>() == false)),
 			
+			// The one way to ask whether an empty non-void method is missing a return, as it is while
+			// being written.
+			new("roslyn_analyze_region: an empty body is analyzed, and its end is reachable",
+				() => Region(61, 63, data => Lines(data, 62, 63)
+					&& data?["control_flow"]?["end_reachable"]?.GetValue<bool>() == true)),
+			
+			new("roslyn_analyze_region: an abstract method has no body to analyze",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Shape.cs", startLine = 3, endLine = 3, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>().Contains("No analyzable code") == true)),
+			
+
 			// A break leaves the loop body, but not the loop.
 			new("roslyn_analyze_region: a break is an exit of the loop body",
 				() => Region(36, 37, data => data?["control_flow"]?["exit_points"]?.AsArray() is [{ } exit]

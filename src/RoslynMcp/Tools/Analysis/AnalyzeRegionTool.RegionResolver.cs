@@ -147,6 +147,11 @@ internal sealed partial class AnalyzeRegionTool
 				
 				return new Region(statements[0], statements[^1]);
 			
+			// An empty body still has answers: a reachable end in a non-void method is a missing return.
+			if(body is not null)
+				
+				return new Region(body, body);
+			
 			return Single(arrow?.Expression);
 		}
 		
