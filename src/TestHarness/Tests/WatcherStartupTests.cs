@@ -32,11 +32,15 @@ static class WatcherStartupTests
 		
 		var adhocNew  = TestFixtures.NewAdhocDir("StartupAdhocCreate");
 		var adhocGone = TestFixtures.NewAdhocDir("StartupAdhocDelete");
+		var adhocInto = TestFixtures.NewAdhocDir("StartupAdhocMoveInto");
+		var adhocFrom = TestFixtures.NewAdhocDir("StartupAdhocMoveFrom");
 		var projNew   = TestFixtures.NewMsBuildProject("StartupProjectCreate");
 		var projGone  = TestFixtures.NewMsBuildProject("StartupProjectDelete");
 		
 		adhocNew.Write("There.cs",  "class ThereAtLoad { }\n");
 		adhocGone.Write("Stays.cs", "class StaysPut { }\n");
+		adhocInto.Write("There.cs", "class ThereAtLoad { }\n");
+		adhocFrom.Write("Moved/Inside.cs", "class CameAlong { }\n");
 		projNew.Write("There.cs",   "class ThereAtLoad { }\n");
 		projGone.Write("Stays.cs",  "class StaysPut { }\n");
 		
@@ -134,6 +138,27 @@ static class WatcherStartupTests
 						: (false, "FAIL  (Doomed.cs is still a document fifteen seconds after it was deleted)");
 				}),
 			
+			// A directory that is moved keeps its own time; only the one it lands in is written.
+			// Its time is set well back so that no margin can make it look recent. A move after
+			// the window is MovedDirectoryTests' subject, and passes this test the same way.
+			new("watcher start-up: a directory moved in straight after the load brings its source files along in a workspace without a project",
+				async () => {
+					
+					var moved = adhocFrom.PathOf("Moved");
+					
+					Directory.SetLastWriteTimeUtc(moved, DateTime.UtcNow.AddHours(-1));
+					
+					if(!await IsDocumentAsync(adhocInto.Dir, "There.cs"))
+						
+						return (false, "FAIL  (precondition: the workspace did not load There.cs)");
+					
+					Directory.Move(moved, adhocInto.PathOf("Moved"));
+					
+					return await EventuallyAsync(() => IsDocumentAsync(adhocInto.Dir, "Moved/Inside.cs"))
+						? (true,  "PASS")
+						: (false, "FAIL  (Moved/Inside.cs is not a document fifteen seconds after its directory was moved in)");
+				}),
+			
 			// In a project a new source file cannot be added in place: the workspace has to
 			// reload. The flag is the observable — asking for it does not trigger the reload.
 			new("watcher start-up: a source file created straight after the load flags a reload in a project",
@@ -169,6 +194,8 @@ static class WatcherStartupTests
 			
 			adhocNew.Dispose();
 			adhocGone.Dispose();
+			adhocInto.Dispose();
+			adhocFrom.Dispose();
 			projNew.Dispose();
 			projGone.Dispose();
 			

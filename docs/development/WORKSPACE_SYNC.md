@@ -505,10 +505,10 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
     existed would look deleted on every start, flag a reload, and look deleted again after it.
   - **A file that was created.** Directories under the root, and under project directories
     outside it, are walked, and only one written since construction began is looked into.
-    There an AdhocWorkspace queues every `.cs` it has no document for; a project queues an
-    untracked file only if the file itself was created since then, because a project may
-    leave sources out on purpose (`Compile Remove`). The flush decides what a queued file
-    means.
+    There an AdhocWorkspace queues every `.cs` it has no document for, in that directory and
+    below it, because a directory moved in keeps its own time; a project queues an untracked
+    file only if the file itself was created since then, because a project may leave sources
+    out on purpose (`Compile Remove`). The flush decides what a queued file means.
 
   In an AdhocWorkspace a directory's time gets the same two-second margin, since a `.cs` it
   finds that way is always right. In a project the times get no margin: a project written just
@@ -517,9 +517,9 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
 
   - Not found in a project: a change whose time a coarse file system rounds down to before
     construction began.
-  - Not found in a project: a file **moved** in with its old timestamps, and on Windows a file
-    deleted and created again under one name within 15 seconds, which keeps the old file's
-    creation time.
+  - Not found in a project: a file or directory **moved** in with its old timestamps, and on
+    Windows a file deleted and created again under one name within 15 seconds, which keeps the
+    old file's creation time.
   - Not found anywhere: a change on a file system that does not write a directory when its
     entries change; a new file the flush does not recognise as an input; the delete of a link's
     target under a never-input directory (`node_modules`), which is never watched, so the
@@ -532,6 +532,13 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
 - **Non-recursive roots adopt new directories.** A directory created or moved under one gets a
   recursive watcher, and the files already in it are reported — `mkdir` and the first write into it
   are milliseconds apart.
+- **A directory that moves is one event.** Nothing is raised for the files in it, so recursive
+  roots ask for directory events too. One that arrives has its files reported, as above. One
+  that leaves is reported as a delete of its own path, and the flush adds the tracked documents
+  below that path whose files are gone (`DocumentsGoneWith`). Both halves are needed: a rename
+  inside the workspace is one of each, and reporting only the arrival would leave every document
+  of the directory there twice. The `projects` shape of non-recursive roots has no directory
+  events, so a directory moved in or out under it goes unnoticed.
 
 A workspace never holds more than 32 watchers: when adopting a directory would pass that, the
 watch set plans again instead, which moves it to the `projects` or `fallback` shape.

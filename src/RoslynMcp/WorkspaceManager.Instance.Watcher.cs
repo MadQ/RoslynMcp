@@ -228,8 +228,8 @@ internal sealed partial class WorkspaceManager
 		///         directory at all, and the pass costs one walk of directory entries.
 		///     </para>
 		///     <para>
-		///         In such a directory, an AdhocWorkspace takes every source file it has no
-		///         document for. Nothing it finds that way can be wrong, so the directory's time
+		///         In such a directory and below it, an AdhocWorkspace takes every source file it
+		///         has no document for. Nothing it finds that way can be wrong, so the directory's time
 		///         gets the margin a modified document gets. A project cannot do the same: it
 		///         may leave source files out on purpose (<c>Compile Remove</c>), and those
 		///         would look new on every start. There a file also has to have been created
@@ -240,7 +240,7 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		int QueueMissedCreates(Solution solution, DateTime sinceUtc)
 		{
-			var queued       = 0;
+			var queued       = new HashSet<string>(WatchPlanner.PathComparer);
 			var writtenAfter = isMSBuild ? sinceUtc : sinceUtc - ReconcileTolerance;
 			
 			// The root, and every project directory outside it — what the watch set covers.
@@ -273,16 +273,23 @@ internal sealed partial class WorkspaceManager
 						
 						try {
 							
-							foreach(var file in Directory.EnumerateFiles(directory)) {
+							// A directory moved in keeps its own time: only the one it landed in
+							// was written. So an AdhocWorkspace searches below a written directory.
+							var files = isMSBuild
+								? Directory.EnumerateFiles(directory)
+								: WorkspaceWalker.EnumerateFiles(directory, "*.cs", recursive: true, PruneFromWalk)
+							;
+							
+							foreach(var file in files) {
 								
 								if(!solution.GetDocumentIdsWithFilePath(file).IsEmpty)
 									continue;
 								
-								if(isMSBuild ? File.GetCreationTimeUtc(file) <= sinceUtc : !file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+								if(isMSBuild && File.GetCreationTimeUtc(file) <= sinceUtc)
 									continue;
 								
-								ScheduleDebounced(file);
-								queued++;
+								if(queued.Add(file))
+									ScheduleDebounced(file);
 							}
 						}
 						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -295,7 +302,7 @@ internal sealed partial class WorkspaceManager
 				}
 			}
 			
-			return queued;
+			return queued.Count;
 		}
 		
 		// The directories a walk for source files stays out of. An AdhocWorkspace also leaves
@@ -404,6 +411,30 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		// The tracked documents below one of the given paths whose files are gone. Which of those
+		// paths were directories can no longer be asked of the disk, so each document's ancestors
+		// are looked up instead: one pass, however many paths a checkout reports.
+		static IEnumerable<string> DocumentsGoneWith(HashSet<string> paths, Solution solution)
+		{
+			static bool IsBelow(string document, HashSet<string> paths)
+			{
+				for(var directory = Path.GetDirectoryName(document); directory is not null; directory = Path.GetDirectoryName(directory))
+					if(paths.Contains(directory))
+						
+						return true;
+				
+				return false;
+			}
+			
+			return solution.Projects
+				.SelectMany(project => project.Documents.Concat<TextDocument>(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments))
+				.Select(document => document.FilePath)
+				.OfType<string>()
+				.Distinct(SecurityBoundary.PathComparer)
+				.Where(document => IsBelow(document, paths) && !File.Exists(document))
+			;
+		}
+		
 		void FlushPendingChanges(object? _)
 		{
 			// Timer callbacks must never throw — unhandled exceptions crash the process.
@@ -504,6 +535,13 @@ internal sealed partial class WorkspaceManager
 					// reloads, and the documents that depended on that path are read again.
 					if(isMSBuild)
 						unreported.UnionWith(FindChangedLinks(changed, index, tracked, out linkChanged));
+					
+					// A directory moved away is reported once, as itself. Nothing reports the
+					// documents that went with it. Handled as deleted documents like any other.
+					var unknown = new HashSet<string>(deleted.Where(path => tracked.GetDocumentIdsWithFilePath(path).IsEmpty), SecurityBoundary.PathComparer);
+					
+					if(unknown.Count > 0)
+						deleted = [.. deleted.Union(DocumentsGoneWith(unknown, tracked), SecurityBoundary.PathComparer)];
 					
 					if(index.Count > 0) {
 						
