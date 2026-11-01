@@ -1381,12 +1381,6 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		;
 	}
 	
-	/// <summary>
-	///     True when <paramref name="path"/> is a C# source file. The shared spelling of the
-	///     C#-only requirement for tools backed by <see cref="SyntaxTree"/>/<c>SemanticModel</c>,
-	///     which is a genuinely different question from "is this tracked by Roslyn" — see
-	///     <see cref="WorkspaceTextDocumentInfo"/> for that one (#288).
-	/// </summary>
 	// A suffix must end on a path segment boundary: without one, 'Tool.cs' would silently name
 	// 'RoslynMcpTool.cs'.
 	static bool HasPathSuffix(string path, string suffix)
@@ -1401,6 +1395,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		;
 	}
 	
+	/// <summary>
+	///     True when <paramref name="path"/> is a C# source file. The shared spelling of the
+	///     C#-only requirement for tools backed by <see cref="SyntaxTree"/>/<c>SemanticModel</c>,
+	///     which is a genuinely different question from "is this tracked by Roslyn" — see
+	///     <see cref="WorkspaceTextDocumentInfo"/> for that one (#288).
+	/// </summary>
 	protected static bool IsCSharpSourcePath(string path) =>
 		string.Equals(Path.GetExtension(path), ".cs", StringComparison.OrdinalIgnoreCase);
 	
