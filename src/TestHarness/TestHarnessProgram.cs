@@ -259,6 +259,7 @@ sealed class HarnessRun(string[] args)
 			groups.Add(NavigationTests.Build(ctx));
 			groups.Add(CallGraphTests.Build(ctx));
 			groups.Add(AnalyzeRegionTests.Build(ctx));
+			groups.Add(SymbolInfoTests.Build(ctx));
 			groups.Add(CodeGenerationTests.Build(ctx));
 			groups.Add(FileContentTests.Build(ctx));
 			groups.Add(CodeFixTests.Build(ctx));
