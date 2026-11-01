@@ -47,12 +47,46 @@ static class SymbolInfoTests
 		/* 35 */ "}",
 	];
 	
+	// The harder shapes: conditional access, delegates, method groups and code that does not bind.
+	static readonly string[] Shapes = [
+		/*  1 */ "#nullable enable",
+		/*  2 */ "using System;",
+		/*  3 */ "",
+		/*  4 */ "class Shapes",
+		/*  5 */ "{",
+		/*  6 */ "\tvoid Run(string? s, Action? onDone, Func<string?> f)",
+		/*  7 */ "\t{",
+		/*  8 */ "\t\tvar trimmed = s?.Trim();",
+		/*  9 */ "\t\tvar size = s?.Length;",
+		/* 10 */ "\t\tonDone();",
+		/* 11 */ "\t\tvar value = f();",
+		/* 12 */ "\t\tAction<int> group = Take;",
+		/* 13 */ "\t\tstring? none = null;",
+		/* 14 */ "\t\tvar bad = Missing;",
+		/* 15 */ "\t\tconst string Q = \"a\\\"b\";",
+		/* 16 */ "\t}",
+		/* 17 */ "\tvoid Take(int a) { }",
+		/* 18 */ "\tvoid Take(ref string? a) { }",
+		/* 19 */ "}",
+		/* 20 */ "",
+		/* 21 */ "#nullable disable warnings",
+		/* 22 */ "class Annotated",
+		/* 23 */ "{",
+		/* 24 */ "\tvoid Run(string? s) { Console.WriteLine(s); }",
+		/* 25 */ "}",
+	];
+	
+	// Two types with one display name, joined by a user-defined conversion. Line 7 column 15 is 'm'.
+	const string Money = "namespace A { struct Money { public static implicit operator B.Money(Money m) => default; } }\nnamespace B { struct Money { } }\nclass Use\n{\n\tvoid Run(A.Money m)\n\t{\n\t\tB.Money n = m;\n\t}\n}\n";
+	
 	internal static TestGroup Build(TestContext ctx)
 	{
 		
 		var fx = TestFixtures.NewMsBuildProject("SymbolInfoFacts", targetFrameworks: "net10.0");
 		
 		fx.Write("Facts.cs", string.Join("\n", Facts) + "\n");
+		fx.Write("Shapes.cs", string.Join("\n", Shapes) + "\n");
+		fx.Write("Money.cs", Money);
 		
 		Task<(bool pass, string message)> At(int line, int column, Func<JsonNode?, bool> validate)
 			=> ctx.RunTestAsync("roslyn_get_symbol_info", new { filePath = "Facts.cs", line, column, projectPath = fx.Csproj }, validate)
@@ -60,6 +94,10 @@ static class SymbolInfoTests
 		
 		Task<(bool pass, string message)> WithOverloads(int line, int column, Func<JsonNode?, bool> validate)
 			=> ctx.RunTestAsync("roslyn_get_symbol_info", new { filePath = "Facts.cs", line, column, includeOverloads = true, projectPath = fx.Csproj }, validate)
+		;
+		
+		Task<(bool pass, string message)> InShapes(int line, int column, Func<JsonNode?, bool> validate)
+			=> ctx.RunTestAsync("roslyn_get_symbol_info", new { filePath = "Shapes.cs", line, column, includeOverloads = true, projectPath = fx.Csproj }, validate)
 		;
 		
 		var tests = new List<TestCase> {
@@ -146,6 +184,64 @@ static class SymbolInfoTests
 			new("roslyn_get_symbol_info: a brace of a declaration is not the declared symbol",
 				() => At(5, 1, data => data?["error"] is not null)),
 			
+			// The call inside ?. only runs on a non-null receiver, so stopping there reports NotNull for
+			// an expression that can be null, and an agent would drop a null check it needs.
+			new("roslyn_get_symbol_info: a call behind ?. describes the conditional access",
+				() => InShapes(8, 20, data => Text(data, "type") == "string?" && Text(data, "nullable_flow") == "MaybeNull")),
+			
+			new("roslyn_get_symbol_info: a call behind ?. still gives its method group",
+				() => InShapes(8, 20, data => data?["overloads"]?.AsArray().Count > 1)),
+			
+			new("roslyn_get_symbol_info: a value member behind ?. is lifted",
+				() => InShapes(9, 17, data => Text(data, "type") == "int?")),
+			
+			// The delegate's own null state is the question here, and void would hide it.
+			new("roslyn_get_symbol_info: a nullable delegate in call position describes the delegate",
+				() => InShapes(10, 3, data => Text(data, "kind") == "parameter"
+					&& Text(data, "type") == "Action?"
+					&& Text(data, "nullable_flow") == "MaybeNull")),
+			
+			// The opposite error: the call's maybe-null result must not be reported as the delegate's.
+			new("roslyn_get_symbol_info: a delegate returning a nullable is not itself nullable",
+				() => InShapes(11, 15, data => Text(data, "type") == "Func<string?>" && Text(data, "nullable_flow") == "NotNull")),
+			
+			// Silence here would read as 'no other overloads'. The two overloads differ by ref, which
+			// the signatures must show.
+			new("roslyn_get_symbol_info: a method used as a value gives its group, with ref in the signatures",
+				() => InShapes(12, 23, data => Text(data, "conversion") == "MethodGroup"
+					&& data?["overloads"]?.AsArray().Count == 2
+					&& data?["overloads"]?.AsArray().Any(o => o?.GetValue<string>().Contains("ref string") == true) == true)),
+			
+			// The null literal has no type of its own, but its target is the useful answer.
+			new("roslyn_get_symbol_info: a null literal reports its target type",
+				() => InShapes(13, 18, data => data?["error"] is null
+					&& Text(data, "converted_type") == "string?"
+					&& Text(data, "conversion") == "ImplicitReference"
+					&& Text(data, "constant_value") == "null")),
+			
+			// '?' is not a type, and code that does not bind has no nullable state to disclaim.
+			new("roslyn_get_symbol_info: unresolved code reports no type facts",
+				() => InShapes(14, 13, data => Text(data, "type") is null
+					&& Text(data, "nullable_flow") is null
+					&& Text(data, "nullable_context") is null)),
+			
+			// Quoted and escaped, so a string reading null cannot pass for the null constant.
+			new("roslyn_get_symbol_info: a string constant is rendered as C#",
+				() => InShapes(15, 20, data => Text(data, "constant_value") == "\"a\\\"b\"")),
+			
+			// Line 21 turns warnings off and leaves the annotations from line 1 on. The flow state is
+			// None although the context is not fully off, so the marker cannot key on the context.
+			new("roslyn_get_symbol_info: an annotations-only section reports no flow analysis",
+				() => InShapes(24, 42, data => Text(data, "nullable_context") == "disabled" && Text(data, "nullable_flow") is null)),
+			
+			// Both types display as 'Money', so comparing the strings would hide the conversion.
+			new("roslyn_get_symbol_info: a conversion between same-named types keeps converted_type",
+				() => ctx.RunTestAsync(
+					"roslyn_get_symbol_info",
+					new { filePath = "Money.cs", line = 7, column = 15, projectPath = fx.Csproj },
+					data => Text(data, "converted_type") == "Money" && Text(data, "conversion") == "ImplicitUserDefined")),
+			
+
 			new("roslyn_get_symbol_info: a position past the file is refused",
 				() => At(500, 1, data => data?["error"]?.GetValue<string>().Contains("out of range") == true)),
 		};

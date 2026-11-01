@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -24,14 +23,15 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		"return type) plus the facts text cannot show about the enclosing expression. " +
 		"Use this when you have a line and column and need to identify exactly what is there, disambiguate an overloaded name, " +
 		"or check nullability or a conversion instead of guessing. Works on declarations as well as references. " +
-		"A position on a method name describes the call: 'type' is what the invocation returns. " +
+		"A position on a method name describes the call: 'type' is what the invocation returns. A delegate in call position " +
+		"describes the delegate. A member behind ?. describes the whole conditional access: 's?.Trim()' is 'string?'. " +
 		"'type' is flow-adjusted, so 'string? s' reads 'string' after a null check. " +
 		"nullable_flow is NotNull or MaybeNull, per the compiler's flow analysis at this point; it applies to references and " +
 		"nullable values. nullable_context is 'disabled' where nullable analysis is off, so a missing nullable_flow there does not " +
 		"mean not-null. converted_type and conversion appear when an implicit conversion applies, and constant_value when the " +
 		"expression is a compile-time constant. " +
 		"On failed overload resolution, candidates and candidate_reason list what the compiler considered. The compiler does not " +
-		"say why a successful overload won; set includeOverloads=true to see the others on a method name. " +
+		"say why a successful overload won; set includeOverloads=true to see the others on a method name in code. " +
 		"Fields that do not apply are omitted. " +
 		"For looking up a symbol by name without a position, use roslyn_get_symbol_definition instead.")]
 	public async Task<object> GetSymbolInfo(
@@ -39,7 +39,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		[Description("1-based line number.")] int line,
 		[Description("1-based column number.")] int column,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Also list every overload in the method group on a method name. Can be long, e.g. for Console.WriteLine. Default: false.")] bool includeOverloads = false)
+		[Description("Also list every overload in the method group, on a method name at a call or used as a value. Can be long, e.g. for Console.WriteLine. At a declaration, use roslyn_find_overloads instead. Default: false.")] bool includeOverloads = false)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_info", $"{filePath}:{line}", new { column, includeOverloads });
 		
@@ -82,15 +82,18 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		if(isDeclaration)
 			symbol = model.GetDeclaredSymbol(node);
 		
-		var (expression, callee) = EnclosingExpression(node);
+		var (expression, callee) = EnclosingExpression(node, symbol);
 		var typeInfo             = model.GetTypeInfo(expression ?? node);
 		
-		if(symbol is null && typeInfo.Type is null)
+		// The null literal has no type of its own, only the one it converts to.
+		var anyType = typeInfo.Type ?? typeInfo.ConvertedType;
+		
+		if(symbol is null && anyType is null)
 			
 			return scope.Error(new ErrorResult("No symbol resolved at that position."));
 		
 		var result = symbol is null
-			? new SymbolInfoResult("type", typeInfo.Type!.ToDisplayString(), null, null)
+			? new SymbolInfoResult("type", anyType!.ToDisplayString(), null, null)
 			: new SymbolInfoResult(
 				symbol.Kind.ToString().ToLowerInvariant(),
 				symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
@@ -106,7 +109,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		;
 		
 		var enriched = expression is not null
-			? AddExpressionFacts(result, model, expression, typeInfo, position)
+			? AddExpressionFacts(result, model, expression, typeInfo)
 			: result with { Type = isDeclaration ? DeclaredType(symbol) : null }
 		;
 		
@@ -120,12 +123,14 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 	}
 	
 	/// <summary>
-	///     Climbs from the node under the position to the expression an agent means by it: a method
-	///     name has no type of its own, so 'a.Bar' in 'a.Bar(x)' resolves to the whole call. Also returns
-	///     the call's callee, which is where <c>GetMemberGroup</c> answers; the invocation gets nothing
-	///     back from it.
+	///     Climbs from the node under the position to the expression an agent means by it. A method
+	///     name has no type of its own, so 'a.Bar' in 'a.Bar(x)' resolves to the whole call, and the
+	///     value of 's?.Trim()' is the conditional access: the call inside it never sees a null, so
+	///     stopping there reports NotNull for something that can be null. A delegate in call position
+	///     stays itself, because whether it can be null is the question. Also returns the name's
+	///     expression, which is where <c>GetMemberGroup</c> answers; the invocation gets nothing back.
 	/// </summary>
-	static (ExpressionSyntax? Expression, ExpressionSyntax? Callee) EnclosingExpression(SyntaxNode node)
+	static (ExpressionSyntax? Expression, ExpressionSyntax? Callee) EnclosingExpression(SyntaxNode node, ISymbol? symbol)
 	{
 		if(node is not ExpressionSyntax current)
 			
@@ -137,30 +142,35 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		else if(current.Parent is MemberBindingExpressionSyntax binding && binding.Name == current)
 			current = binding;
 		
-		return current.Parent is InvocationExpressionSyntax invocation && invocation.Expression == current
-			? (invocation, current)
-			: (current, null)
-		;
+		var callee = current;
+		
+		if(symbol is IMethodSymbol && current.Parent is InvocationExpressionSyntax invocation && invocation.Expression == current)
+			current = invocation;
+		
+		while(current.Parent is ConditionalAccessExpressionSyntax conditional && conditional.WhenNotNull == current)
+			current = conditional;
+		
+		return (current, callee);
 	}
 	
-	static SymbolInfoResult AddExpressionFacts(SymbolInfoResult result, SemanticModel model, ExpressionSyntax expression, TypeInfo typeInfo, int position)
+	static SymbolInfoResult AddExpressionFacts(SymbolInfoResult result, SemanticModel model, ExpressionSyntax expression, TypeInfo typeInfo)
 	{
-		var type       = typeInfo.Type?.ToDisplayString(TypeFormat);
-		var converted  = typeInfo.ConvertedType?.ToDisplayString(TypeFormat);
+		// An error type means the code does not bind, and '?' is not a fact about it.
+		var type       = typeInfo.Type is { TypeKind: not TypeKind.Error } ? typeInfo.Type : null;
+		var converted  = typeInfo.ConvertedType is { TypeKind: not TypeKind.Error } ? typeInfo.ConvertedType : null;
 		var conversion = model.GetConversion(expression);
 		var constant   = model.GetConstantValue(expression);
-		var context    = model.GetNullableContext(position);
-		var nullable   = CanBeNull(typeInfo.Type);
+		var nullable   = CanBeNull(type ?? converted);
 		var flow       = typeInfo.Nullability.FlowState;
 		
 		return result with {
 			
-			Type            = type,
-			ConvertedType   = converted == type ? null : converted,
+			Type            = type?.ToDisplayString(TypeFormat),
+			ConvertedType   = SymbolEqualityComparer.IncludeNullability.Equals(type, converted) ? null : converted?.ToDisplayString(TypeFormat),
 			NullableFlow    = nullable && flow != NullableFlowState.None ? flow.ToString() : null,
-			NullableContext = nullable && !context.WarningsEnabled() && !context.AnnotationsEnabled() ? "disabled" : null,
+			NullableContext = nullable && flow == NullableFlowState.None ? "disabled" : null,
 			Conversion      = conversion.Exists && !conversion.IsIdentity ? conversion.ToString() : null,
-			ConstantValue   = constant.HasValue ? Convert.ToString(constant.Value, CultureInfo.InvariantCulture) ?? "null" : null
+			ConstantValue   = constant.HasValue ? SymbolDisplay.FormatPrimitive(constant.Value!, quoteStrings: true, useHexadecimalNumbers: false) : null
 		};
 	}
 	
@@ -181,7 +191,11 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 	
 	static string[]? Signatures(IEnumerable<ISymbol> symbols)
 	{
-		var signatures = symbols.Select(SymbolFormatter.FormatSignature).ToArray();
+		// The full form, because ref and out are exactly what can tell two overloads apart.
+		var signatures = symbols
+			.Select(symbol => symbol is IMethodSymbol method ? SymbolFormatter.FormatFullMethodSignature(method) : SymbolFormatter.FormatSignature(symbol))
+			.ToArray()
+		;
 		
 		return signatures.Length == 0 ? null : signatures;
 	}
