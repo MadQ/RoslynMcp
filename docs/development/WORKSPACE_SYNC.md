@@ -498,10 +498,11 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
     is later than the start of construction, less a two-second margin for coarse timestamps,
     is queued; the flush drops the ones whose content is unchanged.
   - **A file that was deleted.** A tracked file that is not on disk — a document, or a file
-    that only links represent — is queued as deleted when the nearest existing directory
-    above it was written since construction began. Removing an entry writes the directory;
-    without that condition, a source file a project lists but that never existed would look
-    deleted on every start, flag a reload, and look deleted again after it.
+    that only links represent — is queued as deleted. In an AdhocWorkspace that is all it
+    takes: it only holds files it found. In a project the nearest existing directory above
+    the file must also have been written since construction began. Removing an entry writes
+    the directory; without that condition, a source file a project lists but that never
+    existed would look deleted on every start, flag a reload, and look deleted again after it.
   - **A file that was created.** Directories under the root, and under project directories
     outside it, are walked, and only one written since construction began is looked into.
     There an AdhocWorkspace queues every `.cs` it has no document for; a project queues an
@@ -509,10 +510,23 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
     leave sources out on purpose (`Compile Remove`). The flush decides what a queued file
     means.
 
-  Neither of the last two takes a margin off the time: a delete or create that is wrongly
-  assumed costs a reload. Not found: a file **moved** into a project with its old timestamps;
-  a change on a file system that does not write a directory when its entries change; a new
-  file the flush does not recognise as an input.
+  In an AdhocWorkspace a directory's time gets the same two-second margin, since a `.cs` it
+  finds that way is always right. In a project the times get no margin: a project written just
+  before it was opened would look new, and a delete or create that is wrongly assumed costs a
+  reload. What that leaves:
+
+  - Not found in a project: a change whose time a coarse file system rounds down to before
+    construction began.
+  - Not found in a project: a file **moved** in with its old timestamps, and on Windows a file
+    deleted and created again under one name within 15 seconds, which keeps the old file's
+    creation time.
+  - Not found anywhere: a change on a file system that does not write a directory when its
+    entries change; a new file the flush does not recognise as an input; the delete of a link's
+    target under a never-input directory (`node_modules`), which is never watched, so the
+    link's document stays then as it does at any other time.
+  - One reload too many in a project: a listed source file that never existed looks deleted if
+    something else wrote its directory during the load. The two cannot be told apart. It
+    happens once, not on every start.
 - **Suppression is unchanged in meaning.** `ApplyChangesWithFswSuppressed` calls
   `Suspend`/`Resume`, which disable and re-enable every watcher under the same ref-count rule.
 - **Non-recursive roots adopt new directories.** A directory created or moved under one gets a

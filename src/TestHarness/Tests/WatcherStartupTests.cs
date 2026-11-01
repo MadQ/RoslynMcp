@@ -65,9 +65,24 @@ static class WatcherStartupTests
 		async Task<bool> IsDocumentAsync(string? projectPath, string filePath)
 			=> (await Call("roslyn_read_file", new { filePath, projectPath }))?["source"]?.GetValue<string>() == "roslyn";
 		
+		// Whether the workspace answers that it has no such file. Only that answer counts: a call
+		// that failed for any other reason says nothing about the document.
+		async Task<bool> IsNotADocumentAsync(string? projectPath, string filePath)
+			=> (await Call("roslyn_read_file", new { filePath, projectPath }))?["error"]?.GetValue<string>().Contains("not found") == true;
+		
 		// reload_pending is omitted from the JSON when false.
 		async Task<bool> ReloadPendingAsync(string? projectPath)
 			=> (await Call("roslyn_check_drift", new { projectPath }))?["reload_pending"]?.GetValue<bool>() == true;
+		
+		// Loads the workspace and checks that nothing is pending, in one call: it has to be the
+		// last call before the change, or the watchers get another round trip to go live. A call
+		// that failed is no "nothing pending". If the file a test goes on to delete did not load,
+		// the test fails on its own: no reload follows.
+		async Task<bool> LoadsWithNothingPendingAsync(string? projectPath)
+			=> await Call("roslyn_check_drift", new { projectPath }) is { } reply
+				&& reply["error"] is null
+				&& reply["reload_pending"]?.GetValue<bool>() != true
+		;
 		
 		// Polls until the condition holds, for at most fifteen seconds.
 		static async Task<bool> EventuallyAsync(Func<Task<bool>> condition)
@@ -114,7 +129,7 @@ static class WatcherStartupTests
 					
 					File.Delete(adhocDoomed);
 					
-					return await EventuallyAsync(async () => !await IsDocumentAsync(adhocGone.Dir, "Doomed.cs"))
+					return await EventuallyAsync(() => IsNotADocumentAsync(adhocGone.Dir, "Doomed.cs"))
 						? (true,  "PASS")
 						: (false, "FAIL  (Doomed.cs is still a document fifteen seconds after it was deleted)");
 				}),
@@ -124,9 +139,9 @@ static class WatcherStartupTests
 			new("watcher start-up: a source file created straight after the load flags a reload in a project",
 				async () => {
 					
-					if(!await IsDocumentAsync(projNew.Csproj, "There.cs") || await ReloadPendingAsync(projNew.Csproj))
+					if(!await LoadsWithNothingPendingAsync(projNew.Csproj))
 						
-						return (false, "FAIL  (precondition: the workspace did not load There.cs, or a reload was pending already)");
+						return (false, "FAIL  (precondition: the workspace did not load, or a reload was pending already)");
 					
 					File.WriteAllText(projNew.PathOf("Arrived.cs"), "class ArrivedLate { }\n");
 					
@@ -138,9 +153,9 @@ static class WatcherStartupTests
 			new("watcher start-up: a source file deleted straight after the load flags a reload in a project",
 				async () => {
 					
-					if(!await IsDocumentAsync(projGone.Csproj, "Doomed.cs") || await ReloadPendingAsync(projGone.Csproj))
+					if(!await LoadsWithNothingPendingAsync(projGone.Csproj))
 						
-						return (false, "FAIL  (precondition: the workspace did not load Doomed.cs, or a reload was pending already)");
+						return (false, "FAIL  (precondition: the workspace did not load, or a reload was pending already)");
 					
 					File.Delete(projDoomed);
 					

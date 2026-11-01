@@ -84,8 +84,21 @@ internal sealed partial class WorkspaceManager
 					
 					return;
 				
-				var solution = PeekSolution();
-				var index    = physicalIndex;
+				PhysicalFileIndex index;
+				Solution          solution;
+				
+				// Together, under the lock a reload swaps both under.
+				@lock.EnterReadLock();
+				
+				try {
+					
+					index    = physicalIndex;
+					solution = workspace.CurrentSolution;
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
 				var modified = 0;
 				var missing  = new List<string>();
 				
@@ -142,17 +155,18 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		/// <summary>
-		///     The deletes the watchers were not yet there to report (#348). A tracked file that
-		///     is not on disk was either deleted in the window, or was never there — a project
-		///     can list a source file that does not exist, and a document for it is tracked all
-		///     the same. Taking the second for the first would flag a reload on every start, and
-		///     again after that reload.
+		///     The deletes the watchers were not yet there to report (#348). An AdhocWorkspace
+		///     only holds files it found on disk, so a tracked file that is gone was deleted.
 		///     <para>
-		///         The directory tells them apart. Removing an entry writes the directory, so a
-		///         file can only have gone missing since <paramref name="sinceUtc"/> if the
-		///         nearest directory above it that still exists was written since then. No
-		///         margin is taken off here, unlike for a modified document: a delete that is
-		///         wrongly assumed costs a reload, not a comparison that comes out equal.
+		///         In a project it was either deleted in the window, or was never there: a
+		///         project can list a source file that does not exist, and a document for it is
+		///         tracked all the same. Taking the second for the first would flag a reload on
+		///         every start, and again after that reload. The directory tells them apart.
+		///         Removing an entry writes the directory, so a file can only have gone missing
+		///         since <paramref name="sinceUtc"/> if the nearest directory above it that
+		///         still exists was written since then. No margin is taken off here, unlike for
+		///         a modified document: a delete that is wrongly assumed costs a reload, not a
+		///         comparison that comes out equal.
 		///     </para>
 		/// </summary>
 		int QueueMissedDeletes(List<string> missing, DateTime sinceUtc)
@@ -162,34 +176,44 @@ internal sealed partial class WorkspaceManager
 			
 			foreach(var path in missing) {
 				
-				try {
-					
-					var directory = Path.GetDirectoryName(path);
-					
-					while(directory is not null && !Directory.Exists(directory))
-						directory = Path.GetDirectoryName(directory);
-					
-					if(directory is null)
-						continue;
-					
-					if(!written.TryGetValue(directory, out var since)) {
-						
-						since = Directory.GetLastWriteTimeUtc(directory) > sinceUtc;
-						written.Add(directory, since);
-					}
-					
-					if(!since)
-						continue;
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				if(isMSBuild && !DirectoryWrittenSince(path, sinceUtc, written))
 					continue;
-				}
 				
 				ScheduleDebounced(path, deleted: true);
 				queued++;
 			}
 			
 			return queued;
+		}
+		
+		// Whether the nearest directory above path that still exists was written since sinceUtc.
+		// The answer is kept per directory: a checkout that removes a thousand files from one
+		// asks a thousand times.
+		static bool DirectoryWrittenSince(string path, DateTime sinceUtc, Dictionary<string, bool> written)
+		{
+			try {
+				
+				var directory = Path.GetDirectoryName(path);
+				
+				while(directory is not null && !Directory.Exists(directory))
+					directory = Path.GetDirectoryName(directory);
+				
+				if(directory is null)
+					
+					return false;
+				
+				if(!written.TryGetValue(directory, out var since)) {
+					
+					since = Directory.GetLastWriteTimeUtc(directory) > sinceUtc;
+					written.Add(directory, since);
+				}
+				
+				return since;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				
+				return false;
+			}
 		}
 		
 		/// <summary>
@@ -205,16 +229,19 @@ internal sealed partial class WorkspaceManager
 		///     </para>
 		///     <para>
 		///         In such a directory, an AdhocWorkspace takes every source file it has no
-		///         document for. A project cannot: it may leave source files out on purpose
-		///         (<c>Compile Remove</c>), and those would look new on every start. There a
-		///         file also has to have been created since <paramref name="sinceUtc"/>. A file
-		///         moved in with its old timestamps is therefore not found in a project. No
-		///         margin is taken off either time, for the reason given for deletes.
+		///         document for. Nothing it finds that way can be wrong, so the directory's time
+		///         gets the margin a modified document gets. A project cannot do the same: it
+		///         may leave source files out on purpose (<c>Compile Remove</c>), and those
+		///         would look new on every start. There a file also has to have been created
+		///         since <paramref name="sinceUtc"/>, and no margin is taken off either time: a
+		///         project written just before it was opened would look new, and reload. A file
+		///         moved in with its old timestamps is therefore not found in a project.
 		///     </para>
 		/// </summary>
 		int QueueMissedCreates(Solution solution, DateTime sinceUtc)
 		{
-			var queued = 0;
+			var queued       = 0;
+			var writtenAfter = isMSBuild ? sinceUtc : sinceUtc - ReconcileTolerance;
 			
 			// The root, and every project directory outside it — what the watch set covers.
 			var roots = solution.Projects
@@ -223,48 +250,48 @@ internal sealed partial class WorkspaceManager
 				.Where(directory => !SecurityBoundary.IsUnderDirectory(directory, rootPath))
 				.Prepend(rootPath)
 				.Distinct(WatchPlanner.PathComparer)
-				.ToArray()
 			;
 			
 			foreach(var root in roots) {
 				
-				IEnumerable<(string Path, DateTime WrittenUtc)> directories;
-				
+				// Around the loop, not the walk's construction: the walk is lazy, and a root that
+				// has gone only throws once it is enumerated.
 				try {
 					
-					directories = WorkspaceWalker
+					if(!isMSBuild && !IsLoadableRoot(root))
+						continue;
+					
+					var directories = WorkspaceWalker
 						.EnumerateDirectories(root, PruneFromWalk)
 						.Prepend((root, Directory.GetLastWriteTimeUtc(root)))
 					;
-				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					continue;
-				}
-				
-				foreach(var (directory, writtenUtc) in directories) {
 					
-					if(writtenUtc <= sinceUtc)
-						continue;
-					
-					try {
+					foreach(var (directory, writtenUtc) in directories) {
 						
-						foreach(var file in Directory.EnumerateFiles(directory)) {
+						if(writtenUtc <= writtenAfter)
+							continue;
+						
+						try {
 							
-							if(!solution.GetDocumentIdsWithFilePath(file).IsEmpty)
-								continue;
-							
-							if(isMSBuild ? File.GetCreationTimeUtc(file) <= sinceUtc : !file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-								continue;
-							
-							ScheduleDebounced(file);
-							queued++;
+							foreach(var file in Directory.EnumerateFiles(directory)) {
+								
+								if(!solution.GetDocumentIdsWithFilePath(file).IsEmpty)
+									continue;
+								
+								if(isMSBuild ? File.GetCreationTimeUtc(file) <= sinceUtc : !file.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+									continue;
+								
+								ScheduleDebounced(file);
+								queued++;
+							}
+						}
+						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+							// Gone or unreadable since the walk listed it.
 						}
 					}
-					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-						// Gone or unreadable since the walk listed it.
-						_ = ex
-						;
-					}
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					// Gone or unreadable. The next root may still be there.
 				}
 			}
 			
