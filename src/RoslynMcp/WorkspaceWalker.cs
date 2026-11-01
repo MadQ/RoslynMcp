@@ -42,6 +42,22 @@ internal static class WorkspaceWalker
 	;
 	
 	/// <summary>
+	///     Lazily enumerates the directories under <paramref name="root"/> — not the root itself —
+	///     that <paramref name="prune"/> does not reject, each with the time it was last written.
+	///     A directory is written when an entry is added to it or removed from it, which is what
+	///     makes that time worth having: it says whether a directory can hold a file that has
+	///     appeared, or has lost one, since a given moment. Like the other walks, it never
+	///     follows a link and skips what it cannot read.
+	/// </summary>
+	public static IEnumerable<(string Path, DateTime WrittenUtc)> EnumerateDirectories(string root, PrunePredicate prune) =>
+		new FileSystemEnumerable<(string, DateTime)>(root, (ref FileSystemEntry entry) => (entry.ToFullPath(), entry.LastWriteTimeUtc.UtcDateTime), Options(recursive: true)) {
+			
+			ShouldIncludePredicate = (ref FileSystemEntry entry) => entry.IsDirectory && !IsLink(ref entry) && !prune(ref entry),
+			ShouldRecursePredicate = (ref FileSystemEntry entry) => !IsLink(ref entry) && !prune(ref entry),
+		}
+	;
+	
+	/// <summary>
 	///     Walks <paramref name="root"/> and returns the full paths of the directories
 	///     <paramref name="prune"/> rejected, without entering them. This is how the watcher learns
 	///     where the expensive trees are, at the cost of the directories it would watch anyway.

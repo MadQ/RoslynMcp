@@ -429,11 +429,12 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			// All files, not only .cs: MSBuild inputs such as AdditionalFiles, .editorconfig,
 			// props/targets, and global.json must all reach the shared reload classifier.
-			// Directory names only where a new directory has to be adopted.
+			// Directory names wherever a directory can arrive or leave as a whole: moving one
+			// raises a single event for the directory and none for the files in it.
 			watcher = new FileSystemWatcher(root.Path) {
 				
 				IncludeSubdirectories = root.Recursive,
-				NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.FileName | (root.Expands ? NotifyFilters.DirectoryName : 0),
+				NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.FileName | (root.Expands || root.Recursive ? NotifyFilters.DirectoryName : 0),
 			};
 			
 			watcher.Changed += (_, e) => { if(!Muted()) Report(e.FullPath, deleted: false); };
@@ -525,6 +526,12 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			if(root.Expands && Directory.Exists(fullPath))
 				Adopt(fullPath);
 			
+			else if(root.Recursive && Directory.Exists(fullPath)) {
+				
+				// Already covered by this watcher, so only its files are news.
+				if(!IsLeftAlone(fullPath))
+					ReportFilesOf(fullPath);
+			}
 			else
 				onChange(fullPath, false);
 		}
@@ -569,8 +576,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	/// </summary>
 	void Adopt(string directory)
 	{
-		if(rules.IsNeverInput(Path.GetFileName(directory.AsSpan()))
-		   || WorkspaceWalker.IsLink(new DirectoryInfo(directory)))
+		if(IsLeftAlone(directory))
 			
 			return;
 		
@@ -592,6 +598,16 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			Replan();
 		}
 		
+		ReportFilesOf(directory);
+	}
+	
+	bool IsLeftAlone(string directory)
+		=> rules.IsNeverInput(Path.GetFileName(directory.AsSpan()))
+			|| WorkspaceWalker.IsLink(new DirectoryInfo(directory))
+	;
+	
+	void ReportFilesOf(string directory)
+	{
 		var reported = 0;
 		
 		foreach(var file in WorkspaceWalker.EnumerateFiles(directory, "*", recursive: true, (ref FileSystemEntry entry) => rules.IsNeverInput(entry.FileName))) {

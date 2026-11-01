@@ -63,11 +63,17 @@ internal sealed partial class WorkspaceManager
 			logger.LogInfo("Links", $"{index.Count} of {files.Length} document path(s) lead to another file ({elapsed}ms)");
 		}
 		
-		IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
+		// A drive root or a directory marked as the system's own is never searched for sources.
+		static bool IsLoadableRoot(string path)
 		{
 			var pathInfo = new DirectoryInfo(path);
 			
-			if(pathInfo.Attributes.HasFlag(FileAttributes.System) || pathInfo.Parent is null)
+			return !pathInfo.Attributes.HasFlag(FileAttributes.System) && pathInfo.Parent is not null;
+		}
+		
+		IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
+		{
+			if(!IsLoadableRoot(path))
 				
 				return [];
 			
