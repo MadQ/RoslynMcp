@@ -18,6 +18,23 @@ static class NavigationTests
 					new { filePath = "Program.cs", line = 10, column = 10, projectPath = ctx.TargetPath },
 					data => data?["kind"] is not null && data?["name"] is not null)),
 			
+			// 'ool.cs' ends many real paths but names no file. A match on the raw suffix answered with
+			// whichever tree came first, so the agent read the wrong file without any sign of it.
+			new("FindSyntaxTree: a partial file name is not found",
+				() => ctx.RunTestAsync(
+					"roslyn_get_file_outline",
+					new { filePath = "ool.cs", projectPath = ctx.TargetPath },
+					data => data?["error"]?.GetValue<string>().Contains("not found") == true)),
+			
+			// The boundary must not break the usual way to name a file: a trailing run of whole
+			// path segments.
+			new("FindSyntaxTree: whole trailing segments still resolve",
+				() => ctx.RunTestAsync(
+					"roslyn_get_file_outline",
+					new { filePath = "Analysis/FileOutlineTool.cs", projectPath = ctx.TargetPath },
+					data => data?["file"]?.GetValue<string>().EndsWith("FileOutlineTool.cs") == true)),
+			
+
 			// Same anchor position as the symbol-info test above — proves the position path
 			// resolves a symbol and runs the reference search end-to-end.
 			new("roslyn_find_references: position-based resolution",

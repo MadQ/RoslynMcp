@@ -5,8 +5,9 @@
 
 ## Public tool inventory (complete)
 
-### Analysis / navigation (24)
+### Analysis / navigation (25)
 
+- `roslyn_analyze_region`
 - `roslyn_check_drift`
 - `roslyn_check_syntax`
 - `roslyn_find_callers`
@@ -109,4 +110,4 @@ Where normal tools still win:
 
 The core value proposition is still correct: Roslyn-backed semantics are genuinely better than text search for C# navigation and analysis. The tool surface is now broad enough to cover most C# exploration, search, editing, rename/refactoring, and build workflows without leaving the MCP layer.
 
-This file is now **inventory-complete** for the 43 public tools, but the qualitative commentary remains intentionally selective rather than giving every tool a score.
+This file is now **inventory-complete** for the 44 public tools, but the qualitative commentary remains intentionally selective rather than giving every tool a score.

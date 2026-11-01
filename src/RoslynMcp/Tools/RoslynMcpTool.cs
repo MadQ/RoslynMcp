@@ -1377,7 +1377,21 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		var normalized = NormalizePath(filePath);
 		
 		return compilation.SyntaxTrees
-			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
+			.FirstOrDefault(t => HasPathSuffix(t.FilePath, normalized))
+		;
+	}
+	
+	// A suffix must end on a path segment boundary: without one, 'Tool.cs' would silently name
+	// 'RoslynMcpTool.cs'.
+	static bool HasPathSuffix(string path, string suffix)
+	{
+		if(suffix.Length == 0 || !path.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+			
+			return false;
+		
+		return path.Length == suffix.Length
+			|| suffix[0] is '/' or '\\'
+			|| path[path.Length - suffix.Length - 1] is '/' or '\\'
 		;
 	}
 	

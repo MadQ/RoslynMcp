@@ -65,6 +65,10 @@ built-in tools only if a roslyn tool fails.
   Answers "what does this method depend on?" by walking the Roslyn IOperation
   tree — finds actual invocations, not text patterns. Pair with
   `roslyn_find_callers` to trace the full call chain in both directions.
+- `roslyn_analyze_region` — Compiler data-flow and control-flow facts for a line
+  range: what an extracted method would take and return, what a lambda captures,
+  whether every path returns. Covers locals, parameters and `this` only; fields
+  and properties never appear.
 - `roslyn_find_implementations` — Find implementations of an interface or
   overrides of a virtual/abstract method. Grep cannot do this.
 - `roslyn_get_symbol_definition` — Jump to a symbol's declaration. Returns file,

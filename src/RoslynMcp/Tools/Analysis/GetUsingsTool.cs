@@ -36,10 +36,7 @@ internal sealed class GetUsingsTool : RoslynMcpTool
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
-		var normalized = NormalizePath(filePath);
-		var tree       = compilation.SyntaxTrees
-			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
-		;
+		var tree = FindSyntaxTree(compilation, filePath);
 		
 		if(tree is null)
 			

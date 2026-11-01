@@ -36,10 +36,7 @@ internal sealed class GetSymbolsInScopeTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var normalized = NormalizePath(filePath);
-		var tree = compilation.SyntaxTrees
-			.FirstOrDefault(t => t.FilePath.EndsWith(normalized, StringComparison.OrdinalIgnoreCase))
-		;
+		var tree = FindSyntaxTree(compilation, filePath);
 		
 		if(tree is null)
 			
