@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "MadQ.RoslynMcp": {
+      "type": "stdio",
+      "command": "madq-roslynmcp",
+      "args": ["--root", "."],
+      "tools": ["*"]
+    }
+  }
+}
