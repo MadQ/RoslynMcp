@@ -255,6 +255,7 @@ internal sealed record SymbolDocumentationEmptyResult(
 
 /// <summary>Result of <c>roslyn_analyze_region</c>. <c>control_flow</c> is null for an expression region: Roslyn analyzes control flow over statements only.</summary>
 internal sealed record AnalyzeRegionResult(
+	[property: JsonPropertyName("file")]         string        File,
 	[property: JsonPropertyName("region")]       LineRange     Region,
 	[property: JsonPropertyName("data_flow")]    DataFlowFacts DataFlow,
 	[property: JsonPropertyName("control_flow")]
@@ -288,6 +289,12 @@ internal sealed record DataFlowFacts(
 	[property: JsonPropertyName("written_inside")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string[]? WrittenInside,
+	[property: JsonPropertyName("read_outside")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? ReadOutside,
+	[property: JsonPropertyName("written_outside")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? WrittenOutside,
 	[property: JsonPropertyName("captured")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string[]? Captured

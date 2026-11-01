@@ -17,19 +17,21 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 	[Description(
 		"Returns the compiler's data-flow and control-flow facts for a range of lines — what text alone cannot prove. " +
 		"Use it before extracting a method (data_flow.data_flows_in are its parameters, data_flows_out its return values, " +
-		"control_flow.exit_points the jumps that would need rewriting), to learn what a lambda captures, whether a local is " +
-		"used after a block, or whether every path returns. " +
+		"control_flow.exit_points the jumps that would need rewriting), to learn what a lambda in the region captures, whether a " +
+		"local is used outside the region (read_outside and written_outside, before or after it), or whether every path returns. " +
 		"The range resolves to whole statements from one statement list: a partly covered statement widens to all of it, and " +
-		"'region' reports the lines actually analyzed. A range over a whole method analyzes its body. " +
+		"'file' and 'region' report what was actually analyzed. A range over a whole method or local function analyzes its body. " +
 		"An expression-bodied member or an initializer is analyzed as one expression and has no control_flow. " +
 		"data_flow covers local variables, parameters and 'this' only: fields and properties never appear, so an empty list " +
-		"does not mean the region touches no state; 'this' in data_flows_in means extracted code must be an instance method. " +
+		"does not mean the region touches no state. Entries read 'type name'; an entry such as 'Order this' in data_flows_in " +
+		"means extracted code must be an instance method. " +
 		"control_flow.end_reachable false means every path leaves the region; true just before the closing brace of a " +
 		"non-void method means a return is missing. start_reachable false means dead code. " +
 		"exit_points lists return, break, continue, goto and yield_break statements that leave the region. " +
 		"throws lists explicit throw sites apart from exit_points, because a try in the region may catch them; exceptions " +
 		"from calls are not included. Sites inside lambdas and local functions that lie in the region are not reported. " +
-		"Empty lists are omitted. Returns a structured error when the range holds no code: blank lines, comments, disabled #if text.")]
+		"Empty lists are omitted. Returns a structured error when the range holds no code (blank lines, comments, disabled #if text), " +
+		"misses a body (an attribute or signature line), or spans several members or accessors.")]
 	public async Task<object> AnalyzeRegion(
 		[Description("Relative path to a C# file in the compilation, e.g. 'Core/WindowTracker.cs'.")] string filePath,
 		[Description("1-based first line of the region.")] int startLine,
@@ -51,7 +53,11 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 		
 		if(tree is null)
 			
-			return scope.Failed("file not found", new ErrorResult($"File '{filePath}' not found in the compilation."));
+			return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
+		
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
 		
 		var text      = await tree.GetTextAsync(cancellationToken);
 		var lineCount = text.Lines.Count;
@@ -64,9 +70,9 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 		
 		if(RegionResolver.Resolve(root, text, startLine, endLine) is not { } region)
 			
-			return scope.Failed("no code in range", new ErrorResult(
+			return scope.Error(new ErrorResult(
 				$"No analyzable code in lines {startLine}-{endLine}.",
-				"The range holds no statement or expression: it may be blank, a comment, disabled #if text, or a declaration without a body."));
+				"The range holds no statement or expression: it may be blank, a comment, disabled #if text, or a line outside a body. A range across several members or accessors must be narrowed to one body."));
 		
 		var model = compilation.GetSemanticModel(tree);
 		
@@ -88,18 +94,19 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 				dataFlow = model.AnalyzeDataFlow((ExpressionSyntax) region.First);
 		}
 		catch(ArgumentException ex) {
-			return scope.Failed(ex.Message, new ErrorResult($"Roslyn rejected the region: {ex.Message}"));
+			return scope.Error(new ErrorResult($"Roslyn rejected the region: {ex.Message}"));
 		}
 		
 		if(!dataFlow.Succeeded || controlFlow is { Succeeded: false })
 			
-			return scope.Failed("analysis failed", new ErrorResult(
+			return scope.Error(new ErrorResult(
 				$"Roslyn could not analyze lines {startLine}-{endLine}.",
 				"The region must lie inside one method body or be a single expression."));
 		
 		var span = tree.GetLineSpan(region.Span);
 		
 		return scope.Outcome($"{region.First.Kind()} region", new AnalyzeRegionResult(
+			Path.GetRelativePath(rootPath, tree.FilePath),
 			new LineRange(span.StartLinePosition.Line + 1, span.EndLinePosition.Line + 1),
 			ToFacts(dataFlow),
 			controlFlow is null ? null : ToFacts(controlFlow, root, tree, region.Span))
@@ -117,6 +124,8 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 		Names(flow.DefinitelyAssignedOnExit),
 		Names(flow.ReadInside),
 		Names(flow.WrittenInside),
+		Names(flow.ReadOutside),
+		Names(flow.WrittenOutside),
 		Names(flow.CapturedInside)
 	);
 	

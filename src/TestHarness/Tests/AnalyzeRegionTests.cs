@@ -75,7 +75,29 @@ static class AnalyzeRegionTests
 		/* 61 */ "\tint Empty()",
 		/* 62 */ "\t{",
 		/* 63 */ "\t}",
-		/* 64 */ "}",
+		/* 64 */ "\t",
+		/* 65 */ "\tint Outer()",
+		/* 66 */ "\t{",
+		/* 67 */ "\t\tint Local(int x)",
+		/* 68 */ "\t\t{",
+		/* 69 */ "\t\t\tif(x > 0)",
+		/* 70 */ "\t\t\t\treturn 1;",
+		/* 71 */ "\t\t\tthrow new InvalidOperationException();",
+		/* 72 */ "\t\t}",
+		/* 73 */ "\t\treturn Local(1);",
+		/* 74 */ "\t}",
+		/* 75 */ "\t",
+		/* 76 */ "\t[Obsolete]",
+		/* 77 */ "\tvoid Marked()",
+		/* 78 */ "\t{",
+		/* 79 */ "\t\tConsole.WriteLine();",
+		/* 80 */ "\t}",
+		/* 81 */ "\t",
+		/* 82 */ "\tint Prop",
+		/* 83 */ "\t{",
+		/* 84 */ "\t\tget { return 1; }",
+		/* 85 */ "\t}",
+		/* 86 */ "}",
 	];
 	
 	internal static TestGroup Build(TestContext ctx)
@@ -84,6 +106,7 @@ static class AnalyzeRegionTests
 		var fx = TestFixtures.NewMsBuildProject("AnalyzeRegion", targetFrameworks: "net10.0");
 		
 		fx.Write("Flow.cs", string.Join("\n", Flow) + "\n");
+		fx.Write("Events.cs", "using System;\n\nclass Events\n{\n\tevent Action Changed = () => { };\n\tstatic Func<int, int> Pick(Func<int, int> f) => f;\n\tFunc<int, int> picked = Pick((int x =\n\t\t1\n\t) => x);\n}\n");
 		fx.Write("Shape.cs", "abstract class Shape\n{\n\tpublic abstract int Area();\n}\n");
 		fx.Write("Broken.cs", "class Broken\n{\n\tvoid Run()\n\t{\n\t\tvar broken = Missing();\n\t\tSystem.Console.WriteLine(broken);\n\t}\n}\n");
 		
@@ -201,6 +224,67 @@ static class AnalyzeRegionTests
 			new("roslyn_analyze_region: a field initializer is analyzed as an expression",
 				() => Region(5, 5, data => data?["error"] is null && data?["control_flow"] is null)),
 			
+			// An event field is a different syntax node from an ordinary field.
+			new("roslyn_analyze_region: an event initializer is analyzed as an expression",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Events.cs", startLine = 5, endLine = 5, projectPath = fx.Csproj },
+					data => Lines(data, 5, 5) && data?["control_flow"] is null)),
+			
+
+			// Line 8 sits in the lambda's default value, itself inside the field's initializer. The
+			// field's initializer is the region, not the default value on the way to it.
+			new("roslyn_analyze_region: the outermost initializer wins over a nested default value",
+				() => ctx.RunTestAsync(
+					"roslyn_analyze_region",
+					new { filePath = "Events.cs", startLine = 8, endLine = 8, projectPath = fx.Csproj },
+					data => Lines(data, 7, 9))),
+			
+			// The declaration of a local function has no flow of its own. Analyzing it reported a
+			// reachable end and no exits for a body where every path leaves.
+			new("roslyn_analyze_region: a whole local function analyzes its body",
+				() => Region(67, 72, data => {
+					
+					var flow = data?["control_flow"];
+					
+					return Lines(data, 69, 71)
+						&& flow?["end_reachable"]?.GetValue<bool>() == false
+						&& flow?["exit_points"]?.AsArray() is [{ } exit]
+						&& exit["line"]?.GetValue<int>() == 70
+						&& flow?["throws"]?.AsArray() is [{ } thrown]
+						&& thrown.GetValue<int>() == 71;
+				})),
+			
+			// 'total' is read in line 11 and written nowhere in it, so it does not flow out. Only
+			// read_outside can say that it is used elsewhere, which is the question agents ask.
+			new("roslyn_analyze_region: a local read but not written in the region is reported as used outside",
+				() => Region(11, 11, data => {
+					
+					var flow = data?["data_flow"];
+					
+					return Has(flow?["read_outside"], "int total")
+						&& Has(flow?["written_outside"], "int total")
+						&& !Has(flow?["data_flows_out"], "int total")
+						&& data?["file"]?.GetValue<string>() == "Flow.cs";
+				})),
+			
+			// Both lines lie outside the body, and an answer about the body would be about other code.
+			new("roslyn_analyze_region: an attribute line is not the method's body",
+				() => Region(76, 76, data => data?["error"]?.GetValue<string>().Contains("No analyzable code") == true)),
+			
+			new("roslyn_analyze_region: a signature line is not the method's body",
+				() => Region(77, 77, data => data?["error"]?.GetValue<string>().Contains("No analyzable code") == true)),
+			
+			// Its accessors are separate bodies, so the hint has to say to narrow the range rather
+			// than claim there is nothing there.
+			new("roslyn_analyze_region: a whole property asks for a narrower range",
+				() => Region(82, 85, data => data?["hint"]?.GetValue<string>().Contains("narrowed to one body") == true)),
+			
+			new("roslyn_analyze_region: one accessor of a property is analyzed",
+				() => Region(84, 84, data => data?["error"] is null
+					&& data?["control_flow"]?["end_reachable"]?.GetValue<bool>() == false)),
+			
+
 			new("roslyn_analyze_region: code after a return has an unreachable start",
 				() => Region(58, 58, data => data?["control_flow"]?["start_reachable"]?.GetValue<bool>() == false)),
 			
