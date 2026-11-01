@@ -192,17 +192,18 @@ static class MovedDirectoryTests
 					
 					Directory.Move(adhocCase.PathOf("Cased"), adhocCase.PathOf("cased"));
 					
-					var expected = $"cased{Path.DirectorySeparatorChar}Inside.cs";
+					var        expected = $"cased{Path.DirectorySeparatorChar}Inside.cs";
+					JsonNode? found    = null;
 					
 					return await EventuallyAsync(async () => {
 							
-							var found = await Call("roslyn_search_files", new { pattern = "class CaseRenamed", projectPath = adhocCase.Dir });
+							found = await Call("roslyn_search_files", new { pattern = "class CaseRenamed", projectPath = adhocCase.Dir });
 							
 							return found?["total_matches"]?.GetValue<int>() == 1
 								&& found["matches"]?[0]?["file"]?.GetValue<string>().EndsWith(expected, StringComparison.Ordinal) == true;
 						})
 						? (true,  "PASS")
-						: (false, "FAIL  (fifteen seconds after the rename, the type is not declared exactly once, under the new spelling)");
+						: (false, $"FAIL  (fifteen seconds after the rename, the type is not declared exactly once, under the new spelling: {found?["matches"]?.ToJsonString() ?? "no result"})");
 				}),
 			
 			// Nothing reports Real.cs, and Alias.cs is still there: it is a link that leads
