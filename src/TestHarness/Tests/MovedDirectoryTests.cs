@@ -109,25 +109,24 @@ static class MovedDirectoryTests
 		async Task<int?> MatchesAsync(string projectPath, string pattern)
 			=> (await Call("roslyn_search_files", new { pattern, projectPath }))?["total_matches"]?.GetValue<int>();
 		
+		// Edits the tracked beacon and waits for the workspace to show the edit.
+		async Task<bool> AwaitEditSeenAsync(FixtureProject fixture)
+		{
+			
+			var marker = $"Beacon{Guid.NewGuid():N}";
+			
+			fixture.Write("Beacon.cs", $"class {marker} {{ }}\n");
+			
+			return await EventuallyAsync(async () => await MatchesAsync(fixture.ProjectPath, marker) > 0);
+		}
+		
 		// Returns once the watchers are live. An edit to a tracked file reaches the workspace
 		// either through a watcher or through the catch-up pass, and that pass runs once the
 		// watchers are live, so seeing the edit means they are, whichever brought it.
 		// The old text is searched for first: a project reads a document's text when it is first
 		// asked for, so a first search after the edit would read it from disk and prove nothing.
 		async Task<bool> SettleAsync(FixtureProject fixture)
-		{
-			
-			var projectPath = fixture.ProjectPath;
-			var marker      = $"Beacon{Guid.NewGuid():N}";
-			
-			if(await MatchesAsync(projectPath, "class Beacon ") is not > 0)
-				
-				return false;
-			
-			fixture.Write("Beacon.cs", $"class {marker} {{ }}\n");
-			
-			return await EventuallyAsync(async () => await MatchesAsync(projectPath, marker) > 0);
-		}
+			=> await MatchesAsync(fixture.ProjectPath, "class Beacon ") > 0 && await AwaitEditSeenAsync(fixture);
 		
 		var tests = new List<TestCase> {
 			
@@ -192,20 +191,36 @@ static class MovedDirectoryTests
 					
 					Directory.Move(adhocCase.PathOf("Cased"), adhocCase.PathOf("cased"));
 					
-					var        expected = $"cased{Path.DirectorySeparatorChar}Inside.cs";
-					JsonNode? found    = null;
+					// An edit made after the rename: once it is seen, the rename has been handled.
+					// Before that, every check below would pass on the old state.
+					if(!await AwaitEditSeenAsync(adhocCase))
+						
+						return (false, "FAIL  (an edit made after the rename never reached the workspace)");
 					
-					return await EventuallyAsync(async () => {
-							
-							found = await Call("roslyn_search_files", new { pattern = "class CaseRenamed", projectPath = adhocCase.Dir });
-							
-							// Exactly once is what matters. macOS keeps the document under the old
-							// spelling, which still opens: see WORKSPACE_SYNC.md.
-							return found?["total_matches"]?.GetValue<int>() == 1
-								&& (OperatingSystem.IsMacOS() || found["matches"]?[0]?["file"]?.GetValue<string>().EndsWith(expected, StringComparison.Ordinal) == true);
-						})
+					// The compiler, not a search: a search counts paths ignoring case, so it shows
+					// two documents that differ in case as one. A workspace without a project has
+					// no references and never compiles cleanly. What is looked for is the one
+					// error a second document causes.
+					var diagnostics = await Call("roslyn_get_diagnostics", new { projectPath = adhocCase.Dir, take = 200, severity = "errors" });
+					
+					if(diagnostics?["items"] is not JsonArray items)
+						
+						return (false, $"FAIL  (no diagnostics: {diagnostics?.ToJsonString() ?? "none"})");
+					
+					var duplicates = items.Count(item => item?["code"]?.GetValue<string>() == "CS0101");
+					
+					if(duplicates > 0)
+						
+						return (false, $"FAIL  ({duplicates} CS0101 after the rename: the type is declared twice)");
+					
+					var found = await Call("roslyn_search_files", new { pattern = "class CaseRenamed", projectPath = adhocCase.Dir });
+					var file  = found?["matches"]?[0]?["file"]?.GetValue<string>();
+					
+					// macOS keeps the document under the old spelling, which still opens: see
+					// WORKSPACE_SYNC.md. The same search says nothing about how many there are.
+					return OperatingSystem.IsMacOS() || file?.EndsWith($"cased{Path.DirectorySeparatorChar}Inside.cs", StringComparison.Ordinal) == true
 						? (true,  "PASS")
-						: (false, $"FAIL  (fifteen seconds after the rename, the type is not declared exactly once, under the new spelling: {found?["matches"]?.ToJsonString() ?? "no result"})");
+						: (false, $"FAIL  (the document does not have the new spelling: {file ?? "no result"})");
 				}),
 			
 			// Nothing reports Real.cs, and Alias.cs is still there: it is a link that leads
