@@ -540,8 +540,10 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
   directory no longer exists under exactly the reported name: after a case-only rename on Windows
   or macOS the file still opens under the old spelling. Both halves are needed: a rename inside
   the workspace is one of each, and reporting only the arrival would leave every document of the
-  directory there twice. The `projects` shape of non-recursive roots has no directory events, so
-  a directory moved in or out under it goes unnoticed.
+  directory there twice. On macOS a case-only rename leaves the document under the old spelling:
+  there is one document, and the file opens under that name. The `projects` shape of
+  non-recursive roots has no directory events, so a directory moved in or out under it goes
+  unnoticed.
 
 A workspace never holds more than 32 watchers: when adopting a directory would pass that, the
 watch set plans again instead, which moves it to the `projects` or `fallback` shape.
