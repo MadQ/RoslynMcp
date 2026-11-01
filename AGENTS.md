@@ -775,7 +775,7 @@ RoslynMcp binds its workspace root **at session launch**, from the server's work
 
 - **Config is committed and portable.** `.github/mcp.json` defines the `MadQ.RoslynMcp` server with `--root .`; being committed, every worktree checkout already carries it, and the relative root resolves to whichever worktree the session launched in — no global `~/.copilot/mcp-config.json` edits, ever. (`.mcp.json` is gitignored for per-checkout local overrides.)
 - **Enter a worktree as a session, not just a directory.** Use `/fork worktree` (create + fork the session into it), `/new worktree`, `/worktree`, or a fresh `copilot` started inside the worktree — any of these launches a session rooted at that worktree. Do **not** rely on `git worktree add` alone from within an existing session; the already-running server will not follow.
-- **Verify once per worktree:** the log shows `Workspace — Default workspace: …\<worktree>\RoslynMcp.slnx (from configured root '.')`, or call `roslyn_info`.
+- **Verify once per worktree:** call `roslyn_list_files` without `projectPath` to resolve the default workspace, then check the resulting `Workspace — Default workspace: …` log entry for the worktree's solution and absolute root.
 
 ---
 
