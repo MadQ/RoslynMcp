@@ -63,10 +63,7 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             return scope.Error(new ErrorResult("take must be between 1 and 500"));
 
-        var normalizedPath = NormalizePath(filePath);
-        var tree		   = compilation.SyntaxTrees.FirstOrDefault(t =>
-            t.FilePath.EndsWith(normalizedPath, StringComparison.OrdinalIgnoreCase)
-        );
+        var tree = FindSyntaxTree(compilation, filePath);
 
         if(tree is null)
 
