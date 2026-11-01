@@ -253,6 +253,67 @@ internal sealed record SymbolDocumentationEmptyResult(
 	[property: JsonPropertyName("documentation")] string? Documentation
 ) : ToolResult, IToolError;
 
+/// <summary>Result of <c>roslyn_analyze_region</c>. <c>control_flow</c> is null for an expression region: Roslyn analyzes control flow over statements only.</summary>
+internal sealed record AnalyzeRegionResult(
+	[property: JsonPropertyName("region")]       LineRange     Region,
+	[property: JsonPropertyName("data_flow")]    DataFlowFacts DataFlow,
+	[property: JsonPropertyName("control_flow")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	ControlFlowFacts? ControlFlow
+) : ToolResult;
+
+/// <summary>Symbols named by Roslyn's data-flow analysis. An empty list is null, so it costs no tokens.</summary>
+internal sealed record DataFlowFacts(
+	[property: JsonPropertyName("variables_declared")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? VariablesDeclared,
+	[property: JsonPropertyName("data_flows_in")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? DataFlowsIn,
+	[property: JsonPropertyName("data_flows_out")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? DataFlowsOut,
+	[property: JsonPropertyName("always_assigned")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? AlwaysAssigned,
+	[property: JsonPropertyName("definitely_assigned_on_entry")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? DefinitelyAssignedOnEntry,
+	[property: JsonPropertyName("definitely_assigned_on_exit")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? DefinitelyAssignedOnExit,
+	[property: JsonPropertyName("read_inside")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? ReadInside,
+	[property: JsonPropertyName("written_inside")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? WrittenInside,
+	[property: JsonPropertyName("captured")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? Captured
+);
+
+/// <summary>Reachability and jumps from Roslyn's control-flow analysis. Lines are 1-based; an empty list is null.</summary>
+internal sealed record ControlFlowFacts(
+	[property: JsonPropertyName("start_reachable")] bool StartReachable,
+	[property: JsonPropertyName("end_reachable")]   bool EndReachable,
+	[property: JsonPropertyName("entry_points")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	int[]? EntryPoints,
+	[property: JsonPropertyName("exit_points")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	ExitPoint[]? ExitPoints,
+	[property: JsonPropertyName("throws")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	int[]? Throws
+);
+
+internal sealed record ExitPoint(
+	[property: JsonPropertyName("kind")] string Kind,
+	[property: JsonPropertyName("line")] int    Line
+);
+
+
 internal sealed record SymbolInfoResult(
 	[property: JsonPropertyName("kind")]            string  Kind,
 	[property: JsonPropertyName("name")]            string  Name,

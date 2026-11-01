@@ -38,7 +38,7 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **Runtime** | .NET 10 (net11.0 auto-added when .NET 11 SDK is detected) |
 | **Language** | C# 14 (`<LangVersion>preview</LangVersion>`) |
 | **Version** | 0.8.1-beta (pre-1.0) |
-| **Tool Count** | 45 MCP tools (43 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
+| **Tool Count** | 46 MCP tools (44 public + 2 debug-only: `roslyn_respawn`, `roslyn_debug_attach`) |
 | **Dependencies** | `Microsoft.CodeAnalysis.*` (Roslyn) — MSBuildWorkspace (if .csproj found) → AdhocWorkspace (fallback) |
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
@@ -86,6 +86,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 | `FindUnusedTool` | `roslyn_find_unused` — private, internal, and effectively internal source symbols with zero direct static references; conservative refactoring guidance with confidence and reason metadata |
 | `FindCallersTool` | `roslyn_find_callers` — all methods that call a named symbol; filter by `isDirect` to exclude interface/delegate dispatch |
 | `GetCallGraphTool` | `roslyn_get_call_graph` — all methods invoked within a method body; walks the Roslyn IOperation tree for precise semantic results |
+| `AnalyzeRegionTool` | `roslyn_analyze_region` — `AnalyzeDataFlow` and `AnalyzeControlFlow` over a line range. The private nested `RegionResolver` turns the range into statements from one list (Roslyn throws on two) or a single expression, widening a partly covered statement and reporting the lines analyzed. `throws` is the tool's own walk, because `ExitPoints` omits `throw`; an expression region has no `control_flow`, because Roslyn has no expression overload |
 | `SymbolInfoTool` | `roslyn_get_symbol_info` — resolve what a name at a location actually is |
 | `PreviewRenameTool` | `roslyn_preview_rename` — compute rename edits, return unified diff + token; builds a `PreviewFileState` snapshot and `WorkspaceBinding` so `roslyn_apply_rename` can commit via `PhysicalSolutionApplier` |
 | `ApplyRenameTool` | `roslyn_apply_rename` — approve/reject a pending rename by token; applies via `PhysicalSolutionApplier` (crash-safe, TOCTOU-guarded); the type-matching file-rename step (including the case-only two-step move) runs as a separate post-apply phase after content writes are confirmed |
@@ -136,7 +137,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 **Nested types.** A type that only one other type has any business using is a `private` nested type of it, not an `internal` type in the namespace: the compiler then keeps it out of everyone else's reach for good (`WorkspaceInstance` inside `WorkspaceManager`; `EditClassifier`, `LinkResolver`, `PhysicalFileIndex` inside `WorkspaceInstance`). Move it out only when that scope actually changes. Nesting separates scope, not state — a nested type can read every private member of an instance of its outer type that it is handed. So a nested type is **given what it needs** (constructor or method arguments) and holds no reference to its outer instance. Code that cannot work without reaching into the outer instance's locks and fields is not a separate concern: it stays a member, in a partial file of its own if the file gets long (the watcher flush, the write path and the reload in `WorkspaceInstance`). Name the file after the nesting (`WorkspaceManager.Instance.LinkResolver.cs`), and avoid nesting deeper than three levels.
 
 **Tool subfolders** (all share the `RoslynMcp.Tools` namespace — subfolders are organisational only):
-- `Tools/Analysis/` — 24 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, drift, …)
+- `Tools/Analysis/` — 25 read-only Roslyn semantic queries (diagnostics, symbols, types, usings, outline, drift, …)
 - `Tools/Search/` — 4 file/content search tools (list files, text search, semantic search, string literal search)
 - `Tools/Editing/` — 5 file mutation tools (`roslyn_replace_in_file`, `roslyn_replace_in_code`, `roslyn_insert_lines`, `roslyn_write_file`, `roslyn_local_history`)
 - `Tools/Rename/` — 2-step rename workflow (`roslyn_preview_rename` → `roslyn_apply_rename`)
