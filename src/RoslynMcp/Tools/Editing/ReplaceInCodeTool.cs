@@ -31,7 +31,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"that filters by the declared name of the node — not body content. " +
 		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors. " +
 		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
-		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern or set force=true to proceed. " +
+		"To pick one of several similar nodes, such as the third if statement in a method, pass line (and column for several on one line): where the node starts, as a read of the file or a dry run's changed_nodes shows it. A declaration starts at its first attribute or modifier, not at its name. These narrow nodeKind and textPattern. " +
+		"A position is only as good as the read it came from: after an edit moves lines it can land on a different node of the same kind, so re-read first, or add textPattern so that only a node with that text can match. " +
+		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern, pass line and column, or set force=true to proceed. " +
 		"Supports dryRun=true to preview which nodes would be replaced without writing; the replacement is parsed and validated exactly as for a real write, so a passing dry run reflects the same syntax checks the write would run. " +
 		"Set verbose=true to also include each matched node's original_text in the response (omitted by default to save tokens; always included on error)."
 	)]
@@ -45,10 +47,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Preview changes without writing. Returns what would change, after the same parse and validation a real write performs. Default: false.")] bool dryRun = false,
 		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false,
 		[Description("When false (default), omits original node text from the response on success to reduce token usage. Set true to include the full original text of each matched node in changed_nodes[].original_text. Error responses always include the text regardless of this flag.")] bool verbose = false,
-		[Description("Match line endings in the replacement text to the file's existing style (CRLF or LF). Default: true — prevents mixed line endings in the file. Set false only if your replacement text already has the correct line endings.")] bool normalizeLineEndings = true
+		[Description("Match line endings in the replacement text to the file's existing style (CRLF or LF). Default: true — prevents mixed line endings in the file. Set false only if your replacement text already has the correct line endings.")] bool normalizeLineEndings = true,
+		[Description("Keep only nodes that start on this 1-based line. Default: 0 — any line.")] int line = 0,
+		[Description("Keep only nodes that start at this 1-based column, in UTF-16 code units: a tab is one, an emoji two. A dry run's changed_nodes reports matching columns. Requires line. Default: 0 — any column.")] int column = 0
 	)
 	{
-		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force, normalizeLineEndings });
+		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force, normalizeLineEndings, line, column });
 		
 		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
 			
@@ -71,6 +75,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		if(!TryParseSyntaxKind(nodeKind, out var kind))
 			
 			return scope.Error(new ErrorResult($"Unknown node kind: {nodeKind}.", "Examples: MethodDeclaration, ConstructorDeclaration, FieldDeclaration, IdentifierName."));
+		
+		if(line < 0 || column < 0 || (column > 0 && line == 0))
+			
+			return scope.Error(new ErrorResult($"Line {line}, column {column} is not a valid position.", "Both are 1-based, and column requires line."));
 		
 		SourceText sourceText;
 		SyntaxTree syntaxTree;
@@ -124,20 +132,34 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			;
 		}
 		
+		// One calculation for filtering and for changed_nodes, because the tool promises that a
+		// position it reports can be passed back.
+		LinePosition StartOf(SyntaxNode n) => syntaxTree.GetLineSpan(n.Span).StartLinePosition;
+		
+		if(line > 0) {
+			
+			matchedNodes = matchedNodes
+				.Where(n => StartOf(n) is var start && start.Line + 1 == line && (column == 0 || start.Character + 1 == column))
+				.ToArray()
+			;
+		}
+		
 		if(matchedNodes.Length == 0)
 			
-			return scope.Failed("No matching nodes found.", new ReplaceInCodeResult(false, 0, [], "No matching nodes found."));
+			return scope.Failed("No matching nodes found.", new ReplaceInCodeResult(false, 0, [], line > 0
+				? $"No matching nodes found at line {line}{(column > 0 ? $", column {column}" : "")}. Check nodeKind, textPattern and the position: a dry run without line and column lists where the matches start."
+				: "No matching nodes found."));
 		
 		// Local helper so error paths can always include the matched text (diagnostic info the agent needs),
 		// while success paths omit it unless verbose=true to save tokens.
 		ReplaceInCodeNodeInfo[] BuildNodeInfo(bool includeText) => matchedNodes.Select(n => {
 			
-			var lineSpan = syntaxTree.GetLineSpan(n.Span);
+			var start = StartOf(n);
 			
 			return new ReplaceInCodeNodeInfo(
 				includeText ? n.ToString() : null,
-				lineSpan.StartLinePosition.Line + 1,
-				lineSpan.StartLinePosition.Character + 1
+				start.Line + 1,
+				start.Character + 1
 			);
 		}).ToArray();
 		
@@ -145,9 +167,19 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		// Safety guard: multiple matches require explicit opt-in via force=true. A dry run is
 		// exempt — its job is to show what would match.
-		if(matchedNodes.Length > 1 && !force && !dryRun)
+		// Nodes of one kind can start at the same place, as in 'a.b.c', and asking for a position
+		// again would never end.
+		if(matchedNodes.Length > 1 && !force && !dryRun) {
 			
-			return scope.Outcome("multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or narrow textPattern to target one."));
+			var narrowing = (line, column) switch {
+				
+				(0, _) => "narrow textPattern or pass line and column to target one",
+				(_, 0) => "add column or narrow textPattern to target one",
+				_      => "narrow textPattern: these nodes start at the same position. If the text cannot tell them apart, replace the enclosing node or use roslyn_replace_in_file"
+			};
+			
+			return scope.Outcome("multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or {narrowing}."));
+		}
 		
 		// Build the edited tree — deletion or replacement — and validate it BEFORE the dry-run
 		// exit, so a dry run's verdict rests on the same checks a real write runs (#267).

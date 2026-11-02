@@ -44,6 +44,21 @@ static class EditingTests
 		var tempLfFile            = fx.Write("lf.cs",              "class Lf\n{\n\tvoid M()\n\t{\n\t}\n}\n");
 		var tempMostlyLfMixedFile = fx.Write("mostly_lf_mixed.cs", "class Mixed\n{\n\tvoid M()\r\n\t{\n\t}\n}\n");
 
+		// Line and column fixture (#356): five if statements a text pattern could only tell apart by
+		// their bodies, two of them on line 8. Each test edits its own copy, so none passes on
+		// another's write. Line 8's second statement starts at column 26.
+		const string pickSource = "class Pick\n{\n\tvoid M(int a)\n\t{\n\t\tif(a == 1) { a = 10; }\n\t\tif(a == 2) { a = 20; }\n\t\tif(a == 3) { a = 30; }\n\t\tif(a == 4) { a = 40; } if(a == 5) { a = 50; }\n\t}\n}\n";
+		
+		var tempPickLine   = fx.Write("pick_line.cs",   pickSource);
+		var tempPickColumn = fx.Write("pick_column.cs", pickSource);
+		var tempPickStale  = fx.Write("pick_stale.cs",  pickSource);
+		var tempPickDry    = fx.Write("pick_dry.cs",    pickSource);
+		
+		fx.Write("pick_all.cs", pickSource);
+		
+		// Both member accesses in 'a.B.C' start at line 3, column 16, so a position cannot part them.
+		fx.Write("pick_nested.cs", "class Nested\n{\n\tint M(S a) => a.B.C;\n}\n");
+		
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
@@ -194,6 +209,148 @@ static class EditingTests
 						: (false, $"FAIL  (constructor not written: '{content.Trim()}')");
 				}),
 			
+			// ── #356: line and column pick one of several similar nodes ─────────────────────────────
+			// Before these, the third if in a method needed a unique text fragment or force=true, which
+			// replaces all of them. The other statements must come through byte for byte.
+			new("roslyn_replace_in_code: line replaces only the node on that line",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "pick_line.cs", nodeKind = "IfStatement", line = 6, replacement = "if(a == 2) { a = 99; }", projectPath = fx.Csproj },
+						data => data?["applied"]?.GetValue<bool>() == true && data?["change_count"]?.GetValue<int>() == 1);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempPickLine);
+					
+					return content == pickSource.Replace("a = 20", "a = 99")
+						? (true,  "PASS  (only line 6 changed)")
+						: (false, $"FAIL  (unexpected content: '{content}')");
+				}),
+			
+			new("roslyn_replace_in_code: column tells apart two nodes on one line",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "pick_column.cs", nodeKind = "IfStatement", line = 8, column = 26, replacement = "if(a == 5) { a = 99; }", projectPath = fx.Csproj },
+						data => data?["applied"]?.GetValue<bool>() == true && data?["change_count"]?.GetValue<int>() == 1);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempPickColumn);
+					
+					return content == pickSource.Replace("a = 50", "a = 99")
+						? (true,  "PASS  (only the second statement changed)")
+						: (false, $"FAIL  (unexpected content: '{content}')");
+				}),
+			
+			// Without column, line 8 holds two matches, and the multiple-match guard must still hold.
+			new("roslyn_replace_in_code: line alone on a line with two matches applies nothing",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", line = 8, replacement = "if(a == 4) { }", projectPath = fx.Csproj },
+					data => data?["applied"]?.GetValue<bool>() == false && data?["change_count"]?.GetValue<int>() == 2)),
+			
+			// The danger of a position is that it goes stale. Line 9 is the closing brace of M, so the
+			// edit must find nothing and write nothing, not reach for the nearest statement.
+			new("roslyn_replace_in_code: a stale line matches nothing and writes nothing",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "pick_stale.cs", nodeKind = "IfStatement", line = 9, replacement = "if(a == 9) { }", projectPath = fx.Csproj },
+						data => data?["applied"]?.GetValue<bool>() == false
+							&& data?["change_count"]?.GetValue<int>() == 0
+							&& data?["message"]?.GetValue<string>().Contains("line 9") == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					return File.ReadAllText(tempPickStale) == pickSource
+						? (true,  "PASS  (file unchanged)")
+						: (false, "FAIL  (the file was written)");
+				}),
+			
+			new("roslyn_replace_in_code: a dry run with line reports one match and writes nothing",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "pick_dry.cs", nodeKind = "IfStatement", line = 7, replacement = "if(a == 3) { }", dryRun = true, projectPath = fx.Csproj },
+						data => data?["applied"]?.GetValue<bool>() == false
+							&& data?["change_count"]?.GetValue<int>() == 1
+							&& data?["changed_nodes"]?[0]?["line"]?.GetValue<int>() == 7);
+					
+					if(!pass)
+						return (false, msg);
+					
+					return File.ReadAllText(tempPickDry) == pickSource
+						? (true,  "PASS  (file unchanged)")
+						: (false, "FAIL  (the dry run wrote the file)");
+				}),
+			
+			// The filters narrow textPattern and do not replace it: a match on one with a miss on the
+			// other is a miss, so a stale line cannot pass because the pattern still matches elsewhere.
+			new("roslyn_replace_in_code: line combines with textPattern",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", textPattern = "a == 1", line = 6, replacement = "if(a == 1) { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["change_count"]?.GetValue<int>() == 0)),
+			
+			// The other half of the test above: a filter that emptied the result whenever both were set
+			// would pass that one.
+			new("roslyn_replace_in_code: line and textPattern that agree select the node",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", textPattern = "a == 2", line = 6, replacement = "if(a == 2) { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["change_count"]?.GetValue<int>() == 1)),
+			
+			// Column 4 is inside the first statement on line 8. A column must name a start exactly,
+			// not the nearest one, and the message must name what was asked for.
+			new("roslyn_replace_in_code: a column that holds no node start matches nothing",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", line = 8, column = 4, replacement = "if(a == 4) { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["change_count"]?.GetValue<int>() == 0
+						&& data?["message"]?.GetValue<string>().Contains("line 8, column 4") == true
+						&& data?["message"]?.GetValue<string>().Contains("without line and column") == true)),
+			
+			// Telling an agent that already passed a position to pass one would loop forever.
+			new("roslyn_replace_in_code: nodes sharing a start get advice other than a position",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_nested.cs", nodeKind = "SimpleMemberAccessExpression", line = 3, column = 16, replacement = "x", projectPath = fx.Csproj },
+					data => data?["applied"]?.GetValue<bool>() == false
+						&& data?["change_count"]?.GetValue<int>() == 2
+						&& data?["message"]?.GetValue<string>().Contains("same position") == true
+						&& data?["message"]?.GetValue<string>().Contains("roslyn_replace_in_file") == true)),
+			
+
+			new("roslyn_replace_in_code: omitting line and column behaves as before",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", replacement = "if(a == 1) { }", projectPath = fx.Csproj },
+					data => data?["applied"]?.GetValue<bool>() == false
+						&& data?["change_count"]?.GetValue<int>() == 5
+						&& data?["message"]?.GetValue<string>().Contains("line and column") == true)),
+			
+			new("roslyn_replace_in_code: column without line is refused",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", column = 3, replacement = "if(a == 1) { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["hint"]?.GetValue<string>().Contains("column requires line") == true)),
+			
+			new("roslyn_replace_in_code: a negative line is refused",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", line = -1, replacement = "if(a == 1) { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>().Contains("not a valid position") == true)),
+			
+
 			// The 'ctor' alias must resolve to ConstructorDeclaration (dry run — no write).
 			new("roslyn_replace_in_code: 'ctor' alias resolves to ConstructorDeclaration",
 				() => ctx.RunTestAsync(
