@@ -56,6 +56,9 @@ static class EditingTests
 		
 		fx.Write("pick_all.cs", pickSource);
 		
+		// Both member accesses in 'a.B.C' start at line 3, column 16, so a position cannot part them.
+		fx.Write("pick_nested.cs", "class Nested\n{\n\tint M(S a) => a.B.C;\n}\n");
+		
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
@@ -298,6 +301,33 @@ static class EditingTests
 					new { filePath = "pick_all.cs", nodeKind = "IfStatement", textPattern = "a == 1", line = 6, replacement = "if(a == 1) { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["change_count"]?.GetValue<int>() == 0)),
 			
+			// The other half of the test above: a filter that emptied the result whenever both were set
+			// would pass that one.
+			new("roslyn_replace_in_code: line and textPattern that agree select the node",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", textPattern = "a == 2", line = 6, replacement = "if(a == 2) { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["change_count"]?.GetValue<int>() == 1)),
+			
+			// Column 4 is inside the first statement on line 8. A column must name a start exactly,
+			// not the nearest one, and the message must name what was asked for.
+			new("roslyn_replace_in_code: a column that holds no node start matches nothing",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_all.cs", nodeKind = "IfStatement", line = 8, column = 4, replacement = "if(a == 4) { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["change_count"]?.GetValue<int>() == 0
+						&& data?["message"]?.GetValue<string>().Contains("line 8, column 4") == true)),
+			
+			// Telling an agent that already passed a position to pass one would loop forever.
+			new("roslyn_replace_in_code: nodes sharing a start get advice other than a position",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "pick_nested.cs", nodeKind = "SimpleMemberAccessExpression", line = 3, column = 16, replacement = "x", projectPath = fx.Csproj },
+					data => data?["applied"]?.GetValue<bool>() == false
+						&& data?["change_count"]?.GetValue<int>() == 2
+						&& data?["message"]?.GetValue<string>().Contains("same position") == true)),
+			
+
 			new("roslyn_replace_in_code: omitting line and column behaves as before",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
