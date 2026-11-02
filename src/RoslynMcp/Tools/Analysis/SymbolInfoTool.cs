@@ -109,7 +109,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		;
 		
 		var enriched = expression is not null
-			? AddExpressionFacts(result, model, expression, typeInfo)
+			? AddExpressionFacts(result, model, expression, typeInfo, symbol)
 			: result with { Type = isDeclaration ? DeclaredType(symbol) : null }
 		;
 		
@@ -153,14 +153,17 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		return (current, callee);
 	}
 	
-	static SymbolInfoResult AddExpressionFacts(SymbolInfoResult result, SemanticModel model, ExpressionSyntax expression, TypeInfo typeInfo)
+	static SymbolInfoResult AddExpressionFacts(SymbolInfoResult result, SemanticModel model, ExpressionSyntax expression, TypeInfo typeInfo, ISymbol? symbol)
 	{
 		// An error type means the code does not bind, and '?' is not a fact about it.
 		var type       = typeInfo.Type is { TypeKind: not TypeKind.Error } ? typeInfo.Type : null;
 		var converted  = typeInfo.ConvertedType is { TypeKind: not TypeKind.Error } ? typeInfo.ConvertedType : null;
 		var conversion = model.GetConversion(expression);
 		var constant   = model.GetConstantValue(expression);
-		var nullable   = CanBeNull(type ?? converted);
+		
+		// A type name is not a value, so it has no null state, and Roslyn gives it NotNull or None
+		// depending on where it stands. None would read as nullable analysis being off.
+		var nullable   = symbol is not ITypeSymbol && CanBeNull(type ?? converted);
 		var flow       = typeInfo.Nullability.FlowState;
 		
 		return result with {

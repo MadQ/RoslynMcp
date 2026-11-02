@@ -87,6 +87,7 @@ static class SymbolInfoTests
 		fx.Write("Facts.cs", string.Join("\n", Facts) + "\n");
 		fx.Write("Shapes.cs", string.Join("\n", Shapes) + "\n");
 		fx.Write("Money.cs", Money);
+		fx.Write("Made.cs", "#nullable enable\nclass Made\n{\n\tMade Copy() => new Made();\n}\n");
 		
 		Task<(bool pass, string message)> At(int line, int column, Func<JsonNode?, bool> validate)
 			=> ctx.RunTestAsync("roslyn_get_symbol_info", new { filePath = "Facts.cs", line, column, projectPath = fx.Csproj }, validate)
@@ -241,6 +242,23 @@ static class SymbolInfoTests
 					"roslyn_get_symbol_info",
 					new { filePath = "Money.cs", line = 7, column = 15, projectPath = fx.Csproj },
 					data => Text(data, "converted_type") == "Money" && Text(data, "conversion") == "ImplicitUserDefined")),
+			
+
+			// Roslyn gives the type name in 'new Made()' a flow state of None, which read as nullable
+			// analysis being off in a file that has it on.
+			new("roslyn_get_symbol_info: a type name in new reports no nullable facts",
+				() => ctx.RunTestAsync(
+					"roslyn_get_symbol_info",
+					new { filePath = "Made.cs", line = 4, column = 21, projectPath = fx.Csproj },
+					data => Text(data, "kind") == "namedtype"
+						&& Text(data, "nullable_context") is null
+						&& Text(data, "nullable_flow") is null)),
+			
+			// Here Roslyn says NotNull instead, which is true of no value because there is none.
+			new("roslyn_get_symbol_info: a type name used as a receiver reports no nullable facts",
+				() => At(17, 3, data => Text(data, "kind") == "namedtype"
+					&& Text(data, "nullable_flow") is null
+					&& Text(data, "nullable_context") is null)),
 			
 
 			new("roslyn_get_symbol_info: a position past the file is refused",
