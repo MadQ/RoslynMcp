@@ -209,6 +209,7 @@ static class SymbolInfoTests
 			// the signatures must show.
 			new("roslyn_get_symbol_info: a method used as a value gives its group, with ref in the signatures",
 				() => InShapes(12, 23, data => Text(data, "conversion") == "MethodGroup"
+					&& Text(data, "nullable_context") is null
 					&& data?["overloads"]?.AsArray().Count == 2
 					&& data?["overloads"]?.AsArray().Any(o => o?.GetValue<string>().Contains("ref string") == true) == true)),
 			
