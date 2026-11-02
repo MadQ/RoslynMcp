@@ -87,6 +87,7 @@ static class SymbolInfoTests
 		fx.Write("Facts.cs", string.Join("\n", Facts) + "\n");
 		fx.Write("Shapes.cs", string.Join("\n", Shapes) + "\n");
 		fx.Write("Money.cs", Money);
+		fx.Write("Chain.cs", "#nullable enable\nclass Chain\n{\n\tint? Size(string? s) => s?.Trim().Length;\n\tunsafe int Read(int* p) => *p;\n}\n");
 		fx.Write("Made.cs", "#nullable enable\nclass Made\n{\n\tMade Copy() => new Made();\n}\n");
 		
 		Task<(bool pass, string message)> At(int line, int column, Func<JsonNode?, bool> validate)
@@ -259,6 +260,31 @@ static class SymbolInfoTests
 				() => At(17, 3, data => Text(data, "kind") == "namedtype"
 					&& Text(data, "nullable_flow") is null
 					&& Text(data, "nullable_context") is null)),
+			
+
+			// Only the last link is what the expression yields. Climbing from Trim would report 'int?',
+			// a type Trim never returns, and hide that the rest of the chain needs no further '?.'.
+			new("roslyn_get_symbol_info: an earlier link of a ?. chain keeps its own type",
+				() => ctx.RunTestAsync(
+					"roslyn_get_symbol_info",
+					new { filePath = "Chain.cs", line = 4, column = 29, projectPath = fx.Csproj },
+					data => Text(data, "type") == "string" && Text(data, "nullable_flow") == "NotNull")),
+			
+			new("roslyn_get_symbol_info: the last link of a ?. chain describes the whole access",
+				() => ctx.RunTestAsync(
+					"roslyn_get_symbol_info",
+					new { filePath = "Chain.cs", line = 4, column = 36, projectPath = fx.Csproj },
+					data => Text(data, "type") == "int?" && Text(data, "nullable_flow") == "MaybeNull")),
+			
+			// A pointer has no flow state, and None read as nullable analysis being off in a file
+			// that has it on.
+			new("roslyn_get_symbol_info: a pointer reports no nullable facts",
+				() => ctx.RunTestAsync(
+					"roslyn_get_symbol_info",
+					new { filePath = "Chain.cs", line = 5, column = 30, projectPath = fx.Csproj },
+					data => Text(data, "type") == "int*"
+						&& Text(data, "nullable_context") is null
+						&& Text(data, "nullable_flow") is null)),
 			
 
 			new("roslyn_get_symbol_info: a position past the file is refused",

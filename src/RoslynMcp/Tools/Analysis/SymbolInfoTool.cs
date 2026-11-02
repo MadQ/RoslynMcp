@@ -24,7 +24,8 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		"Use this when you have a line and column and need to identify exactly what is there, disambiguate an overloaded name, " +
 		"or check nullability or a conversion instead of guessing. Works on declarations as well as references. " +
 		"A position on a method name describes the call: 'type' is what the invocation returns. A delegate in call position " +
-		"describes the delegate. A member behind ?. describes the whole conditional access: 's?.Trim()' is 'string?'. " +
+		"describes the delegate. The last member of a ?. chain describes the whole conditional access: 's?.Trim()' is 'string?'. " +
+		"An earlier link keeps its own type: in 's?.Trim().Length', Trim is a NotNull 'string'. " +
 		"'type' is flow-adjusted, so 'string? s' reads 'string' after a null check. " +
 		"nullable_flow is NotNull or MaybeNull, per the compiler's flow analysis at this point; it applies to references and " +
 		"nullable values. nullable_context is 'disabled' where nullable analysis is off, so a missing nullable_flow there does not " +
@@ -126,8 +127,10 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 	///     Climbs from the node under the position to the expression an agent means by it. A method
 	///     name has no type of its own, so 'a.Bar' in 'a.Bar(x)' resolves to the whole call, and the
 	///     value of 's?.Trim()' is the conditional access: the call inside it never sees a null, so
-	///     stopping there reports NotNull for something that can be null. A delegate in call position
-	///     stays itself, because whether it can be null is the question. Also returns the name's
+	///     stopping there reports NotNull for something that can be null. An earlier link of a chain
+	///     stays itself: it is not what the expression yields, and in 's?.Trim().Length' the whole
+	///     has a different type altogether. A delegate in call position stays itself too, because
+	///     whether it can be null is the question. Also returns the name's
 	///     expression, which is where <c>GetMemberGroup</c> answers; the invocation gets nothing back.
 	/// </summary>
 	static (ExpressionSyntax? Expression, ExpressionSyntax? Callee) EnclosingExpression(SyntaxNode node, ISymbol? symbol)
@@ -177,9 +180,10 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		};
 	}
 	
-	// A flow state on an int or a void call is true and useless.
+	// A flow state on an int or a void call is true and useless. A pointer is no value type either,
+	// but nullable reference analysis does not apply to it.
 	static bool CanBeNull(ITypeSymbol? type)
-		=> type is not null && (!type.IsValueType || type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+		=> type is not (null or IPointerTypeSymbol or IFunctionPointerTypeSymbol) && (!type.IsValueType || type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
 	;
 	
 	static string? DeclaredType(ISymbol? symbol) => symbol switch {
