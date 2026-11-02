@@ -321,12 +321,56 @@ internal sealed record ExitPoint(
 );
 
 
+/// <summary>
+///     Result of <c>roslyn_get_symbol_info</c>. The positional properties describe the symbol at the
+///     position. The rest are facts about the enclosing expression and are omitted when empty.
+/// </summary>
 internal sealed record SymbolInfoResult(
 	[property: JsonPropertyName("kind")]            string  Kind,
 	[property: JsonPropertyName("name")]            string  Name,
 	[property: JsonPropertyName("containing_type")] string? ContainingType,
 	[property: JsonPropertyName("type_or_return")]  string? TypeOrReturn
-) : ToolResult;
+) : ToolResult
+{
+	/// <summary>The expression's type after flow analysis, or the declared type at a declaration.</summary>
+	[JsonPropertyName("type")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Type { get; init; }
+	
+	/// <summary>The type after an implicit conversion; null when it is the same as <see cref="Type"/>.</summary>
+	[JsonPropertyName("converted_type")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? ConvertedType { get; init; }
+	
+	[JsonPropertyName("nullable_flow")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? NullableFlow { get; init; }
+	
+	/// <summary>"disabled" where nullable analysis is off, so a missing flow state is not read as "not null".</summary>
+	[JsonPropertyName("nullable_context")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? NullableContext { get; init; }
+	
+	[JsonPropertyName("conversion")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Conversion { get; init; }
+	
+	[JsonPropertyName("constant_value")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? ConstantValue { get; init; }
+	
+	[JsonPropertyName("candidates")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? Candidates { get; init; }
+	
+	[JsonPropertyName("candidate_reason")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? CandidateReason { get; init; }
+	
+	[JsonPropertyName("overloads")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? Overloads { get; init; }
+}
 
 internal sealed record SymbolsInScopeResult(
 	[property: JsonPropertyName("file")]       string                             File,

@@ -73,8 +73,10 @@ built-in tools only if a roslyn tool fails.
   overrides of a virtual/abstract method. Grep cannot do this.
 - `roslyn_get_symbol_definition` — Jump to a symbol's declaration. Returns file,
   line, and the declaration source.
-- `roslyn_get_symbol_info` — Resolve the symbol at a specific file/line/column.
-  Returns type, kind, containing type, and declaration location.
+- `roslyn_get_symbol_info` — Resolve the symbol at a specific file/line/column,
+  on a reference or a declaration. Returns kind, containing type and type, plus
+  what text cannot show: nullable flow state at that point, implicit conversions,
+  constant values, and the candidates of a failed overload resolution.
 - `roslyn_get_symbol_documentation` — Get XML documentation for a symbol.
 - `roslyn_get_symbols_in_scope` — List all symbols visible at a specific
   location. Useful for understanding what's available in a method body.
