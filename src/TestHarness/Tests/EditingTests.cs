@@ -316,7 +316,8 @@ static class EditingTests
 					"roslyn_replace_in_code",
 					new { filePath = "pick_all.cs", nodeKind = "IfStatement", line = 8, column = 4, replacement = "if(a == 4) { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["change_count"]?.GetValue<int>() == 0
-						&& data?["message"]?.GetValue<string>().Contains("line 8, column 4") == true)),
+						&& data?["message"]?.GetValue<string>().Contains("line 8, column 4") == true
+						&& data?["message"]?.GetValue<string>().Contains("without line and column") == true)),
 			
 			// Telling an agent that already passed a position to pass one would loop forever.
 			new("roslyn_replace_in_code: nodes sharing a start get advice other than a position",
@@ -325,7 +326,8 @@ static class EditingTests
 					new { filePath = "pick_nested.cs", nodeKind = "SimpleMemberAccessExpression", line = 3, column = 16, replacement = "x", projectPath = fx.Csproj },
 					data => data?["applied"]?.GetValue<bool>() == false
 						&& data?["change_count"]?.GetValue<int>() == 2
-						&& data?["message"]?.GetValue<string>().Contains("same position") == true)),
+						&& data?["message"]?.GetValue<string>().Contains("same position") == true
+						&& data?["message"]?.GetValue<string>().Contains("roslyn_replace_in_file") == true)),
 			
 
 			new("roslyn_replace_in_code: omitting line and column behaves as before",

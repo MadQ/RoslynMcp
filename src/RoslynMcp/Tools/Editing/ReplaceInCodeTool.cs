@@ -49,7 +49,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("When false (default), omits original node text from the response on success to reduce token usage. Set true to include the full original text of each matched node in changed_nodes[].original_text. Error responses always include the text regardless of this flag.")] bool verbose = false,
 		[Description("Match line endings in the replacement text to the file's existing style (CRLF or LF). Default: true — prevents mixed line endings in the file. Set false only if your replacement text already has the correct line endings.")] bool normalizeLineEndings = true,
 		[Description("Keep only nodes that start on this 1-based line. Default: 0 — any line.")] int line = 0,
-		[Description("Keep only nodes that start at this 1-based column, counting a tab as one character. Requires line. Default: 0 — any column.")] int column = 0
+		[Description("Keep only nodes that start at this 1-based column, in UTF-16 code units: a tab is one, an emoji two. A dry run's changed_nodes reports matching columns. Requires line. Default: 0 — any column.")] int column = 0
 	)
 	{
 		using var scope    = BeginTool("roslyn_replace_in_code", filePath, new { nodeKind, textPattern, replacement = replacement.Length > 120 ? replacement[..120] + "…" : replacement, dryRun, force, normalizeLineEndings, line, column });
@@ -147,7 +147,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		if(matchedNodes.Length == 0)
 			
 			return scope.Failed("No matching nodes found.", new ReplaceInCodeResult(false, 0, [], line > 0
-				? $"No matching nodes found at line {line}{(column > 0 ? $", column {column}" : "")}. Check nodeKind, textPattern and the position: a dry run without line lists where the matches start."
+				? $"No matching nodes found at line {line}{(column > 0 ? $", column {column}" : "")}. Check nodeKind, textPattern and the position: a dry run without line and column lists where the matches start."
 				: "No matching nodes found."));
 		
 		// Local helper so error paths can always include the matched text (diagnostic info the agent needs),
@@ -175,7 +175,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				(0, _) => "narrow textPattern or pass line and column to target one",
 				(_, 0) => "add column or narrow textPattern to target one",
-				_      => "narrow textPattern to target one: these nodes start at the same position"
+				_      => "narrow textPattern: these nodes start at the same position. If the text cannot tell them apart, replace the enclosing node or use roslyn_replace_in_file"
 			};
 			
 			return scope.Outcome("multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or {narrowing}."));
