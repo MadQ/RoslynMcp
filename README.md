@@ -189,7 +189,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | Tool | What it does |
 |------|--------------|
 | `roslyn_check_syntax` | Validate a C# snippet for syntax (and optionally semantic) errors without writing to disk |
-| `roslyn_replace_in_code` | Semantic C# editing -- replaces syntax nodes, validates syntax |
+| `roslyn_replace_in_code` | Semantic C# editing -- replaces syntax nodes by kind, name or position, validates syntax |
 | `roslyn_replace_in_file` | Text-level find-and-replace with regex (any file type) |
 | `roslyn_insert_lines` | Insert lines at a position or anchor pattern |
 | `roslyn_write_file` | Atomically write or create a file; returns a backup token for undo |
