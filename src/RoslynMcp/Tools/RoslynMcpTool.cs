@@ -1422,18 +1422,23 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				(more ??= [first]).Add(tree);
 		}
 		
-		if(more is null)
+		if(first is not null && more is null)
 			
-			return first is not null && IsOtherCaseOfMissingFile(first.FilePath, normalized) ? null : first;
+			return IsOtherCaseOfMissingFile(first.FilePath, normalized) ? null : first;
 		
 		// The workspace root of a project inside a solution is the solution's directory, so a file at the
-		// project's own root is also named exactly by its project-relative path. Looked up only here: one
-		// suffix match needs no anchor, and this is the rare case.
+		// project's own root is also named exactly by its project-relative path. That decides between
+		// several suffix matches, and finds a spelling that is no raw suffix at all ('./Program.cs',
+		// 'Tools/../Program.cs'). Looked up only here: one suffix match needs no anchor.
 		if(!Path.IsPathRooted(normalized) && ProjectDirectory(projectPath) is { } projectDir
 		   && ExactPath(projectDir, normalized) is { } fromProject
-		   && more.FirstOrDefault(t => SecurityBoundary.PathComparer.Equals(t.FilePath, fromProject)) is { } projectRelative)
+		   && (more ?? compilation.SyntaxTrees).FirstOrDefault(t => SecurityBoundary.PathComparer.Equals(t.FilePath, fromProject)) is { } projectRelative)
 			
 			return projectRelative;
+		
+		if(more is null)
+			
+			return null;
 		
 		ambiguous = [.. more.Select(t => TryMakeRelative(t.FilePath, rootPath) ?? t.FilePath)];
 		

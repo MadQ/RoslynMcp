@@ -85,8 +85,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			
 			if(ambiguous.Length > 0)
 				
-				return scope.Failed("ambiguous file", new PreviewRenameResult(
-					null, null, JsonSerializer.Serialize(AmbiguousSourceFileError(filePath!, ambiguous), RoslynMcpJson.Compact), false));
+				return scope.Error(AmbiguousSourceFileError(filePath!, ambiguous));
 			
 			symbol = await FindSymbolAtPosition(compilation, tree, line, column, cancellationToken);
 		}

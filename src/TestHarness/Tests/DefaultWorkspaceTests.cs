@@ -211,6 +211,46 @@ static class DefaultWorkspaceTests
 			new("DefaultWorkspace: a longer path picks one of two nested files (explicit)",
 				() => AssertOutline("B/Dup.cs", libProject, "DupB")),
 			
+			// The project-relative exact path is canonical, so spellings that are no raw suffix of any file
+			// still name the project's root file.
+			new("DefaultWorkspace: './Program.cs' and 'Tools/../Program.cs' name the project's root file", async () => {
+				
+				var dot  = await AssertOutline("./Program.cs",        appProject, "RootProgram");
+				var back = await AssertOutline("Tools/../Program.cs", appProject, "RootProgram");
+				
+				return dot.pass ? back : dot;
+			}),
+			
+			// get_line_count takes a list that can span projects, so with projectPath omitted each path not
+			// on disk finds its own project: Dup.cs lives in Lib, not in the solution's default project App.
+			new("DefaultWorkspace: get_line_count resolves each entry's project when projectPath is omitted", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_line_count", new { filePaths = "Dup.cs,A/Dup.cs" });
+				var files      = data?["files"]?.AsArray();
+				var dup        = files?[0]?["error"]?.GetValue<string>() ?? "";
+				var counted    = files?[1]?["line_count"] is not null;
+				
+				return Verdict(ok && dup.Contains("ambiguous") && counted,
+					$"expected Dup.cs ambiguous and A/Dup.cs counted, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// A positional rename reports the ambiguous file with the standard structured error, not as text
+			// inside a message — a client must be able to read error and found_in.
+			new("DefaultWorkspace: preview_rename at a position in an ambiguous file returns ambiguous_file", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_preview_rename", new {
+					symbolName  = "DupA",
+					newName     = "DupRenamed",
+					projectPath = libProject,
+					filePath    = "Dup.cs",
+					line        = 3,
+					column      = 16
+				});
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file" && data?["found_in"]?.AsArray().Count == 2,
+					$"expected a structured ambiguous_file, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
 			// An exact name follows the file system's case rules: where Name.cs and name.cs are two files,
 			// each name selects its own — a case-insensitive comparison would take whichever came first.
 			new("DefaultWorkspace: an exact name is case-sensitive where the file system is", async () => {
