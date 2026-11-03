@@ -889,13 +889,13 @@ When ending a significant development session (especially with AI assistance), u
   - Example: `2026-03-26 16:07 EDT (Eastern Daylight Time)`
 - **Content:** What was done, current state, next steps, open questions, technical decisions
 - **Purpose:** Allow next session (human or AI) to pick up where you left off
-- **Commit message:** `"docs: Update session handoff"`
+- **Never committed:** `docs/sessions/` is gitignored, so the handoff stays in the local checkout. Do not `git add -f` it
 
 **When to write:**
 - End of multi-hour development sessions
 - Before switching major focus areas
 - After significant refactoring or architecture changes
-- When handing off to another developer (or future you)
+- When handing off to another session in this checkout (or future you)
 
 **Include:**
 - Executive summary of what was accomplished
@@ -906,4 +906,4 @@ When ending a significant development session (especially with AI assistance), u
 - Any blocking issues or questions
 - Context for resuming work
 
-**Format:** Markdown, comprehensive but concise. See existing `HANDOFF.md` for template.
+**Format:** Markdown, comprehensive but concise. Use the existing `HANDOFF.md` as the template when there is one.
