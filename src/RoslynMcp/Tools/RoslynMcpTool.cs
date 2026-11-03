@@ -1424,7 +1424,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		if(more is null)
 			
-			return first;
+			return first is not null && IsOtherCaseOfMissingFile(first.FilePath, normalized) ? null : first;
 		
 		// The workspace root of a project inside a solution is the solution's directory, so a file at the
 		// project's own root is also named exactly by its project-relative path. Looked up only here: one
@@ -1438,6 +1438,22 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		ambiguous = [.. more.Select(t => TryMakeRelative(t.FilePath, rootPath) ?? t.FilePath)];
 		
 		return null;
+	}
+	
+	// True when treePath matches suffix only by ignoring case, on a file system where that makes them two
+	// files, and the spelling asked for exists: then the requested file is not in the compilation —
+	// MSBuildWorkspace on Linux loads only one of two Compile items whose paths differ only in case — and
+	// answering about treePath would answer about a different file. Only an existence check: the path is
+	// treePath itself, respelled in the case of the request.
+	static bool IsOtherCaseOfMissingFile(string treePath, string suffix)
+	{
+		if(treePath.EndsWith(suffix, StringComparison.Ordinal))
+			
+			return false;
+		
+		var requested = string.Concat(treePath.AsSpan(0, treePath.Length - suffix.Length), suffix);
+		
+		return !SecurityBoundary.PathComparer.Equals(requested, treePath) && File.Exists(requested);
 	}
 	
 	// The full path relativePath names under directory, or null when it is not a valid path. A rooted

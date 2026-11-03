@@ -86,8 +86,14 @@ static class DefaultWorkspaceTests
 		
 		var caseSensitive = !File.Exists(caseFx.PathOf("Case/name.cs"));
 		
-		if(caseSensitive)
+		if(caseSensitive) {
+			
 			caseFx.Write("Case/name.cs", "namespace Probe;\n\ninternal class LowerName { }\n");
+			
+			// The same pair in an MSBuild project, where only one of the two is loaded.
+			fx.Write("App/Case/Name.cs", "namespace App.Case;\n\ninternal class UpperName { }\n");
+			fx.Write("App/Case/name.cs", "namespace App.Case;\n\ninternal class LowerName { }\n");
+		}
 		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
@@ -225,6 +231,34 @@ static class DefaultWorkspaceTests
 				var (_, types) = await Call(rootedCtx, "roslyn_list_types", new { projectPath = caseFx.Dir, namespaceFilter = "Probe" });
 				
 				return (false, $"{(upper.pass ? lower : upper).message}; types in Probe: {types?.ToJsonString() ?? "null"}");
+			}),
+			
+			// MSBuildWorkspace on Linux loads one of two files whose names differ only in case. The other
+			// name must then be "not found", never an answer about the loaded file — which one is loaded is
+			// Roslyn's choice, so each name may resolve or be missing, but never to the other class.
+			new("DefaultWorkspace: a case variant missing from the compilation is not found, not swapped", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				var found = 0;
+				
+				foreach(var (name, type) in new[] { ("Case/Name.cs", "UpperName"), ("Case/name.cs", "LowerName") }) {
+					
+					var (ok, data) = await Call(rootedCtx, "roslyn_get_file_outline", new { filePath = name, projectPath = appProject });
+					string?[] types = [.. data?["types"]?.AsArray().Select(t => t?["name"]?.GetValue<string>()) ?? []];
+					var notFound    = (data?["error"]?.GetValue<string>() ?? "").Contains("not found");
+					
+					if(!ok || !(notFound || types is [var only] && only == type))
+						
+						return (false, $"FAIL  ({name}: expected {type} or not found, got {data?.ToJsonString() ?? "null"})");
+					
+					if(!notFound)
+						found++;
+				}
+				
+				return found > 0 ? (true, "PASS") : (false, "FAIL  (neither name resolved; expected the loaded one to)");
 			}),
 			
 			// A position-based semantic tool needs the owning project's semantic model, not just its text.
