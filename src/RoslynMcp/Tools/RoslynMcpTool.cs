@@ -1407,7 +1407,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		foreach(var tree in compilation.SyntaxTrees) {
 			
-			if(fromRoot is not null && string.Equals(tree.FilePath, fromRoot, StringComparison.OrdinalIgnoreCase))
+			// An exact name follows the platform's case rules: on Linux, program.cs and Program.cs are two
+			// files. Suffix matching below stays lenient, so a case clash there is reported as ambiguous.
+			if(fromRoot is not null && SecurityBoundary.PathComparer.Equals(tree.FilePath, fromRoot))
 				
 				return tree;
 			
@@ -1429,7 +1431,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		// suffix match needs no anchor, and this is the rare case.
 		if(!Path.IsPathRooted(normalized) && ProjectDirectory(projectPath) is { } projectDir
 		   && ExactPath(projectDir, normalized) is { } fromProject
-		   && more.FirstOrDefault(t => string.Equals(t.FilePath, fromProject, StringComparison.OrdinalIgnoreCase)) is { } projectRelative)
+		   && more.FirstOrDefault(t => SecurityBoundary.PathComparer.Equals(t.FilePath, fromProject)) is { } projectRelative)
 			
 			return projectRelative;
 		

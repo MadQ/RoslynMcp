@@ -76,6 +76,19 @@ static class DefaultWorkspaceTests
 		fx.Write("Lib/A/Dup.cs",         "namespace Lib.A;\n\ninternal class DupA { }\n");
 		fx.Write("Lib/B/Dup.cs",         "namespace Lib.B;\n\ninternal class DupB { }\n");
 		
+		// Two names that differ only in case are two files only where the file system says so (Linux,
+		// not Windows or a default macOS volume) — probed rather than assumed from the platform. The
+		// pair lives in an Adhoc directory: MSBuildWorkspace on Linux loads only one of two Compile items
+		// whose paths differ only in case (MSBuild itself lists both), so a project could not hold them.
+		var caseFx = TestFixtures.NewAdhocDir("DefaultWorkspaceCase");
+		
+		caseFx.Write("Case/Name.cs", "namespace Probe;\n\ninternal class UpperName { }\n");
+		
+		var caseSensitive = !File.Exists(caseFx.PathOf("Case/name.cs"));
+		
+		if(caseSensitive)
+			caseFx.Write("Case/name.cs", "namespace Probe;\n\ninternal class LowerName { }\n");
+		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
@@ -192,6 +205,28 @@ static class DefaultWorkspaceTests
 			new("DefaultWorkspace: a longer path picks one of two nested files (explicit)",
 				() => AssertOutline("B/Dup.cs", libProject, "DupB")),
 			
+			// An exact name follows the file system's case rules: where Name.cs and name.cs are two files,
+			// each name selects its own — a case-insensitive comparison would take whichever came first.
+			new("DefaultWorkspace: an exact name is case-sensitive where the file system is", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				var upper = await AssertOutline("Case/Name.cs", caseFx.Dir, "UpperName");
+				var lower = await AssertOutline("Case/name.cs", caseFx.Dir, "LowerName");
+				
+				if(upper.pass && lower.pass)
+					
+					return upper;
+				
+				// Says whether the compilation holds both files at all, which the outline cannot tell apart
+				// from a lookup that picked the wrong one.
+				var (_, types) = await Call(rootedCtx, "roslyn_list_types", new { projectPath = caseFx.Dir, namespaceFilter = "Probe" });
+				
+				return (false, $"{(upper.pass ? lower : upper).message}; types in Probe: {types?.ToJsonString() ?? "null"}");
+			}),
+			
 			// A position-based semantic tool needs the owning project's semantic model, not just its text.
 			new("DefaultWorkspace: get_symbol_info resolves in a non-default project", async () => {
 				
@@ -285,6 +320,7 @@ static class DefaultWorkspaceTests
 			await StopServerAsync(bare,   bareCtx);
 			fx.Dispose();
 			empty.Dispose();
+			caseFx.Dispose();
 		});
 	}
 	
