@@ -49,15 +49,19 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 			
 			return scope.Error(error!);
 		
-		var tree = FindSyntaxTree(compilation, filePath);
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
+		
+		var tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
+		
+		if(ambiguous.Length > 0)
+			
+			return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
 		
 		if(tree is null)
 			
 			return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
-		
-		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
-			
-			return scope.Error(rootError);
 		
 		var text      = await tree.GetTextAsync(cancellationToken);
 		var lineCount = text.Lines.Count;

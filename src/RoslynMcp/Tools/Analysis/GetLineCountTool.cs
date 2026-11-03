@@ -84,7 +84,13 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 					
 					return scope.Error(error!);
 				
-				var tree = FindSyntaxTree(compilation, filePath);
+				var tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
+				
+				if(ambiguous.Length > 0) {
+					
+					results.Add(new LineCountEntry(filePath, null, $"ambiguous: matches {string.Join(", ", ambiguous)}"));
+					continue;
+				}
 				
 				if(tree is null) {
 					

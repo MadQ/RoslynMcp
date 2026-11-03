@@ -69,6 +69,13 @@ static class DefaultWorkspaceTests
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
 		
+		// Same trailing path twice in one project (#362): a root file and a nested one, and two nested
+		// ones with nothing at the root. The project-level check above cannot see either case.
+		fx.Write("App/Program.cs",       "namespace App;\n\ninternal class RootProgram { }\n");
+		fx.Write("App/Tools/Program.cs", "namespace App.Tools;\n\ninternal class ToolsProgram { }\n");
+		fx.Write("Lib/A/Dup.cs",         "namespace Lib.A;\n\ninternal class DupA { }\n");
+		fx.Write("Lib/B/Dup.cs",         "namespace Lib.B;\n\ninternal class DupB { }\n");
+		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
@@ -98,6 +105,28 @@ static class DefaultWorkspaceTests
 		
 		static (bool pass, string message) Verdict(bool pass, string failure)
 			=> pass ? (true, "PASS") : (false, $"FAIL  ({failure})");
+		
+		// Outlines filePath and checks it named the expected file: the type it declares, or ambiguous_file
+		// with both candidates when expectType is null. projectPath null exercises the default workspace.
+		async Task<(bool pass, string message)> AssertOutline(string filePath, string? projectPath, string? expectType)
+		{
+			
+			var (ok, data) = projectPath is null
+				? await Call(rootedCtx, "roslyn_get_file_outline", new { filePath })
+				: await Call(rootedCtx, "roslyn_get_file_outline", new { filePath, projectPath });
+			
+			if(expectType is null)
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file" && data?["found_in"]?.AsArray().Count == 2,
+					$"expected ambiguous_file naming both files, got {data?.ToJsonString() ?? "null"}");
+			
+			string?[] types = [.. data?["types"]?.AsArray().Select(t => t?["name"]?.GetValue<string>()) ?? []];
+			
+			return Verdict(ok && types is [var only] && only == expectType, $"expected type {expectType}, got {data?.ToJsonString() ?? "null"}");
+		}
+		
+		var appProject = fx.PathOf("App/App.csproj");
+		var libProject = fx.PathOf("Lib/Lib.csproj");
 		
 		var tests = new List<TestCase> {
 			
@@ -136,6 +165,32 @@ static class DefaultWorkspaceTests
 				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file" && found == 2,
 					$"expected ambiguous_file naming both projects, got {data?.ToJsonString() ?? "null"}");
 			}),
+			
+			// #362: the name of a file at the project root is exact, so it must not resolve to a nested
+			// file with the same trailing path. With projectPath omitted, the default workspace narrows to
+			// App first and the lookup then runs against App's root — both routes must agree.
+			new("DefaultWorkspace: a root file name beats a nested file with the same name (default)",
+				() => AssertOutline("Program.cs", null, "RootProgram")),
+			
+			new("DefaultWorkspace: a root file name beats a nested file with the same name (explicit)",
+				() => AssertOutline("Program.cs", appProject, "RootProgram")),
+			
+			new("DefaultWorkspace: a nested path still selects the nested file",
+				() => AssertOutline("Tools/Program.cs", appProject, "ToolsProgram")),
+			
+			// Two nested files with nothing at the root: no exact match, so a bare name is ambiguous
+			// within one project — the cross-project check cannot catch it.
+			new("DefaultWorkspace: a name matching two nested files is ambiguous (default)",
+				() => AssertOutline("Dup.cs", null, null)),
+			
+			new("DefaultWorkspace: a name matching two nested files is ambiguous (explicit)",
+				() => AssertOutline("Dup.cs", libProject, null)),
+			
+			new("DefaultWorkspace: a longer path picks one of two nested files (default)",
+				() => AssertOutline("A/Dup.cs", null, "DupA")),
+			
+			new("DefaultWorkspace: a longer path picks one of two nested files (explicit)",
+				() => AssertOutline("B/Dup.cs", libProject, "DupB")),
 			
 			// A position-based semantic tool needs the owning project's semantic model, not just its text.
 			new("DefaultWorkspace: get_symbol_info resolves in a non-default project", async () => {

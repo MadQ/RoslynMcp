@@ -43,7 +43,12 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
-		var tree     = FindSyntaxTree(compilation, filePath);
+		
+		var tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
+		
+		if(ambiguous.Length > 0)
+			
+			return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
 		
 		if(tree is null)
 			
