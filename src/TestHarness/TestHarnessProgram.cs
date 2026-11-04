@@ -79,6 +79,7 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 	Process? server;
 	string?  stopReason;
 	int      total;
+	bool     usageError;
 	
 	/// <summary>Quiet mode (#325): only failures and the final summary line reach the console.</summary>
 	public bool Quiet { get; } = args.Contains("--quiet");
@@ -322,7 +323,11 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		
 		if(groups.Count == 0) {
 			
-			Stop($"no test matched the selection ({selection.FilterNote})");
+			// A usage error like an --only typo (exit code 2), only found later: test names exist
+			// once their groups are built.
+			usageError = true;
+			Stop("no test matched the selection");
+			Info($"\nNo test matched the selection ({selection.FilterNote}).");
 			
 			return;
 		}
@@ -508,6 +513,6 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		
 		server?.Dispose();
 		
-		return succeeded ? 0 : 1;
+		return succeeded ? 0 : usageError ? 2 : 1;
 	}
 }
