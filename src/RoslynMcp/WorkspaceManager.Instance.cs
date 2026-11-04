@@ -482,7 +482,10 @@ internal sealed partial class WorkspaceManager
 			
 			throw new Tools.ProjectNotInWorkspaceException(
 				csprojPath,
-				[..projectMap.Keys.Order(StringComparer.OrdinalIgnoreCase).Select(path => Path.GetRelativePath(rootPath, path))],
+				// Absolute: a relative projectPath resolves against the server's working directory,
+				// which need not be the workspace root (--root), so only a full path can be passed
+				// back as it is.
+				[..projectMap.Keys.Order(StringComparer.OrdinalIgnoreCase)],
 				IsSolutionPath(csprojPath))
 			;
 		}

@@ -836,8 +836,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		};
 	}
 	
-	// found_projects carries the paths relative to the workspace root, not bare file names: the
-	// agent is to pass one of them back, and two projects may share a file name.
+	// found_projects carries full paths, not bare file names: the agent is to pass one of them back
+	// as it is, and two projects may share a file name.
 	// A solution that a file-anchored call kept because no project has its file: that missing file is
 	// the answer, not the solution (see ToolScope.FileInNoProject).
 	private static ToolResult ProjectNotInWorkspaceError(ProjectNotInWorkspaceException ex)

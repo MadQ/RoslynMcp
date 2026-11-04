@@ -97,6 +97,25 @@ static class DefaultWorkspaceTests
 		single.Write("Only/OnlyType.cs", "namespace Only;\n\npublic class OnlyType\n{\n\tpublic int Value() => 1;\n}\n");
 		single.Write("Beside/Beside.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
 		
+		// Review of #378: a solution in a directory of its own that lists a project outside it, and
+		// a project with two target frameworks whose warnings differ by framework — net10.0-windows
+		// defines WINDOWS. EnableWindowsTargeting lets it load on Linux too; it needs no other pack.
+		single.Write("Sln/Apart.slnx", "<Solution>\n  <Project Path=\"../Apart/Apart.csproj\" />\n  <Project Path=\"../Multi/Multi.csproj\" />\n</Solution>\n");
+		single.Write("Apart/Apart.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		single.Write("Apart/Warned.cs", "namespace Apart;\n\ninternal class Warned\n{\n\tvoid M()\n\t{\n\t\tint outsideTheSolutionDirectory;\n\t}\n}\n");
+		single.Write("Multi/Multi.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>\n  </PropertyGroup>\n</Project>\n");
+		single.Write("Multi/Both.cs", "namespace Multi;\n\ninternal class Both\n{\n\tvoid M()\n\t{\n#if WINDOWS\n\t\tint onlyOnWindows;\n#else\n\t\tint onlyElsewhere;\n#endif\n\t}\n}\n");
+		
+		// Review of #378: a solution in a directory whose project file pins the adhoc workspace. The
+		// adhoc project has no file, so a solution's projects come out as none; the one compilation
+		// must still be checked.
+		var adhocSln = TestFixtures.NewAdhocDir("DefaultWorkspaceAdhocSln");
+		
+		adhocSln.Write(".madq_roslynmcp.json", "{ \"workspace\": \"adhoc\" }\n");
+		adhocSln.Write("Pinned.slnx", "<Solution>\n  <Project Path=\"Pinned/Pinned.csproj\" />\n</Solution>\n");
+		adhocSln.Write("Pinned/Pinned.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		adhocSln.Write("Pinned/Broken.cs", "namespace Pinned;\n\ninternal class Broken\n{\n\tint M() => undefinedName;\n}\n");
+		
 		// Two names that differ only in case are two files only where the file system says so (Linux,
 		// not Windows or a default macOS volume) — probed rather than assumed from the platform. The
 		// pair lives in an Adhoc directory: MSBuildWorkspace on Linux loads only one of two Compile items
@@ -372,12 +391,15 @@ static class DefaultWorkspaceTests
 			
 			// #376: a tool that works on one project, given the solution, used to answer for the
 			// solution's first project (App) — and Greet, which is in Lib, was "not found". It must
-			// say that it needs one project, and name them, so the agent can pass one back.
+			// say that it needs one project, and name them, so the agent can pass one back. Passed back
+			// exactly as returned: this server's working directory is not the workspace root, so a
+			// path relative to the root would resolve elsewhere (review of #378).
 			new("DefaultWorkspace: a solution passed to a one-project tool is an error that lists the projects", async () => {
 				
 				var (ok, data)   = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = fx.PathOf("DefaultWs.slnx") });
 				var found        = data?["found_projects"]?.AsArray().Select(p => p?.GetValue<string>() ?? "").ToArray() ?? [];
-				var (libOk, lib) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = libProject });
+				var choice       = found.FirstOrDefault(p => p.EndsWith("Lib.csproj")) ?? "";
+				var (libOk, lib) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = choice });
 				
 				return Verdict(ok
 					&& data?["error"]?.GetValue<string>() == "solution_needs_project"
@@ -466,6 +488,29 @@ static class DefaultWorkspaceTests
 					$"expected project_not_in_workspace for Beside.csproj and a body through Single.slnx; got {data?.ToJsonString() ?? "null"} / {sln?.ToJsonString() ?? "null"}");
 			}),
 			
+			// Review of #378: a project outside the solution's directory is still checked, and a project
+			// with two target frameworks is checked under both — one warning only exists under each.
+			new("DefaultWorkspace: get_diagnostics for a solution covers projects outside its directory and every target framework", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = single.PathOf("Sln/Apart.slnx"), severity = "warnings", take = 200 });
+				var messages   = data?["items"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				
+				bool Has(string name) => messages.Any(message => message.Contains(name));
+				
+				return Verdict(ok && Has("outsideTheSolutionDirectory") && Has("onlyOnWindows") && Has("onlyElsewhere"),
+					$"expected the warnings of Apart and of both Multi frameworks; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// Review of #378: in an adhoc workspace the solution's projects have no files; the one
+			// compilation is checked rather than none — "0 errors" for broken code was the result.
+			new("DefaultWorkspace: get_diagnostics for a solution in an adhoc workspace still checks the code", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = adhocSln.PathOf("Pinned.slnx"), severity = "errors", take = 200 });
+				
+				return Verdict(ok && data?["items"]?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "CS0103") == true,
+					$"expected CS0103 from Broken.cs; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it
 			// must reject "" even when a default exists — otherwise it would silently search the default
 			// solution's first project (App here), not fail as the schema promises.
@@ -513,6 +558,7 @@ static class DefaultWorkspaceTests
 			empty.Dispose();
 			caseFx.Dispose();
 			single.Dispose();
+			adhocSln.Dispose();
 		});
 	}
 	
