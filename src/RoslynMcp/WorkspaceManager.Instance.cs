@@ -444,9 +444,15 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		// The project a path names. An AdhocWorkspace has one project and no project files, so every
+		// path gets it. In an MSBuild workspace a path that names none of its projects is an error
+		// rather than a guess: the first project used to answer for a solution, a misspelled
+		// .csproj, or a project the solution does not contain, and every lookup in it came back
+		// wrong with nothing to say so (#376).
 		ProjectId ResolveProjectId_NoLock(string? csprojPath)
 		{
-			if(csprojPath is null)
+			// No project file is known at all — nothing to choose between.
+			if(csprojPath is null || !isMSBuild || projectMap.Count == 0)
 				
 				return defaultProjectId;
 			
@@ -454,18 +460,34 @@ internal sealed partial class WorkspaceManager
 				
 				return projectId;
 			
-			// Match by filename only (agent may pass a relative path that doesn't match fully).
-			var fileName = Path.GetFileName(csprojPath)
-			;
-			var match    = projectMap.FirstOrDefault(kvp =>
-				string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase)
-			);
-			
-			if(match.Value is not null)
+			// A solution of one project names that project. Any other .csproj — one the solution
+			// does not list, beside it in the tree — is still not it.
+			if(projectMap.Count == 1 && IsSolutionPath(csprojPath))
 				
-				return match.Value;
+				return defaultProjectId;
 			
-			return defaultProjectId;
+			// By file name, for a path that names the same file differently (a link, a short name, a
+			// substituted drive). Only when exactly one project has that name: of two Tests.csproj,
+			// neither is the answer.
+			var fileName = Path.GetFileName(csprojPath);
+			var byName   = projectMap
+				.Where(kvp => string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase))
+				.Take(2)
+				.ToArray()
+			;
+			
+			if(byName.Length == 1)
+				
+				return byName[0].Value;
+			
+			throw new Tools.ProjectNotInWorkspaceException(
+				csprojPath,
+				// Absolute: a relative projectPath resolves against the server's working directory,
+				// which need not be the workspace root (--root), so only a full path can be passed
+				// back as it is.
+				[..projectMap.Keys.Order(StringComparer.OrdinalIgnoreCase)],
+				IsSolutionPath(csprojPath))
+			;
 		}
 		
 		/// <summary>Returns the .csproj path for a given resolved path, or the first known .csproj.</summary>

@@ -29,7 +29,7 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		CancellationToken ct = default)
 	{
-		using var scope = BeginTool("roslyn_get_member_body", symbolName, new { containingType });
+		using var scope = BeginTool("roslyn_get_member_body", symbolName, new { containingType, projectPath });
 		
 		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			

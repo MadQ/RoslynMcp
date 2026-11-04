@@ -25,7 +25,9 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		"Check your code for compiler errors and warnings — fast, in-process, no build needed. " +
 		"Use this after editing code to verify correctness before committing or continuing work. " +
 		"Returns a structured summary (error count, warning count) plus paginated individual items " +
-		"with code, file, line, and message. Pass take: 0 for a lightweight error-count-only check " +
+		"with code, file, line, and message. A .sln/.slnx projectPath checks every project in the solution " +
+		"(with filePath: the project or projects that compile that file). " +
+		"Pass take: 0 for a lightweight error-count-only check " +
 		"with no items returned. When take: 0, the response includes full counts but items is null — " +
 		"not an empty array. An empty array means items were requested but none matched; null means items were not requested. " +
 		"Covers C# type/symbol errors by default; set includeAnalyzers: true to also run the project's " +
@@ -59,55 +61,114 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			}
 			catch { /* malformed token — fall through to explicit params */ }
 		
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return scope.Error(error!);
-		
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
 		
-		IEnumerable<Diagnostic> diagnostics;
-		SyntaxTree?             tree = null;
+		// A file is diagnosed in the project that compiles it. For a solution that is the project
+		// holding the file, found the way every file-anchored tool finds it — a short name that two
+		// projects' files end with is ambiguous_file, never the two files' diagnostics merged.
+		var givenPath     = projectPath;
+		var solutionGiven = filePath is not null && ResolvedSolutionPath(projectPath) is not null;
 		
-		if(filePath is not null) {
+		if(filePath is not null && !TryResolveProjectArg(projectPath, filePath, out projectPath, out var fileError))
 			
-			// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
-			tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
+			return scope.Error(fileError);
+		
+		// What the path stands for, compilation by compilation (#376): every project of a solution,
+		// and every target framework of a project — each is compiled on its own, and an error under
+		// one framework's #if is not an error under another. Given the solution, the tool used to
+		// check its first project alone, and its "0 errors" said nothing about the rest.
+		var (targets, targetError) = await GetTargetsAsync(projectPath, forFile: filePath is not null, cancellationToken);
+		
+		if(targetError is not null)
 			
-			if(ambiguous.Length > 0)
-				
-				return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
+			return scope.Error(targetError);
+		
+		// A file is looked up by the name given until its own path is known.
+		var fileKey = filePath;
+		
+		// One file can be compiled by several projects of a solution (a linked or shared source),
+		// and it can be an error in one and fine in another. The lookup above stops at the first
+		// project that has it; given the solution, every other project with that same file is
+		// diagnosed too — by the file's full path, which names that one file and no namesake.
+		if(solutionGiven
+			&& targets.Length > 0
+			&& FindSyntaxTree(targets[0].Compilation, filePath!, targets[0].Project?.FilePath ?? projectPath, rootPath, out _) is { FilePath: { Length: > 0 } sharedPath }
+			&& TryResolveSolution(givenPath, out var whole, out _)) {
 			
-			// An empty result here would read as "this file is clean" for a mistyped path, a file of
-			// another project, or one the workspace has not loaded — the worst answer for the edit
-			// check this tool is used for (#366). Fail like every other file-based tool.
-			if(tree is null)
-				
-				return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
+			fileKey = sharedPath;
 			
-			diagnostics = compilation.GetSemanticModel(tree).GetDiagnostics();
+			var present = targets.Select(target => target.Project?.Id).OfType<ProjectId>().ToHashSet();
+			var others  = new List<(Compilation Compilation, Project? Project)>();
+			
+			foreach(var projectId in whole.GetDocumentIdsWithFilePath(sharedPath).Select(id => id.ProjectId).Distinct())
+				if(present.Add(projectId) && whole.GetProject(projectId) is { } other && await other.GetCompilationAsync(cancellationToken) is { } otherCompilation)
+					others.Add((otherCompilation, other));
+			
+			targets = [..targets, ..others];
 		}
-		else
-			diagnostics = compilation.GetDiagnostics()
-				.Where(d => IsUnderRoot(d, rootPath))
+		
+		var diagnostics = new List<Diagnostic>();
+		var notes       = new List<string>();
+		var fileFound   = false;
+		
+		foreach(var (compilation, project) in targets) {
+			
+			// A project's own directory counts as well as the root: a solution may list a project
+			// outside its directory (../Lib/Lib.csproj), and that project's errors are no less
+			// real. The filter is for external and generated files (#113), not for them.
+			var projectDirectory = Path.GetDirectoryName(project?.FilePath);
+			
+			bool Ours(Diagnostic diagnostic)
+				=> IsUnderRoot(diagnostic, rootPath)
+					|| (projectDirectory is not null && IsUnderRoot(diagnostic, projectDirectory))
 			;
-		
-		string? analyzerNote = null;
-		
-		if(includeAnalyzers) {
 			
-			var (analyzerDiags, note) = await RunAnalyzersAsync(projectPath, compilation, cancellationToken);
+			SyntaxTree? tree = null;
 			
-			analyzerNote = note;
+			if(filePath is not null) {
+				
+				// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
+				tree = FindSyntaxTree(compilation, fileKey!, project?.FilePath ?? projectPath, rootPath, out var ambiguous);
+				
+				if(ambiguous.Length > 0)
+					
+					return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
+				
+				if(tree is null)
+					continue;
+				
+				fileFound = true;
+				diagnostics.AddRange(compilation.GetSemanticModel(tree).GetDiagnostics());
+			}
+			else
+				diagnostics.AddRange(compilation.GetDiagnostics().Where(Ours));
 			
-			var inRoot = analyzerDiags.Where(d => IsUnderRoot(d, rootPath));
-			
-			// Keep file-scoped queries file-scoped for analyzer output too.
-			diagnostics = tree is null
-				? diagnostics.Concat(inRoot)
-				: diagnostics.Concat(inRoot.Where(d => d.Location.SourceTree == tree));
+			if(includeAnalyzers && project is not null) {
+				
+				var (analyzerDiags, note) = await RunAnalyzersAsync(project, compilation, cancellationToken);
+				
+				// Across several compilations a note is about one of them: "no analyzer references"
+				// for one project is not that no analyzer ran.
+				if(note is not null)
+					notes.Add(targets.Length > 1 ? $"{project.Name}: {note}" : note);
+				
+				var ours = analyzerDiags.Where(Ours);
+				
+				// Keep file-scoped queries file-scoped for analyzer output too.
+				diagnostics.AddRange(tree is null ? ours : ours.Where(d => d.Location.SourceTree == tree));
+			}
 		}
+		
+		// An empty result here would read as "this file is clean" for a mistyped path, a file of
+		// another project, or one the workspace has not loaded — the worst answer for the edit
+		// check this tool is used for (#366). Fail like every other file-based tool.
+		if(filePath is not null && !fileFound)
+			
+			return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
+		
+		string? analyzerNote = notes.Count > 0 ? string.Join(" ", notes.Distinct()) : null;
 		
 		// Deduplicate by identity tuple — multi-TFM workspaces can surface the same
 		// diagnostic from duplicate document entries across target frameworks.
@@ -243,6 +304,45 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 	
 
 	/// <summary>
+	///     The compilations <paramref name="projectPath"/> stands for, each with its project: every
+	///     project of a solution, every target framework of a .csproj — a multi-targeted project is
+	///     one Roslyn project per framework, all with the same file. Falls back to the one compilation
+	///     the path resolves to for a workspace without project files (an AdhocWorkspace), a path that
+	///     names no project of the workspace (whose resolution error is the answer), projects none of
+	///     which has a compilation, and a solution given with a file — which reaches here only when no
+	///     project contains that file, and is answered as such by the fallback.
+	/// </summary>
+	async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, CancellationToken cancellationToken)
+	{
+		if(TryResolveSolution(projectPath, out var solution, out _)) {
+			
+			var (path, kind) = workspace.Resolve(projectPath);
+			
+			Project[] named = kind == ResolutionKind.Solution && forFile
+				? []
+				: [..solution.Projects.Where(candidate => candidate.FilePath is not null
+					&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(path))))];
+			
+			var compiled = new List<(Compilation, Project?)>(named.Length);
+			
+			foreach(var project in named)
+				if(await project.GetCompilationAsync(cancellationToken) is { } compilation)
+					compiled.Add((compilation, project));
+			
+			// None at all would be "0 errors" for code nobody checked.
+			if(compiled.Count > 0)
+				
+				return ([..compiled], null);
+		}
+		
+		if(!TryGetCompilation(projectPath, out var single, out var error))
+			
+			return ([], error);
+		
+		return ([(single, TryGetProject(projectPath, out var only, out _) ? only : null)], null);
+	}
+	
+	/// <summary>
 	///     Runs the project's analyzer references over the compilation via
 	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.
 	///     Analyzer failures must never break compiler diagnostics: any error (misbehaving
@@ -250,11 +350,10 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 	///     explanatory note. Assemblies load through <see cref="ShadowCopyAnalyzerLoader"/> so the
 	///     analyzed project's outputs are never locked.
 	/// </summary>
-	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(string projectPath, Compilation compilation, CancellationToken cancellationToken)
+	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(Project project, Compilation compilation, CancellationToken cancellationToken)
 	{
 		try {
 			
-			var project   = workspace.GetProject(projectPath);
 			var analyzers = project.AnalyzerReferences
 				.SelectMany(r => AnalyzerLoading.GetShadowedAnalyzers(r, LanguageNames.CSharp))
 				.ToImmutableArray()

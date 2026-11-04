@@ -30,7 +30,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_find_implementations", symbolName, new { containingType, skip, take });
+		using var scope = BeginTool("roslyn_find_implementations", symbolName, new { containingType, skip, take, projectPath });
 		
 		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			
