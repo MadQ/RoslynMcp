@@ -19,6 +19,9 @@ static class FileContentTests
 		
 		fx.Write("Probe.cs", ExactSource);
 		
+		// Not a C# file, so it is never a tracked document: roslyn_read_file reads it from disk.
+		var lockedPath = fx.Write("locked.txt", "held\n");
+		
 		var tests = new List<TestCase> {
 			
 			new("roslyn_read_file: read .cs file from Roslyn in-memory",
@@ -73,6 +76,36 @@ static class FileContentTests
 						&& text == "\tstring Path() => \"C:\\\\temp\\\\a.txt\";\n\t\n"
 						&& data?["start_line"]?.GetValue<int>() == 3
 						&& data?["end_line"]?.GetValue<int>() == 4)),
+			
+			// #370: a disk read that fails — here, another process holds the file open without read
+			// sharing, as a log being written does — must be a structured error, not the SDK's opaque
+			// "An error occurred invoking". Released, the same file must read normally, so the error is
+			// about the lock and not the file. Windows only: elsewhere file locks are advisory and the
+			// read succeeds, so there is nothing to check.
+			new("roslyn_read_file: a file locked by another process is a structured error",
+				async () => {
+					
+					if(!OperatingSystem.IsWindows())
+						
+						return Skip.NotApplicable("file locks are advisory on this platform; the read succeeds");
+					
+					(bool pass, string message) locked;
+					
+					using(new FileStream(lockedPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+						locked = await ctx.RunTestAsync(
+							"roslyn_read_file",
+							new { filePath = "locked.txt", projectPath = fx.ProjectPath },
+							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal));
+					
+					if(!locked.pass)
+						
+						return locked;
+					
+					return await ctx.RunTestAsync(
+						"roslyn_read_file",
+						new { filePath = "locked.txt", projectPath = fx.ProjectPath },
+						(data, source) => data?["source"]?.GetValue<string>() == "disk" && source is ["held\n\n"]);
+				}),
 			
 			new("roslyn_get_line_count: single and multi-file",
 				() => ctx.RunTestAsync(
