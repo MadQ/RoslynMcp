@@ -11,11 +11,17 @@ static class DriftTests
 {
 	internal static TestGroup Build(TestContext ctx)
 	{
-		async Task<(bool, string)> CheckAsync(string? tool, object? edit, bool external = false, bool touch = false, bool delete = false)
+		async Task<(bool, string)> CheckAsync(string? tool, object? edit, bool external = false, bool touch = false, bool delete = false, int? codePage = null)
 		{
+			var codePageXml = codePage is null ? string.Empty : $"<PropertyGroup><CodePage>{codePage}</CodePage></PropertyGroup>";
 			using var fx = TestFixtures.NewMsBuildProject("Drift", extraProjectXml:
-				"<ItemGroup><Compile Include=\"obj/Edited.cs\" /><Compile Include=\"obj/Outside.cs\" /></ItemGroup>");
-			var edited  = fx.Write("obj/Edited.cs", "class Edited\n{\n\tint value = 1;\n}\n");
+				codePageXml + "<ItemGroup><Compile Include=\"obj/Edited.cs\" /><Compile Include=\"obj/Outside.cs\" /></ItemGroup>");
+			var editedContent = codePage is null ? "class Edited\n{\n\tint value = 1;\n}\n" : "class Edited { const string value = \"café\"; }\n";
+			var edited  = fx.Write("obj/Edited.cs", editedContent);
+
+			if(codePage is not null)
+				File.WriteAllBytes(edited, System.Text.Encoding.Latin1.GetBytes(editedContent));
+
 			var outside = fx.Write("obj/Outside.cs", "class Outside { }\n");
 			
 			var (loaded, loadMessage) = await ctx.RunTestAsync("roslyn_get_diagnostics",
@@ -74,6 +80,7 @@ static class DriftTests
 			new("drift: own edit does not hide unrelated external drift", () => CheckAsync("roslyn_insert_lines",
 				new { filePath = "obj/Edited.cs", atLine = 1, text = "// Issue 299" }, external: true)),
 			new("drift: timestamp-only touch is not stale source", () => CheckAsync(null, null, touch: true)),
+			new("drift: BOM-less source uses its project code page", () => CheckAsync(null, null, touch: true, codePage: 1252)),
 			new("drift: deleted source remains drifted", () => CheckAsync(null, null, delete: true)),
 		]);
 	}
