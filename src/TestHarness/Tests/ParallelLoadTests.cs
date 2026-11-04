@@ -16,8 +16,11 @@ using System.Text.Json.Nodes;
 ///         two ways — the <c>.slnx</c>, and a <c>.csproj</c> the solution above it is found for — so
 ///         the shared load is found by where the workspace is cached, not by the path given. The log
 ///         must then hold one <c>Loading solution</c> for the fixture and no <c>Released</c>: before,
-///         it held two of the first and one of the second. Whether the two calls really overlap is
-///         down to timing, but a solution load takes seconds and the calls are sent back to back.
+///         it held two of the first and one of the second. The second call must also have logged that it
+///         waited for the first one's load: whether the two calls overlap is down to timing, and
+///         when they did not — the second found the workspace already loaded — the test is a skip,
+///         not a pass. A solution load takes seconds and the calls are sent back to back, so that is
+///         rare.
 ///     </para>
 /// </summary>
 static class ParallelLoadTests
@@ -53,7 +56,10 @@ static class ParallelLoadTests
 						
 						var answers = new[] { await server.ReceiveAsync(120_000), await server.ReceiveAsync(120_000) };
 						
-						var answered = answers.All(answer => answer?["result"] is not null && answer["error"] is null);
+						// A tool that failed still answers with a result, marked isError — not an answer.
+						var answered = answers.All(answer => answer?["result"] is { } result
+							&& answer["error"] is null
+							&& result["isError"]?.GetValue<bool>() != true);
 						
 						if(!ServerLog.TryRead(logDir, logStem + "*", 1, out var lines, out var failure))
 							
@@ -62,10 +68,17 @@ static class ParallelLoadTests
 						var label    = Path.GetFileName(fx.Dir);
 						var loads    = lines.Count(line => line.Contains("Loading solution") && line.Contains(label));
 						var released = lines.Count(line => line.Contains("Released") && line.Contains(label));
+						var waited   = lines.Count(line => line.Contains("Waiting for the load already in progress") && line.Contains(label));
 						
-						return answered && loads == 1 && released == 0
+						// The second call found the workspace already cached: the calls never overlapped,
+						// and one load proves nothing about two concurrent ones. Not a pass.
+						if(answered && loads == 1 && released == 0 && waited == 0)
+							
+							return Skip.NotApplicable("the two calls did not overlap — the second found the workspace already loaded");
+						
+						return answered && loads == 1 && released == 0 && waited == 1
 							? (true,  "PASS")
-							: (false, $"FAIL  (both calls answered: {answered}; solution loads logged: {loads}; loads released: {released})");
+							: (false, $"FAIL  (both calls answered: {answered}; solution loads logged: {loads}; loads released: {released}; waits logged: {waited})");
 					}
 					finally {
 						await DefaultWorkspaceTests.StopServerAsync(process, server);

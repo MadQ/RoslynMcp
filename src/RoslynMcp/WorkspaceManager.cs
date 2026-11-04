@@ -127,28 +127,37 @@ internal sealed partial class WorkspaceManager : IDisposable
 		var (cacheKey, load) = PlanLoad(normalizedPath);
 		
 		Lazy<WorkspaceInstance> pending;
+		bool                    waiting;
 		
 		lock(cacheLock) {
 			
 			// Loaded while the key was being worked out.
 			if(cache.TryGetValue(cacheKey, out var loaded)) {
 				
-				cache[cacheKey] = loaded with { LastAccess = DateTime.UtcNow };
-				
-				if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
-					projectToCacheKey[normalizedPath] = cacheKey;
+				TouchAndAlias(cacheKey, loaded, normalizedPath);
 				
 				return loaded.Instance;
 			}
 			
-			if(!pendingLoads.TryGetValue(cacheKey, out pending!)) {
+			waiting = pendingLoads.TryGetValue(cacheKey, out pending!);
+			
+			if(!waiting) {
 				
-				pending = new(load, LazyThreadSafetyMode.ExecutionAndPublication);
-				pendingLoads[cacheKey] = pending;
+				// The load stores its own result, once, from inside the Lazy: a caller that waited on
+				// it only ever reads the cache afterwards. Were every caller to store what it was
+				// handed, one arriving after the instance had been stored and evicted again would put
+				// a retired instance back — and the sweep would dispose it while it was cached.
+				Lazy<WorkspaceInstance>? created = null;
+				
+				created = new(() => Publish(load(), cacheKey, normalizedPath, created!), LazyThreadSafetyMode.ExecutionAndPublication);
+				pending = created;
+				pendingLoads[cacheKey] = created;
 			}
-			else
-				logger.LogInfo("Load", $"Waiting for the load already in progress: {cacheKey}");
 		}
+		
+		// Logged outside the lock, which is kept free of anything slow (#277).
+		if(waiting)
+			logger.LogInfo("Load", $"Waiting for the load already in progress: {cacheKey}");
 		
 		WorkspaceInstance instance;
 		
@@ -166,6 +175,33 @@ internal sealed partial class WorkspaceManager : IDisposable
 			throw;
 		}
 		
+		// The path this caller came in by is remembered as well — but only while the cache still
+		// holds this very instance. One evicted since is on its way to disposal, and never goes back.
+		if(waiting)
+			lock(cacheLock)
+				if(cache.TryGetValue(cacheKey, out var entry) && ReferenceEquals(entry.Instance, instance))
+					TouchAndAlias(cacheKey, entry, normalizedPath);
+		
+		return instance;
+	}
+	
+	// Callers hold cacheLock. Marks the entry used and lets the path find it directly next time.
+	void TouchAndAlias(string cacheKey, CacheEntry entry, string normalizedPath)
+	{
+		cache[cacheKey] = entry with { LastAccess = DateTime.UtcNow };
+		
+		if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+			projectToCacheKey[normalizedPath] = cacheKey;
+	}
+	
+	/// <summary>
+	///     Stores a workspace that has just been loaded, from inside the load's <see cref="Lazy{T}"/>
+	///     — once per load, whoever else waits on it (#377). Returns the instance callers are to use:
+	///     the one loaded, or one already cached for the same workspace under another path, in which
+	///     case the one loaded is torn down.
+	/// </summary>
+	WorkspaceInstance Publish(WorkspaceInstance instance, string cacheKey, string normalizedPath, Lazy<WorkspaceInstance> pending)
+	{
 		// Instances this insert must tear down: the one just loaded when another thread won the
 		// race, or retired instances whose grace period has expired. Collected under cacheLock,
 		// disposed after it (#277): WorkspaceInstance.Dispose waits on timer callbacks and
@@ -175,10 +211,6 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		try {
 			
-			// Re-acquire lock to insert. Every caller that waited on this load gets here with the
-			// same instance; the first one stores it, and the others find it stored. An instance is
-			// only torn down when it is not the one in the cache — loaded under another key that
-			// turned out to be the same workspace.
 			lock(cacheLock) {
 				
 				if(pendingLoads.TryGetValue(cacheKey, out var current) && ReferenceEquals(current, pending))
@@ -187,9 +219,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 				if(projectToCacheKey.TryGetValue(normalizedPath, out var raceKey)
 					&& cache.TryGetValue(raceKey, out var raceEntry)) {
 					
-					if(!ReferenceEquals(raceEntry.Instance, instance))
-						doomed = [instance];
-					
+					doomed         = [instance];
 					cache[raceKey] = raceEntry with { LastAccess = DateTime.UtcNow };
 					
 					return raceEntry.Instance;
@@ -197,15 +227,11 @@ internal sealed partial class WorkspaceManager : IDisposable
 				
 				if(cache.TryGetValue(cacheKey, out var existing)) {
 					
-					if(!ReferenceEquals(existing.Instance, instance))
-						doomed = [instance];
-					
-					cache[cacheKey] = existing with { LastAccess = DateTime.UtcNow };
+					doomed = [instance];
 					
 					// Record the alias even on a lost race, or the next call for this path would
 					// slow-path load-and-discard again (see below).
-					if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
-						projectToCacheKey[normalizedPath] = cacheKey;
+					TouchAndAlias(cacheKey, existing, normalizedPath);
 					
 					return existing.Instance;
 				}
