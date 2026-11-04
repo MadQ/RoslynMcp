@@ -22,21 +22,21 @@ class Program
 {
 	static async Task<int> Main(string[] args)
 	{
-		// Before anything is built: listing the groups must be instant.
+		// A selection that cannot be honoured is a usage error, not a test failure: exit code 2. Checked
+		// first, --list included: it builds nothing, so listing stays instant.
+		if(!HarnessGroups.TrySelect(args, out var selection, out var error)) {
+			
+			Console.WriteLine($"FAIL  {error}");
+			
+			return 2;
+		}
+		
 		if(args.Contains("--list")) {
 			
 			foreach(var group in HarnessGroups.All)
 				Console.WriteLine(group.FullRunOnly ? $"{group.Name}  (full run only, or when named in --only)" : group.Name);
 			
 			return 0;
-		}
-		
-		// A selection that cannot be honoured is a usage error, not a test failure: exit code 2.
-		if(!HarnessGroups.TrySelect(args, out var selection, out var error)) {
-			
-			Console.WriteLine($"FAIL  {error}");
-			
-			return 2;
 		}
 		
 		var run = new HarnessRun(args, selection);
