@@ -131,6 +131,15 @@ static class HarnessGroups
 		
 		GroupEntry[] selected = [.. All.Where(g => terms.Any(term => Matches(g, term)))];
 		
+		// Every group and no test filter is a full run, however it was asked for ('--only e'): the
+		// whole-run audits must not skip a run that did everything.
+		if(selected.Length == All.Length && test is null) {
+			
+			selection = new(selected, null, null);
+			
+			return true;
+		}
+		
 		var note = $"filtered: {string.Join(", ", selected.Select(g => g.Name))}";
 		
 		if(test is not null)
@@ -156,6 +165,14 @@ static class HarnessGroups
 		if(index < 0)
 			
 			return true;
+		
+		// Only one value is read, so a second occurrence would be dropped without a word.
+		if(Array.IndexOf(args, name, index + 1) >= 0) {
+			
+			error = $"{name} is given more than once; list several values in one, separated by commas.";
+			
+			return false;
+		}
 		
 		if(index + 1 >= args.Length || args[index + 1].StartsWith("--", StringComparison.Ordinal)) {
 			

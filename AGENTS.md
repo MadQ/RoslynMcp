@@ -810,8 +810,9 @@ dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --quiet --
 dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --quiet --only "symbol info,analyze region" --test nullable
 dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --list
 ```
-- `--only <a,b>` builds and runs only the groups whose name contains one of the comma-separated parts (case-insensitive). Groups that are not selected are not even built, which matters: some start servers or create projects while being built. A part that matches no group stops the run with exit code 2 and the list of groups, so a typo cannot pass with zero tests.
-- `--test <text>` keeps the tests whose name contains the text, within the selected groups. Combine it with `--only`, or every group is still built.
+- `--only <a,b>` builds and runs only the groups whose name contains one of the comma-separated parts (case-insensitive). A selection that happens to cover every group, with no `--test`, is a full run. Groups that are not selected are not even built, which matters: some start servers or create projects while being built. A part that matches no group stops the run with exit code 2 and the list of groups, so a typo cannot pass with zero tests.
+- `--test <text>` keeps the tests whose name contains the text, within the selected groups. Combine it with `--only`, or every group is still built. Tests run in order and a few pass state to the next — *Pagination Cursor* and *String Literal Search* hand a `page_token` from one test to the following one — so dropping an earlier test can fail a later one that is not broken. Run such a group whole.
+- `--only` and `--test` take one value each; give several groups in one `--only`, comma-separated. A repeated switch exits 2.
 - `--list` prints the group names (`HarnessGroups.All`, in run order) and exits.
 - `--only-build-diag` is `--only validation`.
 - A filtered run says so on its summary line — `PASS  25 passed, 2 skipped (filtered: DefaultWorkspace)` — so it can never be reported as a full run. *Workspace Hygiene* audits the whole run's log, so it runs only in a full run, or when `--only` names it — and then its two whole-run audits skip, since over a few groups they would pass or fail on too little evidence.
@@ -848,7 +849,7 @@ Do not filter the full output with a text match instead — passing tests with "
 **When to run it:** the Windows run (full or filtered, see above) is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine (the script exits with code 2), say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either local run — see below.
 
 **Pull requests and the release gate (#330, #367).** `.github/workflows/harness.yml` runs the full harness with `--quiet`. It runs:
-- on every pull request to `dev` or `main`, on `windows-latest` and `ubuntu-latest`, unless the pull request changes only `*.md` files or `docs/`. A new push cancels the run still going for the previous one. macOS is left out because its runners queue for up to an hour;
+- on every pull request to `dev` or `main`, on `windows-latest` and `ubuntu-latest` — docs-only ones included, because a path-filtered workflow reports no status and would block a docs-only pull request if the check were ever made required. A new push cancels the run still going for the previous one. macOS is left out because its runners queue for up to an hour;
 - as part of `publish.yml`, on all three operating systems including `macos-latest`. The `publish` job needs it: nothing is published — not even a dry run reaches the packing step — unless all three pass;
 - by hand: Actions → *Test Harness* → *Run workflow*, on any branch (`gh workflow run harness.yml --ref <branch>`), on all three.
 

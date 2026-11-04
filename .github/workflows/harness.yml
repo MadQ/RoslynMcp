@@ -14,12 +14,11 @@ on:
   # Run by hand, on any branch: Actions -> Test Harness -> Run workflow.
   workflow_dispatch:
 
+  # Every pull request, docs-only ones included: a workflow skipped by a path filter reports no
+  # status at all, so if this check is ever made required, a docs-only pull request would wait for
+  # it forever. Trivial doc fixes go straight to dev anyway (AGENTS.md).
   pull_request:
     branches: [ main, dev ]
-    # A change to docs alone cannot change a test result.
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
 
 # A new push to a pull request supersedes the run still going for the previous one.
 concurrency:

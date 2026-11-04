@@ -267,31 +267,57 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		Running = "test group setup";
 		
 		// Only the selected groups are built: building one can start servers or create projects (#367).
-		var groups = new List<TestGroup>();
+		// A group's build time is part of its cost (some start servers while being built), so it is
+		// kept with the group and added to the time the group reports.
+		var groups = new List<(TestGroup group, TimeSpan build)>();
 		var inputs = new GroupInputs(ctx, serverLogDir, serverLogGlob, FullRun: selection.FilterNote is null);
 		var done   = 0;
 		
-		foreach(var entry in selection.Groups) {
+		try {
 			
-			Running = $"{entry.Name} › setup";
-			
-			var group = await entry.Build(inputs);
-			
-			if(selection.TestFilter is { } filter) {
+			foreach(var entry in selection.Groups) {
 				
-				group = group with { Tests = [.. group.Tests.Where(t => t.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))] };
+				Running = $"{entry.Name} › setup";
 				
-				// Built, so its fixtures exist: a group left with no tests is torn down at once.
-				if(group.Tests.Count == 0) {
+				var clock = Stopwatch.StartNew();
+				var group = await entry.Build(inputs);
+				
+				if(selection.TestFilter is { } filter) {
 					
-					if(group.Teardown is not null)
-						await group.Teardown();
+					TestCase[] kept = [.. group.Tests.Where(t => t.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))];
 					
-					continue;
+					// Built, so its fixtures exist: a group left with no tests is torn down at once.
+					if(kept.Length == 0) {
+						
+						if(group.Teardown is not null)
+							await group.Teardown();
+						
+						continue;
+					}
+					
+					// The header still counts the whole group; say how many of them run.
+					if(kept.Length < group.Tests.Count)
+						group = group with { Header = $"{group.Header} — {kept.Length} selected", Tests = kept };
 				}
+				
+				groups.Add((group, clock.Elapsed));
 			}
+		}
+		catch {
 			
-			groups.Add(group);
+			// A group that failed to build leaves the ones built before it holding fixtures and,
+			// for some, servers: tear those down before the failure is reported.
+			foreach(var (built, _) in groups)
+				if(built.Teardown is not null)
+					try {
+						await built.Teardown();
+					}
+					catch(Exception) {
+						// Best effort: the build failure is what gets reported, and one teardown
+						// failing must not stop the others or replace that report.
+					}
+			
+			throw;
 		}
 		
 		if(groups.Count == 0) {
@@ -301,12 +327,12 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 			return;
 		}
 		
-		total = groups.Sum(g => g.Tests.Count);
+		total = groups.Sum(g => g.group.Tests.Count);
 		
-		// Per group, tests and teardown: the numbers #367 needed and the output never gave.
+		// Per group, build, tests and teardown: the numbers #367 needed and the output never gave.
 		var timings = new List<(string header, TimeSpan elapsed)>(groups.Count);
 		
-		foreach(var group in groups) {
+		foreach(var (group, build) in groups) {
 			
 			Info($"\n{group.Header}");
 			Info("─────────────────────────────────────────────────────────────");
@@ -350,8 +376,10 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 					;
 			}
 			
-			timings.Add((group.Header, clock.Elapsed));
-			Info($"  ({clock.Elapsed.TotalSeconds:0.0} s)");
+			var elapsed = build + clock.Elapsed;
+			
+			timings.Add((group.Header, elapsed));
+			Info($"  ({elapsed.TotalSeconds:0.0} s, {build.TotalSeconds:0.0} s of it building the group)");
 		}
 		
 		// -- Summary (default mode) -------------------------------------------------------------

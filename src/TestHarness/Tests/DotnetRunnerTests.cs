@@ -17,25 +17,18 @@ static class DotnetRunnerTests
 	/// <param name="serverLogGlob">Glob for the harness server's log (the server inserts its PID).</param>
 	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
-		// One fixture for both checks: each loads it (only the first load costs anything) and counts only
-		// the log entries written after it started, so neither sees the other's cleans.
-		var fx = NewHeldCleanFixture("DotnetGate");
-		
+		// Each check has its own fixture, so a check that fails with a clean still running cannot leave a
+		// late log entry or response in the other's way. Sharing one would save a single project load.
 		var tests = new List<TestCase> {
 			
 			new("dotnet runner: concurrent dotnet runs are serialized",
-				() => AssertDotnetRunsSerializedAsync(ctx, fx, serverLogDir, serverLogGlob)),
+				() => AssertDotnetRunsSerializedAsync(ctx, serverLogDir, serverLogGlob)),
 			
 			new("dotnet runner: a run cancelled while queued never starts dotnet",
-				() => AssertQueuedCancellationAsync(ctx, fx, serverLogDir, serverLogGlob)),
+				() => AssertQueuedCancellationAsync(ctx, serverLogDir, serverLogGlob)),
 		};
 		
-		return new TestGroup($"Dotnet Runner ({tests.Count} tests)", tests, Teardown: () => {
-			
-			fx.Dispose();
-			
-			return Task.CompletedTask;
-		});
+		return new TestGroup($"Dotnet Runner ({tests.Count} tests)", tests);
 	}
 	
 	/// <summary>
@@ -51,16 +44,14 @@ static class DotnetRunnerTests
 	///     never restored, and whether clean then succeeds is beside the point — what matters is that both
 	///     processes ran, and not at the same time.
 	/// </summary>
-	static async Task<(bool pass, string message)> AssertDotnetRunsSerializedAsync(TestContext ctx, FixtureProject fx, string logDir, string logGlob)
+	static async Task<(bool pass, string message)> AssertDotnetRunsSerializedAsync(TestContext ctx, string logDir, string logGlob)
 	{
+		using var fx = NewHeldCleanFixture("DotnetGate");
+		
 		// Loaded up front so the two requests overlap only in DotnetRunner. Cold, both would enter
 		// the workspace load together (it runs outside the cache lock) — an unrelated concurrent
 		// design-time build that could blur or destabilize what this check observes.
 		await fx.WarmAsync(ctx);
-		
-		if(!TryCountCleans(fx, logDir, logGlob, out var before, out var failure))
-			
-			return (false, failure);
 		
 		// Both requests go out before either response is read — sequential RunTestAsync calls would
 		// never overlap — and the fixture's clean holds for HoldSeconds, so the second request is
@@ -74,11 +65,11 @@ static class DotnetRunnerTests
 				
 				return (false, "FAIL  (a clean request timed out)");
 		
-		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out failure))
+		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out var failure))
 			
 			return (false, failure);
 		
-		var details = CleanDetails(lines, fx)[before..];
+		var details = CleanDetails(lines, fx);
 		var queued  = details.Count(d => d.Contains("behind another dotnet command", StringComparison.Ordinal));
 		
 		// pid= is recorded only once Process.Start has succeeded, so two of them prove both runs
@@ -105,16 +96,14 @@ static class DotnetRunnerTests
 	///     process exists. A must still complete normally. Before the tools passed their request token through,
 	///     B ignored the cancellation, queued, and started dotnet once A finished.
 	/// </summary>
-	static async Task<(bool pass, string message)> AssertQueuedCancellationAsync(TestContext ctx, FixtureProject fx, string logDir, string logGlob)
+	static async Task<(bool pass, string message)> AssertQueuedCancellationAsync(TestContext ctx, string logDir, string logGlob)
 	{
+		using var fx = NewHeldCleanFixture("DotnetGateCancel");
+		
 		// Loaded up front: a cold load takes seconds, and B would otherwise still be resolving its
 		// workspace when the cancellation arrives — reaching the gate already cancelled instead of
 		// being cancelled while waiting on it, which is the case under test.
 		await fx.WarmAsync(ctx);
-		
-		if(!TryCountCleans(fx, logDir, logGlob, out var before, out var failure))
-			
-			return (false, failure);
 		
 		// A must own the gate before B is sent: concurrently dispatched requests reach it in no
 		// guaranteed order, and B winning would turn this into a cancel-while-running check (which
@@ -151,11 +140,11 @@ static class DotnetRunnerTests
 		if(!sawB)
 			await ctx.ReceiveAsync(1_500);
 		
-		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out failure))
+		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out var failure))
 			
 			return (false, failure);
 		
-		var details   = CleanDetails(lines, fx)[before..];
+		var details   = CleanDetails(lines, fx);
 		var cancelled = details.Where(d => d.Contains("dotnet never started", StringComparison.Ordinal)).ToArray();
 		var completed = details.Where(d => d.Contains("pid=", StringComparison.Ordinal)).ToArray();
 		
@@ -189,21 +178,6 @@ static class DotnetRunnerTests
 		fx.Write("Probe.cs", "class Probe { }\n");
 		
 		return fx;
-	}
-	
-	// The number of clean entries this fixture already has in the log: the baseline a check counts from,
-	// since the fixture is shared and the other check's cleans are in the same log.
-	static bool TryCountCleans(FixtureProject fx, string logDir, string logGlob, out int count, out string failure)
-	{
-		count = 0;
-		
-		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out failure))
-			
-			return false;
-		
-		count = CleanDetails(lines, fx).Length;
-		
-		return true;
 	}
 	
 	// Sends one roslyn_clean_solution request without waiting for its response; returns its request id.
