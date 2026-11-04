@@ -210,6 +210,14 @@ internal sealed partial class WorkspaceManager
 		// ScheduleDebounced.
 		private readonly ConcurrentDictionary<string, int> ownedDeletePaths = new(StringComparer.OrdinalIgnoreCase)
 		;
+		// The files an ApplyChangesToDisk is writing at this moment — its documents, and the files
+		// behind those that are links — ref-counted like ignoredPaths (#358). Unlike ignoredPaths
+		// nothing is dropped for them: their reports are queued as usual, and FlushPendingChanges
+		// holds them back until the apply is over. A flush in the middle of an apply would compare
+		// the file with the solution from before it and start a stale second apply; afterwards the
+		// comparison tells RM's own write (equal) from a save someone made meanwhile (applied).
+		private readonly ConcurrentDictionary<string, int> applyingPaths    = new(SecurityBoundary.PathComparer)
+		;
 		private          Timer?           debounceTimer;
 		private const    int              DebounceMs     = 300;
 		

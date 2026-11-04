@@ -332,9 +332,10 @@ There are **two** places a tool's write goes through, and both do this:
 - `ApplyChangesToDisk` — edits handed to the workspace as text or as a solution
   (`roslyn_replace_in_file`, `roslyn_insert_lines`, `roslyn_replace_in_code` on a tracked
   document). `TryApplyChanges` writes each changed document at its own path, so a document
-  that is a link is written into the file behind it. Both the written paths and the files
-  behind the links are counted in `ignoredPaths` for the length of the apply and the sync.
-  Without the sync nothing would ever tell the workspace about that file.
+  that is a link is written into the file behind it. The file behind a link is counted in
+  `ignoredPaths` while it is synced, as in `WriteAndInvalidate`; the write itself is covered by
+  `applyingPaths` (see *The watchers are never switched off* below). Without the sync nothing
+  would ever tell the workspace about that file.
 
 The ordering rules above are unchanged: suppress before the write, invalidate inside the
 window, release in `finally`.
@@ -531,11 +532,14 @@ every `TryApplyChanges`, which then toggled `EnableRaisingEvents` (it no longer 
   `Suspend`/`Resume`, which disabled every watcher and enabled it again. Whatever anyone else
   changed in between went unseen, with nothing to catch up on it, and enabling a watcher is not
   instant: on macOS it starts a new event stream, on Linux it adds an inotify watch per directory
-  again. Now RM's own writes are reported like any other. `ApplyChangesToDisk` counts the paths
-  it writes, and the files behind links, in `ignoredPaths` while the write and the sync run, so
-  a flush cannot start a second, stale apply in the middle of a long one. A report that arrives
-  afterwards is recognised in the flush — the document already holds the file's text, or the
-  file still has the stamp in `ownedLinkTargets` — and applies nothing. The flush used to skip a
+  again. Now RM's own writes are reported like any other, and no report is dropped for them.
+  `ApplyChangesToDisk` counts the files it writes, and the files behind links, in
+  `applyingPaths` while the apply runs, and `FlushPendingChanges` puts a report for such a file
+  back for the next flush instead of handling it: in the middle of an apply it would be compared
+  with the solution from before it and start a stale second apply. Once the apply is over the
+  flush recognises RM's own write — the document already holds the file's text, or the file
+  still has the stamp in `ownedLinkTargets` — and applies nothing, while a save someone else made
+  to that file in the meantime differs and is applied. The flush used to skip a
   file whose size matched the one recorded at RM's last write, without looking at its text. That
   record was only cleared by a report of that write, and a report arriving during the write never
   got that far; the record stayed and swallowed the next outside edit of the same length. It is

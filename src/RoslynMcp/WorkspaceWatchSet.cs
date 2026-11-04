@@ -211,8 +211,9 @@ internal static class WatchPlanner
 ///         writes (#358). A change made while they were off would go unseen — nothing catches up on
 ///         it — and switching one back on is not instant: on macOS it starts a new event stream, on
 ///         Linux it adds an inotify watch per directory again. RM's own writes are reported like
-///         any other, and the workspace recognises them when it handles the report: by the size it
-///         recorded, by comparing the text, or by the stamp a write through a link leaves.
+///         any other, and the workspace recognises them when it handles the report: the document
+///         already holds the file's text, or the file still has the stamp a write through a link
+///         leaves.
 ///     </para>
 /// </summary>
 internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Action<string, bool> onChange, Action<DateTime> reconcile, FileLogger logger) : IDisposable

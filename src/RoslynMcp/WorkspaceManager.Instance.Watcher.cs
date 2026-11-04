@@ -340,6 +340,14 @@ internal sealed partial class WorkspaceManager
 				return;
 			}
 			
+			Enqueue(fullPath, deleted);
+		}
+		
+		// Queues a report for the next flush and (re)starts the debounce. Past every filter of
+		// ScheduleDebounced: FlushPendingChanges puts reports back through here that it has
+		// already let in.
+		void Enqueue(string fullPath, bool deleted)
+		{
 			lock(debounceLock) {
 				
 				// Guard against late-arriving FSW callbacks after Dispose has quiesced the timer.
@@ -479,6 +487,28 @@ internal sealed partial class WorkspaceManager
 					deleted = [.. pendingDeletes];
 					pendingChanges.Clear();
 					pendingDeletes.Clear();
+				}
+				
+				// Reports for a file an ApplyChangesToDisk is writing right now wait for the next
+				// flush (#358). Handled now, a change would be compared with the solution from
+				// before the apply, and its text applied over the one being written — a stale
+				// apply, which fails and flags a reload. Once the apply is over the comparison
+				// recognises RM's own write, and applies a save that someone made meanwhile.
+				bool Applying(string path) => applyingPaths.TryGetValue(path, out var writing) && writing > 0;
+				
+				var heldChanges = changed.Where(Applying).ToArray();
+				var heldDeletes = deleted.Where(Applying).ToArray();
+				
+				if(heldChanges.Length + heldDeletes.Length > 0) {
+					
+					changed = [.. changed.Except(heldChanges, SecurityBoundary.PathComparer)];
+					deleted = [.. deleted.Except(heldDeletes, SecurityBoundary.PathComparer)];
+					
+					foreach(var path in heldChanges)
+						Enqueue(path, deleted: false);
+					
+					foreach(var path in heldDeletes)
+						Enqueue(path, deleted: true);
 				}
 				
 				// A file reported as deleted that is there when the flush runs was replaced, not

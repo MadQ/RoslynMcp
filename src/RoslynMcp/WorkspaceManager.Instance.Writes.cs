@@ -185,19 +185,16 @@ internal sealed partial class WorkspaceManager
 			;
 			
 			// The watchers stay live through the write (#358), so it is reported, at each path
-			// written and at the file behind each link. Reports that arrive while the write is
-			// in progress are dropped by these counts, as in WriteAndInvalidate: a flush that
-			// fell into a long apply would compare the files against the solution from before
-			// it, and start a second, stale apply that fails and flags a reload. A report that
-			// arrives later is recognised in the flush, by its text or by the stamp
-			// SyncLinkTarget leaves.
+			// written and at the file behind each link. Those reports are kept, not dropped, and
+			// held back by FlushPendingChanges until the apply is over (see applyingPaths): then
+			// the comparison in the flush recognises RM's own write, and still applies a save
+			// someone else made to one of these files in the meantime.
 			// Counted directly before the try that uncounts: nothing may come between the two,
-			// or an exception leaves a file ignored for good.
-			foreach(var path in ownedPaths)
-				ignoredPaths.AddOrUpdate(path, 1, (_, count) => count + 1);
+			// or an exception leaves a file held back for good.
+			string[] applying = [..ownedPaths, ..linkedWrites.Select(linked => linked.Target)];
 			
-			foreach(var linked in linkedWrites)
-				ignoredPaths.AddOrUpdate(linked.Target, 1, (_, count) => count + 1);
+			foreach(var path in applying)
+				applyingPaths.AddOrUpdate(path, 1, (_, count) => count + 1);
 			
 			bool applied;
 			
@@ -216,20 +213,33 @@ internal sealed partial class WorkspaceManager
 					applied = false;
 				}
 				
-				if(applied)
-					foreach(var linked in linkedWrites) {
-						
-						SyncLinkTarget(linked);
-						syncedByApply = linked.Path;
-					}
+				// The sync below is a write of its own through WriteAndInvalidate's rules: the
+				// file behind each link is ignored while it is brought up to date, so that its
+				// InvalidateFile is not raced by the watcher (#338).
+				// Counted directly before the try that uncounts: nothing may come between the two,
+				// or an exception leaves a file ignored for good.
+				foreach(var linked in linkedWrites)
+					ignoredPaths.AddOrUpdate(linked.Target, 1, (_, count) => count + 1);
+				
+				try {
+					
+					if(applied)
+						foreach(var linked in linkedWrites) {
+							
+							SyncLinkTarget(linked);
+							syncedByApply = linked.Path;
+						}
+				}
+				finally {
+					
+					foreach(var linked in linkedWrites)
+						ignoredPaths.AddOrUpdate(linked.Target, 0, (_, count) => count - 1);
+				}
 			}
 			finally {
 				
-				foreach(var path in ownedPaths)
-					ignoredPaths.AddOrUpdate(path, 0, (_, count) => count - 1);
-				
-				foreach(var linked in linkedWrites)
-					ignoredPaths.AddOrUpdate(linked.Target, 0, (_, count) => count - 1);
+				foreach(var path in applying)
+					applyingPaths.AddOrUpdate(path, 0, (_, count) => count - 1);
 			}
 			
 			// The other direction: a changed document that is a file with links to it. The
