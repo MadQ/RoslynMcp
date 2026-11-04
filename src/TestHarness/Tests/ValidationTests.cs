@@ -22,6 +22,25 @@ static class ValidationTests
 					new { projectPath = ctx.TargetPath },
 					data => data is not null)),
 			
+			// #366: a filePath that names no file in the compilation used to return "0 errors, 0
+			// warnings" — a mistyped path read as a clean file. It must now be an error, and the same
+			// call on a real, clean file must still be a clean result, so the error is not just "any
+			// filePath fails".
+			new("roslyn_get_diagnostics: a filePath not in the compilation is an error, not a clean result",
+				() => ctx.RunTestAsync(
+					"roslyn_get_diagnostics",
+					new { projectPath = fx.Csproj, filePath = "NoSuchFile.cs" },
+					data => (data?["error"]?.GetValue<string>() ?? "").Contains("not found in the compilation")
+						&& data?["summary"] is null)),
+			
+			new("roslyn_get_diagnostics: a clean file in the compilation is a clean result",
+				() => ctx.RunTestAsync(
+					"roslyn_get_diagnostics",
+					new { projectPath = fx.Csproj, filePath = "Probe.cs" },
+					data => data?["error"] is null
+						&& data?["error_count"]?.GetValue<int>() == 0
+						&& data?["summary"] is not null)),
+			
 			// The target project consumes RoslynMcp.Analyzers, so a healthy analyzer run
 			// produces a summary WITHOUT the degraded-mode notes in hint.
 			new("roslyn_get_diagnostics: includeAnalyzers runs project analyzers",
