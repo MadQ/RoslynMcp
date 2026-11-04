@@ -928,7 +928,7 @@ internal static class CodeFixTests
 			}
 		}
 		
-		return new TestGroup("Code Fix Tools", [
+		List<TestCase> tests = [
 			new("unbundled diagnostic is rejected without a token", RunUnbundledDiagnosticRejected),
 			new("single write reports exact state and recovery", RunSingleWrite),
 			new("MSBuild workspace previews and applies an existing-file fix", RunMsBuildSingleWrite),
@@ -951,6 +951,8 @@ internal static class CodeFixTests
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),
 			new("external file changes are rejected during preview", RunExternalPathRejectedAtPreview),
 			new("create and delete changes are rejected during preview", RunCreateDeleteRejectedAtPreview)
-		]);
+		];
+		
+		return new TestGroup($"Code Fix Tools ({tests.Count} tests)", tests);
 	}
 }

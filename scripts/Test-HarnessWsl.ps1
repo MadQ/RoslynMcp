@@ -33,9 +33,10 @@
     The WSL distribution to use. Default: the default distribution.
 
 .PARAMETER HarnessArgs
-    Further arguments passed to the harness unchanged. Name the parameter and quote the value,
-    since PowerShell does not bind a bare token that starts with a dash:
-    -HarnessArgs '--only-build-diag'.
+    Further arguments passed to the harness unchanged, one array element per argument. Name the
+    parameter and quote each element, since PowerShell does not bind a bare token that starts with
+    a dash: -HarnessArgs '--only','dotnet runner,linked files'. A single string holding several
+    arguments reaches the harness as one, which it rejects as unknown.
 
 .NOTES
     Exit codes: 0 — every test passed; 1 — the harness reported failures, or did not build on
