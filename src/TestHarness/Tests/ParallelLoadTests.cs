@@ -56,10 +56,25 @@ static class ParallelLoadTests
 						
 						var answers = new[] { await server.ReceiveAsync(120_000), await server.ReceiveAsync(120_000) };
 						
-						// A tool that failed still answers with a result, marked isError — not an answer.
-						var answered = answers.All(answer => answer?["result"] is { } result
-							&& answer["error"] is null
-							&& result["isError"]?.GetValue<bool>() != true);
+						// A tool that failed still answers with a result: marked isError when it threw, and
+						// as a structured error — an "error" field in the JSON it returns — when it caught
+						// the failure itself. Neither is an answer.
+						static bool Answered(JsonNode? answer)
+						{
+							if(answer?["result"] is not { } result || answer["error"] is not null || result["isError"]?.GetValue<bool>() == true)
+								
+								return false;
+							
+							try {
+								return JsonNode.Parse(result["content"]?[0]?["text"]?.GetValue<string>() ?? "") is { } payload
+									&& payload["error"] is null;
+							}
+							catch(System.Text.Json.JsonException) {
+								return false;
+							}
+						}
+						
+						var answered = answers.All(Answered);
 						
 						if(!ServerLog.TryRead(logDir, logStem + "*", 1, out var lines, out var failure))
 							
