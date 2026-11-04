@@ -42,7 +42,10 @@ static class WatcherThroughWritesTests
 	// measured on Windows.
 	const int OutsideFiles = 40;
 	
-	internal static TestGroup Build(TestContext ctx)
+	/// <param name="ctx">The harness's connection to the server.</param>
+	/// <param name="serverLogDir">Directory the harness pointed ROSLYNMCP_LOG_PATH at.</param>
+	/// <param name="serverLogGlob">File pattern of the server's log in that directory.</param>
+	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
 		
 		var fx = TestFixtures.NewMsBuildProject("WatcherThroughWrites");
@@ -256,9 +259,19 @@ static class WatcherThroughWritesTests
 					
 					var equal = Lines(served).SequenceEqual(Lines(onDisk));
 					
-					return state == "none" && equal && onDisk.Contains("keptToo") && onDisk.Contains("// edit 1005")
+					// reload_pending only shows a flag that is still waiting. The next edit's
+					// compilation would have serviced an earlier one, so the log is asked too: no
+					// reload may have been flagged for a file of this fixture, for any reason.
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var log, out var logFailure))
+						
+						return (false, logFailure);
+					
+					var flagged = log.Count(line => line.Contains("Flagged") && line.Contains("WatcherThroughWrites"));
+					var edits   = onDisk.Contains("keptToo") && onDisk.Contains("// edit 1005");
+					
+					return state == "none" && flagged == 0 && equal && edits
 						? (true,  "PASS")
-						: (false, $"FAIL  (reload state: {state}; document equals file: {equal}; file has every edit: {onDisk.Contains("keptToo") && onDisk.Contains("// edit 1005")})");
+						: (false, $"FAIL  (reload state: {state}; reloads flagged for this fixture in the log: {flagged}; document equals file: {equal}; file has every edit: {edits})");
 				}),
 			
 			// An outside edit that leaves the file the length the server's own last write left
