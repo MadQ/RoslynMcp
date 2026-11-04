@@ -76,7 +76,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		// and every target framework of a project — each is compiled on its own, and an error under
 		// one framework's #if is not an error under another. Given the solution, the tool used to
 		// check its first project alone, and its "0 errors" said nothing about the rest.
-		var (targets, targetError) = await GetTargetsAsync(projectPath, cancellationToken);
+		var (targets, targetError) = await GetTargetsAsync(projectPath, forFile: filePath is not null, cancellationToken);
 		
 		if(targetError is not null)
 			
@@ -277,39 +277,35 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 	
 
 	/// <summary>
-	///     Runs the project's analyzer references over the compilation via
-	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.
-	///     Analyzer failures must never break compiler diagnostics: any error (misbehaving
-	///     analyzer, unresolved analyzer reference) degrades to compiler-only output with an
-	///     explanatory note. Assemblies load through <see cref="ShadowCopyAnalyzerLoader"/> so the
-	///     analyzed project's outputs are never locked.
-	/// </summary>
-	/// <summary>
 	///     The compilations <paramref name="projectPath"/> stands for, each with its project: every
 	///     project of a solution, every target framework of a .csproj — a multi-targeted project is
-	///     one Roslyn project per framework, all with the same file. Only a workspace without project
-	///     files (an AdhocWorkspace) falls back to the one compilation the path resolves to, and so
-	///     does a path that names no project of the workspace, whose resolution error is the answer.
+	///     one Roslyn project per framework, all with the same file. Falls back to the one compilation
+	///     the path resolves to for a workspace without project files (an AdhocWorkspace), a path that
+	///     names no project of the workspace (whose resolution error is the answer), projects none of
+	///     which has a compilation, and a solution given with a file — which reaches here only when no
+	///     project contains that file, and is answered as such by the fallback.
 	/// </summary>
-	async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, CancellationToken cancellationToken)
+	async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, CancellationToken cancellationToken)
 	{
 		if(TryResolveSolution(projectPath, out var solution, out _)) {
 			
 			var (path, kind) = workspace.Resolve(projectPath);
 			
-			Project[] named = [..solution.Projects.Where(candidate => candidate.FilePath is not null
-				&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(path))))];
+			Project[] named = kind == ResolutionKind.Solution && forFile
+				? []
+				: [..solution.Projects.Where(candidate => candidate.FilePath is not null
+					&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(path))))];
 			
-			if(named.Length > 0) {
-				
-				var compiled = new List<(Compilation, Project?)>(named.Length);
-				
-				foreach(var project in named)
-					if(await project.GetCompilationAsync(cancellationToken) is { } compilation)
-						compiled.Add((compilation, project));
+			var compiled = new List<(Compilation, Project?)>(named.Length);
+			
+			foreach(var project in named)
+				if(await project.GetCompilationAsync(cancellationToken) is { } compilation)
+					compiled.Add((compilation, project));
+			
+			// None at all would be "0 errors" for code nobody checked.
+			if(compiled.Count > 0)
 				
 				return ([..compiled], null);
-			}
 		}
 		
 		if(!TryGetCompilation(projectPath, out var single, out var error))
@@ -319,6 +315,14 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		return ([(single, TryGetProject(projectPath, out var only, out _) ? only : null)], null);
 	}
 	
+	/// <summary>
+	///     Runs the project's analyzer references over the compilation via
+	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.
+	///     Analyzer failures must never break compiler diagnostics: any error (misbehaving
+	///     analyzer, unresolved analyzer reference) degrades to compiler-only output with an
+	///     explanatory note. Assemblies load through <see cref="ShadowCopyAnalyzerLoader"/> so the
+	///     analyzed project's outputs are never locked.
+	/// </summary>
 	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(Project project, Compilation compilation, CancellationToken cancellationToken)
 	{
 		try {
