@@ -196,9 +196,8 @@ write may replace the link, and then there is nothing left to follow):
      schedule — after the window has closed, and on Windows more than once for a replaced
      file — and `FlushPendingChanges` drops every report for the path while the file still has
      that stamp, or while another write to it is in flight. The entry is forgotten as soon as
-     the stamp no longer matches: someone else has written the file. A one-shot record, like
-     `rmOwnedWriteSizes`, would be used up by the first report and leave a second one to be
-     taken for a new document.
+     the stamp no longer matches: someone else has written the file. A one-shot record would
+     be used up by the first report and leave a second one to be taken for a new document.
 
 4. `SyncAliases` then refreshes every **other** tracked document that is the same file on
    disk: a second link to it, a link earlier in a chain. This is a lookup in the index
@@ -535,8 +534,12 @@ every `TryApplyChanges`, which then toggled `EnableRaisingEvents` (it no longer 
   again. Now RM's own writes are reported like any other. `ApplyChangesToDisk` counts the paths
   it writes, and the files behind links, in `ignoredPaths` while the write and the sync run, so
   a flush cannot start a second, stale apply in the middle of a long one. A report that arrives
-  afterwards is recognised in the flush — by the size in `rmOwnedWriteSizes`, by comparing the
-  text, or by the stamp in `ownedLinkTargets` — and applies nothing.
+  afterwards is recognised in the flush — the document already holds the file's text, or the
+  file still has the stamp in `ownedLinkTargets` — and applies nothing. The flush used to skip a
+  file whose size matched the one recorded at RM's last write, without looking at its text. That
+  record was only cleared by a report of that write, and a report arriving during the write never
+  got that far; the record stayed and swallowed the next outside edit of the same length. It is
+  gone: a recorded size cannot tell RM's text from someone else's.
 - **Non-recursive roots adopt new directories.** A directory created or moved under one gets a
   recursive watcher, and the files already in it are reported — `mkdir` and the first write into it
   are milliseconds apart.

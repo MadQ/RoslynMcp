@@ -90,8 +90,8 @@ internal sealed partial class WorkspaceManager
 		/// <summary>
 		///     Applies solution changes to the workspace, which in a project writes the changed
 		///     documents to disk (MSBuildWorkspace.TryApplyChanges). The watchers report those
-		///     writes like any other; the flush recognises them by the sizes recorded here and by
-		///     comparing the text, so they apply nothing a second time (#49). The watchers are not
+		///     writes like any other; the flush compares the file with the document's text and
+		///     finds them equal, so they apply nothing a second time (#49). The watchers are not
 		///     switched off for the write: a change someone else made meanwhile would be lost (#358).
 		/// </summary>
 		internal bool ApplyChangesToDisk(Solution newSolution)
@@ -189,8 +189,8 @@ internal sealed partial class WorkspaceManager
 			// in progress are dropped by these counts, as in WriteAndInvalidate: a flush that
 			// fell into a long apply would compare the files against the solution from before
 			// it, and start a second, stale apply that fails and flags a reload. A report that
-			// arrives later is recognised in the flush — by the size recorded below, by its
-			// text, or by the stamp SyncLinkTarget leaves.
+			// arrives later is recognised in the flush, by its text or by the stamp
+			// SyncLinkTarget leaves.
 			// Counted directly before the try that uncounts: nothing may come between the two,
 			// or an exception leaves a file ignored for good.
 			foreach(var path in ownedPaths)
@@ -214,38 +214,6 @@ internal sealed partial class WorkspaceManager
 					_ = ex
 					;
 					applied = false;
-				}
-				
-				// Record sizes only when TryApplyChanges succeeded and actually wrote files.
-				if(applied && ownedPaths.Length > 0) {
-					
-					lock(debounceLock) {
-						
-						// Safety cap — clear rather than evict individual entries to keep it simple.
-						// These entries are short-lived (consumed by the next FSW flush), so this
-						// branch is only reached if FSW events are being lost or unusually delayed.
-						if(rmOwnedWriteSizes.Count + ownedPaths.Length > MaxRmOwnedWriteSizes)
-							rmOwnedWriteSizes.Clear();
-						
-						// Not for a path that was written through a link. The record is used up by
-						// the watcher's report at that path, and for a link no such report comes —
-						// the change is reported at the file behind it. The entry would stay, and
-						// vouch for the link the next time someone else changes that file (#341).
-						foreach(var path in ownedPaths) {
-							
-							if(linkedWrites.Any(linked => SecurityBoundary.PathComparer.Equals(linked.Path, path)))
-								continue;
-							
-							try {
-								rmOwnedWriteSizes[path] = new FileInfo(path).Length;
-							}
-							catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-								// File gone or locked — skip recording; FlushMSBuild will reload normally.
-								_ = ex
-								;
-							}
-						}
-					}
 				}
 				
 				if(applied)

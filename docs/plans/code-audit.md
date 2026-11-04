@@ -281,6 +281,6 @@ Each `PendingOperation` holds a full `Solution` snapshot. Unclaimed previews acc
 
 **Fix (v0.6.0):** Suppress FSW events during `TryApplyChanges` via `watcher.EnableRaisingEvents = false/true`.
 
-**Superseded (#358):** the watchers are no longer switched off — a change someone else made during the write was lost. Own writes are now recognised in the flush by size (`rmOwnedWriteSizes`), by content, and by the link-target stamps, and the written paths are counted in `ignoredPaths` while the write runs.
+**Superseded (#358):** the watchers are no longer switched off — a change someone else made during the write was lost. Own writes are now recognised in the flush by content and by the link-target stamps, and the written paths are counted in `ignoredPaths` while the write runs. The size record (`rmOwnedWriteSizes`, #140) was removed with it: it outlived writes whose report it never saw, and then skipped the next outside edit of the same length.
 
 **Earlier future consideration:** Self-write tracking — track paths written by `TryApplyChanges` and skip FSW events for those paths within a short window. More precise, no lost events. See [Issue #49](https://github.com/MadQ/RoslynMcp/issues/49).

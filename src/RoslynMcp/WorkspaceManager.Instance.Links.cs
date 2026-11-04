@@ -441,7 +441,7 @@ internal sealed partial class WorkspaceManager
 				
 				// Room is made by dropping what has lapsed. Only when the table is full of live
 				// stamps is it cleared, which costs those files a reload if a report still comes.
-				if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes) {
+				if(ownedLinkTargets.Count >= MaxOwnedLinkTargets) {
 					
 					var now    = DateTime.UtcNow;
 					var lapsed = ownedLinkTargets
@@ -453,7 +453,7 @@ internal sealed partial class WorkspaceManager
 					foreach(var key in lapsed)
 						ownedLinkTargets.Remove(key);
 					
-					if(ownedLinkTargets.Count >= MaxRmOwnedWriteSizes)
+					if(ownedLinkTargets.Count >= MaxOwnedLinkTargets)
 						ownedLinkTargets.Clear();
 				}
 				

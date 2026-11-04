@@ -52,6 +52,7 @@ static class WatcherThroughWritesTests
 		var filler  = string.Concat(Enumerable.Repeat("\t// Filler that makes each write of this file take a while.\n", 10_000));
 		var edited  = fx.Write("Edited.cs", $"class Edited\n{{\n\tint kept;\n{filler}}}\n");
 		var beacon  = fx.Write("Beacon.cs", "class Beacon { }\n");
+		var small   = fx.Write("Small.cs",  "class Small\n{\n\tint a;\n}\n");
 		var outside = Enumerable.Range(1, OutsideFiles)
 			.Select(n => fx.Write($"Outside{n:00}.cs", $"class Outside{n:00} {{ }}\n"))
 			.ToArray()
@@ -258,6 +259,44 @@ static class WatcherThroughWritesTests
 					return state == "none" && equal && onDisk.Contains("keptToo") && onDisk.Contains("// edit 1005")
 						? (true,  "PASS")
 						: (false, $"FAIL  (reload state: {state}; document equals file: {equal}; file has every edit: {onDisk.Contains("keptToo") && onDisk.Contains("// edit 1005")})");
+				}),
+			
+			// An outside edit that leaves the file the length the server's own last write left
+			// it. The flush used to skip a report whose file had the size recorded at the
+			// server's write, without looking at the text, and that record was only cleared by
+			// a report of the server's own write — which, arriving during the write, never got
+			// that far. So the record stayed and swallowed the next same-length change.
+			new("watcher through writes: an outside edit of the same length after the server's own edit is seen",
+				async () => {
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers)");
+					
+					var own = await Call("roslyn_replace_in_file", new { filePath = "Small.cs", pattern = "int a;", replacement = "int b;", projectPath = fx.Csproj });
+					
+					if(own is null || own["error"] is not null)
+						
+						return (false, $"FAIL  (roslyn_replace_in_file failed: {own?.ToJsonString() ?? "no response"})");
+					
+					// Past the debounce, so whatever the server's own write produced has been handled.
+					await Task.Delay(1500);
+					
+					File.WriteAllText(small, File.ReadAllText(small).Replace("int b;", "int c;"));
+					
+					var deadline = DateTime.UtcNow.AddSeconds(10);
+					var seen     = false;
+					
+					while(DateTime.UtcNow < deadline && !seen) {
+						
+						await Task.Delay(250);
+						
+						seen = (await WorkspaceTextAsync(small))?.Contains("int c;") == true;
+					}
+					
+					return seen
+						? (true,  "PASS")
+						: (false, "FAIL  (Small.cs was changed on disk to a text of the same length ten seconds ago, and the workspace still serves the server's own edit)");
 				}),
 		};
 		

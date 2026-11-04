@@ -171,11 +171,8 @@ internal sealed partial class WorkspaceManager
 #endif
 		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
 		private readonly HashSet<string>  pendingDeletes = new(StringComparer.OrdinalIgnoreCase);
-		// Tracks file sizes written by RM's own TryApplyChanges calls so FlushMSBuild
-		// can skip reloading files that are already up to date in the workspace.
-		private          Dictionary<string, long> rmOwnedWriteSizes    = new(StringComparer.OrdinalIgnoreCase)
-		;
-		private const    int                       MaxRmOwnedWriteSizes = 50;
+		// The most entries ownedLinkTargets holds before it makes room.
+		private const    int                       MaxOwnedLinkTargets = 50;
 		// Files RM wrote through a symbolic link that are sources no project compiles, with the
 		// size and write time they were left with (#338). The watcher reports such a write at
 		// the link's target, any number of times and on its own schedule; FlushMSBuild drops
@@ -533,7 +530,6 @@ internal sealed partial class WorkspaceManager
 				
 				timerToQuiesce = debounceTimer;
 				debounceTimer  = null;
-				rmOwnedWriteSizes.Clear();
 			}
 			
 			if(!QuiesceTimer(timerToQuiesce, "Debounce callback"))

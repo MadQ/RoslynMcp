@@ -715,27 +715,6 @@ internal sealed partial class WorkspaceManager
 			
 			foreach(var path in changed) {
 				
-				// Skip reload if this is a write RM made itself — workspace is already up to date
-				// from the TryApplyChanges call that triggered the FSW event.
-				lock(debounceLock) {
-					
-					if(rmOwnedWriteSizes.TryGetValue(path, out var expected)) {
-						
-						rmOwnedWriteSizes.Remove(path);
-						
-						try {
-							
-							if(new FileInfo(path).Length == expected)
-								continue;
-						}
-						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-							// Can't read size — fall through to normal reload.
-							_ = ex
-							;
-						}
-					}
-				}
-				
 				try {
 					
 					var impact = edits.Classify(newSolution, path, out var info, out var reason);
@@ -772,8 +751,11 @@ internal sealed partial class WorkspaceManager
 
 					// Already current. Applying identical text is not free: it still runs a
 					// TryApplyChanges, which writes to disk and flags a full reload if it fails.
-					// This catches what the rmOwnedWriteSizes check above cannot — an edit that
-					// leaves the file the same length, and any write RM did not make itself.
+					// This is how a report of RM's own write is recognised: the document already
+					// holds what it wrote. It used to be recognised by the size the write left,
+					// without the text, and that record outlived the write whenever its report
+					// came while the write was still running — which ignoredPaths drops — so it
+					// went on to swallow the next outside edit of the same length (#358).
 					// TryGetText deliberately: it reads already-materialized text rather than
 					// forcing a load, and falls through to apply when none is available.
 					var existingDoc = info.GetDocument(newSolution);
