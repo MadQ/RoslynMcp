@@ -65,6 +65,15 @@ internal sealed partial class WorkspaceManager : IDisposable
 	;
 	
 	readonly object     cacheLock = new();
+	
+	// Loads in progress, by the cache key they will be stored under (#377). Guarded by cacheLock;
+	// the load itself runs outside it. A caller that needs a workspace whose load has already
+	// started waits for that load instead of starting a second one: two design-time builds of
+	// one solution race on its obj\ files, and one of them can drop references. The entry is
+	// removed once the instance is in the cache, or once the load has failed — every caller
+	// waiting on it then gets the failure, and the next call tries again.
+	readonly Dictionary<string, Lazy<WorkspaceInstance>> pendingLoads = new(StringComparer.OrdinalIgnoreCase);
+	
 	readonly int        maxCachedWorkspaces;
 	readonly FileLogger logger;
 	
@@ -113,53 +122,86 @@ internal sealed partial class WorkspaceManager : IDisposable
 		}
 		
 		// Slow path: load outside lock so other tool calls can still hit the cache.
-		WorkspaceInstance	instance
-		;
-		string				cacheKey;
+		// The cache key is decided first, from the path alone, so that a load in progress can be
+		// found by it (#377). Cheap: a mode lookup and, for a .csproj, a walk up for a solution.
+		var (cacheKey, load) = PlanLoad(normalizedPath);
 		
-		// Route on the *requested* effective mode, not just the post-hoc ResolvedMode — on a
-		// fresh process ResolvedMode is still Auto (EnsureReady only runs inside the
-		// WorkspaceInstance constructor, after routing has committed), so the first .csproj
-		// load in adhoc mode would wrongly take the MSBuild branch and fail (#229).
-		// ResolvedMode == Adhoc stays as a fallback: once the process has skipped MSBuild
-		// registration, MSBuildWorkspace can never work, whatever this path requests.
-		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc
-			|| ProjectConfig.EffectiveWorkspaceMode(normalizedPath, logger) == WorkspaceMode.Adhoc) {
-			
-			instance = WorkspaceInstance.ForDirectory(
-				Directory.Exists(normalizedPath) ? normalizedPath : Path.GetDirectoryName(normalizedPath)!, logger)
-			;
-			cacheKey = instance.RootPath;
-		}
+		Lazy<WorkspaceInstance> pending;
+		bool                    waiting;
 		
-		else if(IsSolutionPath(normalizedPath)) {
+		lock(cacheLock) {
 			
-			instance = WorkspaceInstance.ForSolution(normalizedPath, logger);
-			cacheKey = normalizedPath;
-		}
-		
-		else if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
-			
-			var solutionPath = FindSolutionFileUpwards(Path.GetDirectoryName(normalizedPath)!);
-			
-			if(solutionPath is not null) {
+			// Loaded while the key was being worked out.
+			if(cache.TryGetValue(cacheKey, out var loaded)) {
 				
-				instance = WorkspaceInstance.ForSolution(solutionPath, logger);
-				cacheKey = Path.GetFullPath(solutionPath);
+				TouchAndAlias(cacheKey, loaded, normalizedPath);
+				
+				return loaded.Instance;
 			}
 			
-			else {
+			waiting = pendingLoads.TryGetValue(cacheKey, out pending!);
+			
+			if(!waiting) {
 				
-				instance = WorkspaceInstance.ForProject(normalizedPath, logger);
-				cacheKey = normalizedPath;
+				// The load stores its own result, once, from inside the Lazy: a caller that waited on
+				// it only ever reads the cache afterwards. Were every caller to store what it was
+				// handed, one arriving after the instance had been stored and evicted again would put
+				// a retired instance back — and the sweep would dispose it while it was cached.
+				Lazy<WorkspaceInstance>? created = null;
+				
+				created = new(() => Publish(load(), cacheKey, normalizedPath, created!), LazyThreadSafetyMode.ExecutionAndPublication);
+				pending = created;
+				pendingLoads[cacheKey] = created;
 			}
 		}
-		else {
+		
+		// Logged outside the lock, which is kept free of anything slow (#277).
+		if(waiting)
+			logger.LogInfo("Load", $"Waiting for the load already in progress: {cacheKey}");
+		
+		WorkspaceInstance instance;
+		
+		try {
+			instance = pending.Value;
+		}
+		catch {
 			
-			instance = WorkspaceInstance.ForDirectory(normalizedPath, logger);
-			cacheKey = normalizedPath;
+			// Every caller waiting on this load gets the same exception (Lazy keeps it). The entry
+			// goes, so that the next call loads afresh.
+			lock(cacheLock)
+				if(pendingLoads.TryGetValue(cacheKey, out var current) && ReferenceEquals(current, pending))
+					pendingLoads.Remove(cacheKey);
+			
+			throw;
 		}
 		
+		// The path this caller came in by is remembered as well — but only while the cache still
+		// holds this very instance. One evicted since is on its way to disposal, and never goes back.
+		if(waiting)
+			lock(cacheLock)
+				if(cache.TryGetValue(cacheKey, out var entry) && ReferenceEquals(entry.Instance, instance))
+					TouchAndAlias(cacheKey, entry, normalizedPath);
+		
+		return instance;
+	}
+	
+	// Callers hold cacheLock. Marks the entry used and lets the path find it directly next time.
+	void TouchAndAlias(string cacheKey, CacheEntry entry, string normalizedPath)
+	{
+		cache[cacheKey] = entry with { LastAccess = DateTime.UtcNow };
+		
+		if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+			projectToCacheKey[normalizedPath] = cacheKey;
+	}
+	
+	/// <summary>
+	///     Stores a workspace that has just been loaded, from inside the load's <see cref="Lazy{T}"/>
+	///     — once per load, whoever else waits on it (#377). Returns the instance callers are to use:
+	///     the one loaded, or one already cached for the same workspace under another path, in which
+	///     case the one loaded is torn down.
+	/// </summary>
+	WorkspaceInstance Publish(WorkspaceInstance instance, string cacheKey, string normalizedPath, Lazy<WorkspaceInstance> pending)
+	{
 		// Instances this insert must tear down: the one just loaded when another thread won the
 		// race, or retired instances whose grace period has expired. Collected under cacheLock,
 		// disposed after it (#277): WorkspaceInstance.Dispose waits on timer callbacks and
@@ -169,8 +211,10 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		try {
 			
-			// Re-acquire lock to insert. Another thread may have loaded the same workspace.
 			lock(cacheLock) {
+				
+				if(pendingLoads.TryGetValue(cacheKey, out var current) && ReferenceEquals(current, pending))
+					pendingLoads.Remove(cacheKey);
 				
 				if(projectToCacheKey.TryGetValue(normalizedPath, out var raceKey)
 					&& cache.TryGetValue(raceKey, out var raceEntry)) {
@@ -183,13 +227,11 @@ internal sealed partial class WorkspaceManager : IDisposable
 				
 				if(cache.TryGetValue(cacheKey, out var existing)) {
 					
-					doomed          = [instance];
-					cache[cacheKey] = existing with { LastAccess = DateTime.UtcNow };
+					doomed = [instance];
 					
 					// Record the alias even on a lost race, or the next call for this path would
 					// slow-path load-and-discard again (see below).
-					if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
-						projectToCacheKey[normalizedPath] = cacheKey;
+					TouchAndAlias(cacheKey, existing, normalizedPath);
 					
 					return existing.Instance;
 				}
@@ -238,6 +280,50 @@ internal sealed partial class WorkspaceManager : IDisposable
 			if(doomed is { Count: > 0 })
 				DisposeDetached(doomed);
 		}
+	}
+	
+	/// <summary>
+	///     Where a path's workspace will be cached, and how to load it — decided before the load, so
+	///     that a load in progress can be found by its key (#377). The routing is the one the load
+	///     always followed: adhoc when the effective mode says so, a solution as itself, a .csproj
+	///     through the solution above it when there is one, and anything else as a directory.
+	/// </summary>
+	(string CacheKey, Func<WorkspaceInstance> Load) PlanLoad(string normalizedPath)
+	{
+		// Route on the *requested* effective mode, not just the post-hoc ResolvedMode — on a
+		// fresh process ResolvedMode is still Auto (EnsureReady only runs inside the
+		// WorkspaceInstance constructor, after routing has committed), so the first .csproj
+		// load in adhoc mode would wrongly take the MSBuild branch and fail (#229).
+		// ResolvedMode == Adhoc stays as a fallback: once the process has skipped MSBuild
+		// registration, MSBuildWorkspace can never work, whatever this path requests.
+		if(MSBuildBootstrap.ResolvedMode == WorkspaceMode.Adhoc
+			|| ProjectConfig.EffectiveWorkspaceMode(normalizedPath, logger) == WorkspaceMode.Adhoc) {
+			
+			// An adhoc instance is keyed by its RootPath, which is exactly this directory.
+			var directory = Directory.Exists(normalizedPath) ? normalizedPath : Path.GetDirectoryName(normalizedPath)!;
+			
+			return (directory, () => WorkspaceInstance.ForDirectory(directory, logger));
+		}
+		
+		if(IsSolutionPath(normalizedPath))
+			
+			return (normalizedPath, () => WorkspaceInstance.ForSolution(normalizedPath, logger));
+		
+		if(normalizedPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)) {
+			
+			var solutionPath = FindSolutionFileUpwards(Path.GetDirectoryName(normalizedPath)!);
+			
+			if(solutionPath is not null) {
+				
+				var solutionKey = Path.GetFullPath(solutionPath);
+				
+				return (solutionKey, () => WorkspaceInstance.ForSolution(solutionPath, logger));
+			}
+			
+			return (normalizedPath, () => WorkspaceInstance.ForProject(normalizedPath, logger));
+		}
+		
+		return (normalizedPath, () => WorkspaceInstance.ForDirectory(normalizedPath, logger));
 	}
 	
 	// ── Public API ───────────────────────────────────────────────────────────

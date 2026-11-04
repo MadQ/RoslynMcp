@@ -1,0 +1,111 @@
+using System.Text.Json.Nodes;
+
+/// <summary>
+///     Covers two tool calls that need the same workspace arriving together on a cold server (#377).
+///     <para>
+///         <c>WorkspaceManager.GetOrLoadInstance</c> loads outside its cache lock, on purpose, and
+///         used to settle a race only after the fact: both callers loaded the whole solution, the
+///         second load was disposed. Two design-time builds of one solution race on its <c>obj\</c>
+///         files — in the log of the issue one of them failed to write a generated file, dropped a
+///         project's references, and sent both loads into their reload-once retry. Now the second
+///         caller waits for the load already in progress.
+///     </para>
+///     <para>
+///         The test starts a server of its own, so that its first two calls are the first the server
+///         sees, and sends them without waiting for the first answer. They name the same workspace in
+///         two ways — the <c>.slnx</c>, and a <c>.csproj</c> the solution above it is found for — so
+///         the shared load is found by where the workspace is cached, not by the path given. The log
+///         must then hold one <c>Loading solution</c> for the fixture and no <c>Released</c>: before,
+///         it held two of the first and one of the second. The second call must also have logged that it
+///         waited for the first one's load: whether the two calls overlap is down to timing, and
+///         when they did not — the second found the workspace already loaded — the test is a skip,
+///         not a pass. A solution load takes seconds and the calls are sent back to back, so that is
+///         rare.
+///     </para>
+/// </summary>
+static class ParallelLoadTests
+{
+	internal static TestGroup Build(TestContext ctx)
+	{
+		
+		var fx = TestFixtures.NewMsBuildProject("ParallelLoad");
+		
+		fx.Write("ParallelLoad.slnx", $"<Solution>\n  <Project Path=\"{Path.GetFileName(fx.Csproj)}\" />\n</Solution>\n");
+		fx.Write("Loaded.cs", "namespace ParallelLoad;\n\npublic class Loaded { }\n");
+		
+		var tests = new List<TestCase> {
+			
+			new("parallel load: two first calls for one workspace load it once",
+				async () => {
+					
+					var logStem         = $"parallelload-{Guid.NewGuid():N}";
+					var logDir          = Path.Combine(TestFixtures.TempRoot, "logs");
+					var (process, server) = await DefaultWorkspaceTests.StartServerLoggingToAsync(ctx, fx.Dir, Path.Combine(logDir, logStem + ".log"));
+					
+					try {
+						
+						if(server is null)
+							
+							return (false, "FAIL  (the server did not answer initialize)");
+						
+						// Sent back to back: the second request is on its way before the first load ends.
+						await server.SendAsync(new { jsonrpc = "2.0", id = server.NextId(), method = "tools/call",
+							@params = new { name = "roslyn_get_diagnostics", arguments = new { projectPath = fx.PathOf("ParallelLoad.slnx"), take = 0 } } });
+						await server.SendAsync(new { jsonrpc = "2.0", id = server.NextId(), method = "tools/call",
+							@params = new { name = "roslyn_list_types", arguments = new { projectPath = fx.Csproj } } });
+						
+						var answers = new[] { await server.ReceiveAsync(120_000), await server.ReceiveAsync(120_000) };
+						
+						// A tool that failed still answers with a result: marked isError when it threw, and
+						// as a structured error — an "error" field in the JSON it returns — when it caught
+						// the failure itself. Neither is an answer.
+						static bool Answered(JsonNode? answer)
+						{
+							if(answer?["result"] is not { } result || answer["error"] is not null || result["isError"]?.GetValue<bool>() == true)
+								
+								return false;
+							
+							try {
+								return JsonNode.Parse(result["content"]?[0]?["text"]?.GetValue<string>() ?? "") is { } payload
+									&& payload["error"] is null;
+							}
+							catch(System.Text.Json.JsonException) {
+								return false;
+							}
+						}
+						
+						var answered = answers.All(Answered);
+						
+						if(!ServerLog.TryRead(logDir, logStem + "*", 1, out var lines, out var failure))
+							
+							return (false, failure);
+						
+						var label    = Path.GetFileName(fx.Dir);
+						var loads    = lines.Count(line => line.Contains("Loading solution") && line.Contains(label));
+						var released = lines.Count(line => line.Contains("Released") && line.Contains(label));
+						var waited   = lines.Count(line => line.Contains("Waiting for the load already in progress") && line.Contains(label));
+						
+						// The second call found the workspace already cached: the calls never overlapped,
+						// and one load proves nothing about two concurrent ones. Not a pass.
+						if(answered && loads == 1 && released == 0 && waited == 0)
+							
+							return Skip.NotApplicable("the two calls did not overlap — the second found the workspace already loaded");
+						
+						return answered && loads == 1 && released == 0 && waited == 1
+							? (true,  "PASS")
+							: (false, $"FAIL  (both calls answered: {answered}; solution loads logged: {loads}; loads released: {released}; waits logged: {waited})");
+					}
+					finally {
+						await DefaultWorkspaceTests.StopServerAsync(process, server);
+					}
+				}),
+		};
+		
+		return new TestGroup($"Parallel Load ({tests.Count} tests)", tests, Teardown: () => {
+			
+			fx.Dispose();
+			
+			return Task.CompletedTask;
+		});
+	}
+}
