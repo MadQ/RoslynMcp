@@ -22,7 +22,7 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 		[Description("Maximum dependencies to return. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_type_dependencies", typeName, new { skip, take });
+		using var scope = BeginTool("roslyn_get_type_dependencies", typeName, new { projectPath, skip, take });
 		
 		if(!TryStripChatSymbolRef(ref typeName, out var refError))
 			

@@ -58,7 +58,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_find_string_literal", pattern, new { mode, useGlob, matchRaw, caseSensitive, filePattern, skip, take });
+		using var scope = BeginTool("roslyn_find_string_literal", pattern, new { projectPath, mode, useGlob, matchRaw, caseSensitive, filePattern, skip, take });
 
 		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 

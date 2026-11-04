@@ -34,7 +34,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description(PageTokenDescription)] string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_search_files", pattern, new { filePattern, caseSensitive, mode, skip, take });
+		using var scope = BeginTool("roslyn_search_files", pattern, new { projectPath, filePattern, caseSensitive, mode, skip, take });
 		
 		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 			

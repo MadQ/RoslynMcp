@@ -1232,6 +1232,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected const string PageTokenDescription =
 		"The page_token from the previous response. Pass it alone to get the next page — it carries the position and page size, " +
 		"so skip and take are not needed (a non-zero skip or a non-default take overrides it). " +
+		"Repeat the original query arguments; a different tool or query re-runs from the cursor position. " +
+		"An explicit take equal to the tool's default is treated as omitted and keeps the token's page size. " +
 		"A response whose has_more is false returns no page_token: that was the last page."
 	;
 	
@@ -1251,7 +1253,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		var hasMore = skip + page.Length < allResults.Length;
 		
 		var token = hasMore
-			? new PageCursor(paginationCache.Store(allResults, shape), skip + page.Length, take).ToString()
+			? new PageCursor(paginationCache.Store(allResults, shape, activeScope.Value?.PaginationKey), skip + page.Length, take).ToString()
 			: null
 		;
 		
