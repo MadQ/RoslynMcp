@@ -77,7 +77,42 @@ internal sealed class ApplyCodeFixTool : RoslynMcpTool
 			// differently. An omitted projectPath names nothing, so the token's own binding is the
 			// workspace — resolving the session default here would instead compare against whichever
 			// project the default solution lists first and reject a perfectly valid token.
-			if(!string.IsNullOrWhiteSpace(projectPath)) {
+			// A solution names no one project: the preview, given it with a file, bound the token to
+			// the project that contains the file (#376). The solution matches when that project is
+			// one of its own — asking it for "its" .csproj would answer with its first one.
+			string? requestedSolution;
+			
+			try {
+				requestedSolution = string.IsNullOrWhiteSpace(projectPath) ? null : ResolvedSolutionPath(projectPath);
+			}
+			catch(Exception ex) when(ex is not OutOfMemoryException) {
+				
+				// The guarded resolution below reports a bad path through its structured mapping.
+				requestedSolution = null;
+			}
+			
+			// An adhoc workspace has no project files to be a member of; its binding is its root, and
+			// the comparison below handles it as before.
+			Solution? requested = null;
+			
+			if(requestedSolution is not null && !TryResolveSolution(projectPath!, out requested, out var solutionError)) {
+				
+				var (message, kind) = DescribeResolveFailure(solutionError);
+				
+				return scope.Failed("workspace unavailable", new ApplyCodeFixResult(message, null, kind));
+			}
+			
+			if(requested is not null && requested.Projects.Any(project => project.FilePath is not null)) {
+				
+				var bound = operation.WorkspaceBinding.CanonicalPath;
+				
+				if(!requested.Projects.Any(project => project.FilePath is { } file && SecurityBoundary.PathComparer.Equals(Path.GetFullPath(file), Path.GetFullPath(bound))))
+					return scope.Failed("workspace mismatch", new ApplyCodeFixResult(
+						$"Apply aborted — this token belongs to '{bound}', which is not a project of '{requestedSolution}'. Re-run roslyn_preview_code_fix for the intended workspace.",
+						null,
+						"workspace mismatch"));
+			}
+			else if(!string.IsNullOrWhiteSpace(projectPath)) {
 				
 				if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
 					

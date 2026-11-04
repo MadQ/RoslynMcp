@@ -106,6 +106,22 @@ static class DefaultWorkspaceTests
 		single.Write("Multi/Multi.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>\n  </PropertyGroup>\n</Project>\n");
 		single.Write("Multi/Both.cs", "namespace Multi;\n\ninternal class Both\n{\n\tvoid M()\n\t{\n#if WINDOWS\n\t\tint onlyOnWindows;\n#else\n\t\tint onlyElsewhere;\n#endif\n\t}\n}\n");
 		
+		// Review of #378, round 2: two projects that both compile Common/SharedSource.cs, which uses
+		// a type each project declares and the other lacks — the file is an error in both, each
+		// time for the other project's reason. And a file of the second project with a code fix,
+		// for a preview/apply round trip through the solution. In a directory of its own, so that
+		// Beside.csproj still finds only Single.slnx above it.
+		single.Write("Shared/Shared.slnx", "<Solution>\n  <Project Path=\"P1/P1.csproj\" />\n  <Project Path=\"P2/P2.csproj\" />\n</Solution>\n");
+		
+		foreach(var name in new[] { "P1", "P2" }) {
+			
+			single.Write($"Shared/{name}/{name}.csproj", $"<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n  <ItemGroup>\n    <Compile Include=\"../Common/SharedSource.cs\" Link=\"SharedSource.cs\" />\n  </ItemGroup>\n</Project>\n");
+			single.Write($"Shared/{name}/OnlyIn{name}.cs", $"namespace Shared;\n\ninternal class OnlyIn{name} {{ }}\n");
+		}
+		
+		single.Write("Shared/Common/SharedSource.cs", "namespace Shared;\n\ninternal class SharedSource\n{\n\tOnlyInP1? first;\n\tOnlyInP2? second;\n}\n");
+		single.Write("Shared/P2/FixMe.cs", "class CodeFixFixture { TestMultipleActions value; }\n");
+		
 		// Review of #378: a solution in a directory whose project file pins the adhoc workspace. The
 		// adhoc project has no file, so a solution's projects come out as none; the one compilation
 		// must still be checked.
@@ -511,6 +527,37 @@ static class DefaultWorkspaceTests
 					$"expected CS0103 from Broken.cs; got {data?.ToJsonString() ?? "null"}");
 			}),
 			
+			// Review of #378, round 2: the shared file is diagnosed in every project that compiles it —
+			// P1 lacks OnlyInP2 and P2 lacks OnlyInP1 — not only in the first project found to have it.
+			new("DefaultWorkspace: get_diagnostics for a file shared by two projects reports both projects' errors", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = single.PathOf("Shared/Shared.slnx"), filePath = "Common/SharedSource.cs", severity = "errors" });
+				var messages   = data?["items"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				
+				return Verdict(ok && messages.Any(m => m.Contains("OnlyInP1")) && messages.Any(m => m.Contains("OnlyInP2")),
+					$"expected the missing OnlyInP1 and OnlyInP2 both; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// Review of #378, round 2: a preview given the solution binds its token to the project of
+			// the file (P2, not the first project); applying it through the same solution must be
+			// accepted, not refused as another workspace.
+			new("DefaultWorkspace: a code fix previewed and applied through a solution round-trips", async () => {
+				
+				var solution       = single.PathOf("Shared/Shared.slnx");
+				var (ok, preview)  = await Call(rootedCtx, "roslyn_preview_code_fix", new { projectPath = solution, filePath = "P2/FixMe.cs", line = 1, column = 24, diagnosticId = "CS0246", actionIndex = 0 });
+				var token          = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_code_fix", new { token, approval = "y", projectPath = solution });
+				var text               = applied?.ToJsonString() ?? "null";
+				
+				return Verdict(applyOk && !text.Contains("mismatch") && applied?["error"] is null,
+					$"expected the fix applied through the solution, got {text}");
+			}),
+			
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it
 			// must reject "" even when a default exists — otherwise it would silently search the default
 			// solution's first project (App here), not fail as the schema promises.
@@ -582,6 +629,10 @@ static class DefaultWorkspaceTests
 			UseShellExecute        = false,
 		};
 		psi.Environment["ROSLYNMCP_LOG_PATH"] = Path.Combine(TestFixtures.TempRoot, "logs", $"defaultws-{label}-{Guid.NewGuid():N}.log");
+		
+		// As for the harness's own server: the debug-only fix provider for the marker types, which
+		// the code-fix round trip through a solution uses.
+		psi.Environment["ROSLYNMCP_TEST_CODE_FIXES"] = "1";
 		
 		var process = Process.Start(psi)!;
 		

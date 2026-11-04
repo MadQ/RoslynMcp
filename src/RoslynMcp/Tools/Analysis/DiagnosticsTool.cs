@@ -68,6 +68,9 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		// A file is diagnosed in the project that compiles it. For a solution that is the project
 		// holding the file, found the way every file-anchored tool finds it — a short name that two
 		// projects' files end with is ambiguous_file, never the two files' diagnostics merged.
+		var givenPath     = projectPath;
+		var solutionGiven = filePath is not null && ResolvedSolutionPath(projectPath) is not null;
+		
 		if(filePath is not null && !TryResolveProjectArg(projectPath, filePath, out projectPath, out var fileError))
 			
 			return scope.Error(fileError);
@@ -81,6 +84,30 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		if(targetError is not null)
 			
 			return scope.Error(targetError);
+		
+		// A file is looked up by the name given until its own path is known.
+		var fileKey = filePath;
+		
+		// One file can be compiled by several projects of a solution (a linked or shared source),
+		// and it can be an error in one and fine in another. The lookup above stops at the first
+		// project that has it; given the solution, every other project with that same file is
+		// diagnosed too — by the file's full path, which names that one file and no namesake.
+		if(solutionGiven
+			&& targets.Length > 0
+			&& FindSyntaxTree(targets[0].Compilation, filePath!, targets[0].Project?.FilePath ?? projectPath, rootPath, out _) is { FilePath: { Length: > 0 } sharedPath }
+			&& TryResolveSolution(givenPath, out var whole, out _)) {
+			
+			fileKey = sharedPath;
+			
+			var present = targets.Select(target => target.Project?.Id).OfType<ProjectId>().ToHashSet();
+			var others  = new List<(Compilation Compilation, Project? Project)>();
+			
+			foreach(var projectId in whole.GetDocumentIdsWithFilePath(sharedPath).Select(id => id.ProjectId).Distinct())
+				if(present.Add(projectId) && whole.GetProject(projectId) is { } other && await other.GetCompilationAsync(cancellationToken) is { } otherCompilation)
+					others.Add((otherCompilation, other));
+			
+			targets = [..targets, ..others];
+		}
 		
 		var diagnostics = new List<Diagnostic>();
 		var notes       = new List<string>();
@@ -103,7 +130,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			if(filePath is not null) {
 				
 				// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
-				tree = FindSyntaxTree(compilation, filePath, project?.FilePath ?? projectPath, rootPath, out var ambiguous);
+				tree = FindSyntaxTree(compilation, fileKey!, project?.FilePath ?? projectPath, rootPath, out var ambiguous);
 				
 				if(ambiguous.Length > 0)
 					
