@@ -154,6 +154,18 @@ static class DotnetRunnerTests
 			&& System.Text.RegularExpressions.Regex.Match(cancelled[0], @"cancelled after (\d+) ms queued") is { Success: true } m
 			&& int.Parse(m.Groups[1].Value) >= 200;
 		
+		// #371: the clean logs its own cancellation and rethrows it. The call filter must not add a second
+		// entry for the same call ("failed after the tool returned: OperationCanceledException"). Its
+		// entry carries the raw arguments, so it is found by the fixture's directory name.
+		var fixtureName = Path.GetFileName(fx.Dir);
+		var extra       = lines.Count(l => l.Contains(fixtureName, StringComparison.Ordinal)
+			&& l.Contains("\"tool_name\":\"clean_solution\"", StringComparison.Ordinal)
+			&& (l.Contains("after the tool returned", StringComparison.Ordinal) || l.Contains("before the tool ran", StringComparison.Ordinal)));
+		
+		if(extra > 0)
+			
+			return (false, $"FAIL  ({extra} extra filter entr(ies) for a cancellation the tool already logged)");
+		
 		return cancelled.Length == 1 && waited && completed.Length == 1 && !cancelled[0].Contains("pid=", StringComparison.Ordinal)
 			? (true,  "PASS  (B cancelled while queued never started dotnet; A completed)")
 			: (false, $"FAIL  (expected 1 clean cancelled after ≥200 ms queued and 1 completed; found {cancelled.Length} cancelled (waited: {waited}), {completed.Length} completed: {string.Join(" || ", details)})")

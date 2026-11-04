@@ -350,6 +350,10 @@ internal abstract partial class RoslynMcpTool
 			;
 			
 			log.LogTool(name, elapsed, !failed, isMSBuild, estimatedTokens, subject, logged, cacheTag, responsePeek, args);
+			
+			// Tells the call filter this call's failure is already in the log.
+			if(failed && callFrame.Value is { } frame)
+				frame.FailureLogged = true;
 		}
 		
 		

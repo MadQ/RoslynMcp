@@ -39,6 +39,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		// came after the tool returned, not before it ran.
 		internal bool Started;
 		
+		// A scope already wrote a failure entry for this call — e.g. build, clean and restore log
+		// "cancelled" and rethrow the cancellation. The exception is the one the tool reported: no
+		// second entry.
+		internal bool FailureLogged;
+		
 		// A scope disposed by an exception, whose entry waits for the filter to name the exception.
 		internal ToolScope? Unfinished;
 	}
@@ -74,8 +79,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					scope.WriteDeferred(ex);
 				
 				// No scope waiting. A name that matched no tool is the SDK's to answer and names nothing to
-				// log under; otherwise the call failed around its tool, which wrote no entry for it.
-				else if(request.MatchedPrimitive is not null && request.Services?.GetService(typeof(FileLogger)) is FileLogger log) {
+				// log under, and a failure the tool logged itself needs no second entry; otherwise the
+				// call failed around its tool, which wrote no entry for it.
+				else if(request.MatchedPrimitive is not null && !frame.FailureLogged && request.Services?.GetService(typeof(FileLogger)) is FileLogger log) {
 					
 					var when = frame.Started ? "failed after the tool returned"
 						: ex is OperationCanceledException && cancellationToken.IsCancellationRequested ? "cancelled before the tool ran"
@@ -100,7 +106,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		var root = ex.GetBaseException();
 		
-		return Cap(ReferenceEquals(root, ex) ? Describe(ex) : $"{Describe(ex)} ← {Describe(root)}", 300);
+		// Capped apart, so a long wrapper message cannot push the root cause out of the entry.
+		return ReferenceEquals(root, ex)
+			? Cap(Describe(ex), 300)
+			: $"{Cap(Describe(ex), 140)} ← {Cap(Describe(root), 160)}"
+		;
 	}
 	
 	// Cuts text to at most max characters plus an ellipsis, never between the two halves of a surrogate
