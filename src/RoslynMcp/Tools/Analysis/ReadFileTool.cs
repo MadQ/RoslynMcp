@@ -63,10 +63,22 @@ internal sealed class ReadFileTool : RoslynMcpTool
 			}
 			else {
 				
-				// Stream directly - avoids the ReadAllTextAsync string SourceText double-buffer.
-				using var stream = File.OpenRead(fullPath);
+				// The file existed when ResolveFilePath looked, but the read can still fail: another
+				// process holding it open without read sharing (a log being written), the file
+				// vanishing in between, or no read permission. Unguarded, the exception reached the
+				// client as an opaque "An error occurred invoking" (#370); the editing tools guard
+				// their reads the same way.
+				try {
+					
+					// Stream directly - avoids the ReadAllTextAsync string SourceText double-buffer.
+					using var stream = File.OpenRead(fullPath);
+					
+					sourceText = SourceText.From(stream);
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
+				}
 				
-				sourceText    = SourceText.From(stream);
 				canonicalPath = fullPath;
 				source        = "disk";
 			}
