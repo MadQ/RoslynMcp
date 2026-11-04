@@ -48,9 +48,12 @@ This fix preserves that behavior rather than reintroducing per-write watcher sup
 
 The existing probe limits remain: files whose mtimes do not exceed the global cutoff are
 not compared, and brand-new files are not in the snapshot. `reload_pending` is the signal
-for an addition awaiting reload. The *Source Drift* harness group explicitly compiles its
-temporary fixture files under `obj`, outside watcher classification, to verify both owned
-edits and genuinely missed external edits without relying on the debounce race.
+for an addition awaiting reload. A file that no longer decodes with its document's encoding
+counts as drift, not as a failure of the probe. The *Source Drift* harness group explicitly
+compiles its temporary fixture files under `obj` and lists `obj` under `"ignore"` in the
+fixture's `.madq_roslynmcp.json`, so no watcher covers them; that verifies both owned edits and
+genuinely missed external edits without relying on the debounce race. `obj` alone would not:
+it is watched, and a tracked document under it is flushed like any other.
 
 ---
 

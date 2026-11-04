@@ -1,7 +1,9 @@
 /// <summary>
 ///     Verifies source drift measures stale workspace text, not the age of an RM-owned write (#299).
-///     The temporary MSBuild project explicitly compiles files under obj: watcher classification
-///     excludes that directory, so no debounce flush can heal a missed edit or hide a broken probe.
+///     The temporary MSBuild project explicitly compiles files under obj, and its .madq_roslynmcp.json
+///     ignores obj — so no watcher covers that directory, and no debounce flush can heal a missed
+///     edit or hide a broken probe. obj alone would not do: it is watched, and a tracked document
+///     under it is flushed like any other (review of #382).
 ///     Each case loads its own fixture before writing and ages the sync clock past its two-second
 ///     tolerance. Tool edits must remain clean, whereas a direct disk edit must remain drifted even
 ///     after another file is edited through RM. A timestamp-only touch is not stale source, and a
@@ -11,11 +13,14 @@ static class DriftTests
 {
 	internal static TestGroup Build(TestContext ctx)
 	{
-		async Task<(bool, string)> CheckAsync(string? tool, object? edit, bool external = false, bool touch = false, bool delete = false, int? codePage = null)
+		async Task<(bool, string)> CheckAsync(string? tool, object? edit, bool external = false, bool touch = false, bool delete = false, int? codePage = null, bool undecodable = false)
 		{
 			var codePageXml = codePage is null ? string.Empty : $"<PropertyGroup><CodePage>{codePage}</CodePage></PropertyGroup>";
 			using var fx = TestFixtures.NewMsBuildProject("Drift", extraProjectXml:
 				codePageXml + "<ItemGroup><Compile Include=\"obj/Edited.cs\" /><Compile Include=\"obj/Outside.cs\" /></ItemGroup>");
+			
+			// Before the first load, which reads it: no watcher may cover obj (see the class remarks).
+			fx.Write(".madq_roslynmcp.json", "{ \"ignore\": [\"obj\"] }\n");
 			var editedContent = codePage is null ? "class Edited\n{\n\tint value = 1;\n}\n" : "class Edited { const string value = \"café\"; }\n";
 			var edited  = fx.Write("obj/Edited.cs", editedContent);
 
@@ -61,10 +66,17 @@ static class DriftTests
 			if(delete)
 				File.Delete(edited);
 			
+			// Bytes that are no UTF-8 at all: a strict decoder throws on them, and the probe must
+			// report the file as drifted rather than fail as a whole (review of #382).
+			if(undecodable)
+				File.WriteAllBytes(edited, [..File.ReadAllBytes(edited), 0xC3, 0x28, (byte) '\n']);
+			
+			var expectDrift = external || delete || undecodable;
+			
 			return await ctx.RunTestAsync("roslyn_check_drift", new { projectPath = fx.Csproj },
-				data => data?["drifted"]?.GetValue<bool>() == (external || delete)
-					&& data?["drifted_count"]?.GetValue<int>() == (external || delete ? 1 : 0)
-					&& (!(external || delete) || data?["drifted_files"]?.AsArray().Any(file =>
+				data => data?["drifted"]?.GetValue<bool>() == expectDrift
+					&& data?["drifted_count"]?.GetValue<int>() == (expectDrift ? 1 : 0)
+					&& (!expectDrift || data?["drifted_files"]?.AsArray().Any(file =>
 						file?.GetValue<string>()?.EndsWith(external ? "Outside.cs" : "Edited.cs") == true) == true));
 		}
 		
@@ -82,6 +94,7 @@ static class DriftTests
 			new("drift: timestamp-only touch is not stale source", () => CheckAsync(null, null, touch: true)),
 			new("drift: BOM-less source uses its project code page", () => CheckAsync(null, null, touch: true, codePage: 1252)),
 			new("drift: deleted source remains drifted", () => CheckAsync(null, null, delete: true)),
+			new("drift: source that no longer decodes is drifted, not an error", () => CheckAsync(null, null, undecodable: true)),
 		]);
 	}
 }

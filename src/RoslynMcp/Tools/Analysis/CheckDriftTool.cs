@@ -97,6 +97,13 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 				catch(DirectoryNotFoundException) {
 					differs = true;
 				}
+				catch(System.Text.DecoderFallbackException) {
+					
+					// The file holds bytes the document's encoding rejects — saved since in another
+					// encoding, or damaged. Either way it is not the workspace's text: drift, not a
+					// failure of the whole probe.
+					differs = true;
+				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
 					return scope.Error(new ErrorResult($"Cannot compare '{path}' with workspace text: {ex.Message}"));
