@@ -674,9 +674,9 @@ internal sealed partial class WorkspaceManager
 		
 		/// <summary>
 		///     Applies a debounced batch of file changes to an MSBuild workspace.
-		///     Returns <see langword="true"/> when it could only flag a full reload rather than
-		///     apply the change — meaning the workspace is now behind disk, and the caller must
-		///     not advance the sync clock.
+		///     Returns <see langword="true"/> when the workspace is left behind disk — it could only
+		///     flag a full reload, or it put the batch back for the next flush because another
+		///     apply moved the solution on — and the caller must not advance the sync clock.
 		/// </summary>
 		// unreported: the paths in changed that no watcher report named — documents the index
 		// lists as other names of a changed file.
@@ -814,8 +814,41 @@ internal sealed partial class WorkspaceManager
 				}
 			}
 			
-			if(modified && !ApplyChangesToDisk(newSolution, currentSolution, ws))
-				FlagReload("incremental apply failed", applyFailed);
+			if(modified && !ApplyChangesToDisk(newSolution, currentSolution, ws)) {
+				
+				// The apply fails when the solution has moved on since the snapshot above — an
+				// ApplyChangesToDisk that finished after the snapshot was taken, possibly before
+				// the files were read (#358). The texts were then compared with a solution that
+				// is no longer current, and that is no reason for a reload: the batch is put
+				// back, and the next flush compares the files with the solution as it is then.
+				// RM's own write compares equal there; a change someone else made is applied.
+				// A replaced workspace, or a failure on a solution nobody moved, still flags one.
+				bool movedOn;
+				
+				@lock.EnterReadLock();
+				
+				try {
+					movedOn = ReferenceEquals(workspace, ws) && !ReferenceEquals(workspace.CurrentSolution, currentSolution);
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
+				if(movedOn) {
+					
+					// The names the index added are not put back: they are found again from
+					// the reported paths, and on their own a name that is no document would
+					// look like a new source file.
+					foreach(var path in changed)
+						if(!unreported.Contains(path))
+							Enqueue(path, deleted: false);
+					
+					// Behind disk until that flush: the sync clock must not advance.
+					return true;
+				}
+				else
+					FlagReload("incremental apply failed", applyFailed);
+			}
 
 			return reloadFlagged;
 		}

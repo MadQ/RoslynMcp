@@ -539,7 +539,11 @@ every `TryApplyChanges`, which then toggled `EnableRaisingEvents` (it no longer 
   with the solution from before it and start a stale second apply. Once the apply is over the
   flush recognises RM's own write — the document already holds the file's text, or the file
   still has the stamp in `ownedLinkTargets` — and applies nothing, while a save someone else made
-  to that file in the meantime differs and is applied. The flush used to skip a
+  to that file in the meantime differs and is applied. An apply can still finish between the
+  moment a flush takes its solution and the moment it reads the files; the flush's own apply then
+  fails on the moved-on solution, and `FlushMSBuild` puts its reported changes back for the next
+  flush instead of flagging a reload — which it still does for a replaced workspace, or a failure
+  on a solution nobody moved. The flush used to skip a
   file whose size matched the one recorded at RM's last write, without looking at its text. That
   record was only cleared by a report of that write, and a report arriving during the write never
   got that far; the record stayed and swallowed the next outside edit of the same length. It is
