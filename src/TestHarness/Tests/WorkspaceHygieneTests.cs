@@ -52,6 +52,10 @@ static class WorkspaceHygieneTests
 			// #303: tools that resolve only a root or a solution must still record Adhoc.
 			new("workspace hygiene: root/solution-only tools label an adhoc workspace ADH",
 				() => AssertAdhocLabelAsync(ctx, serverLogDir, serverLogGlob)),
+			
+			// #371: a call that fails before its tool runs used to leave no log entry at all.
+			new("workspace hygiene: a call that fails before the tool runs is logged with its exception",
+				() => AssertFailedCallLoggedAsync(ctx, serverLogDir, serverLogGlob)),
 		};
 		
 		return new TestGroup($"Workspace Hygiene ({tests.Count} tests)", tests);
@@ -232,6 +236,56 @@ static class WorkspaceHygieneTests
 		finally {
 			fx.Dispose();
 		}
+	}
+	
+	/// <summary>
+	///     Guards #371. A call the SDK cannot bind — here <c>roslyn_get_member_body</c> without its required
+	///     <c>symbolName</c> — throws before the tool method runs, so no <c>ToolScope</c> exists and nothing
+	///     was logged: the client got an opaque "An error occurred invoking", and the log had no trace of the
+	///     call. The call filter now writes a TOOL entry for it. A GUID in an extra argument makes this call's
+	///     entry unique in the log (the filter records the raw arguments); the entry must be a failure that
+	///     names the exception. Against the pre-#371 server there is no entry.
+	/// </summary>
+	static async Task<(bool pass, string message)> AssertFailedCallLoggedAsync(TestContext ctx, string logDir, string logGlob)
+	{
+		var marker = $"hygiene-{Guid.NewGuid():N}";
+		
+		await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
+			@params = new { name = "roslyn_get_member_body", arguments = new { projectPath = marker } } });
+		
+		if(await ctx.ReceiveAsync() is null)
+			
+			return (false, "FAIL  (the call timed out)");
+		
+		// Looks for the entry its own call wrote: no floor, works in a filtered run.
+		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out var failure))
+			
+			return (false, failure);
+		
+		var entry = lines
+			.Where(line => line.Contains(marker, StringComparison.Ordinal))
+			.Select(line => {
+				
+				try {
+					return JsonNode.Parse(line);
+				}
+				catch(System.Text.Json.JsonException) {
+					return null;
+				}
+			})
+			.FirstOrDefault(e => e?["level"]?.GetValue<string>() == "TOOL");
+		
+		if(entry is null)
+			
+			return (false, "FAIL  (no TOOL entry for a call that failed before its tool ran)");
+		
+		var detail  = entry["detail"]?.GetValue<string>() ?? "";
+		var success = entry["success"]?.GetValue<bool>();
+		
+		return entry["tool_name"]?.GetValue<string>() == "get_member_body" && success == false && detail.StartsWith("failed before the tool ran: ", StringComparison.Ordinal) && detail.Contains("Exception", StringComparison.Ordinal)
+			? (true,  $"PASS  ({detail})")
+			: (false, $"FAIL  (unexpected entry: {entry.ToJsonString()})")
+		;
 	}
 	
 	static (bool pass, string message) AssertNoScratchFiles(TestContext ctx)

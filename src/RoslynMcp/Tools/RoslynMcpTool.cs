@@ -1,5 +1,7 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO.Enumeration;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -24,6 +26,78 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	// single thread and would be null if TryGetCompilation ran after an await on a different thread.
 	private static readonly AsyncLocal<ToolScope?> activeScope = new()
 	;
+	
+	// The tools/call request in flight, set by UnhandledExceptionFilter before the tool runs. A
+	// reference object: what the tool's scope stores in it is still visible to the filter after the
+	// call, which an AsyncLocal value set inside the tool would not be (#371).
+	private static readonly AsyncLocal<CallFrame?> callFrame = new()
+	;
+	
+	sealed class CallFrame
+	{
+		// A scope disposed by an exception, whose entry waits for the filter to name the exception.
+		internal ToolScope? Unfinished;
+	}
+	
+	/// <summary>
+	///     The <c>tools/call</c> filter that gets an exception escaping a tool into the log (#371). A tool's
+	///     <see cref="ToolScope"/> is disposed while the exception unwinds and cannot see it, so it defers its
+	///     entry to the call frame set here; this filter's catch writes it with the exception's type and
+	///     message. An exception before the tool method runs — the SDK failing to bind an argument — has no
+	///     scope at all, and used to leave no entry; the filter writes one. The exception is rethrown
+	///     unchanged, so the client sees exactly what it saw before. Registered in <c>Program</c>.
+	/// </summary>
+	internal static McpRequestHandler<CallToolRequestParams, CallToolResult> UnhandledExceptionFilter(McpRequestHandler<CallToolRequestParams, CallToolResult> next)
+		=> async (request, cancellationToken) => {
+			
+			var frame = new CallFrame();
+			var clock = Stopwatch.StartNew();
+			
+			callFrame.Value = frame;
+			
+			try {
+				
+				var result = await next(request, cancellationToken);
+				
+				// A tool that returned without a terminal call: its entry, as it was always written.
+				frame.Unfinished?.WriteDeferred(null);
+				
+				return result;
+			}
+			catch(Exception ex) {
+				
+				if(frame.Unfinished is { } scope)
+					scope.WriteDeferred(ex);
+				
+				else if(request.Services?.GetService(typeof(FileLogger)) is FileLogger log)
+					log.LogTool(request.Params?.Name ?? "unknown", clock.ElapsedMilliseconds, false, true, 0, null,
+						$"failed before the tool ran: {DescribeException(ex)}", null, null, DescribeArguments(request.Params));
+				
+				throw;
+			}
+		};
+	
+	// "IOException: The process cannot access the file …" on one line, capped: an exception message can
+	// span lines and quote whole files, and a log entry is one line.
+	static string DescribeException(Exception ex)
+	{
+		var message = string.Join(' ', ex.Message.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+		var text    = $"{ex.GetType().Name}: {message}";
+		
+		return text.Length <= 300 ? text : text[..300] + "…";
+	}
+	
+	// The raw arguments of a call that failed before its tool ran, which no scope recorded.
+	static string? DescribeArguments(CallToolRequestParams? request)
+	{
+		if(request?.Arguments is not { Count: > 0 } arguments)
+			
+			return null;
+		
+		var json = JsonSerializer.Serialize(arguments, RoslynMcpJson.Compact);
+		
+		return json.Length <= 600 ? json : json[..600] + "…";
+	}
 	
 	// 0 = not shown, 1 = shown. Interlocked.CompareExchange ensures exactly one thread injects the note.
 	internal static int sessionNoteShown

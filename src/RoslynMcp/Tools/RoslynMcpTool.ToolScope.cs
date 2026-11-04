@@ -34,6 +34,7 @@ internal abstract partial class RoslynMcpTool
 		string? _pendingHint
 		;
 		string? pendingCaution;
+		long    deferredElapsed;   // Elapsed time at Dispose, for an entry the call filter writes later (#371).
 		
 		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose, PaginationCache paginationCache)
 		{
@@ -302,23 +303,53 @@ internal abstract partial class RoslynMcpTool
 		
 		public void Dispose()
 		{
+			var elapsed = sw.ElapsedMilliseconds;
+			
 			// An unhandled exception bypasses Outcome/Failed — detect it here so the log
 			// entry correctly shows success:false instead of silently logging success:true.
 			if(!completed) {
 				
 				failed = true;
 				detail ??= "unhandled exception";
+				
+				// The exception is unwinding through this using, but a scope cannot see it. Under the
+				// call filter the entry waits for the filter's catch, which can (#371). One deferred
+				// scope per call: a second one, should a call ever hold two, writes as before.
+				if(callFrame.Value is { Unfinished: null } frame) {
+					
+					deferredElapsed  = elapsed;
+					frame.Unfinished = this;
+					onDispose();
+					
+					return;
+				}
 			}
 			
+			Write(elapsed);
+			onDispose();
+		}
+		
+		/// <summary>
+		///     Writes the entry <see cref="Dispose"/> deferred to the call filter: with the exception that
+		///     ended the call, or without one when the tool returned without a terminal call.
+		/// </summary>
+		internal void WriteDeferred(Exception? exception)
+		{
+			if(exception is not null)
+				detail = $"unhandled {DescribeException(exception)}";
+			
+			Write(deferredElapsed);
+		}
+		
+		void Write(long elapsed)
+		{
 			// Outcome first — it is what the log viewer's detail column should lead with.
 			var logged = notes is null ? detail
 				: detail is null ? notes
 				: $"{detail}; {notes}"
 			;
 			
-			log.LogTool(name, sw.ElapsedMilliseconds, !failed, isMSBuild, estimatedTokens, subject, logged, cacheTag, responsePeek, args);
-			
-			onDispose();
+			log.LogTool(name, elapsed, !failed, isMSBuild, estimatedTokens, subject, logged, cacheTag, responsePeek, args);
 		}
 		
 		

@@ -205,6 +205,8 @@ builder.Services
 		, TypeInfoResolver = JsonSerializerOptions.Default.TypeInfoResolver
 		, WriteIndented = false
 	})
+	// An exception escaping a tool reaches the log with its type and message (#371).
+	.WithRequestFilters(filters => filters.AddCallToolFilter(RoslynMcp.Tools.RoslynMcpTool.UnhandledExceptionFilter))
 ;
 
 var host = builder.Build();
