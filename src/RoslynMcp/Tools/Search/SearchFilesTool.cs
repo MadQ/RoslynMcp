@@ -129,18 +129,19 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 					
 					var text  = await document.GetTextAsync(cancellationToken);
 					var lines = text.Lines;
+					var source = text.ToString();
 					
 					for(int i = 0; i < lines.Count; i++) {
 						
-						var lineText = lines[i].ToString();
+						var line = lines[i];
 						
-						if(rx.IsMatch(lineText)) {
+						if(rx.IsMatch(source.AsSpan(line.Start, line.Span.Length))) {
 							
 							matches.Add(new MatchResult {
 								
 								File = Path.GetRelativePath(rootPath, document.FilePath),
 								Line = i + 1,
-								Text = lineText.Trim()
+								Text = source.AsSpan(line.Start, line.Span.Length).Trim().ToString()
 							});
 						}
 					}
