@@ -45,6 +45,7 @@ static class HarnessGroups
 		Group("Link Write Sync",                           g => LinkWriteSyncTests.Build(g.Ctx)),
 		Group("Linked Files",                              g => LinkedFileTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Watcher Start-up",                          g => WatcherStartupTests.Build(g.Ctx)),
+		Group("Watcher Through Writes",                    g => WatcherThroughWritesTests.Build(g.Ctx)),
 		Group("Moved Directory",                           g => MovedDirectoryTests.Build(g.Ctx)),
 		Group("Hook Hint",                                 g => HookHintTests.Build(g.Ctx)),
 		Group("Claude Code Hook Setup",                    g => ClaudeHookSetupTests.Build(g.Ctx)),

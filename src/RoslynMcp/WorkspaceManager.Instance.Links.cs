@@ -14,7 +14,7 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		readonly record struct LinkedWrite(string Path, string Target, bool TargetExisted);
 		
-		// The linked path ApplyChangesWithFswSuppressed last synced on this thread. Lets
+		// The linked path ApplyChangesToDisk last synced on this thread. Lets
 		// WriteAndInvalidate see that its InvalidateFile call has already done the sync.
 		[ThreadStatic] static string? syncedByApply;
 		

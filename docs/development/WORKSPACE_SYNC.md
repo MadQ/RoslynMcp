@@ -42,7 +42,7 @@ Every mutation of a `.cs` file in the workspace flows through one of these paths
 
 Paths 1–5 are **owned writes**: the tool knows it is writing. For `.cs` files, all paths
 suppress spurious FSW events using the `ignoredPaths` counter (directly via `WriteAndInvalidate`
-or `ApplyChangesWithFswSuppressed`). For non-`.cs` files (paths 2, 4, 5), the write goes
+or `ApplyChangesToDisk`). For non-`.cs` files (paths 2, 4, 5), the write goes
 directly to disk and `InvalidateFile` classifies the path (see
 [`InvalidateFile` Contract](#invalidatefile-contract)): a tracked `AdditionalFiles` item (e.g. a
 `.txt` declared as one) applies incrementally via `WithAdditionalDocumentText` (#276); otherwise
@@ -262,7 +262,7 @@ workspace without links has an empty index and every lookup in it returns at onc
   a file is already a document and then adds one, from both a tool's write and the flush.
 - **Used in three places**, so that a change to a file refreshes every document that is that
   file, whoever made the change and under whichever name:
-  - `WriteAndInvalidate` and `ApplyChangesWithFswSuppressed`: a write through a link (step 4
+  - `WriteAndInvalidate` and `ApplyChangesToDisk`: a write through a link (step 4
     above), and a write **straight to a file that has links to it**, which nothing about the
     written path gives away.
   - `FlushPendingChanges`: the watcher reports a change under the file's own name only. The
@@ -330,11 +330,12 @@ There are **two** places a tool's write goes through, and both do this:
 
 - `WriteAndInvalidate` — whole-file writes (`roslyn_write_file`, untracked files, the apply
   step, the local-history restore).
-- `ApplyChangesWithFswSuppressed` — edits handed to the workspace as text or as a solution
+- `ApplyChangesToDisk` — edits handed to the workspace as text or as a solution
   (`roslyn_replace_in_file`, `roslyn_insert_lines`, `roslyn_replace_in_code` on a tracked
   document). `TryApplyChanges` writes each changed document at its own path, so a document
-  that is a link is written into the file behind it, with the watch set suspended. Without
-  the sync nothing would ever tell the workspace about that file.
+  that is a link is written into the file behind it. Both the written paths and the files
+  behind the links are counted in `ignoredPaths` for the length of the apply and the sync.
+  Without the sync nothing would ever tell the workspace about that file.
 
 The ordering rules above are unchanged: suppress before the write, invalidate inside the
 window, release in `finally`.
@@ -349,7 +350,7 @@ written. It classifies the path (issue #273):
 1. **Tracked source or additional document** (`GetDocumentIdsWithFilePath` non-empty, and
    `ClassifyTrackedDocument` says `Source` or `Additional`) → the new text is applied incrementally
    via `WithDocumentText` (source) or `WithAdditionalDocumentText` (additional, #276) +
-   `ApplyChangesWithFswSuppressed`. No reload. If the apply fails, a reload is flagged (logged
+   `ApplyChangesToDisk`. No reload. If the apply fails, a reload is flagged (logged
    `Reload — Flagged (incremental apply failed): <path>`). A defensive `catch(InvalidOperationException)`
    also flags a reload instead of propagating, for the theoretical case where a path's ids span
    mixed kinds across projects.
@@ -473,7 +474,7 @@ gone, the report is the only word of that.
 A workspace no longer holds one recursive `FileSystemWatcher` on its root. A watcher cannot
 exclude a directory, and on Linux a recursive one registers an inotify watch per directory below
 it, so a root watcher walked all of `node_modules` and `.git` on the first load — and again on
-every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
+every `TryApplyChanges`, which then toggled `EnableRaisingEvents` (it no longer does, #358).
 
 `WatchPlanner` picks the roots, in order of coverage:
 
@@ -527,8 +528,15 @@ every `TryApplyChanges`, which toggles `EnableRaisingEvents`.
   - One reload too many in a project: a listed source file that never existed looks deleted if
     something else wrote its directory during the load. The two cannot be told apart. It
     happens once, not on every start.
-- **Suppression is unchanged in meaning.** `ApplyChangesWithFswSuppressed` calls
-  `Suspend`/`Resume`, which disable and re-enable every watcher under the same ref-count rule.
+- **The watchers are never switched off (#358).** Until #358, `TryApplyChanges` was wrapped in
+  `Suspend`/`Resume`, which disabled every watcher and enabled it again. Whatever anyone else
+  changed in between went unseen, with nothing to catch up on it, and enabling a watcher is not
+  instant: on macOS it starts a new event stream, on Linux it adds an inotify watch per directory
+  again. Now RM's own writes are reported like any other. `ApplyChangesToDisk` counts the paths
+  it writes, and the files behind links, in `ignoredPaths` while the write and the sync run, so
+  a flush cannot start a second, stale apply in the middle of a long one. A report that arrives
+  afterwards is recognised in the flush — by the size in `rmOwnedWriteSizes`, by comparing the
+  text, or by the stamp in `ownedLinkTargets` — and applies nothing.
 - **Non-recursive roots adopt new directories.** A directory created or moved under one gets a
   recursive watcher, and the files already in it are reported — `mkdir` and the first write into it
   are milliseconds apart.

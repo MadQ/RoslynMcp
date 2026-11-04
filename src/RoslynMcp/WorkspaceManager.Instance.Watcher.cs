@@ -802,7 +802,7 @@ internal sealed partial class WorkspaceManager
 				}
 			}
 			
-			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
+			if(modified && !ApplyChangesToDisk(newSolution, currentSolution, ws))
 				FlagReload("incremental apply failed", applyFailed);
 
 			return reloadFlagged;
