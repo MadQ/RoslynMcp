@@ -88,6 +88,15 @@ static class DefaultWorkspaceTests
 		fx.Write("Lib/A/Dup.cs",         "namespace Lib.A;\n\ninternal class DupA { }\n");
 		fx.Write("Lib/B/Dup.cs",         "namespace Lib.B;\n\ninternal class DupB { }\n");
 		
+		// #376: a solution of one project with another, unlisted project beside it. One project is no
+		// reason to take any path for it.
+		var single = TestFixtures.NewAdhocDir("DefaultWorkspaceSingle");
+		
+		single.Write("Single.slnx", "<Solution>\n  <Project Path=\"Only/Only.csproj\" />\n</Solution>\n");
+		single.Write("Only/Only.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		single.Write("Only/OnlyType.cs", "namespace Only;\n\npublic class OnlyType\n{\n\tpublic int Value() => 1;\n}\n");
+		single.Write("Beside/Beside.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		
 		// Two names that differ only in case are two files only where the file system says so (Linux,
 		// not Windows or a default macOS volume) — probed rather than assumed from the platform. The
 		// pair lives in an Adhoc directory: MSBuildWorkspace on Linux loads only one of two Compile items
@@ -402,6 +411,61 @@ static class DefaultWorkspaceTests
 					$"expected CS0168 in Lib/Warn.cs both ways; got {data?.ToJsonString() ?? "null"} / {onFile?.ToJsonString() ?? "null"}");
 			}),
 			
+			// #376 review W1: a file no project has, with projectPath omitted. The default solution
+			// stays, and the tool that needs a compilation must say the file is not found — not that a
+			// solution was given where one project was needed.
+			new("DefaultWorkspace: a file in no project is 'not found', not a solution error", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_file_outline", new { filePath = "Lib/Gretter.cs" });
+				var error      = data?["error"]?.GetValue<string>() ?? "";
+				
+				return Verdict(ok && error.Contains("not found in any project"),
+					$"expected 'not found in any project', got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #376 review W2: one entry the workspace cannot find fails that entry, not the batch.
+			new("DefaultWorkspace: get_line_count reports a file in no project per entry", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_line_count", new { filePaths = "App/Consumer.cs,Lib/Nowhere.cs" });
+				var files      = data?["files"]?.AsArray() ?? [];
+				var counted    = files.Any(f => (f?["file"]?.GetValue<string>() ?? "").Contains("Consumer.cs") && f?["line_count"] is not null);
+				var missing    = files.Any(f => (f?["file"]?.GetValue<string>() ?? "").Contains("Nowhere.cs") && f?["error"] is not null);
+				
+				return Verdict(ok && data?["error"] is null && counted && missing,
+					$"expected Consumer.cs counted and Nowhere.cs with an error; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #376 review W3: an explicit solution with filePath is narrowed to the file's project,
+			// as the default solution is.
+			new("DefaultWorkspace: an explicit solution with filePath uses the file's project", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_file_outline", new { filePath = "Lib/Greeter.cs", projectPath = fx.PathOf("DefaultWs.slnx") });
+				var types      = data?["types"]?.AsArray().Select(t => t?["name"]?.GetValue<string>()).ToArray() ?? [];
+				
+				return Verdict(ok && types.Contains("Greeter"), $"expected the outline of Greeter, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #376 review W4: Shared.cs is App/Shared.cs and Lib/Shared.cs. Diagnosing it across the
+			// solution must be ambiguous_file, not the two files' diagnostics merged.
+			new("DefaultWorkspace: get_diagnostics with a solution and an ambiguous file name is ambiguous_file", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = fx.PathOf("DefaultWs.slnx"), filePath = "Shared.cs" });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file",
+					$"expected ambiguous_file, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #376 review W5: Beside.csproj lies under a solution of one project that does not list it.
+			// The solution's one project used to answer for it; the solution itself still names it.
+			new("DefaultWorkspace: a solution of one project still rejects a .csproj it does not list", async () => {
+				
+				var (ok, data)   = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Value", projectPath = single.PathOf("Beside/Beside.csproj") });
+				var (slnOk, sln) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Value", projectPath = single.PathOf("Single.slnx") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace" && slnOk && sln?["error"] is null,
+					$"expected project_not_in_workspace for Beside.csproj and a body through Single.slnx; got {data?.ToJsonString() ?? "null"} / {sln?.ToJsonString() ?? "null"}");
+			}),
+			
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it
 			// must reject "" even when a default exists — otherwise it would silently search the default
 			// solution's first project (App here), not fail as the schema promises.
@@ -448,6 +512,7 @@ static class DefaultWorkspaceTests
 			fx.Dispose();
 			empty.Dispose();
 			caseFx.Dispose();
+			single.Dispose();
 		});
 	}
 	

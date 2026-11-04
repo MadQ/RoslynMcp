@@ -838,7 +838,17 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	// found_projects carries the paths relative to the workspace root, not bare file names: the
 	// agent is to pass one of them back, and two projects may share a file name.
-	private static PathErrorResult ProjectNotInWorkspaceError(ProjectNotInWorkspaceException ex)
+	// A solution that a file-anchored call kept because no project has its file: that missing file is
+	// the answer, not the solution (see ToolScope.FileInNoProject).
+	private static ToolResult ProjectNotInWorkspaceError(ProjectNotInWorkspaceException ex)
+		=> ex.IsSolution && activeScope.Value?.FileInNoProject is { } file
+			? new ErrorResult(
+				$"File '{file}' not found in any project of the solution.",
+				"Check the path: relative to the workspace root, or a unique trailing part of it. A file created since the workspace loaded becomes a document once the watcher has seen it.")
+			: ProjectChoiceError(ex)
+	;
+	
+	private static PathErrorResult ProjectChoiceError(ProjectNotInWorkspaceException ex)
 		=> new(ex.Message, ProvidedPath: ex.RequestedPath, FoundProjects: ex.ProjectFiles)
 		{
 			Error = ex.IsSolution ? "solution_needs_project" : "project_not_in_workspace",
@@ -895,7 +905,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     yet be inferred when the argument is omitted. RMCP009 pins it to that parameter shape.
 	/// </summary>
 	protected const string ProjectPathDescription =
-		"Path to a .csproj, .sln/.slnx, project directory, or source file — absolute or relative (relative paths are resolved against the server's working directory). " +
+		"Path to a .csproj, project directory, or source file — absolute or relative (relative paths are resolved against the server's working directory). " +
+		"A .sln/.slnx only where the tool covers the whole solution; a tool that works on one project answers a solution with " +
+		"solution_needs_project and lists the .csproj files to choose from. " +
 		"REQUIRED - must be explicitly specified. " +
 		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj. " +
 		"NOTE: a directory or file path that cannot locate a .csproj falls back to AdhocWorkspace (no MSBuild, " +
@@ -908,8 +920,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected const string OptionalProjectPathDescription =
 		"Optional — omit to use the session's default workspace (a solution or project set by the server's --root). Otherwise a .csproj, .sln/.slnx, " +
-		"project directory, or source file path (relative paths resolve against the server's working directory). When omitted, a filePath " +
-		"argument selects the project in the default workspace that contains that file."
+		"project directory, or source file path (relative paths resolve against the server's working directory). For a solution — the default " +
+		"one or one given — a filePath argument selects the project that contains that file."
 	;
 	
 	/// <summary>
@@ -977,11 +989,34 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	{
 		var wasOmitted = string.IsNullOrWhiteSpace(projectPath);
 		
+		// Per file: a tool that resolves several files in one call must not carry one file's answer
+		// over to the next.
+		if(activeScope.Value is { } current)
+			current.FileInNoProject = null;
+		
 		if(!TryResolveProjectArg(projectPath, out resolved, out error))
 			
 			return false;
 		
-		if(!wasOmitted || string.IsNullOrWhiteSpace(filePath))
+		if(string.IsNullOrWhiteSpace(filePath))
+			
+			return true;
+		
+		// An explicit solution is narrowed to the file's project just like the default one: the tool
+		// works on one project, and a solution names none of them (#376). An explicit .csproj or
+		// directory is taken as given.
+		bool isSolution;
+		
+		try {
+			isSolution = ResolvedSolutionPath(resolved) is not null;
+		}
+		catch(Exception ex) when(!IsFatal(ex)) {
+			
+			// The tool's own resolution guard reports a bad path through its structured mapping.
+			isSolution = false;
+		}
+		
+		if(!wasOmitted && !isSolution)
 			
 			return true;
 		
@@ -1007,6 +1042,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				activeScope.Value?.Record($"→ {Path.GetFileName(owner)}");
 				resolved = owner;
 			}
+			
+			// No project has the file: a new file, a non-source file, or a wrong name. The solution
+			// stays (see ToolScope.FileInNoProject).
+			else if(activeScope.Value is { } scope && ResolvedSolutionPath(defaultPath) is not null)
+				scope.FileInNoProject = filePath;
 		}
 		catch(Exception ex) when(!IsFatal(ex)) {
 			

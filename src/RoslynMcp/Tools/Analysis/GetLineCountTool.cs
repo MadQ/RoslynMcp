@@ -27,8 +27,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		
 		// Not anchored to a file: the list can span projects, and every path is counted from the
 		// solution or disk. The not-on-disk compilation fallback below needs one project per path, which
-		// it resolves per entry when projectPath was omitted.
-		var omitted = string.IsNullOrWhiteSpace(projectPath);
+		// it resolves per entry when projectPath is a solution.
 		
 		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 			
@@ -83,11 +82,9 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			
 			if(IsCSharpSourcePath(normalized)) {
 				
-				// With projectPath omitted, the project that holds this file — a suffix-only name such as
-				// 'Dup.cs' may live in any project of the default solution, not only its default project.
-				var entryProject = projectPath;
-				
-				if(omitted && !TryResolveProjectArg(null, filePath, out entryProject, out var entryError)) {
+				// For a solution — the default one, or one given — the project that holds this file: a
+				// suffix-only name such as 'Dup.cs' may live in any of its projects (#376).
+				if(!TryResolveProjectArg(projectPath, filePath, out var entryProject, out var entryError)) {
 					
 					results.Add(new LineCountEntry(filePath, null, entryError is PathErrorResult { FoundIn: { } projects }
 						? $"ambiguous: in {string.Join(", ", projects.Select(Path.GetFileName))}"
@@ -95,9 +92,12 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 					continue;
 				}
 				
-				if(!TryGetCompilation(entryProject, out var compilation, out var error))
+				// One entry's failure is that entry's answer: the rest of the batch still counts.
+				if(!TryGetCompilation(entryProject, out var compilation, out var error)) {
 					
-					return scope.Error(error!);
+					results.Add(new LineCountEntry(filePath, null, error.Error ?? "project not resolved"));
+					continue;
+				}
 				
 				var tree = FindSyntaxTree(compilation, filePath, entryProject, rootPath, out var ambiguous);
 				

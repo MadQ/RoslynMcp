@@ -276,7 +276,14 @@ if(ServerArgs.Current.PreloadPaths.Length > 0) {
 
         try {
 
-            resolver.GetCompilation(path);
+            // A solution is loaded as one; its compilations are one per project, and none of them
+            // is the solution's (#376).
+            if(WorkspaceManager.IsSolutionPath(Path.GetFullPath(path)))
+                resolver.GetSolution(path);
+
+            else
+                resolver.GetCompilation(path);
+
             Console.Error.WriteLine($"✓ Loaded: {path}");
         }
         catch(Exception ex) {

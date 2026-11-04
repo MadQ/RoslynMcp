@@ -65,12 +65,19 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			
 			return scope.Error(rootError);
 		
-		// A solution is checked project by project, like the fast path of roslyn_build_project. A
-		// compilation is one project's: given the solution, it used to be the first project's
+		// A file is diagnosed in the project that compiles it. For a solution that is the project
+		// holding the file, found the way every file-anchored tool finds it — a short name that two
+		// projects' files end with is ambiguous_file, never the two files' diagnostics merged.
+		if(filePath is not null && !TryResolveProjectArg(projectPath, filePath, out projectPath, out var fileError))
+			
+			return scope.Error(fileError);
+		
+		// A whole solution is checked project by project, like the fast path of roslyn_build_project.
+		// A compilation is one project's: given the solution, it used to be the first project's
 		// alone, and its "0 errors" said nothing about the rest (#376).
 		string[] projects = [projectPath];
 		
-		if(ResolvedSolutionPath(projectPath) is not null) {
+		if(filePath is null && ResolvedSolutionPath(projectPath) is not null) {
 			
 			if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
 				
@@ -104,8 +111,6 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 					
 					return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
 				
-				// In a solution the file belongs to some of the projects only; a linked file to
-				// several, each of which diagnoses it in its own context.
 				if(tree is null)
 					continue;
 				
@@ -119,8 +124,10 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 				
 				var (analyzerDiags, note) = await RunAnalyzersAsync(project, compilation, cancellationToken);
 				
-				if(note is not null && !notes.Contains(note))
-					notes.Add(note);
+				// Across a solution a note is about one project: "no analyzer references" for one of
+				// them is not that no analyzer ran.
+				if(note is not null)
+					notes.Add(projects.Length > 1 ? $"{Path.GetFileNameWithoutExtension(project)}: {note}" : note);
 				
 				var inRoot = analyzerDiags.Where(d => IsUnderRoot(d, rootPath));
 				

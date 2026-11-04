@@ -444,21 +444,27 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
-		// The project a path names. A workspace with one project — any AdhocWorkspace, and a
-		// project without references — has no other answer to give, so every path gets it. In a
-		// workspace with several, a path that names none of them is an error rather than a guess:
-		// the first project used to answer for a solution, a misspelled .csproj, or a project the
-		// solution does not contain, and every lookup in it came back wrong with nothing to say so
-		// (#376).
+		// The project a path names. An AdhocWorkspace has one project and no project files, so every
+		// path gets it. In an MSBuild workspace a path that names none of its projects is an error
+		// rather than a guess: the first project used to answer for a solution, a misspelled
+		// .csproj, or a project the solution does not contain, and every lookup in it came back
+		// wrong with nothing to say so (#376).
 		ProjectId ResolveProjectId_NoLock(string? csprojPath)
 		{
-			if(csprojPath is null || !isMSBuild || projectMap.Count <= 1)
+			// No project file is known at all — nothing to choose between.
+			if(csprojPath is null || !isMSBuild || projectMap.Count == 0)
 				
 				return defaultProjectId;
 			
 			if(projectMap.TryGetValue(csprojPath, out var projectId))
 				
 				return projectId;
+			
+			// A solution of one project names that project. Any other .csproj — one the solution
+			// does not list, beside it in the tree — is still not it.
+			if(projectMap.Count == 1 && IsSolutionPath(csprojPath))
+				
+				return defaultProjectId;
 			
 			// By file name, for a path that names the same file differently (a link, a short name, a
 			// substituted drive). Only when exactly one project has that name: of two Tests.csproj,

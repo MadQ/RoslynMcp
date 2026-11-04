@@ -48,6 +48,15 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records the workspace mode so the log line can show MSB/ADH.</summary>
 		internal void SetWorkspaceMode(bool isMSBuild) => this.isMSBuild = isMSBuild;
 		
+		/// <summary>
+		///     The <c>filePath</c> of this call when it names no document of any project in the solution
+		///     the call resolved to (#376). The call keeps the solution — a tool that only reads or writes
+		///     the disk needs nothing more — and a compilation asked of it then fails as "file not
+		///     found", which is the actual problem, rather than as a solution given where one project
+		///     was needed.
+		/// </summary>
+		internal string? FileInNoProject { get; set; }
+		
 		/// <summary>Records whether a pagination cache hit or miss occurred.</summary>
 		internal void SetCacheTag(bool hit) => cacheTag = hit ? "HIT" : "MISS";
 		
