@@ -444,9 +444,15 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		// The project a path names. A workspace with one project — any AdhocWorkspace, and a
+		// project without references — has no other answer to give, so every path gets it. In a
+		// workspace with several, a path that names none of them is an error rather than a guess:
+		// the first project used to answer for a solution, a misspelled .csproj, or a project the
+		// solution does not contain, and every lookup in it came back wrong with nothing to say so
+		// (#376).
 		ProjectId ResolveProjectId_NoLock(string? csprojPath)
 		{
-			if(csprojPath is null)
+			if(csprojPath is null || !isMSBuild || projectMap.Count <= 1)
 				
 				return defaultProjectId;
 			
@@ -454,18 +460,25 @@ internal sealed partial class WorkspaceManager
 				
 				return projectId;
 			
-			// Match by filename only (agent may pass a relative path that doesn't match fully).
-			var fileName = Path.GetFileName(csprojPath)
+			// By file name, for a path that names the same file differently (a link, a short name, a
+			// substituted drive). Only when exactly one project has that name: of two Tests.csproj,
+			// neither is the answer.
+			var fileName = Path.GetFileName(csprojPath);
+			var byName   = projectMap
+				.Where(kvp => string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase))
+				.Take(2)
+				.ToArray()
 			;
-			var match    = projectMap.FirstOrDefault(kvp =>
-				string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase)
-			);
 			
-			if(match.Value is not null)
+			if(byName.Length == 1)
 				
-				return match.Value;
+				return byName[0].Value;
 			
-			return defaultProjectId;
+			throw new Tools.ProjectNotInWorkspaceException(
+				csprojPath,
+				[..projectMap.Keys.Order(StringComparer.OrdinalIgnoreCase).Select(path => Path.GetRelativePath(rootPath, path))],
+				IsSolutionPath(csprojPath))
+			;
 		}
 		
 		/// <summary>Returns the .csproj path for a given resolved path, or the first known .csproj.</summary>

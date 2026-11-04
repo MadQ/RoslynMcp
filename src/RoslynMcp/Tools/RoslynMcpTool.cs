@@ -360,6 +360,14 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return false;
 		}
+		catch(ProjectNotInWorkspaceException ex) {
+			
+			error = ProjectNotInWorkspaceError(ex);
+			
+			logger.LogError("TryGetCompilation", ex.Message);
+			
+			return false;
+		}
 		catch(InvalidProjectPathException ex) {
 			
 			error = InvalidPathError(ex);
@@ -438,6 +446,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		catch(MultipleProjectsFoundException ex) {
 			
 			error = MultipleProjectsError(ex);
+			logger.LogError("TryGetProject", ex.Message);
+			
+			return false;
+		}
+		catch(ProjectNotInWorkspaceException ex) {
+			
+			error = ProjectNotInWorkspaceError(ex);
 			logger.LogError("TryGetProject", ex.Message);
 			
 			return false;
@@ -525,6 +540,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		=> !IsFatal(ex)
 			&& ex is not (ProjectNotFoundException
 				or MultipleProjectsFoundException
+				or ProjectNotInWorkspaceException
 				or InvalidProjectPathException
 				or AmbiguousFileException
 				or ArgumentException);
@@ -762,6 +778,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				return MultipleProjectsError(e);
 			
+			case ProjectNotInWorkspaceException e:
+				logger.LogError(op, e.Message);
+				
+				return ProjectNotInWorkspaceError(e);
+			
 			case InvalidProjectPathException e:
 				logger.LogError(op, e.Message);
 				
@@ -814,6 +835,17 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			Hint  = "Specify the exact .csproj file path instead of the directory."
 		};
 	}
+	
+	// found_projects carries the paths relative to the workspace root, not bare file names: the
+	// agent is to pass one of them back, and two projects may share a file name.
+	private static PathErrorResult ProjectNotInWorkspaceError(ProjectNotInWorkspaceException ex)
+		=> new(ex.Message, ProvidedPath: ex.RequestedPath, FoundProjects: ex.ProjectFiles)
+		{
+			Error = ex.IsSolution ? "solution_needs_project" : "project_not_in_workspace",
+			Hint  = ex.IsSolution
+				? "Pass the .csproj of the project to work on, from found_projects — or omit projectPath where the tool allows it, to use the project that contains filePath."
+				: "Pass a .csproj from found_projects. Check the path for a typo, and that the project is part of the solution."
+		};
 	
 	private static PathErrorResult AmbiguousFileError(AmbiguousFileException ex)
 		=> new(ex.Message, FileName: ex.FileName, FoundIn: ex.CsprojPaths)

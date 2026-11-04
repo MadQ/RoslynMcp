@@ -65,6 +65,18 @@ static class DefaultWorkspaceTests
 		fx.Write("App/Consumer.cs", "namespace App;\n\npublic class Consumer\n{\n\tpublic string Use() => new Lib.Greeter().Greet();\n}\n");
 		fx.Write("Notes.md", "# notes\n");
 		
+		// #376: a warning (CS0168) in Lib, the solution's second project, for the solution-wide
+		// diagnostics test; and a project under the solution's directory that the solution does not
+		// list, so that a .csproj loads the solution and still names none of its projects.
+		fx.Write("Lib/Warn.cs", "namespace Lib;\n\ninternal class WarnHolder\n{\n\tvoid M()\n\t{\n\t\tint unused;\n\t}\n}\n");
+		fx.Write("Stray/Stray.csproj", """
+			<Project Sdk="Microsoft.NET.Sdk">
+			  <PropertyGroup>
+			    <TargetFramework>net10.0</TargetFramework>
+			  </PropertyGroup>
+			</Project>
+			""");
+		
 		// Same file name, different files, different projects — the Program.cs-in-every-project case.
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
@@ -347,6 +359,47 @@ static class DefaultWorkspaceTests
 				
 				return Verdict(ok && data?["drifted"] is not null && data?["error"] is null,
 					$"expected a drift report, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #376: a tool that works on one project, given the solution, used to answer for the
+			// solution's first project (App) — and Greet, which is in Lib, was "not found". It must
+			// say that it needs one project, and name them, so the agent can pass one back.
+			new("DefaultWorkspace: a solution passed to a one-project tool is an error that lists the projects", async () => {
+				
+				var (ok, data)   = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = fx.PathOf("DefaultWs.slnx") });
+				var found        = data?["found_projects"]?.AsArray().Select(p => p?.GetValue<string>() ?? "").ToArray() ?? [];
+				var (libOk, lib) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = libProject });
+				
+				return Verdict(ok
+					&& data?["error"]?.GetValue<string>() == "solution_needs_project"
+					&& found.Any(p => p.EndsWith("App.csproj")) && found.Any(p => p.EndsWith("Lib.csproj"))
+					&& libOk && lib?["error"] is null,
+					$"expected solution_needs_project naming App and Lib, and a body through Lib.csproj; got {data?.ToJsonString() ?? "null"} / {lib?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #376: Stray.csproj lies under the solution's directory, so it loads the solution — which
+			// does not contain it. It used to answer for the solution's first project.
+			new("DefaultWorkspace: a .csproj the loaded solution does not contain is an error", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", projectPath = fx.PathOf("Stray/Stray.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #376: diagnostics for a solution cover every project — the warning is in Lib, not in the
+			// first project — and a file-scoped check finds the file in whichever project holds it.
+			new("DefaultWorkspace: get_diagnostics for a solution checks every project", async () => {
+				
+				var solution         = fx.PathOf("DefaultWs.slnx");
+				var (ok, data)       = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = solution, severity = "warnings", take = 200 });
+				var (fileOk, onFile) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = solution, filePath = "Lib/Warn.cs", severity = "warnings" });
+				
+				static bool HasUnused(JsonNode? result)
+					=> result?["items"]?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "CS0168" && (item?["file"]?.GetValue<string>() ?? "").Contains("Warn.cs")) == true;
+				
+				return Verdict(ok && fileOk && HasUnused(data) && HasUnused(onFile),
+					$"expected CS0168 in Lib/Warn.cs both ways; got {data?.ToJsonString() ?? "null"} / {onFile?.ToJsonString() ?? "null"}");
 			}),
 			
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it

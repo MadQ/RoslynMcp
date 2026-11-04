@@ -25,7 +25,9 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		"Check your code for compiler errors and warnings — fast, in-process, no build needed. " +
 		"Use this after editing code to verify correctness before committing or continuing work. " +
 		"Returns a structured summary (error count, warning count) plus paginated individual items " +
-		"with code, file, line, and message. Pass take: 0 for a lightweight error-count-only check " +
+		"with code, file, line, and message. A .sln/.slnx projectPath checks every project in the solution " +
+		"(with filePath: the project or projects that compile that file). " +
+		"Pass take: 0 for a lightweight error-count-only check " +
 		"with no items returned. When take: 0, the response includes full counts but items is null — " +
 		"not an empty array. An empty array means items were requested but none matched; null means items were not requested. " +
 		"Covers C# type/symbol errors by default; set includeAnalyzers: true to also run the project's " +
@@ -59,55 +61,82 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			}
 			catch { /* malformed token — fall through to explicit params */ }
 		
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
-			
-			return scope.Error(error!);
-		
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
 		
-		IEnumerable<Diagnostic> diagnostics;
-		SyntaxTree?             tree = null;
+		// A solution is checked project by project, like the fast path of roslyn_build_project. A
+		// compilation is one project's: given the solution, it used to be the first project's
+		// alone, and its "0 errors" said nothing about the rest (#376).
+		string[] projects = [projectPath];
 		
-		if(filePath is not null) {
+		if(ResolvedSolutionPath(projectPath) is not null) {
 			
-			// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
-			tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
-			
-			if(ambiguous.Length > 0)
+			if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
 				
-				return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
+				return scope.Error(solutionError);
 			
-			// An empty result here would read as "this file is clean" for a mistyped path, a file of
-			// another project, or one the workspace has not loaded — the worst answer for the edit
-			// check this tool is used for (#366). Fail like every other file-based tool.
-			if(tree is null)
+			// Multi-targeted projects appear once per framework with the same file path.
+			projects = [..solution.Projects
+				.Select(p => p.FilePath)
+				.OfType<string>()
+				.Distinct(StringComparer.OrdinalIgnoreCase)];
+		}
+		
+		var diagnostics = new List<Diagnostic>();
+		var notes       = new List<string>();
+		var fileFound   = false;
+		
+		foreach(var project in projects) {
+			
+			if(!TryGetCompilation(project, out var compilation, out var error))
 				
-				return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
+				return scope.Error(error!);
 			
-			diagnostics = compilation.GetSemanticModel(tree).GetDiagnostics();
+			SyntaxTree? tree = null;
+			
+			if(filePath is not null) {
+				
+				// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
+				tree = FindSyntaxTree(compilation, filePath, project, rootPath, out var ambiguous);
+				
+				if(ambiguous.Length > 0)
+					
+					return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
+				
+				// In a solution the file belongs to some of the projects only; a linked file to
+				// several, each of which diagnoses it in its own context.
+				if(tree is null)
+					continue;
+				
+				fileFound = true;
+				diagnostics.AddRange(compilation.GetSemanticModel(tree).GetDiagnostics());
+			}
+			else
+				diagnostics.AddRange(compilation.GetDiagnostics().Where(d => IsUnderRoot(d, rootPath)));
+			
+			if(includeAnalyzers) {
+				
+				var (analyzerDiags, note) = await RunAnalyzersAsync(project, compilation, cancellationToken);
+				
+				if(note is not null && !notes.Contains(note))
+					notes.Add(note);
+				
+				var inRoot = analyzerDiags.Where(d => IsUnderRoot(d, rootPath));
+				
+				// Keep file-scoped queries file-scoped for analyzer output too.
+				diagnostics.AddRange(tree is null ? inRoot : inRoot.Where(d => d.Location.SourceTree == tree));
+			}
 		}
-		else
-			diagnostics = compilation.GetDiagnostics()
-				.Where(d => IsUnderRoot(d, rootPath))
-			;
 		
-		string? analyzerNote = null;
+		// An empty result here would read as "this file is clean" for a mistyped path, a file of
+		// another project, or one the workspace has not loaded — the worst answer for the edit
+		// check this tool is used for (#366). Fail like every other file-based tool.
+		if(filePath is not null && !fileFound)
+			
+			return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
 		
-		if(includeAnalyzers) {
-			
-			var (analyzerDiags, note) = await RunAnalyzersAsync(projectPath, compilation, cancellationToken);
-			
-			analyzerNote = note;
-			
-			var inRoot = analyzerDiags.Where(d => IsUnderRoot(d, rootPath));
-			
-			// Keep file-scoped queries file-scoped for analyzer output too.
-			diagnostics = tree is null
-				? diagnostics.Concat(inRoot)
-				: diagnostics.Concat(inRoot.Where(d => d.Location.SourceTree == tree));
-		}
+		string? analyzerNote = notes.Count > 0 ? string.Join(" ", notes) : null;
 		
 		// Deduplicate by identity tuple — multi-TFM workspaces can surface the same
 		// diagnostic from duplicate document entries across target frameworks.
