@@ -14,7 +14,7 @@ internal sealed class PaginationCache
 {
 	// Shape is the tool's own page-to-result function, stored with the items so every later page
 	// is built by the same code as the first — a Func<PaginatedResult<T>, object> for the T[] in Items.
-	record CachedResult(Array Items, Delegate Shape, DateTime LastAccess);
+	record CachedResult(Array Items, Delegate Shape, string? QueryKey, DateTime LastAccess);
 	
 	private readonly Dictionary<string, CachedResult> cache = new();
 	private readonly object syncRoot = new();
@@ -23,7 +23,7 @@ internal sealed class PaginationCache
 	private static readonly TimeSpan Ttl      = TimeSpan.FromSeconds(60);
 	
 	/// <summary>Stores a full result set with its shape function and returns the entry's id.</summary>
-	public string Store<T>(T[] items, Func<PaginatedResult<T>, object> shape)
+	public string Store<T>(T[] items, Func<PaginatedResult<T>, object> shape, string? queryKey)
 	{
 		var id = Guid.NewGuid().ToString("N")[..12];
 		
@@ -39,20 +39,20 @@ internal sealed class PaginationCache
 				cache.Remove(oldest.Key);
 			}
 			
-			cache[id] = new CachedResult(items, shape, DateTime.UtcNow);
+			cache[id] = new CachedResult(items, shape, queryKey, DateTime.UtcNow);
 		}
 		
 		return id;
 	}
 	
 	/// <summary>
-	///     Looks up an entry by id. False when it is unknown, expired, or holds a different element type;
-	///     a mismatch leaves the entry it belongs to untouched. The element type is the only check: an
-	///     id presented to another tool with the same element type still hits, and is served with the
-	///     shape of the tool that stored it (#316).
+	///     Looks up an entry by id and issuing tool/query identity. False when it is unknown, expired,
+	///     belongs to another query, or holds a different element type. A mismatch leaves the entry
+	///     it belongs to untouched; an unavailable identity never hits.
 	/// </summary>
 	public bool TryGet<T>(
 		string id,
+		string? queryKey,
 		out ReadOnlyMemory<T> items,
 		[NotNullWhen(true)] out Func<PaginatedResult<T>, object>? shape)
 	{
@@ -60,6 +60,7 @@ internal sealed class PaginationCache
 			
 			if(cache.TryGetValue(id, out var entry)
 				&& DateTime.UtcNow - entry.LastAccess < Ttl
+				&& queryKey is not null && entry.QueryKey == queryKey
 				&& entry.Items is T[] typed
 				&& entry.Shape is Func<PaginatedResult<T>, object> typedShape) {
 				

@@ -23,6 +23,15 @@ using System.Text.Json.Nodes;
 ///         the file the edit test touches, so the edit clears the cache without changing the
 ///         result set.
 ///     </para>
+///     <para>
+///         Query binding (#316) is checked with a changed primary pattern, an auxiliary file filter,
+///         and a different project containing the same marker in differently named files. Each must
+///         equal a fresh query at skip=2/take=2, both before and after a cache-clearing edit. A
+///         list-files token is also passed to list-types: both cache string arrays, but must retain
+///         their own result shape and values. Reusing the original token afterwards proves a
+///         mismatch did not consume or replace its entry. An explicit default take=50 deliberately
+///         keeps the token's size of two, documenting the omitted/default argument ambiguity.
+///     </para>
 /// </summary>
 static class PaginationTests
 {
@@ -31,9 +40,13 @@ static class PaginationTests
 		
 		var fx     = TestFixtures.NewMsBuildProject("Pagination");
 		var csproj = fx.Csproj!;
+		var otherProject = TestFixtures.NewMsBuildProject("PaginationOther");
 		
 		for(int i = 1; i <= 5; i++)
 			fx.Write($"Page{i}.cs", $"// PAGEMARK {i}\nclass Page{i} {{ }}\n");
+		
+		for(int i = 1; i <= 5; i++)
+			otherProject.Write($"Alternate{i}.cs", $"// PAGEMARK {i}\nclass Alternate{i} {{ }}\n");
 		
 		fx.Write("Other.cs", "class Other { }\n");
 		
@@ -81,6 +94,31 @@ static class PaginationTests
 			=> pass ? (true, "PASS") : (false, $"FAIL  ({failure})");
 		
 		static string Show(string[]? files) => files is null ? "wrong shape" : string.Join(",", files);
+		
+		async Task<(bool, string)> CheckQueryBinding()
+		{
+			if(token1 is null)
+				
+				return (false, "FAIL  (no token captured from the first-page test)");
+			
+			foreach(var query in new[] {
+				new { pattern = "^class Page", filePattern = (string?) null, projectPath = csproj },
+				new { pattern = "PAGEMARK", filePattern = (string?) "Other.cs", projectPath = csproj },
+				new { pattern = "PAGEMARK", filePattern = (string?) null, projectPath = otherProject.Csproj! }
+			}) {
+				
+				var expected = await Call("roslyn_search_files", new { query.pattern, query.filePattern, query.projectPath, skip = 2, take = 2 });
+				var actual = await Call("roslyn_search_files", new { query.pattern, query.filePattern, query.projectPath, page_token = token1 });
+				
+				if(expected?["matches"] is not JsonArray || actual?["matches"] is not JsonArray
+					|| !JsonNode.DeepEquals(expected["matches"], actual["matches"])
+					|| !JsonNode.DeepEquals(expected["total_matches"], actual["total_matches"]))
+					
+					return (false, $"FAIL  (query {query}: expected {expected}, got {actual})");
+			}
+			
+			return (true, "PASS");
+		}
 		
 		var tests = new List<TestCase> {
 			
@@ -173,6 +211,43 @@ static class PaginationTests
 						$"expected {page2[0]}; got {Show(files)}");
 				}),
 			
+			new("pagination: explicit default take retains the token's page size",
+				async () => {
+					
+					var data = await Call("roslyn_search_files", new { pattern = "PAGEMARK", take = 50, page_token = token1, projectPath = csproj });
+					
+					return Verdict(page2 is not null && Files(data)?.SequenceEqual(page2) == true,
+						$"expected {Show(page2)}; got {Show(Files(data))}");
+				}),
+			
+			new("pagination: cached token with changed pattern, filter or project re-runs the current query",
+				CheckQueryBinding),
+			
+			new("pagination: string-array token from another tool keeps the current tool's shape and cursor",
+				async () => {
+					
+					var first = await Call("roslyn_list_files", new { pattern = "*.cs", take = 2, projectPath = csproj });
+					var token = Token(first);
+					var expected = await Call("roslyn_list_types", new { skip = 2, take = 2, projectPath = csproj });
+					var actual = await Call("roslyn_list_types", new { page_token = token, projectPath = csproj });
+					
+					return Verdict(token is not null && actual?["types"] is JsonArray { Count: 2 }
+						&& JsonNode.DeepEquals(expected?["types"], actual["types"])
+						&& actual["files"] is null && actual["skip"]?.GetValue<int>() == 2
+						&& actual["take"]?.GetValue<int>() == 2,
+						$"expected {expected}, got {actual}");
+				}),
+			
+			new("pagination: mismatched calls leave the original cached query usable",
+				async () => {
+					
+					var data = await Call("roslyn_search_files", new { pattern = "PAGEMARK", page_token = token1, projectPath = csproj });
+					var next = Token(data);
+					
+					return Verdict(page2 is not null && Files(data)?.SequenceEqual(page2) == true && next == token2,
+						$"expected {Show(page2)} and token {token2}; got {Show(Files(data))} and {next}");
+				}),
+			
 			// Every edit clears the pagination cache. The token carries its position, so the query
 			// is re-run and the same second page comes back instead of an error or page 1.
 			new("pagination: token still returns the next page after an edit cleared the cache",
@@ -204,8 +279,11 @@ static class PaginationTests
 					
 					return Verdict(files?.Length == 5 && !HasMore(data), $"files={Show(files)}");
 				}),
+			
+			new("pagination: evicted token with changed pattern, filter or project matches the cached-mismatch behavior",
+				CheckQueryBinding),
 		};
 		
-		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });
+		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); return Task.CompletedTask; });
 	}
 }

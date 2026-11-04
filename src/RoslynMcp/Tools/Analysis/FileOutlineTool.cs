@@ -26,7 +26,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		[Description("Maximum number of types to return. Default: 20, max: 100.")] int take = 20,
 		[Description(PageTokenDescription)] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_file_outline", filePath, new { skip, take });
+		using var scope = BeginTool("roslyn_get_file_outline", filePath, new { projectPath, skip, take });
 		
 		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
 			

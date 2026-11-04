@@ -36,7 +36,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		[Description("Maximum members to return. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_type_members", typeName, new { memberKind, includeInherited, skip, take });
+		using var scope = BeginTool("roslyn_get_type_members", typeName, new { projectPath, memberKind, includeInherited, skip, take });
 		
 		if(!TryStripChatSymbolRef(ref typeName, out var refError))
 			
