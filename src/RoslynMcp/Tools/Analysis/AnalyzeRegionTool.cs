@@ -80,7 +80,7 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 		
 		var model = compilation.GetSemanticModel(tree);
 		
-		DataFlowAnalysis     dataFlow;
+		DataFlowAnalysis?    dataFlow;
 		ControlFlowAnalysis? controlFlow = null;
 		
 		// The resolver only hands over statements from one list, so a throw here would be a resolver
@@ -101,7 +101,8 @@ internal sealed partial class AnalyzeRegionTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Roslyn rejected the region: {ex.Message}"));
 		}
 		
-		if(!dataFlow.Succeeded || controlFlow is { Succeeded: false })
+		// Roslyn's overloads are annotated to return null; a missing analysis is a failed one.
+		if(dataFlow is not { Succeeded: true } || controlFlow is { Succeeded: false })
 			
 			return scope.Error(new ErrorResult(
 				$"Roslyn could not analyze lines {startLine}-{endLine}.",
