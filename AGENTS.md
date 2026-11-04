@@ -804,12 +804,20 @@ PowerShell session with known issues. Rules:
 dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0
 ```
 
-**Run a single section** (e.g., build-diagnostics tests only):
+**Run part of it (#367):**
 ```powershell
-dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --only-build-diag
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --quiet --only DefaultWorkspace
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --quiet --only "symbol info,analyze region" --test nullable
+dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --list
 ```
+- `--only <a,b>` builds and runs only the groups whose name contains one of the comma-separated parts (case-insensitive). Groups that are not selected are not even built, which matters: some start servers or create projects while being built. A part that matches no group stops the run with exit code 2 and the list of groups, so a typo cannot pass with zero tests.
+- `--test <text>` keeps the tests whose name contains the text, within the selected groups. Combine it with `--only`, or every group is still built.
+- `--list` prints the group names (`HarnessGroups.All`, in run order) and exits.
+- `--only-build-diag` is `--only validation`.
+- A filtered run says so on its summary line — `PASS  25 passed, 2 skipped (filtered: DefaultWorkspace)` — so it can never be reported as a full run. *Workspace Hygiene* audits the whole run's log, so it runs only in a full run, or when `--only` names it — and then its two whole-run audits skip, since over a few groups they would pass or fail on too little evidence.
+- The default (non-quiet) output prints each group's time and ends with the slowest groups.
 
-`--only-build-diag` runs just the `ValidationTests` group (the build-diagnostics tests); each group is its own file under `src/TestHarness/Tests/`.
+**Filtered or full.** Filter while iterating: a full run takes about three minutes, most of it loading projects and running `dotnet`, and one group usually takes seconds. Before pushing, run the full suite when the change touches code that many tools share — `RoslynMcpTool`, `WorkspaceManager`, `SecurityBoundary`, `FileWriter`, `PhysicalSolutionApplier`, … — because such code is covered by groups other than the one holding the new test. #362 changed a helper in `RoslynMcpTool` used by twelve tools, whose tests are spread over many groups. A change confined to one tool and its group can rely on its group locally: every pull request runs the full suite in CI (see *Pull requests and the release gate*).
 
 **Quiet output — AI agents: always use this.** `--quiet` prints nothing for a passing test, one line per failing test (with the server's stderr after them), and exactly one summary line at the end. The exit code is unchanged: 0 when everything passed, 1 otherwise.
 ```powershell
@@ -834,15 +842,17 @@ Do not filter the full output with a text match instead — passing tests with "
 ```
 - It copies the tree into the WSL filesystem (`~/.roslynmcp-wsl/tree`, without `bin`/`obj`/`.git`) and runs there; running from `/mnt/<drive>` would share build output with Windows and is slow.
 - It needs the SDK version `global.json` pins. If WSL lacks it the script says so; `-InstallSdk` installs it into `~/.roslynmcp-wsl/dotnet` (not on PATH, system SDK untouched).
-- Further harness arguments go through `-HarnessArgs '--only-build-diag'`.
+- Further harness arguments go through `-HarnessArgs`, one array element per argument: `-HarnessArgs '--only','dotnet runner,linked files'`. A single string such as `'--only "a,b"'` arrives as one unknown argument, and the harness rejects it with exit code 2.
 - Exit codes: 0 — all passed; 1 — the harness reported failures, or did not build on Linux; 2 — the harness could not be run (WSL, the distribution, `rsync` or the pinned SDK is missing, or a setup step failed).
 
-**When to run it:** the Windows run is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine (the script exits with code 2), say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either local run — see the release gate below.
+**When to run it:** the Windows run (full or filtered, see above) is the verify step for every change. Add the WSL run when the change is platform-sensitive — file permissions or modes, symlinks, path separators or case-sensitive names, process spawning, shell or command-line parsing, anything behind an `OperatingSystem.Is…` check — or when a test in the change returns early on Windows. Report it separately ("Windows 239/239, Linux 239/239"); if WSL is not available on the machine (the script exits with code 2), say that the platform-only tests did not run rather than reporting a plain pass. macOS is not covered by either local run — see below.
 
-**Release gate (#330).** `.github/workflows/harness.yml` runs the harness with `--quiet` on `windows-latest`, `ubuntu-latest` and `macos-latest`. `publish.yml` calls it, and the `publish` job needs it: nothing is published — not even a dry run reaches the packing step — unless all three pass. It does **not** run on every push or pull request (`build.yml` only builds); day to day the local runs above are the verify step. It runs in three ways:
-- as part of `publish.yml`;
-- by hand: Actions → *Test Harness* → *Run workflow*, on any branch (`gh workflow run harness.yml --ref <branch>`);
-- on a pull request that changes `harness.yml` itself.
+**Pull requests and the release gate (#330, #367).** `.github/workflows/harness.yml` runs the full harness with `--quiet`. It runs:
+- on every pull request to `dev` or `main`, on `windows-latest` and `ubuntu-latest`, unless the pull request changes only `*.md` files or `docs/`. A new push cancels the run still going for the previous one. macOS is left out because its runners queue for up to an hour;
+- as part of `publish.yml`, on all three operating systems including `macos-latest`. The `publish` job needs it: nothing is published — not even a dry run reaches the packing step — unless all three pass;
+- by hand: Actions → *Test Harness* → *Run workflow*, on any branch (`gh workflow run harness.yml --ref <branch>`), on all three.
+
+Pushes to a branch without a pull request run only `build.yml`, which builds.
 
 Run it by hand before merging a change that is platform-sensitive on macOS specifically (temp-directory paths, symlinks, file watching, case-insensitive-but-preserving names): macOS is the one platform no local run covers, and its first run found a boundary bug that Windows and Linux never hit.
 

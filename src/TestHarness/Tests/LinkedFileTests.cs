@@ -219,7 +219,7 @@ static class LinkedFileTests
 		// changed. reload_pending alone would be satisfied by any reload reason — a document
 		// reported as deleted, say — and the test is about this one.
 		bool FlaggedAsLinkChange(string fixtureLabel, string fileName)
-			=> WorkspaceHygieneTests.TryReadLog(serverLogDir, serverLogGlob, out var lines, out _)
+			=> ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var lines, out _)
 				&& lines.Any(line => line.Contains("Flagged (link changed)") && line.Contains(fixtureLabel) && line.Contains(fileName));
 		
 		// Polls until a reload is pending, for at most ten seconds.

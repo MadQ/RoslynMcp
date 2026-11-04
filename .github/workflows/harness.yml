@@ -2,10 +2,11 @@ name: Test Harness
 permissions:
   contents: read
 
-# The TestHarness on all three operating systems. It is the release gate: publish.yml calls this
-# workflow and will not publish unless it passes (#330). It deliberately does not run on every
-# push or pull request — day-to-day verification is the local run (Windows, plus WSL for
-# platform-sensitive changes; see AGENTS.md, "Testing").
+# The TestHarness, in full. It is the release gate: publish.yml calls this workflow and will not
+# publish unless it passes on all three operating systems (#330). It also runs on pull requests, on
+# Windows and Linux (#367), so a local run may be filtered to the groups a change touches
+# (--only / --test): every pull request still gets the whole suite here. macOS is left out of pull
+# requests because its runners queue for up to an hour; it runs at publish and by hand.
 on:
   # Called by publish.yml.
   workflow_call:
@@ -13,11 +14,17 @@ on:
   # Run by hand, on any branch: Actions -> Test Harness -> Run workflow.
   workflow_dispatch:
 
-  # A change to this file is tested by its own pull request.
   pull_request:
     branches: [ main, dev ]
-    paths:
-      - '.github/workflows/harness.yml'
+    # A change to docs alone cannot change a test result.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+
+# A new push to a pull request supersedes the run still going for the previous one.
+concurrency:
+  group: harness-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   harness:
@@ -27,8 +34,11 @@ jobs:
     strategy:
       # One operating system failing must not hide the result of the others.
       fail-fast: false
+      # Called through workflow_call, event_name is the caller's: publish.yml runs on
+      # workflow_dispatch only, so the release gate keeps all three. Giving publish.yml a
+      # pull_request trigger would drop macOS from the gate.
       matrix:
-        os: [ windows-latest, ubuntu-latest, macos-latest ]
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["windows-latest", "ubuntu-latest"]') || fromJSON('["windows-latest", "ubuntu-latest", "macos-latest"]') }}
 
     # A full run takes a few minutes. The limit only stops a hung run from holding a runner.
     timeout-minutes: 30

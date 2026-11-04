@@ -5,7 +5,13 @@ using System.Reflection;
 
 /// <summary>
 ///     Comprehensive test harness for RoslynMcp. Tests all tools against RoslynMcp itself (dogfooding).
-///     Usage: dotnet run --project TestHarness/TestHarness.csproj [-- --only-build-diag] [-- --quiet]
+///     Usage: dotnet run --project TestHarness/TestHarness.csproj [-- [--quiet] [--only &lt;groups&gt;] [--test &lt;text&gt;] [--list]]
+///     <para>
+///         <c>--only</c> takes comma-separated parts of group names (case-insensitive) and builds and runs
+///         only those groups; <c>--test</c> keeps the tests whose name contains the text; <c>--list</c>
+///         prints the group names. <c>--only-build-diag</c> is <c>--only validation</c>. See
+///         <see cref="HarnessGroups"/>.
+///     </para>
 ///     <para>
 ///         <c>--quiet</c> is for runs whose output is read by an agent or a script: a passing test
 ///         prints nothing, a failing one prints one line, and the run ends with exactly one summary
@@ -16,7 +22,24 @@ class Program
 {
 	static async Task<int> Main(string[] args)
 	{
-		var run = new HarnessRun(args);
+		// Before anything is built: listing the groups must be instant.
+		if(args.Contains("--list")) {
+			
+			foreach(var group in HarnessGroups.All)
+				Console.WriteLine(group.FullRunOnly ? $"{group.Name}  (full run only, or when named in --only)" : group.Name);
+			
+			return 0;
+		}
+		
+		// A selection that cannot be honoured is a usage error, not a test failure: exit code 2.
+		if(!HarnessGroups.TrySelect(args, out var selection, out var error)) {
+			
+			Console.WriteLine($"FAIL  {error}");
+			
+			return 2;
+		}
+		
+		var run = new HarnessRun(args, selection);
 		
 		// Quiet mode has one exit, and this is it. Whatever ends the run — a failing test, a failed
 		// server build, a server that dies during startup, an exception from anywhere — arrives
@@ -41,7 +64,7 @@ class Program
 ///     server down, and reports. The three steps are separate methods so that <c>Main</c> can
 ///     route every outcome of the first through the other two.
 /// </summary>
-sealed class HarnessRun(string[] args)
+sealed class HarnessRun(string[] args, HarnessSelection selection)
 {
 	// The server's stderr, held back in quiet mode: a passing run logs expected errors there too
 	// (a cancelled request, for one), so it is shown only when the run fails.
@@ -243,60 +266,52 @@ sealed class HarnessRun(string[] args)
 		
 		Running = "test group setup";
 		
-		var groups        = new List<TestGroup>();
-		var onlyBuildDiag = args.Contains("--only-build-diag");
-		var done          = 0;
+		// Only the selected groups are built: building one can start servers or create projects (#367).
+		var groups = new List<TestGroup>();
+		var inputs = new GroupInputs(ctx, serverLogDir, serverLogGlob, FullRun: selection.FilterNote is null);
+		var done   = 0;
 		
-		if(!onlyBuildDiag) {
+		foreach(var entry in selection.Groups) {
 			
-			groups.Add(DiscoveryTests.Build(ctx));
-			groups.Add(VsVersionPinTests.Build(ctx));
-			groups.Add(ProjectStyleDetectionTests.Build(ctx));
-			groups.Add(FindStringLiteralTests.Build(ctx));
-			groups.Add(FindUnusedTests.Build(ctx));
-			groups.Add(MemberBodyTests.Build(ctx));
-			groups.Add(TypeTests.Build(ctx));
-			groups.Add(NavigationTests.Build(ctx));
-			groups.Add(CallGraphTests.Build(ctx));
-			groups.Add(AnalyzeRegionTests.Build(ctx));
-			groups.Add(SymbolInfoTests.Build(ctx));
-			groups.Add(CodeGenerationTests.Build(ctx));
-			groups.Add(FileContentTests.Build(ctx));
-			groups.Add(CodeFixTests.Build(ctx));
+			Running = $"{entry.Name} › setup";
+			
+			var group = await entry.Build(inputs);
+			
+			if(selection.TestFilter is { } filter) {
+				
+				group = group with { Tests = [.. group.Tests.Where(t => t.Name.Contains(filter, StringComparison.OrdinalIgnoreCase))] };
+				
+				// Built, so its fixtures exist: a group left with no tests is torn down at once.
+				if(group.Tests.Count == 0) {
+					
+					if(group.Teardown is not null)
+						await group.Teardown();
+					
+					continue;
+				}
+			}
+			
+			groups.Add(group);
 		}
 		
-		groups.Add(ValidationTests.Build(ctx));
-		
-		if(!onlyBuildDiag) {
+		if(groups.Count == 0) {
 			
-			groups.Add(RefactoringTests.Build(ctx));
-			groups.Add(EditingTests.Build(ctx));
-			groups.Add(await ReloadFlaggingTests.BuildAsync(ctx));
-			groups.Add(PaginationTests.Build(ctx));
-			groups.Add(LinkedWorkspaceTests.Build(ctx));
-			groups.Add(FileRewriteTests.Build(ctx));
-			groups.Add(ApplyLinkTests.Build(ctx));
-			groups.Add(LinkWriteSyncTests.Build(ctx));
-			groups.Add(LinkedFileTests.Build(ctx, serverLogDir, serverLogGlob));
-			groups.Add(WatcherStartupTests.Build(ctx));
-		groups.Add(MovedDirectoryTests.Build(ctx));
-			groups.Add(HookHintTests.Build(ctx));
-			groups.Add(ClaudeHookSetupTests.Build(ctx));
-			groups.Add(await IgnoredDirectoryTests.BuildAsync(ctx));
-			groups.Add(await IncrementalAdditionalDocTests.BuildAsync(ctx));
-			groups.Add(await LocalHistoryTests.BuildAsync(ctx));
-			groups.Add(await DefaultWorkspaceTests.BuildAsync(ctx));
+			Stop($"no test matched the selection ({selection.FilterNote})");
 			
-			// Last on purpose: it reads the server log written by everything above.
-			groups.Add(WorkspaceHygieneTests.Build(ctx, serverLogDir, serverLogGlob));
+			return;
 		}
 		
 		total = groups.Sum(g => g.Tests.Count);
+		
+		// Per group, tests and teardown: the numbers #367 needed and the output never gave.
+		var timings = new List<(string header, TimeSpan elapsed)>(groups.Count);
 		
 		foreach(var group in groups) {
 			
 			Info($"\n{group.Header}");
 			Info("─────────────────────────────────────────────────────────────");
+			
+			var clock = Stopwatch.StartNew();
 			
 			try {
 				
@@ -334,6 +349,9 @@ sealed class HarnessRun(string[] args)
 					await group.Teardown()
 					;
 			}
+			
+			timings.Add((group.Header, clock.Elapsed));
+			Info($"  ({clock.Elapsed.TotalSeconds:0.0} s)");
 		}
 		
 		// -- Summary (default mode) -------------------------------------------------------------
@@ -368,6 +386,15 @@ sealed class HarnessRun(string[] args)
 				Console.WriteLine($"      {msg}");
 			}
 		}
+		
+		// A partial run must never read like a full one.
+		if(selection.FilterNote is { } note)
+			Console.WriteLine($"\n  ({note})");
+		
+		Console.WriteLine("\n  Slowest groups:");
+		
+		foreach(var (header, elapsed) in timings.OrderByDescending(t => t.elapsed).Take(5))
+			Console.WriteLine($"    {elapsed.TotalSeconds,6:0.0} s  {header}");
 		
 		Console.WriteLine();
 	}
@@ -421,6 +448,10 @@ sealed class HarnessRun(string[] args)
 		var failed    = results.Count - passed - skipped;
 		var succeeded = failed == 0 && stopReason is null;
 		var skipNote  = skipped > 0 ? $", {skipped} skipped" : "";
+		
+		// A filtered run says so on the one line an agent or a script reads (#367).
+		if(selection.FilterNote is { } note)
+			skipNote += $" ({note})";
 		
 		if(Quiet) {
 			
