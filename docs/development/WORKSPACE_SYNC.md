@@ -27,6 +27,33 @@ that were already applied (by `TryApplyChanges`) but not yet observed by the nex
 
 ---
 
+## Source drift after owned writes (#299)
+
+`roslyn_check_drift` uses the last workspace sync plus a two-second tolerance as a cheap
+mtime filter, then compares each newer source file with its document in the non-reloading
+solution snapshot. A newer timestamp alone does not mean stale source: an owned write has
+already updated that document, even before its watcher event is flushed. A timestamp-only
+touch is likewise not drift. Missing files still count as drift; an unreadable candidate
+returns an explicit comparison error rather than an all-clear.
+
+The probe deliberately does **not** call `MarkSynced()` after a successful owned apply.
+That clock belongs to the whole workspace, and advancing it for one document could hide
+an unrelated external write that the watcher missed. Comparing the candidate's text fixes
+the false positive without acknowledging any other file.
+
+The original issue also identified the window where `ApplyChangesWithFswSuppressed`
+disabled every watcher. #358 already removed that window: `ApplyChangesToDisk` keeps
+watchers live, holds reports for files being applied, and compares their content afterwards.
+This fix preserves that behavior rather than reintroducing per-write watcher suppression.
+
+The existing probe limits remain: files whose mtimes do not exceed the global cutoff are
+not compared, and brand-new files are not in the snapshot. `reload_pending` is the signal
+for an addition awaiting reload. The *Source Drift* harness group explicitly compiles its
+temporary fixture files under `obj`, outside watcher classification, to verify both owned
+edits and genuinely missed external edits without relying on the debounce race.
+
+---
+
 ## The Six Write Paths
 
 Every mutation of a `.cs` file in the workspace flows through one of these paths:

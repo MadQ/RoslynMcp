@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -20,8 +21,9 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"roslyn_get_diagnostics reports errors you do not believe. Checks three independent axes. " +
 		"(1) Source drift: files whose on-disk state changed without the workspace noticing — a " +
 		"FileSystemWatcher miss (network drives, event buffer overflow, excluded directories). A healthy " +
-		"workspace reports drifted: false; changes made within the last ~2 seconds may still be syncing and " +
-		"are not reported. (2) Reference health: workspace_healthy is false when a project loaded with zero " +
+		"workspace reports drifted: false. Newer files are compared with workspace text, so the server's own " +
+		"edits and timestamp-only touches are not drift. Changes within the sync clock's ~2-second tolerance " +
+		"are not compared. (2) Reference health: workspace_healthy is false when a project loaded with zero " +
 		"metadata references, which happens when a contended MSBuild design-time build silently drops them. " +
 		"That state makes symbol results wrong-but-plausible and makes roslyn_get_diagnostics report phantom " +
 		"CS0246/CS0234 errors for code that builds fine — source can be perfectly in sync while this is broken. " +
@@ -32,7 +34,8 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"Any of these is fixed by roslyn_respawn; drift alone can also be cleared by re-saving the files " +
 		"through roslyn editing tools. last_unhealthy_load is present when a dropped-reference load happened " +
 		"at any point, even if the workspace has since recovered.")]
-	public object CheckDrift([Description(OptionalProjectPathDescription)] string? projectPath = null)
+	public async Task<object> CheckDrift(CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_check_drift", null);
 		
@@ -74,8 +77,34 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			
 			checkedCount++;
 			
+			// An own edit can precede its watcher flush. Advancing the global clock for it
+			// would also hide unrelated missed writes, so confirm only this document's text.
+			var differs = !File.Exists(path);
+			
+			if(!differs && File.GetLastWriteTimeUtc(path) > cutoff) {
+				
+				try {
+					
+					using var stream = File.OpenRead(path);
+					var onDisk       = SourceText.From(stream, FileWriter.Utf8NoBom);
+					var inWorkspace  = await document.GetTextAsync(cancellationToken);
+					
+					differs = !onDisk.ContentEquals(inWorkspace);
+				}
+				catch(FileNotFoundException) {
+					differs = true;
+				}
+				catch(DirectoryNotFoundException) {
+					differs = true;
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					
+					return scope.Error(new ErrorResult($"Cannot compare '{path}' with workspace text: {ex.Message}"));
+				}
+			}
+			
 			// Missing counts as drift too — the workspace still serves the deleted file's text.
-			if(!File.Exists(path) || File.GetLastWriteTimeUtc(path) > cutoff)
+			if(differs)
 				drifted.Add(TryMakeRelative(path, rootPath) ?? path);
 		}
 		
