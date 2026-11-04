@@ -708,6 +708,18 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			Hint  = "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
 		};
 	
+	/// <summary>
+	///     The <c>ambiguous_file</c> error for a <paramref name="filePath"/> that names several files of one
+	///     compilation (see <see cref="FindSyntaxTree"/>). <c>found_in</c> lists the files, not projects: a
+	///     different projectPath would not help, a longer filePath does.
+	/// </summary>
+	protected static PathErrorResult AmbiguousSourceFileError(string filePath, string[] candidates)
+		=> new($"'{filePath}' matches {candidates.Length} files in the project.", FileName: filePath, FoundIn: candidates)
+		{
+			Error = "ambiguous_file",
+			Hint  = "Pass filePath relative to the workspace root, or enough of its directories to name one file (e.g. 'Tools/Program.cs')."
+		};
+	
 	private static PathErrorResult InvalidPathError(InvalidProjectPathException ex)
 		=> new(ex.Message, ProvidedPath: ex.Path)
 		{
@@ -1369,16 +1381,108 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
-	///     Finds a SyntaxTree in the compilation by relative file path suffix match.
-	///     Handles path normalization (forward slashes → platform separator).
+	///     Finds the SyntaxTree <paramref name="filePath"/> names in the compilation. An absolute path, or a
+	///     relative one that resolves under <paramref name="rootPath"/>, matches that exact file first; otherwise
+	///     the path is matched as a suffix anchored at a segment boundary. Of several suffix matches, the one
+	///     the path names relative to the directory of <paramref name="projectPath"/>'s project wins; with none,
+	///     the result is <c>null</c> with the matches' root-relative paths in <paramref name="ambiguous"/>:
+	///     taking the first would hand the tool <c>Tools/Program.cs</c> when the caller meant the project's
+	///     own <c>Program.cs</c> (#362).
+	///     Forward slashes are accepted on every platform.
 	/// </summary>
-	protected static SyntaxTree? FindSyntaxTree(Compilation compilation, string filePath)
+	protected SyntaxTree? FindSyntaxTree(Compilation compilation, string filePath, string projectPath, string rootPath, out string[] ambiguous)
 	{
+		ambiguous = [];
+		
 		var normalized = NormalizePath(filePath);
 		
-		return compilation.SyntaxTrees
-			.FirstOrDefault(t => HasPathSuffix(t.FilePath, normalized))
-		;
+		if(normalized.Length == 0)
+			
+			return null;
+		
+		var fromRoot = ExactPath(rootPath, normalized);
+		
+		SyntaxTree?       first = null;
+		List<SyntaxTree>? more  = null;
+		
+		foreach(var tree in compilation.SyntaxTrees) {
+			
+			// An exact name follows the platform's case rules: on Linux, program.cs and Program.cs are two
+			// files. Suffix matching below stays lenient, so a case clash there is reported as ambiguous.
+			if(fromRoot is not null && SecurityBoundary.PathComparer.Equals(tree.FilePath, fromRoot))
+				
+				return tree;
+			
+			if(!HasPathSuffix(tree.FilePath, normalized))
+				continue;
+			
+			if(first is null)
+				first = tree;
+			else
+				(more ??= [first]).Add(tree);
+		}
+		
+		if(first is not null && more is null)
+			
+			return IsOtherCaseOfMissingFile(first.FilePath, normalized) ? null : first;
+		
+		// The workspace root of a project inside a solution is the solution's directory, so a file at the
+		// project's own root is also named exactly by its project-relative path. That decides between
+		// several suffix matches, and finds a spelling that is no raw suffix at all ('./Program.cs',
+		// 'Tools/../Program.cs'). Looked up only here: one suffix match needs no anchor.
+		if(!Path.IsPathRooted(normalized) && ProjectDirectory(projectPath) is { } projectDir
+		   && ExactPath(projectDir, normalized) is { } fromProject
+		   && (more ?? compilation.SyntaxTrees).FirstOrDefault(t => SecurityBoundary.PathComparer.Equals(t.FilePath, fromProject)) is { } projectRelative)
+			
+			return projectRelative;
+		
+		if(more is null)
+			
+			return null;
+		
+		ambiguous = [.. more.Select(t => TryMakeRelative(t.FilePath, rootPath) ?? t.FilePath)];
+		
+		return null;
+	}
+	
+	// True when treePath matches suffix only by ignoring case, on a file system where that makes them two
+	// files, and the spelling asked for exists: then the requested file is not in the compilation —
+	// MSBuildWorkspace on Linux loads only one of two Compile items whose paths differ only in case — and
+	// answering about treePath would answer about a different file. Only an existence check: the path is
+	// treePath itself, respelled in the case of the request.
+	static bool IsOtherCaseOfMissingFile(string treePath, string suffix)
+	{
+		if(treePath.EndsWith(suffix, StringComparison.Ordinal))
+			
+			return false;
+		
+		var requested = string.Concat(treePath.AsSpan(0, treePath.Length - suffix.Length), suffix);
+		
+		return !SecurityBoundary.PathComparer.Equals(requested, treePath) && File.Exists(requested);
+	}
+	
+	// The full path relativePath names under directory, or null when it is not a valid path. A rooted
+	// path is returned as is.
+	static string? ExactPath(string directory, string relativePath)
+	{
+		try {
+			return Path.GetFullPath(Path.IsPathRooted(relativePath) ? relativePath : Path.Combine(directory, relativePath));
+		}
+		catch(Exception ex) when(ex is ArgumentException or NotSupportedException or PathTooLongException) {
+			return null;
+		}
+	}
+	
+	// The directory of the .csproj projectPath resolves to, or null for an Adhoc project (no file) or a
+	// resolution failure. The caller has already resolved the compilation, so this is the cached project.
+	string? ProjectDirectory(string projectPath)
+	{
+		try {
+			return workspace.GetProject(projectPath).FilePath is { } csproj ? Path.GetDirectoryName(csproj) : null;
+		}
+		catch(Exception ex) when(!IsFatal(ex)) {
+			return null;
+		}
 	}
 	
 	// A suffix must end on a path segment boundary: without one, 'Tool.cs' would silently name
@@ -1403,12 +1507,6 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected static bool IsCSharpSourcePath(string path) =>
 		string.Equals(Path.GetExtension(path), ".cs", StringComparison.OrdinalIgnoreCase);
-	
-	/// <summary>
-	///     Normalizes a file path for cross-platform compatibility by converting forward slashes
-	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
-	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.
-	/// </summary>
 	
 	/// <summary>
 	///     Builds a compiled regex for literal pattern matching, with CRLF-agnostic newline handling.
@@ -1493,6 +1591,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		;
 	}
 	
+	/// <summary>
+	///     Normalizes a file path for cross-platform compatibility by converting forward slashes
+	///     to the platform directory separator. Agents commonly supply Unix-style paths; this
+	///     ensures suffix matching against Roslyn's <see cref="SyntaxTree.FilePath"/> works on Windows.
+	/// </summary>
 	protected static string NormalizePath(string filePath)
 		=> filePath.Replace('/', Path.DirectorySeparatorChar);
 	
@@ -1634,16 +1737,17 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
-	///     Resolves the symbol at a 1-based line/column in a file of this compilation — the
-	///     declared symbol at the position, or the referenced one. Position resolution pinpoints
-	///     overloads, locals, and parameters that name-based lookup cannot distinguish. Works from
-	///     the compilation (not a Document), so the result belongs to the same snapshot — required
-	///     by Renamer — and Adhoc workspaces are covered. Returns null when the file, position, or
-	///     symbol cannot be resolved.
+	///     Resolves the symbol at a 1-based line/column in <paramref name="tree"/> — the declared symbol
+	///     at the position, or the referenced one. Position resolution pinpoints overloads, locals, and
+	///     parameters that name-based lookup cannot distinguish. Works from the compilation (not a
+	///     Document), so the result belongs to the same snapshot — required by Renamer — and Adhoc
+	///     workspaces are covered. The caller finds the tree with <see cref="FindSyntaxTree"/>, so an
+	///     ambiguous filePath is its error to report. Returns null when the tree is null, or the position
+	///     or symbol cannot be resolved.
 	/// </summary>
-	protected static async Task<ISymbol?> FindSymbolAtPosition(Compilation compilation, string filePath, int line, int column, CancellationToken cancellationToken)
+	protected static async Task<ISymbol?> FindSymbolAtPosition(Compilation compilation, SyntaxTree? tree, int line, int column, CancellationToken cancellationToken)
 	{
-		if(FindSyntaxTree(compilation, filePath) is not { } tree)
+		if(tree is null)
 			
 			return null;
 		

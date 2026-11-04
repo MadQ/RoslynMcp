@@ -69,6 +69,32 @@ static class DefaultWorkspaceTests
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
 		
+		// Same trailing path twice in one project (#362): a root file and a nested one, and two nested
+		// ones with nothing at the root. The project-level check above cannot see either case.
+		fx.Write("App/Program.cs",       "namespace App;\n\ninternal class RootProgram { }\n");
+		fx.Write("App/Tools/Program.cs", "namespace App.Tools;\n\ninternal class ToolsProgram { }\n");
+		fx.Write("Lib/A/Dup.cs",         "namespace Lib.A;\n\ninternal class DupA { }\n");
+		fx.Write("Lib/B/Dup.cs",         "namespace Lib.B;\n\ninternal class DupB { }\n");
+		
+		// Two names that differ only in case are two files only where the file system says so (Linux,
+		// not Windows or a default macOS volume) — probed rather than assumed from the platform. The
+		// pair lives in an Adhoc directory: MSBuildWorkspace on Linux loads only one of two Compile items
+		// whose paths differ only in case (MSBuild itself lists both), so a project could not hold them.
+		var caseFx = TestFixtures.NewAdhocDir("DefaultWorkspaceCase");
+		
+		caseFx.Write("Case/Name.cs", "namespace Probe;\n\ninternal class UpperName { }\n");
+		
+		var caseSensitive = !File.Exists(caseFx.PathOf("Case/name.cs"));
+		
+		if(caseSensitive) {
+			
+			caseFx.Write("Case/name.cs", "namespace Probe;\n\ninternal class LowerName { }\n");
+			
+			// The same pair in an MSBuild project, where only one of the two is loaded.
+			fx.Write("App/Case/Name.cs", "namespace App.Case;\n\ninternal class UpperName { }\n");
+			fx.Write("App/Case/name.cs", "namespace App.Case;\n\ninternal class LowerName { }\n");
+		}
+		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
@@ -98,6 +124,28 @@ static class DefaultWorkspaceTests
 		
 		static (bool pass, string message) Verdict(bool pass, string failure)
 			=> pass ? (true, "PASS") : (false, $"FAIL  ({failure})");
+		
+		// Outlines filePath and checks it named the expected file: the type it declares, or ambiguous_file
+		// with both candidates when expectType is null. projectPath null exercises the default workspace.
+		async Task<(bool pass, string message)> AssertOutline(string filePath, string? projectPath, string? expectType)
+		{
+			
+			var (ok, data) = projectPath is null
+				? await Call(rootedCtx, "roslyn_get_file_outline", new { filePath })
+				: await Call(rootedCtx, "roslyn_get_file_outline", new { filePath, projectPath });
+			
+			if(expectType is null)
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file" && data?["found_in"]?.AsArray().Count == 2,
+					$"expected ambiguous_file naming both files, got {data?.ToJsonString() ?? "null"}");
+			
+			string?[] types = [.. data?["types"]?.AsArray().Select(t => t?["name"]?.GetValue<string>()) ?? []];
+			
+			return Verdict(ok && types is [var only] && only == expectType, $"expected type {expectType}, got {data?.ToJsonString() ?? "null"}");
+		}
+		
+		var appProject = fx.PathOf("App/App.csproj");
+		var libProject = fx.PathOf("Lib/Lib.csproj");
 		
 		var tests = new List<TestCase> {
 			
@@ -135,6 +183,122 @@ static class DefaultWorkspaceTests
 				
 				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file" && found == 2,
 					$"expected ambiguous_file naming both projects, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #362: the name of a file at the project root is exact, so it must not resolve to a nested
+			// file with the same trailing path. With projectPath omitted, the default workspace narrows to
+			// App first and the lookup then runs against App's root — both routes must agree.
+			new("DefaultWorkspace: a root file name beats a nested file with the same name (default)",
+				() => AssertOutline("Program.cs", null, "RootProgram")),
+			
+			new("DefaultWorkspace: a root file name beats a nested file with the same name (explicit)",
+				() => AssertOutline("Program.cs", appProject, "RootProgram")),
+			
+			new("DefaultWorkspace: a nested path still selects the nested file",
+				() => AssertOutline("Tools/Program.cs", appProject, "ToolsProgram")),
+			
+			// Two nested files with nothing at the root: no exact match, so a bare name is ambiguous
+			// within one project — the cross-project check cannot catch it.
+			new("DefaultWorkspace: a name matching two nested files is ambiguous (default)",
+				() => AssertOutline("Dup.cs", null, null)),
+			
+			new("DefaultWorkspace: a name matching two nested files is ambiguous (explicit)",
+				() => AssertOutline("Dup.cs", libProject, null)),
+			
+			new("DefaultWorkspace: a longer path picks one of two nested files (default)",
+				() => AssertOutline("A/Dup.cs", null, "DupA")),
+			
+			new("DefaultWorkspace: a longer path picks one of two nested files (explicit)",
+				() => AssertOutline("B/Dup.cs", libProject, "DupB")),
+			
+			// The project-relative exact path is canonical, so spellings that are no raw suffix of any file
+			// still name the project's root file.
+			new("DefaultWorkspace: './Program.cs' and 'Tools/../Program.cs' name the project's root file", async () => {
+				
+				var dot  = await AssertOutline("./Program.cs",        appProject, "RootProgram");
+				var back = await AssertOutline("Tools/../Program.cs", appProject, "RootProgram");
+				
+				return dot.pass ? back : dot;
+			}),
+			
+			// get_line_count takes a list that can span projects, so with projectPath omitted each path not
+			// on disk finds its own project: Dup.cs lives in Lib, not in the solution's default project App.
+			new("DefaultWorkspace: get_line_count resolves each entry's project when projectPath is omitted", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_line_count", new { filePaths = "Dup.cs,A/Dup.cs" });
+				var files      = data?["files"]?.AsArray();
+				var dup        = files?[0]?["error"]?.GetValue<string>() ?? "";
+				var counted    = files?[1]?["line_count"] is not null;
+				
+				return Verdict(ok && dup.Contains("ambiguous") && counted,
+					$"expected Dup.cs ambiguous and A/Dup.cs counted, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// A positional rename reports the ambiguous file with the standard structured error, not as text
+			// inside a message — a client must be able to read error and found_in.
+			new("DefaultWorkspace: preview_rename at a position in an ambiguous file returns ambiguous_file", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_preview_rename", new {
+					symbolName  = "DupA",
+					newName     = "DupRenamed",
+					projectPath = libProject,
+					filePath    = "Dup.cs",
+					line        = 3,
+					column      = 16
+				});
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "ambiguous_file" && data?["found_in"]?.AsArray().Count == 2,
+					$"expected a structured ambiguous_file, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// An exact name follows the file system's case rules: where Name.cs and name.cs are two files,
+			// each name selects its own — a case-insensitive comparison would take whichever came first.
+			new("DefaultWorkspace: an exact name is case-sensitive where the file system is", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				var upper = await AssertOutline("Case/Name.cs", caseFx.Dir, "UpperName");
+				var lower = await AssertOutline("Case/name.cs", caseFx.Dir, "LowerName");
+				
+				if(upper.pass && lower.pass)
+					
+					return upper;
+				
+				// Says whether the compilation holds both files at all, which the outline cannot tell apart
+				// from a lookup that picked the wrong one.
+				var (_, types) = await Call(rootedCtx, "roslyn_list_types", new { projectPath = caseFx.Dir, namespaceFilter = "Probe" });
+				
+				return (false, $"{(upper.pass ? lower : upper).message}; types in Probe: {types?.ToJsonString() ?? "null"}");
+			}),
+			
+			// MSBuildWorkspace on Linux loads one of two files whose names differ only in case. The other
+			// name must then be "not found", never an answer about the loaded file — which one is loaded is
+			// Roslyn's choice, so each name may resolve or be missing, but never to the other class.
+			new("DefaultWorkspace: a case variant missing from the compilation is not found, not swapped", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				var found = 0;
+				
+				foreach(var (name, type) in new[] { ("Case/Name.cs", "UpperName"), ("Case/name.cs", "LowerName") }) {
+					
+					var (ok, data) = await Call(rootedCtx, "roslyn_get_file_outline", new { filePath = name, projectPath = appProject });
+					string?[] types = [.. data?["types"]?.AsArray().Select(t => t?["name"]?.GetValue<string>()) ?? []];
+					var notFound    = (data?["error"]?.GetValue<string>() ?? "").Contains("not found");
+					
+					if(!ok || !(notFound || types is [var only] && only == type))
+						
+						return (false, $"FAIL  ({name}: expected {type} or not found, got {data?.ToJsonString() ?? "null"})");
+					
+					if(!notFound)
+						found++;
+				}
+				
+				return found > 0 ? (true, "PASS") : (false, "FAIL  (neither name resolved; expected the loaded one to)");
 			}),
 			
 			// A position-based semantic tool needs the owning project's semantic model, not just its text.
@@ -230,6 +394,7 @@ static class DefaultWorkspaceTests
 			await StopServerAsync(bare,   bareCtx);
 			fx.Dispose();
 			empty.Dispose();
+			caseFx.Dispose();
 		});
 	}
 	

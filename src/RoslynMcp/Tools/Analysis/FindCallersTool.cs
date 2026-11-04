@@ -69,7 +69,13 @@ internal sealed class FindCallersTool : RoslynMcpTool
 				
 				return scope.Error(new ErrorResult("filePath is required when line is specified."));
 			
-			symbols = await FindSymbolAtPosition(compilation, filePath, line, column, cancellationToken) is { } positional
+			var tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
+			
+			if(ambiguous.Length > 0)
+				
+				return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
+			
+			symbols = await FindSymbolAtPosition(compilation, tree, line, column, cancellationToken) is { } positional
 				? [positional]
 				: [];
 		}

@@ -26,7 +26,10 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		using var scope = BeginTool("roslyn_get_line_count", filePaths);
 		
 		// Not anchored to a file: the list can span projects, and every path is counted from the
-		// solution or disk. Only the not-on-disk compilation fallback below sees a single project.
+		// solution or disk. The not-on-disk compilation fallback below needs one project per path, which
+		// it resolves per entry when projectPath was omitted.
+		var omitted = string.IsNullOrWhiteSpace(projectPath);
+		
 		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
@@ -80,11 +83,29 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 			
 			if(IsCSharpSourcePath(normalized)) {
 				
-				if(!TryGetCompilation(projectPath, out var compilation, out var error))
+				// With projectPath omitted, the project that holds this file — a suffix-only name such as
+				// 'Dup.cs' may live in any project of the default solution, not only its default project.
+				var entryProject = projectPath;
+				
+				if(omitted && !TryResolveProjectArg(null, filePath, out entryProject, out var entryError)) {
+					
+					results.Add(new LineCountEntry(filePath, null, entryError is PathErrorResult { FoundIn: { } projects }
+						? $"ambiguous: in {string.Join(", ", projects.Select(Path.GetFileName))}"
+						: entryError.Error ?? "project not resolved"));
+					continue;
+				}
+				
+				if(!TryGetCompilation(entryProject, out var compilation, out var error))
 					
 					return scope.Error(error!);
 				
-				var tree = FindSyntaxTree(compilation, filePath);
+				var tree = FindSyntaxTree(compilation, filePath, entryProject, rootPath, out var ambiguous);
+				
+				if(ambiguous.Length > 0) {
+					
+					results.Add(new LineCountEntry(filePath, null, $"ambiguous: matches {string.Join(", ", ambiguous)}"));
+					continue;
+				}
 				
 				if(tree is null) {
 					

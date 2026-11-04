@@ -75,9 +75,20 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		// local, or parameter. The compilation-based lookup keeps the symbol in this snapshot.
 		ISymbol? symbol;
 		
-		if(line > 0)
-			symbol = await FindSymbolAtPosition(compilation, filePath!, line, column, cancellationToken);
-		
+		if(line > 0) {
+			
+			if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+				
+				return scope.Error(rootError);
+			
+			var tree = FindSyntaxTree(compilation, filePath!, projectPath, rootPath, out var ambiguous);
+			
+			if(ambiguous.Length > 0)
+				
+				return scope.Error(AmbiguousSourceFileError(filePath!, ambiguous));
+			
+			symbol = await FindSymbolAtPosition(compilation, tree, line, column, cancellationToken);
+		}
 		else {
 			
 			// Renaming the wrong symbol mutates code silently — never fall back to a first match.

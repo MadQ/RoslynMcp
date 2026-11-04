@@ -63,7 +63,15 @@ internal sealed class GetTriviaTool : RoslynMcpTool
 
             return scope.Error(new ErrorResult("take must be between 1 and 500"));
 
-        var tree = FindSyntaxTree(compilation, filePath);
+        if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+
+            return scope.Error(rootError);
+
+        var tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
+
+        if(ambiguous.Length > 0)
+
+            return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
 
         if(tree is null)
 

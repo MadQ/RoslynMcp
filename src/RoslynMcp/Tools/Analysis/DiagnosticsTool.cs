@@ -66,13 +66,18 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
+		
 		IEnumerable<Diagnostic> diagnostics;
+		SyntaxTree?             tree = null;
 		
 		if(filePath is not null) {
 			
 			// Single-file: use SemanticModel for that tree only — avoids compiling the entire project.
-			var tree = FindSyntaxTree(compilation, filePath)
-			;
+			tree = FindSyntaxTree(compilation, filePath, projectPath, rootPath, out var ambiguous);
+			
+			if(ambiguous.Length > 0)
+				
+				return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
 			
 			diagnostics = tree is not null
 				? compilation.GetSemanticModel(tree).GetDiagnostics()
@@ -97,8 +102,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			// file already produced an empty compiler set — add nothing.
 			diagnostics = filePath is null
 				? diagnostics.Concat(inRoot)
-				: FindSyntaxTree(compilation, filePath) is { } scopeTree
-					? diagnostics.Concat(inRoot.Where(d => d.Location.SourceTree == scopeTree))
+				: tree is not null
+					? diagnostics.Concat(inRoot.Where(d => d.Location.SourceTree == tree))
 					: diagnostics;
 		}
 		
