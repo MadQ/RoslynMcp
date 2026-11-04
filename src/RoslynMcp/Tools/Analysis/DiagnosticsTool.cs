@@ -36,7 +36,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 	public async Task<object> GetDiagnostics(
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
-		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project.")] string? filePath = null,
+		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project. A path that names no file in the compilation is an error, never an empty (clean) result.")] string? filePath = null,
 		[Description("Filter by severity: 'errors', 'warnings', or 'all'. Omit to return all (errors and warnings).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items. When take: 0, items in the response is null (not an empty array).")] int take = 50,
@@ -79,9 +79,14 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 				
 				return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
 			
-			diagnostics = tree is not null
-				? compilation.GetSemanticModel(tree).GetDiagnostics()
-				: [];
+			// An empty result here would read as "this file is clean" for a mistyped path, a file of
+			// another project, or one the workspace has not loaded — the worst answer for the edit
+			// check this tool is used for (#366). Fail like every other file-based tool.
+			if(tree is null)
+				
+				return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
+			
+			diagnostics = compilation.GetSemanticModel(tree).GetDiagnostics();
 		}
 		else
 			diagnostics = compilation.GetDiagnostics()
@@ -98,13 +103,10 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			
 			var inRoot = analyzerDiags.Where(d => IsUnderRoot(d, rootPath));
 			
-			// Keep file-scoped queries file-scoped for analyzer output too; a missing
-			// file already produced an empty compiler set — add nothing.
-			diagnostics = filePath is null
+			// Keep file-scoped queries file-scoped for analyzer output too.
+			diagnostics = tree is null
 				? diagnostics.Concat(inRoot)
-				: tree is not null
-					? diagnostics.Concat(inRoot.Where(d => d.Location.SourceTree == tree))
-					: diagnostics;
+				: diagnostics.Concat(inRoot.Where(d => d.Location.SourceTree == tree));
 		}
 		
 		// Deduplicate by identity tuple — multi-TFM workspaces can surface the same
