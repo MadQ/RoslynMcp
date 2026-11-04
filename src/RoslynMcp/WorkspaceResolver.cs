@@ -181,7 +181,7 @@ internal sealed class WorkspaceResolver
 	
 	/// <summary>
 	///     Writes a text change to a tracked text document via the workspace-managed path.
-	///     For MSBuild-tracked files: single write via TryApplyChanges (FSW-suppressed).
+	///     For MSBuild-tracked files: single write via TryApplyChanges (ApplyChangesToDisk).
 	///     For untracked/Adhoc: FileWriter write with per-file FSW suppression, then InvalidateFile.
 	/// </summary>
 	public async Task ApplyTextChange(string projectPath, string fullPath, SourceText text)

@@ -41,7 +41,7 @@ internal sealed partial class WorkspaceManager
 						
 						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
 						// flag for full reload so the next GetCompilation picks up the new content.
-						if(!ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws)) {
+						if(!ApplyChangesToDisk(newSolution, currentSolution, ws)) {
 							
 							logger.LogInfo("Reload", $"Flagged (incremental apply failed): {fullPath}");
 							Interlocked.Increment(ref reloadVersion);
@@ -88,11 +88,13 @@ internal sealed partial class WorkspaceManager
 		// ── FileSystemWatcher ────────────────────────────────────────────────
 		
 		/// <summary>
-		///     Applies solution changes with FSW suppressed to prevent a feedback loop.
-		///     MSBuildWorkspace.TryApplyChanges writes text back to disk, which would
-		///     re-trigger the FSW. See issue #49.
+		///     Applies solution changes to the workspace, which in a project writes the changed
+		///     documents to disk (MSBuildWorkspace.TryApplyChanges). The watchers report those
+		///     writes like any other; the flush compares the file with the document's text and
+		///     finds them equal, so they apply nothing a second time (#49). The watchers are not
+		///     switched off for the write: a change someone else made meanwhile would be lost (#358).
 		/// </summary>
-		internal bool ApplyChangesWithFswSuppressed(Solution newSolution)
+		internal bool ApplyChangesToDisk(Solution newSolution)
 		{
 			Workspace ws;
 			Solution  baseSolution;
@@ -108,7 +110,7 @@ internal sealed partial class WorkspaceManager
 				@lock.ExitReadLock();
 			}
 			
-			return ApplyChangesWithFswSuppressed(newSolution, baseSolution, ws);
+			return ApplyChangesToDisk(newSolution, baseSolution, ws);
 		}
 		
 		// Triggers a full workspace reload on the next GetCompilation call. Used by
@@ -125,7 +127,7 @@ internal sealed partial class WorkspaceManager
 		// Workspace reference for a best-effort staleness check before TryApplyChanges.
 		// A very narrow race between the staleness check and TryApplyChanges still exists, but
 		// TryApplyChanges returns false gracefully on a disposed workspace — so this is safe.
-		internal bool ApplyChangesWithFswSuppressed(Solution newSolution, Solution baseSolution, Workspace expectedWs)
+		internal bool ApplyChangesToDisk(Solution newSolution, Solution baseSolution, Workspace expectedWs)
 		{
 			// Best-effort staleness guard: if another thread completed a reload and replaced
 			// the workspace since the caller snapshotted it, discard rather than apply stale edits.
@@ -175,86 +177,69 @@ internal sealed partial class WorkspaceManager
 			// TryApplyChanges writes each changed document at its own path. A document that is
 			// reached through a link is thereby written into another file, and that file gets
 			// the same treatment as in WriteAndInvalidate: captured before the write and
-			// brought up to date afterwards (#338). It needs no entry in ignoredPaths for the
-			// write itself — the watch set is suspended for that — only for the sync below.
+			// brought up to date afterwards (#338).
 			var linkedWrites = ownedPaths
 				.Select(LinkedWriteFor)
 				.OfType<LinkedWrite>()
 				.ToArray()
 			;
 			
-			// Ref-counted inside the watch set: events stop before TryApplyChanges and resume
-			// only when the last concurrent suppressor finishes. See issue #145 item 3.
-			watchSet?.Suspend();
+			// The watchers stay live through the write (#358), so it is reported, at each path
+			// written and at the file behind each link. Those reports are kept, not dropped, and
+			// held back by FlushPendingChanges until the apply is over (see applyingPaths): then
+			// the comparison in the flush recognises RM's own write, and still applies a save
+			// someone else made to one of these files in the meantime.
+			// Counted directly before the try that uncounts: nothing may come between the two,
+			// or an exception leaves a file held back for good.
+			string[] applying = [..ownedPaths, ..linkedWrites.Select(linked => linked.Target)];
+			
+			foreach(var path in applying)
+				applyingPaths.AddOrUpdate(path, 1, (_, count) => count + 1);
 			
 			bool applied;
 			
 			try {
-				applied = ws.TryApplyChanges(newSolution);
-			}
-			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException or NotSupportedException) {
-				// ObjectDisposedException/InvalidOperationException: workspace disposed by a concurrent
-				// ReloadIfNeeded between the staleness check and TryApplyChanges.
-				// NotSupportedException: TryApplyChanges throws for unsupported change kinds
-				// (e.g. AddDocument/RemoveDocument on MSBuildWorkspace). Both treated as false return.
-				_ = ex
-				;
-				applied = false;
-			}
-			finally {
-				watchSet?.Resume();
-			}
-			
-			// Record sizes only when TryApplyChanges succeeded and actually wrote files.
-			if(applied && ownedPaths.Length > 0) {
 				
-				lock(debounceLock) {
+				try {
+					applied = ws.TryApplyChanges(newSolution);
+				}
+				catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException or NotSupportedException) {
+					// ObjectDisposedException/InvalidOperationException: workspace disposed by a concurrent
+					// ReloadIfNeeded between the staleness check and TryApplyChanges.
+					// NotSupportedException: TryApplyChanges throws for unsupported change kinds
+					// (e.g. AddDocument/RemoveDocument on MSBuildWorkspace). Both treated as false return.
+					_ = ex
+					;
+					applied = false;
+				}
+				
+				// The sync below is a write of its own through WriteAndInvalidate's rules: the
+				// file behind each link is ignored while it is brought up to date, so that its
+				// InvalidateFile is not raced by the watcher (#338).
+				// Counted directly before the try that uncounts: nothing may come between the two,
+				// or an exception leaves a file ignored for good.
+				foreach(var linked in linkedWrites)
+					ignoredPaths.AddOrUpdate(linked.Target, 1, (_, count) => count + 1);
+				
+				try {
 					
-					// Safety cap — clear rather than evict individual entries to keep it simple.
-					// These entries are short-lived (consumed by the next FSW flush), so this
-					// branch is only reached if FSW events are being lost or unusually delayed.
-					if(rmOwnedWriteSizes.Count + ownedPaths.Length > MaxRmOwnedWriteSizes)
-						rmOwnedWriteSizes.Clear();
+					if(applied)
+						foreach(var linked in linkedWrites) {
+							
+							SyncLinkTarget(linked);
+							syncedByApply = linked.Path;
+						}
+				}
+				finally {
 					
-					// Not for a path that was written through a link. The record is used up by
-					// the watcher's report at that path, and for a link no such report comes —
-					// the change is reported at the file behind it. The entry would stay, and
-					// vouch for the link the next time someone else changes that file (#341).
-					foreach(var path in ownedPaths) {
-						
-						if(linkedWrites.Any(linked => SecurityBoundary.PathComparer.Equals(linked.Path, path)))
-							continue;
-						
-						try {
-							rmOwnedWriteSizes[path] = new FileInfo(path).Length;
-						}
-						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-							// File gone or locked — skip recording; FlushMSBuild will reload normally.
-							_ = ex
-							;
-						}
-					}
+					foreach(var linked in linkedWrites)
+						ignoredPaths.AddOrUpdate(linked.Target, 0, (_, count) => count - 1);
 				}
 			}
-			
-			// Counted directly before the try that uncounts: nothing may come between the two,
-			// or an exception leaves a file ignored for good.
-			foreach(var linked in linkedWrites)
-				ignoredPaths.AddOrUpdate(linked.Target, 1, (_, count) => count + 1);
-			
-			try {
-				
-				if(applied)
-					foreach(var linked in linkedWrites) {
-						
-						SyncLinkTarget(linked);
-						syncedByApply = linked.Path;
-					}
-			}
 			finally {
 				
-				foreach(var linked in linkedWrites)
-					ignoredPaths.AddOrUpdate(linked.Target, 0, (_, count) => count - 1);
+				foreach(var path in applying)
+					applyingPaths.AddOrUpdate(path, 0, (_, count) => count - 1);
 			}
 			
 			// The other direction: a changed document that is a file with links to it. The
@@ -272,7 +257,7 @@ internal sealed partial class WorkspaceManager
 		
 		
 		// For MSBuild-tracked source/additional text documents: routes through TryApplyChanges as the single
-		// disk write (FSW-suppressed via ApplyChangesWithFswSuppressed). Returns false
+		// disk write (via ApplyChangesToDisk). Returns false
 		// for Adhoc workspaces (TryApplyChanges is in-memory only) or for files not
 		// tracked by the workspace — callers fall back to WriteAndInvalidate.
 		internal bool TryApplyTextChange(string filePath, SourceText newText)
@@ -314,7 +299,7 @@ internal sealed partial class WorkspaceManager
 				return false;
 			}
 			
-			return ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws);
+			return ApplyChangesToDisk(newSolution, currentSolution, ws);
 		}
 		
 		

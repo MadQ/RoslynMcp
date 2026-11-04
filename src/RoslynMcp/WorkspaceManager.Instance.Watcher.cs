@@ -340,6 +340,14 @@ internal sealed partial class WorkspaceManager
 				return;
 			}
 			
+			Enqueue(fullPath, deleted);
+		}
+		
+		// Queues a report for the next flush and (re)starts the debounce. Past every filter of
+		// ScheduleDebounced: FlushPendingChanges puts reports back through here that it has
+		// already let in.
+		void Enqueue(string fullPath, bool deleted)
+		{
 			lock(debounceLock) {
 				
 				// Guard against late-arriving FSW callbacks after Dispose has quiesced the timer.
@@ -479,6 +487,28 @@ internal sealed partial class WorkspaceManager
 					deleted = [.. pendingDeletes];
 					pendingChanges.Clear();
 					pendingDeletes.Clear();
+				}
+				
+				// Reports for a file an ApplyChangesToDisk is writing right now wait for the next
+				// flush (#358). Handled now, a change would be compared with the solution from
+				// before the apply, and its text applied over the one being written — a stale
+				// apply, which fails and flags a reload. Once the apply is over the comparison
+				// recognises RM's own write, and applies a save that someone made meanwhile.
+				bool Applying(string path) => applyingPaths.TryGetValue(path, out var writing) && writing > 0;
+				
+				var heldChanges = changed.Where(Applying).ToArray();
+				var heldDeletes = deleted.Where(Applying).ToArray();
+				
+				if(heldChanges.Length + heldDeletes.Length > 0) {
+					
+					changed = [.. changed.Except(heldChanges, SecurityBoundary.PathComparer)];
+					deleted = [.. deleted.Except(heldDeletes, SecurityBoundary.PathComparer)];
+					
+					foreach(var path in heldChanges)
+						Enqueue(path, deleted: false);
+					
+					foreach(var path in heldDeletes)
+						Enqueue(path, deleted: true);
 				}
 				
 				// A file reported as deleted that is there when the flush runs was replaced, not
@@ -644,9 +674,9 @@ internal sealed partial class WorkspaceManager
 		
 		/// <summary>
 		///     Applies a debounced batch of file changes to an MSBuild workspace.
-		///     Returns <see langword="true"/> when it could only flag a full reload rather than
-		///     apply the change — meaning the workspace is now behind disk, and the caller must
-		///     not advance the sync clock.
+		///     Returns <see langword="true"/> when the workspace is left behind disk — it could only
+		///     flag a full reload, or it put the batch back for the next flush because another
+		///     apply moved the solution on — and the caller must not advance the sync clock.
 		/// </summary>
 		// unreported: the paths in changed that no watcher report named — documents the index
 		// lists as other names of a changed file.
@@ -715,27 +745,6 @@ internal sealed partial class WorkspaceManager
 			
 			foreach(var path in changed) {
 				
-				// Skip reload if this is a write RM made itself — workspace is already up to date
-				// from the TryApplyChanges call that triggered the FSW event.
-				lock(debounceLock) {
-					
-					if(rmOwnedWriteSizes.TryGetValue(path, out var expected)) {
-						
-						rmOwnedWriteSizes.Remove(path);
-						
-						try {
-							
-							if(new FileInfo(path).Length == expected)
-								continue;
-						}
-						catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-							// Can't read size — fall through to normal reload.
-							_ = ex
-							;
-						}
-					}
-				}
-				
 				try {
 					
 					var impact = edits.Classify(newSolution, path, out var info, out var reason);
@@ -772,8 +781,11 @@ internal sealed partial class WorkspaceManager
 
 					// Already current. Applying identical text is not free: it still runs a
 					// TryApplyChanges, which writes to disk and flags a full reload if it fails.
-					// This catches what the rmOwnedWriteSizes check above cannot — an edit that
-					// leaves the file the same length, and any write RM did not make itself.
+					// This is how a report of RM's own write is recognised: the document already
+					// holds what it wrote. It used to be recognised by the size the write left,
+					// without the text, and that record outlived the write whenever its report
+					// came while the write was still running — which ignoredPaths drops — so it
+					// went on to swallow the next outside edit of the same length (#358).
 					// TryGetText deliberately: it reads already-materialized text rather than
 					// forcing a load, and falls through to apply when none is available.
 					var existingDoc = info.GetDocument(newSolution);
@@ -802,8 +814,41 @@ internal sealed partial class WorkspaceManager
 				}
 			}
 			
-			if(modified && !ApplyChangesWithFswSuppressed(newSolution, currentSolution, ws))
-				FlagReload("incremental apply failed", applyFailed);
+			if(modified && !ApplyChangesToDisk(newSolution, currentSolution, ws)) {
+				
+				// The apply fails when the solution has moved on since the snapshot above — an
+				// ApplyChangesToDisk that finished after the snapshot was taken, possibly before
+				// the files were read (#358). The texts were then compared with a solution that
+				// is no longer current, and that is no reason for a reload: the batch is put
+				// back, and the next flush compares the files with the solution as it is then.
+				// RM's own write compares equal there; a change someone else made is applied.
+				// A replaced workspace, or a failure on a solution nobody moved, still flags one.
+				bool movedOn;
+				
+				@lock.EnterReadLock();
+				
+				try {
+					movedOn = ReferenceEquals(workspace, ws) && !ReferenceEquals(workspace.CurrentSolution, currentSolution);
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
+				if(movedOn) {
+					
+					// The names the index added are not put back: they are found again from
+					// the reported paths, and on their own a name that is no document would
+					// look like a new source file.
+					foreach(var path in changed)
+						if(!unreported.Contains(path))
+							Enqueue(path, deleted: false);
+					
+					// Behind disk until that flush: the sync clock must not advance.
+					return true;
+				}
+				else
+					FlagReload("incremental apply failed", applyFailed);
+			}
 
 			return reloadFlagged;
 		}

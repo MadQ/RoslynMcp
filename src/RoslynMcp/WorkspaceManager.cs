@@ -362,7 +362,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry)) {
 				
-				if(entry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+				if(entry.Instance.ApplyChangesToDisk(newSolution))
 					
 					return true;
 				
@@ -373,7 +373,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 			
 			if(cache.TryGetValue(normalizedPath, out var directEntry)) {
 				
-				if(directEntry.Instance.ApplyChangesWithFswSuppressed(newSolution))
+				if(directEntry.Instance.ApplyChangesToDisk(newSolution))
 					
 					return true;
 				

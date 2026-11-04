@@ -206,6 +206,15 @@ internal static class WatchPlanner
 ///     into one callback, which is the workspace's existing debounce entry point — nothing
 ///     downstream knows there is more than one watcher. Whenever a plan replaces watchers, the
 ///     reconcile callback is run once the new ones are live, with the moment the change began.
+///     <para>
+///         The watchers are never switched off while they are in place, not even around RM's own
+///         writes (#358). A change made while they were off would go unseen — nothing catches up on
+///         it — and switching one back on is not instant: on macOS it starts a new event stream, on
+///         Linux it adds an inotify watch per directory again. RM's own writes are reported like
+///         any other, and the workspace recognises them when it handles the report: the document
+///         already holds the file's text, or the file still has the stamp a write through a link
+///         leaves.
+///     </para>
 /// </summary>
 internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Action<string, bool> onChange, Action<DateTime> reconcile, FileLogger logger) : IDisposable
 {
@@ -213,7 +222,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	// huge tree into the workspace cannot flood the debounce queue.
 	const int AdoptedFileLimit = 10_000;
 	
-	// Guards watchers, suspendCount, disposed and scopeKey. Never held across a watcher start,
+	// Guards watchers, disposed and scopeKey. Never held across a watcher start,
 	// which is the slow operation this class exists to keep off the caller's thread.
 	readonly Lock gate = new();
 	
@@ -222,7 +231,6 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	
 	readonly Dictionary<string, (FileSystemWatcher Watcher, WatchRoot Root)> watchers = new(WatchPlanner.PathComparer);
 	
-	int     suspendCount;
 	bool    disposed;
 	string? scopeKey;
 	
@@ -418,13 +426,6 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	{
 		FileSystemWatcher? watcher = null;
 		
-		// Set under the gate once the watcher is in the table. Until then Suspend cannot see it,
-		// so its events are dropped here instead whenever a suspension is active — otherwise a
-		// watcher that is still starting would report the very write the suspension is hiding.
-		var registered = false;
-		
-		bool Muted() => !Volatile.Read(ref registered) && Volatile.Read(ref suspendCount) > 0;
-		
 		try {
 			
 			// All files, not only .cs: MSBuild inputs such as AdditionalFiles, .editorconfig,
@@ -437,14 +438,10 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				NotifyFilter          = NotifyFilters.LastWrite | NotifyFilters.FileName | (root.Expands || root.Recursive ? NotifyFilters.DirectoryName : 0),
 			};
 			
-			watcher.Changed += (_, e) => { if(!Muted()) Report(e.FullPath, deleted: false); };
-			watcher.Created += (_, e) => { if(!Muted()) Appeared(root, e.FullPath); };
-			watcher.Deleted += (_, e) => { if(!Muted()) Vanished(root, e.FullPath); };
+			watcher.Changed += (_, e) => Report(e.FullPath, deleted: false);
+			watcher.Created += (_, e) => Appeared(root, e.FullPath);
+			watcher.Deleted += (_, e) => Vanished(root, e.FullPath);
 			watcher.Renamed += (_, e) => {
-				
-				if(Muted())
-					
-					return;
 				
 				Vanished(root, e.OldFullPath);
 				Appeared(root, e.FullPath);
@@ -469,16 +466,9 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			// at once cannot both take the last slot. A planned root is always within it.
 			var fits = !withinCap || watchers.Count < WatchPlanner.MaxRoots;
 			
-			if(!disposed && fits && watchers.TryAdd(root.Path, (watcher, root))) {
-				
-				// A suspension that began while this watcher was starting did not see it.
-				if(suspendCount > 0)
-					watcher.EnableRaisingEvents = false;
-				
-				Volatile.Write(ref registered, true);
+			if(!disposed && fits && watchers.TryAdd(root.Path, (watcher, root)))
 				
 				return true;
-			}
 		}
 		
 		watcher.Dispose();
@@ -621,49 +611,6 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			onChange(file, false);
 		}
-	}
-	
-	/// <summary>
-	///     Stops every watcher raising events until the matching <see cref="Resume"/>. Ref-counted:
-	///     concurrent suspenders each increment, and events resume only when the last one leaves.
-	/// </summary>
-	public void Suspend()
-	{
-		lock(gate) {
-			
-			suspendCount++;
-			
-			foreach(var (watcher, _) in watchers.Values)
-				watcher.EnableRaisingEvents = false;
-		}
-	}
-	
-	public void Resume()
-	{
-		var failed = new List<FileSystemWatcher>();
-		
-		lock(gate) {
-			
-			if(--suspendCount > 0 || disposed)
-				
-				return;
-			
-			foreach(var (path, (watcher, _)) in watchers) {
-				
-				try {
-					watcher.EnableRaisingEvents = true;
-				}
-				catch(Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException) {
-					
-					// The directory went away while suspended.
-					failed.Add(watcher);
-					watchers.Remove(path);
-				}
-			}
-		}
-		
-		foreach(var watcher in failed)
-			watcher.Dispose();
 	}
 	
 	public void Dispose()
