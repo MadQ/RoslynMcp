@@ -163,7 +163,8 @@ internal static class FileIdentity
 				: true
 			;
 		}
-		catch(Exception ex) when(ex is ArgumentException or NotSupportedException or DllNotFoundException or EntryPointNotFoundException) {
+		// It runs inside PathComparer.Equals, under dictionary and set lookups: nothing may escape it.
+		catch(Exception ex) when(ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException or System.Security.SecurityException or DllNotFoundException or EntryPointNotFoundException) {
 			
 			return true;
 		}

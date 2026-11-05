@@ -268,10 +268,6 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			throw new UnsupportedCodeFixChangeException("Phase 1 code fixes cannot add or remove projects.");
 		
 		var canonicalRoot = ResolveCanonicalPath(workspaceRoot);
-		// A fix that respells a path, even only in case, moves or renames a file: Phase 1 refuses that, and
-		// the plan would write the old spelling anyway. The paths come from one workspace, so no other
-		// spelling of the same file reaches this comparison (#391).
-		var comparison = StringComparison.Ordinal;
 		var changedDocumentCount = 0;
 		
 		foreach(var projectChange in changes.GetProjectChanges()) {
@@ -304,7 +300,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			// every CompilationOptions update, so a provider difference can only come from analyzer config.
 			if(!string.Equals(oldProject.Name, newProject.Name, StringComparison.Ordinal)
 				|| !string.Equals(oldProject.AssemblyName, newProject.AssemblyName, StringComparison.Ordinal)
-				|| !string.Equals(oldProject.FilePath, newProject.FilePath, comparison)
+				|| !SecurityBoundary.PathComparer.Equals(oldProject.FilePath, newProject.FilePath)
 				|| !Equals(
 					oldProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null),
 					newProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null))
@@ -320,7 +316,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 					throw new UnsupportedCodeFixChangeException(
 						"Phase 1 code fixes require every changed document to have a physical file path.");
 				
-				if(!string.Equals(oldDocument.FilePath, newDocument.FilePath, comparison))
+				if(!SecurityBoundary.PathComparer.Equals(oldDocument.FilePath, newDocument.FilePath))
 					throw new UnsupportedCodeFixChangeException(
 						$"Phase 1 code fixes cannot move or rename source file '{oldDocument.FilePath}'.");
 				
@@ -336,7 +332,10 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				var canonicalFile = ResolveCanonicalPath(oldDocument.FilePath);
 				var relativePath = Path.GetRelativePath(canonicalRoot, canonicalFile);
 				
-				if(Path.IsPathRooted(relativePath)
+				// Containment by the server's own case rule: GetRelativePath ignores case on Windows and macOS, and
+				// would put a case-sensitive directory's ROOT/ sibling inside root/ (#391 review).
+				if(!SecurityBoundary.IsUnderDirectory(canonicalFile, canonicalRoot)
+					|| Path.IsPathRooted(relativePath)
 					|| relativePath == ".."
 					|| relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
 					|| relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
@@ -367,7 +366,6 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 					oldDocument,
 					newDocument,
 					canonicalRoot,
-					comparison,
 					"additional document");
 				
 				changedDocumentCount++;
@@ -386,7 +384,6 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 					oldDocument,
 					newDocument,
 					canonicalRoot,
-					comparison,
 					"analyzer config document");
 				
 				changedDocumentCount++;
@@ -402,10 +399,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		TextDocument oldDocument,
 		TextDocument newDocument,
 		string canonicalRoot,
-		StringComparison comparison,
 		string documentKind)
 	{
-		if(!string.Equals(oldDocument.FilePath, newDocument.FilePath, comparison))
+		if(!SecurityBoundary.PathComparer.Equals(oldDocument.FilePath, newDocument.FilePath))
 			throw new UnsupportedCodeFixChangeException(
 				$"Phase 1 code fixes cannot move or rename {documentKind} '{oldDocument.FilePath}'.");
 		
@@ -420,7 +416,10 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		var canonicalFile = ResolveCanonicalPath(oldDocument.FilePath);
 		var relativePath = Path.GetRelativePath(canonicalRoot, canonicalFile);
 		
-		if(Path.IsPathRooted(relativePath)
+		// Containment by the server's own case rule: GetRelativePath ignores case on Windows and macOS, and
+		// would put a case-sensitive directory's ROOT/ sibling inside root/ (#391 review).
+		if(!SecurityBoundary.IsUnderDirectory(canonicalFile, canonicalRoot)
+			|| Path.IsPathRooted(relativePath)
 			|| relativePath == ".."
 			|| relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
 			|| relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
