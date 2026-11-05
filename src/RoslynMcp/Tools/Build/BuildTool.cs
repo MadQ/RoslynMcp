@@ -76,13 +76,15 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			return scope.Error(wsError);
 		
-		if(csprojPath is null)
+		// A solution target builds — and fast-path checks — every project in it, not just the first
+		// one the workspace lists. csprojPath is null for a solution, which names no one project, and
+		// for an adhoc workspace.
+		var solutionPath = ResolvedSolutionPath(projectPath);
+		var buildTarget  = solutionPath ?? csprojPath;
+		
+		if(buildTarget is null)
 			
 			return scope.Error(new ErrorResult("No .csproj found — build is only available in MSBuildWorkspace mode."));
-		
-		// A solution target builds — and fast-path checks — every project in it, not just the first
-		// one the workspace lists.
-		var solutionPath = ResolvedSolutionPath(projectPath);
 		
 		// A workspace that loaded without metadata references reports a flood of phantom
 		// CS0246/CS0234 for code that compiles fine. Short-circuiting on those would fail a healthy
@@ -148,7 +150,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		
 		// Slow path: run actual dotnet build.
-		var args = BuildArgs(solutionPath ?? csprojPath, targetFramework)
+		var args = BuildArgs(buildTarget, targetFramework)
 		;
 		
 		string		output;

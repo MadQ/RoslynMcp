@@ -720,6 +720,84 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     Why an apply tool refuses to commit a token through the workspace its caller named:
+	///     <see cref="Detail"/> for the log, <see cref="Message"/> and <see cref="Kind"/> for the result.
+	/// </summary>
+	protected readonly record struct ApplyWorkspaceRefusal(string Detail, string Message, string Kind);
+	
+	/// <summary>
+	///     Checks that <paramref name="projectPath"/>, as given to an apply tool, names the workspace a preview
+	///     token is bound to — <c>null</c> when it does, the refusal otherwise. Shared by every apply tool
+	///     (#384), so the three cannot disagree on what names the same workspace.
+	///     <para>
+	///         A solution names no one project: a preview bound its token to a .csproj (given a solution with
+	///         a file, the project that contains the file, #376), so the solution matches when that project is
+	///         one of its own. Asking the solution for "its" .csproj has no answer. Any other path is compared
+	///         binding to binding. An adhoc workspace has no project files to be a member of; its binding is its
+	///         root, so a solution without project files falls through to that comparison.
+	///     </para>
+	///     <para>
+	///         An omitted <paramref name="projectPath"/> is the caller's decision, not this check's:
+	///         <c>roslyn_apply_code_fix</c> skips the call and lets the token name its own workspace, while the
+	///         tools whose <c>projectPath</c> is still required pass it through and get its resolution error.
+	///     </para>
+	/// </summary>
+	/// <param name="binding">The workspace the token was minted in.</param>
+	/// <param name="projectPath">The path the apply tool was given.</param>
+	/// <param name="previewTool">The tool that mints this workflow's tokens, named in the hint.</param>
+	protected ApplyWorkspaceRefusal? CheckApplyWorkspace(WorkspaceBinding binding, string projectPath, string previewTool)
+	{
+		string? solutionPath;
+		
+		try {
+			solutionPath = ResolvedSolutionPath(projectPath);
+		}
+		catch(Exception ex) when(ex is not OutOfMemoryException) {
+			
+			// The guarded resolution below reports a bad path through its structured mapping.
+			solutionPath = null;
+		}
+		
+		if(solutionPath is not null) {
+			
+			if(!TryResolveSolution(projectPath, out var solution, out var solutionError)) {
+				
+				var (message, kind) = DescribeResolveFailure(solutionError);
+				
+				return new("workspace unavailable", message, kind);
+			}
+			
+			if(solution.Projects.Any(project => project.FilePath is not null)) {
+				
+				var bound = binding.CanonicalPath;
+				
+				return solution.Projects.Any(project => project.FilePath is { } file && SecurityBoundary.PathComparer.Equals(Path.GetFullPath(file), bound))
+					? null
+					: new ApplyWorkspaceRefusal("workspace mismatch",
+						$"Apply aborted — this token belongs to '{bound}', which is not a project of '{solutionPath}'. Re-run {previewTool} for the intended workspace.",
+						"workspace mismatch")
+				;
+			}
+		}
+		
+		if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
+			
+			var (message, kind) = DescribeResolveFailure(wsInfoError);
+			
+			return new("workspace unavailable", message, kind);
+		}
+		
+		var requested = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
+		
+		return binding.Matches(requested)
+			? null
+			: new ApplyWorkspaceRefusal("workspace mismatch",
+				$"Apply aborted — this token belongs to '{binding.CanonicalPath}', but projectPath resolved to '{requested.CanonicalPath}'. Re-run {previewTool} for the intended workspace.",
+				"workspace mismatch")
+		;
+	}
+	
+	/// <summary>
 	///     Applies a changed <see cref="Solution"/> to the workspace, guarding the same transient
 	///     mid-reload and path-resolution failures as <see cref="TryResolveFileContext"/>. On success the
 	///     workspace has accepted (or scheduled a reload for) the change; on failure <paramref name="error"/>

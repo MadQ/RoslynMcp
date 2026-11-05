@@ -490,18 +490,18 @@ internal sealed partial class WorkspaceManager
 			;
 		}
 		
-		/// <summary>Returns the .csproj path for a given resolved path, or the first known .csproj.</summary>
+		/// <summary>
+		///     Returns <paramref name="normalizedPath"/> when it is one of this workspace's projects, else
+		///     <c>null</c> — for a solution, a directory, or an adhoc workspace. Never a guess: answering a
+		///     solution with its first .csproj bound apply checks to the wrong project (#384).
+		/// </summary>
 		public string? FindCsprojForPath(string normalizedPath)
 		{
 			@lock.EnterReadLock();
 			
 			try {
 				
-				if(projectMap.ContainsKey(normalizedPath))
-					
-					return normalizedPath;
-				
-				return projectMap.Keys.FirstOrDefault();
+				return projectMap.ContainsKey(normalizedPath) ? normalizedPath : null;
 			}
 			finally {
 				@lock.ExitReadLock();

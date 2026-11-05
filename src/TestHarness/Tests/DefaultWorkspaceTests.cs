@@ -68,6 +68,8 @@ static class DefaultWorkspaceTests
 		// #376: a warning (CS0168) in Lib, the solution's second project, for the solution-wide
 		// diagnostics test; and a project under the solution's directory that the solution does not
 		// list, so that a .csproj loads the solution and still names none of its projects.
+		// #384: members of Lib, the solution's second project, renamed and re-signed through the solution.
+		fx.Write("Lib/ApplyTarget.cs", "namespace Lib;\n\npublic class ApplyTarget\n{\n\tpublic int Before(int a) => a;\n\tpublic int Shape(int a) => a;\n\tpublic int Kept(int a) => a;\n}\n");
 		fx.Write("Lib/Warn.cs", "namespace Lib;\n\ninternal class WarnHolder\n{\n\tvoid M()\n\t{\n\t\tint unused;\n\t}\n}\n");
 		fx.Write("Stray/Stray.csproj", """
 			<Project Sdk="Microsoft.NET.Sdk">
@@ -558,6 +560,67 @@ static class DefaultWorkspaceTests
 					$"expected the fix applied through the solution, got {text}");
 			}),
 			
+			// #384: a rename previewed in Lib.csproj and applied through the solution. The solution used to
+			// answer for its first project (App), so the token's own workspace was refused as a mismatch.
+			new("DefaultWorkspace: a rename previewed in one project applies through its solution", async () => {
+				
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Before", newName = "After", containingType = "ApplyTarget", projectPath = libProject });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("DefaultWs.slnx") });
+				var renamed            = File.ReadAllText(fx.PathOf("Lib/ApplyTarget.cs")).Contains("After(");
+				
+				return Verdict(applyOk && applied?["error"] is null && renamed,
+					$"expected Before renamed through the solution, got {applied?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384: the same for a signature change.
+			new("DefaultWorkspace: a signature change previewed in one project applies through its solution", async () => {
+				
+				var (ok, preview) = await Call(rootedCtx, "roslyn_change_signature", new {
+					methodName     = "Shape",
+					containingType = "ApplyTarget",
+					addParameters  = """[{"name":"b","type":"int","defaultValue":"0"}]""",
+					projectPath    = libProject
+				});
+				var token = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_signature_change", new { token, approval = "y", projectPath = fx.PathOf("DefaultWs.slnx") });
+				var changed            = File.ReadAllText(fx.PathOf("Lib/ApplyTarget.cs")).Contains("int b");
+				
+				return Verdict(applyOk && applied?["error"] is null && changed,
+					$"expected Shape given a parameter through the solution, got {applied?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384: membership, not any solution. Single.slnx does not list Lib.csproj, so a Lib token
+			// applied through it is still refused, and the file is left alone.
+			new("DefaultWorkspace: a token applied through a solution without its project is refused", async () => {
+				
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Kept", newName = "Lost", containingType = "ApplyTarget", projectPath = libProject });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = single.PathOf("Single.slnx") });
+				var untouched          = !File.ReadAllText(fx.PathOf("Lib/ApplyTarget.cs")).Contains("Lost(");
+				
+				await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "n", projectPath = libProject });
+				
+				return Verdict(applyOk && applied?["error"]?.GetValue<string>() == "workspace mismatch" && untouched,
+					$"expected workspace mismatch, got {applied?.ToJsonString() ?? "null"}");
+			}),
+			
+
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it
 			// must reject "" even when a default exists — otherwise it would silently search the default
 			// solution's first project (App here), not fail as the schema promises.
