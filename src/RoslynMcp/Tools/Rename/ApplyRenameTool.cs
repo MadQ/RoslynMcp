@@ -71,20 +71,8 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 					"The preview token does not contain an originating workspace. Re-run roslyn_preview_rename.",
 					null, null, "workspace binding missing", null, null));
 			
-			if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
-				
-				var (message, kind) = DescribeResolveFailure(wsInfoError);
-				
-				return scope.Failed("workspace unavailable", new ApplyRenameResult(message, null, null, kind, null, null));
-			}
-			
-			var requestedBinding = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
-			
-			if(!operation.WorkspaceBinding.Matches(requestedBinding))
-				return scope.Failed("workspace mismatch", new ApplyRenameResult(
-					$"Apply aborted — this token belongs to '{operation.WorkspaceBinding.CanonicalPath}', " +
-					$"but projectPath resolved to '{requestedBinding.CanonicalPath}'. Re-run roslyn_preview_rename for the intended workspace.",
-					null, null, "workspace mismatch", null, null));
+			if(CheckApplyWorkspace(operation.WorkspaceBinding, projectPath, "roslyn_preview_rename") is { } refusal)
+				return scope.Failed(refusal.Detail, new ApplyRenameResult(refusal.Message, null, null, refusal.Kind, null, null));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;
 			

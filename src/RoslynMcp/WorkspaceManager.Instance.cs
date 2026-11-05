@@ -456,29 +456,10 @@ internal sealed partial class WorkspaceManager
 				
 				return defaultProjectId;
 			
-			if(projectMap.TryGetValue(csprojPath, out var projectId))
+			// A solution of one project answers with the default project, as it always has.
+			if(NamedProjectKey_NoLock(csprojPath) is { } key)
 				
-				return projectId;
-			
-			// A solution of one project names that project. Any other .csproj — one the solution
-			// does not list, beside it in the tree — is still not it.
-			if(projectMap.Count == 1 && IsSolutionPath(csprojPath))
-				
-				return defaultProjectId;
-			
-			// By file name, for a path that names the same file differently (a link, a short name, a
-			// substituted drive). Only when exactly one project has that name: of two Tests.csproj,
-			// neither is the answer.
-			var fileName = Path.GetFileName(csprojPath);
-			var byName   = projectMap
-				.Where(kvp => string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase))
-				.Take(2)
-				.ToArray()
-			;
-			
-			if(byName.Length == 1)
-				
-				return byName[0].Value;
+				return IsSolutionPath(csprojPath) ? defaultProjectId : projectMap[key];
 			
 			throw new Tools.ProjectNotInWorkspaceException(
 				csprojPath,
@@ -490,18 +471,62 @@ internal sealed partial class WorkspaceManager
 			;
 		}
 		
-		/// <summary>Returns the .csproj path for a given resolved path, or the first known .csproj.</summary>
+		// The projectMap key of the project a path names, or null — the one set of rules shared by
+		// ResolveProjectId_NoLock (which tools look in) and FindCsprojForPath (which a preview binds its
+		// token to), so the two can never name different projects (#384).
+		string? NamedProjectKey_NoLock(string path)
+		{
+			if(projectMap.ContainsKey(path))
+				
+				return path;
+			
+			// A solution of one project names that project; a solution of several names none. Checked
+			// before the file comparison below: the default workspace is usually a solution, and its
+			// path reaches here on every call.
+			if(IsSolutionPath(path))
+				
+				return projectMap.Count == 1 ? projectMap.Keys.First() : null;
+			
+			// Only a project file names a project; a directory or a source file is not asked about the
+			// file system for every project below.
+			if(!Path.GetExtension(path).EndsWith("proj", StringComparison.OrdinalIgnoreCase))
+				
+				return null;
+			
+			// Another name of one project — a directory link, a substituted drive, a short name — asked of
+			// the operating system, not read off the name: the same file evaluated from the same directory
+			// (FileIdentity.ProjectIdentity). A different file that merely shares the name (Twin/Lib.csproj
+			// beside Lib/Lib.csproj) is not that project, nor is a link to its file placed in another
+			// directory, which MSBuild evaluates from there. Any other .csproj — one the solution does not
+			// list — is not one of these.
+			if(FileIdentity.OfProject(path) is not { } identity)
+				
+				return null;
+			
+			foreach(var key in projectMap.Keys)
+				
+				if(FileIdentity.OfProject(key) is { } keyIdentity && keyIdentity.Matches(identity))
+					
+					return key;
+			
+			return null;
+		}
+		
+		/// <summary>
+		///     The .csproj of the project <paramref name="normalizedPath"/> names — by the same rules as every
+		///     project lookup: the project itself, a solution of one project, or another name of the project's
+		///     own file (<see cref="FileIdentity"/>) — else
+		///     <c>null</c>: a solution of several projects, a project the workspace does not hold, or an adhoc
+		///     workspace. Never a guess: answering a solution with its first .csproj bound apply checks to the
+		///     wrong project (#384).
+		/// </summary>
 		public string? FindCsprojForPath(string normalizedPath)
 		{
 			@lock.EnterReadLock();
 			
 			try {
 				
-				if(projectMap.ContainsKey(normalizedPath))
-					
-					return normalizedPath;
-				
-				return projectMap.Keys.FirstOrDefault();
+				return isMSBuild ? NamedProjectKey_NoLock(normalizedPath) : null;
 			}
 			finally {
 				@lock.ExitReadLock();

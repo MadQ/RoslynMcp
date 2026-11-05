@@ -69,20 +69,8 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 					"The preview token does not contain an originating workspace. Re-run roslyn_change_signature.",
 					null, "workspace binding missing", null));
 			
-			if(!TryResolveWorkspaceInfo(projectPath, out var requestedRoot, out var requestedIsMSBuild, out var requestedCsproj, out var wsInfoError)) {
-				
-				var (message, kind) = DescribeResolveFailure(wsInfoError);
-				
-				return scope.Failed("workspace unavailable", new ApplySignatureChangeResult(message, null, kind, null));
-			}
-			
-			var requestedBinding = WorkspaceBinding.Create(requestedRoot, requestedIsMSBuild, requestedCsproj);
-			
-			if(!operation.WorkspaceBinding.Matches(requestedBinding))
-				return scope.Failed("workspace mismatch", new ApplySignatureChangeResult(
-					$"Apply aborted — this token belongs to '{operation.WorkspaceBinding.CanonicalPath}', " +
-					$"but projectPath resolved to '{requestedBinding.CanonicalPath}'. Re-run roslyn_change_signature for the intended workspace.",
-					null, "workspace mismatch", null));
+			if(CheckApplyWorkspace(operation.WorkspaceBinding, projectPath, "roslyn_change_signature") is { } refusal)
+				return scope.Failed(refusal.Detail, new ApplySignatureChangeResult(refusal.Message, null, refusal.Kind, null));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;
 			
