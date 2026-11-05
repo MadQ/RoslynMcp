@@ -67,16 +67,17 @@ internal static class FileIdentity
 	
 	/// <summary>
 	///     The file name <paramref name="fullPath"/> gives its own entry — the name of a link, not of the
-	///     file it leads to — as <see cref="LongPath"/> spells it, and off Windows in Unicode normalization
-	///     form C: macOS treats an NFC and an NFD spelling as one entry, and the name is only compared once
-	///     the file and directory already match, so normalizing cannot join two different entries. Costs a
-	///     system call only for a Windows path holding <c>~</c>; cheap enough to filter candidates by.
+	///     file it leads to — as <see cref="LongPath"/> spells it. On macOS in Unicode normalization form C,
+	///     because its file systems treat an NFC and an NFD spelling as one entry. Nowhere else: on Linux
+	///     <c>Caf&#233;.csproj</c> and <c>Cafe&#769;.csproj</c> are two entries, and two links to one file
+	///     beside each other are two projects (#386), so normalizing there would join them (#390 review).
+	///     Costs a system call only for a Windows path holding <c>~</c>; cheap enough to filter candidates by.
 	/// </summary>
 	public static string EntryName(string fullPath)
 	{
 		var name = Path.GetFileName(LongPath(fullPath));
 		
-		return OperatingSystem.IsWindows() ? name : name.Normalize(NormalizationForm.FormC);
+		return OperatingSystem.IsMacOS() ? name.Normalize(NormalizationForm.FormC) : name;
 	}
 	
 	/// <summary>

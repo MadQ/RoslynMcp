@@ -14,6 +14,7 @@ static partial class DefaultWorkspaceTests
 		var dirLinked     = f.DirLinked;
 		var sameDirLinked = f.SameDirLinked;
 		var caseSensitive = f.CaseSensitive;
+		var unicodeLinked = f.UnicodeLinked;
 		var libProject    = f.LibProject;
 		
 		return new List<TestCase> {
@@ -313,6 +314,21 @@ static partial class DefaultWorkspaceTests
 				
 				return Verdict(ok && data?["error"] is null && (data?.ToJsonString() ?? "").Contains("Early"),
 					$"expected Early through {shortPath}, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #390 review: a link beside a project under the same name in another Unicode normalization form
+			// is another project wherever the two spellings are two entries — normalizing names everywhere
+			// joined them. Brew is the NFC project's and must not be found through the NFD link.
+			new("DefaultWorkspace: a link beside a project under its name in another normalization form is not that project", async () => {
+				
+				if(!unicodeLinked)
+					
+					return Skip.NotApplicable("the two spellings are one entry on this file system, or links cannot be created here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Pour", projectPath = fx.PathOf("Uni/Café.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
 			}),
 			
 			// #390 review: CaseProj/Upper/Proj.csproj and CaseProj/upper/Proj.csproj are two projects, in two

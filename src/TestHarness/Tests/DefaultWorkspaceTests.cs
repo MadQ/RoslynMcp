@@ -151,6 +151,26 @@ static partial class DefaultWorkspaceTests
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
+		// #390 review: Uni.slnx lists Café.csproj (NFC); Café.csproj (NFD) is a link to it
+		// beside it. Where the two spellings are two entries (Linux, NTFS) the link is another project,
+		// as Alias is above; macOS file systems make them one entry, so the link cannot be created there.
+		var nfcProject = "Café.csproj";
+		var nfdProject = "Café.csproj";
+		
+		fx.Write("Uni/Uni.slnx", $"<Solution>\n  <Project Path=\"{nfcProject}\" />\n</Solution>\n");
+		fx.Write($"Uni/{nfcProject}", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		fx.Write("Uni/Brew.cs", "namespace Uni;\n\npublic class Brew\n{\n\tpublic int Pour() => 1;\n}\n");
+		
+		var unicodeLinked = false;
+		
+		try {
+			
+			File.CreateSymbolicLink(fx.PathOf($"Uni/{nfdProject}"), fx.PathOf($"Uni/{nfcProject}"));
+			
+			unicodeLinked = Directory.GetFiles(fx.PathOf("Uni"), "*.csproj").Length == 2;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		
 		// Same file name, different files, different projects — the Program.cs-in-every-project case.
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
@@ -241,7 +261,7 @@ static partial class DefaultWorkspaceTests
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -277,7 +297,8 @@ static partial class DefaultWorkspaceTests
 		bool           CaseSensitive,
 		bool           AliasLinked,
 		bool           DirLinked,
-		bool           SameDirLinked)
+		bool           SameDirLinked,
+		bool           UnicodeLinked)
 	{
 		public string AppProject => Fx.PathOf("App/App.csproj");
 		public string LibProject => Fx.PathOf("Lib/Lib.csproj");
