@@ -1146,6 +1146,16 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		=> workspace.Resolve(projectPath) is (var path, ResolutionKind.Solution) ? path : null;
 	
 	/// <summary>
+	///     The file <paramref name="projectPath"/> resolves to — the solution, or the .csproj it names or
+	///     leads to — as the target of a <c>dotnet</c> command in an MSBuild workspace. Taken from the path
+	///     itself, never from the workspace's projects: a .csproj the loaded solution does not list is still
+	///     the project the caller asked for, not the solution's first one (#384). Call after a guarded
+	///     resolution has succeeded and the workspace is known to be MSBuild.
+	/// </summary>
+	protected string ResolvedTargetPath(string projectPath)
+		=> workspace.Resolve(projectPath).Path;
+	
+	/// <summary>
 	///     The .csproj path of the first project holding <paramref name="filePath"/> as a document or
 	///     additional document, or <c>null</c>. An exact full-path match against <paramref name="rootPath"/>
 	///     wins; otherwise a path-suffix match anchored at a segment boundary, so <c>Foo.cs</c> never selects

@@ -97,6 +97,8 @@ static class DefaultWorkspaceTests
 		single.Write("Single.slnx", "<Solution>\n  <Project Path=\"Only/Only.csproj\" />\n</Solution>\n");
 		single.Write("Only/Only.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
 		single.Write("Only/OnlyType.cs", "namespace Only;\n\npublic class OnlyType\n{\n\tpublic int Value() => 1;\n}\n");
+		// #384 review: a member renamed through the solution of one project, which names that project.
+		single.Write("Only/SoleTarget.cs", "namespace Only;\n\npublic class SoleTarget\n{\n\tpublic int Old() => 0;\n}\n");
 		single.Write("Beside/Beside.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
 		
 		// Review of #378: a solution in a directory of its own that lists a project outside it, and
@@ -620,7 +622,47 @@ static class DefaultWorkspaceTests
 					$"expected workspace mismatch, got {applied?.ToJsonString() ?? "null"}");
 			}),
 			
-
+			// #384 review: a solution of one project names that project, for the preview as for every
+			// lookup; the token must bind to Only.csproj, not to the root, or no apply can match it.
+			new("DefaultWorkspace: a rename previewed and applied through a solution of one project round-trips", async () => {
+				
+				var solution      = single.PathOf("Single.slnx");
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Old", newName = "Renewed", containingType = "SoleTarget", projectPath = solution });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = solution });
+				var renamed            = File.ReadAllText(single.PathOf("Only/SoleTarget.cs")).Contains("Renewed(");
+				
+				return Verdict(applyOk && applied?["error"] is null && renamed,
+					$"expected Old renamed through Single.slnx, got {applied?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review: a workspace pinned to adhoc has no project to build, whatever the path names.
+			// A solution path is still a solution in adhoc mode, so it must not reach dotnet.
+			new("DefaultWorkspace: build_project refuses a solution in an adhoc workspace", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = adhocSln.PathOf("Pinned.slnx"), forceBuild = true });
+				var error      = data?["error"]?.GetValue<string>() ?? "";
+				
+				return Verdict(ok && error.Contains("MSBuildWorkspace mode"),
+					$"expected the MSBuild-only refusal, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review: Stray.csproj loads the solution above it, which does not list it. Restore must
+			// target Stray.csproj — the project named — not the solution's first project (App) or nothing.
+			new("DefaultWorkspace: restore_packages targets a .csproj its solution does not list", async () => {
+				
+				var assets     = fx.PathOf("Stray/obj/project.assets.json");
+				var (ok, data) = await Call(rootedCtx, "roslyn_restore_packages", new { projectPath = fx.PathOf("Stray/Stray.csproj") });
+				
+				return Verdict(ok && data?["error"] is null && File.Exists(assets),
+					$"expected Stray restored, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it
 			// must reject "" even when a default exists — otherwise it would silently search the default
 			// solution's first project (App here), not fail as the schema promises.

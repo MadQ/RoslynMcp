@@ -456,29 +456,10 @@ internal sealed partial class WorkspaceManager
 				
 				return defaultProjectId;
 			
-			if(projectMap.TryGetValue(csprojPath, out var projectId))
+			// A solution of one project answers with the default project, as it always has.
+			if(NamedProjectKey_NoLock(csprojPath) is { } key)
 				
-				return projectId;
-			
-			// A solution of one project names that project. Any other .csproj — one the solution
-			// does not list, beside it in the tree — is still not it.
-			if(projectMap.Count == 1 && IsSolutionPath(csprojPath))
-				
-				return defaultProjectId;
-			
-			// By file name, for a path that names the same file differently (a link, a short name, a
-			// substituted drive). Only when exactly one project has that name: of two Tests.csproj,
-			// neither is the answer.
-			var fileName = Path.GetFileName(csprojPath);
-			var byName   = projectMap
-				.Where(kvp => string.Equals(Path.GetFileName(kvp.Key), fileName, StringComparison.OrdinalIgnoreCase))
-				.Take(2)
-				.ToArray()
-			;
-			
-			if(byName.Length == 1)
-				
-				return byName[0].Value;
+				return IsSolutionPath(csprojPath) ? defaultProjectId : projectMap[key];
 			
 			throw new Tools.ProjectNotInWorkspaceException(
 				csprojPath,
@@ -490,10 +471,40 @@ internal sealed partial class WorkspaceManager
 			;
 		}
 		
+		// The projectMap key of the project a path names, or null — the one set of rules shared by
+		// ResolveProjectId_NoLock (which tools look in) and FindCsprojForPath (which a preview binds its
+		// token to), so the two can never name different projects (#384).
+		string? NamedProjectKey_NoLock(string path)
+		{
+			if(projectMap.ContainsKey(path))
+				
+				return path;
+			
+			// A solution of one project names that project. Any other .csproj — one the solution
+			// does not list, beside it in the tree — is still not it.
+			if(projectMap.Count == 1 && IsSolutionPath(path))
+				
+				return projectMap.Keys.First();
+			
+			// By file name, for a path that names the same file differently (a link, a short name, a
+			// substituted drive). Only when exactly one project has that name: of two Tests.csproj,
+			// neither is the answer.
+			var fileName = Path.GetFileName(path);
+			var byName   = projectMap.Keys
+				.Where(key => string.Equals(Path.GetFileName(key), fileName, StringComparison.OrdinalIgnoreCase))
+				.Take(2)
+				.ToArray()
+			;
+			
+			return byName.Length == 1 ? byName[0] : null;
+		}
+		
 		/// <summary>
-		///     Returns <paramref name="normalizedPath"/> when it is one of this workspace's projects, else
-		///     <c>null</c> — for a solution, a directory, or an adhoc workspace. Never a guess: answering a
-		///     solution with its first .csproj bound apply checks to the wrong project (#384).
+		///     The .csproj of the project <paramref name="normalizedPath"/> names — by the same rules as every
+		///     project lookup: the project itself, a solution of one project, or a unique file name — else
+		///     <c>null</c>: a solution of several projects, a project the workspace does not hold, or an adhoc
+		///     workspace. Never a guess: answering a solution with its first .csproj bound apply checks to the
+		///     wrong project (#384).
 		/// </summary>
 		public string? FindCsprojForPath(string normalizedPath)
 		{
@@ -501,7 +512,7 @@ internal sealed partial class WorkspaceManager
 			
 			try {
 				
-				return projectMap.ContainsKey(normalizedPath) ? normalizedPath : null;
+				return isMSBuild ? NamedProjectKey_NoLock(normalizedPath) : null;
 			}
 			finally {
 				@lock.ExitReadLock();

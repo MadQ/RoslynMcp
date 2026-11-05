@@ -27,16 +27,15 @@ if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 
 return scope.Error(projectError);
 
-if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out _, out var csprojPath, out var wsError))
+if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
 
 return scope.Error(wsError);
 
-// A solution target cleans every project in it, not just the first one the workspace lists.
-// csprojPath is null for a solution, which names no one project, and for an adhoc workspace.
-var target = ResolvedSolutionPath(projectPath) ?? csprojPath;
-
-if(target is null)
+if(!isMSBuild)
 return scope.Error(new ErrorResult("No .csproj found - clean requires a project file."));
+
+// A solution target cleans every project in it, not just the first one the workspace lists.
+var target = ResolvedTargetPath(projectPath);
 
 string output;
 int exitCode;
