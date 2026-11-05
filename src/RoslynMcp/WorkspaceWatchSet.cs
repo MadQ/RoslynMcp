@@ -181,15 +181,19 @@ internal static class WatchPlanner
 	{
 		var trimmed = Path.TrimEndingDirectorySeparator(ancestor.AsSpan());
 		
-		if(trimmed.IsEmpty || !SecurityBoundary.StartsWithPath(path, trimmed))
+		if(trimmed.IsEmpty || path.Length < trimmed.Length)
 			
 			return false;
 		
 		// A filesystem root ("C:\", "/") keeps its separator when trimmed, so the boundary is the
-		// root's own last character rather than the one after it.
-		return path.Length == trimmed.Length
+		// root's own last character rather than the one after it. Checked before the text, which can
+		// ask the file system about a case-only difference (#391 review).
+		var atBoundary = path.Length == trimmed.Length
 			|| IsSeparator(trimmed[^1])
-			|| IsSeparator(path[trimmed.Length]);
+			|| IsSeparator(path[trimmed.Length])
+		;
+		
+		return atBoundary && SecurityBoundary.StartsWithPath(path, trimmed);
 		
 		static bool IsSeparator(char c) => c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar;
 	}

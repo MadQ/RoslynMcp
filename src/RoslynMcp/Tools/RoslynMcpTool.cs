@@ -1930,7 +1930,18 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return true;
 		
-		return SecurityBoundary.IsUnderDirectory(filePath, rootPath);
+		if(SecurityBoundary.IsUnderDirectory(filePath, rootPath))
+			
+			return true;
+		
+		// Linux keeps ignoring case here, as before #391: this decides what is reported, not what may be
+		// accessed, and on a case-folding mount the root as the user spelled it can differ in case from
+		// the paths MSBuild reports. Elsewhere the boundary's own rule already covers that.
+		if(!OperatingSystem.IsLinux() || !filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+			
+			return false;
+		
+		return filePath.Length == rootPath.Length || filePath[rootPath.Length] is '\\' or '/';
 	}
 	
 	/// <summary>
