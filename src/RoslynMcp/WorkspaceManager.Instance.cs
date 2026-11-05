@@ -37,8 +37,9 @@ internal sealed partial class WorkspaceManager
 		// live produced no event; ReconcileMissedChanges picks them up by timestamp.
 		private readonly DateTime             constructedUtc = DateTime.UtcNow;
 		
-		// Maps normalized .csproj paths → ProjectIds for all projects in the workspace.
-		private readonly Dictionary<string, ProjectId> projectMap = new(StringComparer.OrdinalIgnoreCase)
+		// Maps normalized .csproj paths → ProjectIds for all projects in the workspace. Keyed as the file
+		// system compares names: on Linux Same/same.csproj is not Same/Same.csproj (#390 review).
+		private readonly Dictionary<string, ProjectId> projectMap = new(SecurityBoundary.PathComparer)
 		;
 		
 		// Per-project compilation cache — cleared on any file change.
@@ -353,7 +354,7 @@ internal sealed partial class WorkspaceManager
 		
 		static Dictionary<string, ProjectId> BuildProjectMapFor(Workspace ws)
 		{
-			var map = new Dictionary<string, ProjectId>(StringComparer.OrdinalIgnoreCase);
+			var map = new Dictionary<string, ProjectId>(SecurityBoundary.PathComparer);
 			
 			foreach(var p in ws.CurrentSolution.Projects)
 				if(p.FilePath is not null)

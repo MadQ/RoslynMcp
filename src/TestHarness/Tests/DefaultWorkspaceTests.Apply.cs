@@ -15,6 +15,7 @@ static partial class DefaultWorkspaceTests
 		var sameDirLinked = f.SameDirLinked;
 		var caseSensitive = f.CaseSensitive;
 		var unicodeLinked = f.UnicodeLinked;
+		var caseLinked    = f.CaseLinked;
 		var libProject    = f.LibProject;
 		
 		return new List<TestCase> {
@@ -326,6 +327,25 @@ static partial class DefaultWorkspaceTests
 					return Skip.NotApplicable("the two spellings are one entry on this file system, or links cannot be created here");
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Pour", projectPath = fx.PathOf("Uni/Café.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #390 review: where names are case-sensitive, Same/same.csproj — a link to Same.csproj beside
+			// it — is another project. The project map ignored case and answered it as Same before the
+			// identity check could run. Pick is Same's and must not be found through it.
+			new("DefaultWorkspace: a link beside a project under its name in another case is not that project", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				if(!caseLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = fx.PathOf("Same/same.csproj") });
 				
 				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
 					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");

@@ -57,11 +57,14 @@ internal sealed partial class WorkspaceManager : IDisposable
 {
 	record CacheEntry(string Key, WorkspaceInstance Instance, SecurityBoundary Boundary, DateTime LastAccess);
 	
-	readonly Dictionary<string, CacheEntry> cache = new(StringComparer.OrdinalIgnoreCase);
+	// Every path-keyed structure here compares paths as the file system does (SecurityBoundary.PathComparer):
+	// on Linux Upper/ and upper/ are two directories, and a case-blind key would let one workspace answer
+	// for the other (#390 review).
+	readonly Dictionary<string, CacheEntry> cache = new(SecurityBoundary.PathComparer);
 	
 	// Secondary index: maps normalized .csproj paths → cache keys for solution-level entries.
 	// Enables O(1) lookup when a tool passes a .csproj that's part of an already-loaded solution.
-	readonly Dictionary<string, string> projectToCacheKey = new(StringComparer.OrdinalIgnoreCase)
+	readonly Dictionary<string, string> projectToCacheKey = new(SecurityBoundary.PathComparer)
 	;
 	
 	readonly object     cacheLock = new();
@@ -72,7 +75,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 	// one solution race on its obj\ files, and one of them can drop references. The entry is
 	// removed once the instance is in the cache, or once the load has failed — every caller
 	// waiting on it then gets the failure, and the next call tries again.
-	readonly Dictionary<string, Lazy<WorkspaceInstance>> pendingLoads = new(StringComparer.OrdinalIgnoreCase);
+	readonly Dictionary<string, Lazy<WorkspaceInstance>> pendingLoads = new(SecurityBoundary.PathComparer);
 	
 	readonly int        maxCachedWorkspaces;
 	readonly FileLogger logger;
@@ -190,7 +193,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 	{
 		cache[cacheKey] = entry with { LastAccess = DateTime.UtcNow };
 		
-		if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+		if(!SecurityBoundary.PathComparer.Equals(normalizedPath, cacheKey))
 			projectToCacheKey[normalizedPath] = cacheKey;
 	}
 	
@@ -244,7 +247,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 				// lookups on every call — re-loading and discarding a full AdhocWorkspace each time,
 				// and bypassing the keyed lookups in WriteAndInvalidate/ApplyChanges/InvalidateFile
 				// (losing FSW suppression). Alias the requested path to the cache key it landed on.
-				if(!normalizedPath.Equals(cacheKey, StringComparison.OrdinalIgnoreCase))
+				if(!SecurityBoundary.PathComparer.Equals(normalizedPath, cacheKey))
 					projectToCacheKey[normalizedPath] = cacheKey;
 				
 				if(cache.Count >= maxCachedWorkspaces) {
@@ -254,7 +257,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 					cache.Remove(lru.Key);
 					
 					var staleKeys = projectToCacheKey
-						.Where(kvp => string.Equals(kvp.Value, lru.Key, StringComparison.OrdinalIgnoreCase))
+						.Where(kvp => SecurityBoundary.PathComparer.Equals(kvp.Value, lru.Key))
 						.Select(kvp => kvp.Key)
 						.ToArray()
 					;

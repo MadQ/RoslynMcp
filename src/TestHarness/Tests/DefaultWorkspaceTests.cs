@@ -237,8 +237,20 @@ static partial class DefaultWorkspaceTests
 		caseFx.Write("Case/Name.cs", "namespace Probe;\n\ninternal class UpperName { }\n");
 		
 		var caseSensitive = !File.Exists(caseFx.PathOf("Case/name.cs"));
+		var caseLinked    = false;
 		
 		if(caseSensitive) {
+			
+			// #390 review: Same/same.csproj, a link to Same.csproj beside it whose name differs only in
+			// case — another project where names are case-sensitive, as Alias.csproj is everywhere. The
+			// project map ignored case and answered it as Same before the identity check ran.
+			try {
+				
+				File.CreateSymbolicLink(fx.PathOf("Same/same.csproj"), fx.PathOf("Same/Same.csproj"));
+				
+				caseLinked = true;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			caseFx.Write("Case/name.cs", "namespace Probe;\n\ninternal class LowerName { }\n");
 			
@@ -261,7 +273,7 @@ static partial class DefaultWorkspaceTests
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeLinked, caseLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -298,7 +310,8 @@ static partial class DefaultWorkspaceTests
 		bool           AliasLinked,
 		bool           DirLinked,
 		bool           SameDirLinked,
-		bool           UnicodeLinked)
+		bool           UnicodeLinked,
+		bool           CaseLinked)
 	{
 		public string AppProject => Fx.PathOf("App/App.csproj");
 		public string LibProject => Fx.PathOf("Lib/Lib.csproj");
