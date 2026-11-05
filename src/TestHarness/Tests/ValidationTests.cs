@@ -162,19 +162,17 @@ static class ValidationTests
 						);
 					})),
 			
-			// Drift probe: bump an existing file's mtime WITHOUT changing content (no source
-			// mutation risk). The probe must report drift before the FSW debounce flush lands,
+			// Drift probe: change a tracked fixture's source directly on disk.
+			// The probe must report drift before the FSW debounce flush lands,
 			// and self-heal after it. The probe reads a non-reloading snapshot, so it can
 			// observe the pre-flush staleness window. Probe.cs is a tracked document of the
 			// fixture project, loaded by the forceBuild tests above.
-			new("roslyn_check_drift: detects out-of-band mtime change, then self-heals",
+			new("roslyn_check_drift: detects out-of-band source change, then self-heals",
 				async () => {
 					
-					var touchPath = probePath;
-					
-					// Let any recent sync age past the 2s drift tolerance, then touch.
+					// Let any recent sync age past the 2s drift tolerance, then change source.
 					await Task.Delay(2500);
-					File.SetLastWriteTimeUtc(touchPath, DateTime.UtcNow);
+					File.AppendAllText(probePath, "// Outside edit for the drift probe.\n");
 					
 					var (driftSeen, msg1) = await ctx.RunTestAsync(
 						"roslyn_check_drift",
@@ -183,9 +181,9 @@ static class ValidationTests
 							&& data?["drifted_files"]?.AsArray().Any(f => f?.GetValue<string>()?.Contains("Probe.cs") == true) == true);
 					
 					if(!driftSeen)
-						return (false, $"FAIL  (mtime touch not reported as drift) {msg1}");
+						return (false, $"FAIL  (outside edit not reported as drift) {msg1}");
 					
-					// The FSW flush lands ~300ms after the touch; give it a second, then expect healed.
+					// The FSW flush lands ~300ms after the edit; give it a second, then expect healed.
 					await Task.Delay(1200);
 					
 					var (healed, msg2) = await ctx.RunTestAsync(
