@@ -151,8 +151,24 @@ static class TestFixtures
 					UseShellExecute        = false,
 				});
 				
-				fsutil?.StandardOutput.ReadToEnd();
-				fsutil?.WaitForExit(10_000);
+				if(fsutil is not null) {
+					
+					// Both pipes drained concurrently, so a full one cannot stall fsutil. A run that does
+					// not finish is killed and its directory counted as not case-sensitive: probing while
+					// fsutil may still set the flag could decide either way.
+					var output = fsutil.StandardOutput.ReadToEndAsync();
+					var errors = fsutil.StandardError.ReadToEndAsync();
+					
+					if(!fsutil.WaitForExit(10_000)) {
+						
+						fsutil.Kill();
+						fsutil.WaitForExit();
+						
+						return false;
+					}
+					
+					Task.WaitAll(output, errors);
+				}
 			}
 			catch(Exception ex) when(ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
 		}

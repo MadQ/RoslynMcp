@@ -148,9 +148,11 @@ internal static class FileIdentity
 	///     Whether the file system matches names in the directory at <paramref name="directory"/> by case:
 	///     the directory's own flag on Windows, where any directory can be made case-sensitive
 	///     (<c>fsutil file setCaseSensitiveInfo</c>, used with WSL), and the volume's format on macOS
-	///     (<c>pathconf(_PC_CASE_SENSITIVE)</c>). <c>null</c> when the directory does not exist. Where the
-	///     question cannot be asked — a file system without the flag (FAT, Windows before 1803), no access —
-	///     the platform's default: case-insensitive on Windows and macOS, case-sensitive anywhere else.
+	///     (<c>pathconf(_PC_CASE_SENSITIVE)</c>). <c>null</c> when the directory does not exist. Only a
+	///     confirmed answer is ever "ignores case": a Windows file system without the flag (FAT, Windows
+	///     before 1803) is one, because there names never differ by case. Anything uncertain — no access,
+	///     a sharing violation, a network error, an answer macOS will not give — is "case-sensitive": this
+	///     answer decides the workspace boundary, and a wrong "ignores case" lets a sibling directory in.
 	/// </summary>
 	public static bool? IsCaseSensitiveDirectory(string directory)
 	{
@@ -163,7 +165,7 @@ internal static class FileIdentity
 		}
 		catch(Exception ex) when(ex is ArgumentException or NotSupportedException or DllNotFoundException or EntryPointNotFoundException) {
 			
-			return !OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS();
+			return true;
 		}
 	}
 	
@@ -173,9 +175,14 @@ internal static class FileIdentity
 		
 		if(handle.IsInvalid)
 			
-			return Marshal.GetLastPInvokeError() is ErrorFileNotFound or ErrorPathNotFound ? null : false;
+			return Marshal.GetLastPInvokeError() is ErrorFileNotFound or ErrorPathNotFound ? null : true;
 		
-		return GetFileInformationByHandleEx(handle, FileCaseSensitiveInfo, out var flags, sizeof(uint)) && (flags & CaseSensitiveDirectoryFlag) != 0;
+		if(GetFileInformationByHandleEx(handle, FileCaseSensitiveInfo, out var flags, sizeof(uint)))
+			
+			return (flags & CaseSensitiveDirectoryFlag) != 0;
+		
+		// The file system or the Windows version has no such flag: its names never differ by case.
+		return Marshal.GetLastPInvokeError() is not (ErrorInvalidFunction or ErrorNotSupported or ErrorInvalidParameter);
 	}
 	
 	static bool? MacCaseSensitive(string directory)
@@ -186,7 +193,7 @@ internal static class FileIdentity
 			
 			return answer != 0;
 		
-		return Marshal.GetLastPInvokeError() is ErrorNoEntry or ErrorNotDirectory ? null : false;
+		return Marshal.GetLastPInvokeError() is ErrorNoEntry or ErrorNotDirectory ? null : true;
 	}
 	
 	static string? WindowsFinalPath(string path)
@@ -243,8 +250,11 @@ internal static class FileIdentity
 	// FILE_INFO_BY_HANDLE_CLASS.FileCaseSensitiveInfo; its FILE_CASE_SENSITIVE_INFO is one ULONG of flags.
 	const int  FileCaseSensitiveInfo      = 23;
 	const uint CaseSensitiveDirectoryFlag = 0x1;
+	const int  ErrorInvalidFunction       = 1;
 	const int  ErrorFileNotFound          = 2;
 	const int  ErrorPathNotFound          = 3;
+	const int  ErrorNotSupported          = 50;
+	const int  ErrorInvalidParameter      = 87;
 	
 	// Darwin's <unistd.h> and <errno.h>.
 	const int PcCaseSensitive   = 11;

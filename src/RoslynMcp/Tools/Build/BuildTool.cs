@@ -119,7 +119,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				fastPathProjects = [..solution.Projects
 					.Select(p => p.FilePath)
 					.OfType<string>()
-					.Distinct(StringComparer.OrdinalIgnoreCase)];
+					.Distinct(SecurityBoundary.PathComparer)];
 			}
 			
 			var aggregated = new List<DiagnosticItem>();

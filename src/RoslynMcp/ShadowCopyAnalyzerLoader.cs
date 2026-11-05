@@ -23,10 +23,10 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 		"RoslynMcp", "analyzer-shadow");
 	
 	// Dependency locations registered by AnalyzerFileReference before LoadFromPath runs.
-	private readonly ConcurrentDictionary<string, byte> dependencyLocations = new(StringComparer.OrdinalIgnoreCase);
+	private readonly ConcurrentDictionary<string, byte> dependencyLocations = new(SecurityBoundary.PathComparer);
 	
 	// Original path → loaded assembly, so repeated loads reuse the same shadow copy.
-	private readonly ConcurrentDictionary<string, Assembly> loadedByPath = new(StringComparer.OrdinalIgnoreCase);
+	private readonly ConcurrentDictionary<string, Assembly> loadedByPath = new(SecurityBoundary.PathComparer);
 	
 	private readonly AssemblyLoadContext context;
 	

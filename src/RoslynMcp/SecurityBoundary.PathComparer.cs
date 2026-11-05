@@ -17,18 +17,20 @@ internal sealed partial class SecurityBoundary
 	/// <remarks>
 	///     The relation is an equivalence: two paths are one when each component they spell differently lies
 	///     in a directory that ignores case, and the directories before a component are the same directory in
-	///     either spelling. A directory's answer is kept for the life of the process — a set keyed by path
-	///     must not see two paths change from equal to unequal — so a flag changed while the server runs is
-	///     seen after a restart. The answer for a directory that does not exist is its nearest existing
-	///     ancestor's, and is not kept: a new directory takes its parent's flag on Windows, and the volume's
-	///     rule on macOS, until it exists and can answer for itself.
+	///     either spelling. Every answer is kept for the life of the process and never dropped — a set keyed
+	///     by path must not see two paths change from equal to unequal — so a flag changed while the server
+	///     runs is seen after a restart. A directory that does not exist answers as its nearest existing
+	///     ancestor does (a new directory takes its parent's flag on Windows, the volume's rule on macOS), and
+	///     that answer is kept for it too. Only directories in which a case-only difference was compared are
+	///     asked at all, so the cache stays small.
+	///     <para>
+	///         The first comparison in a directory asks the file system, possibly under a caller's lock; on an
+	///         unreachable network share that waits as long as opening the directory does. Every later one is
+	///         a lookup.
+	///     </para>
 	/// </remarks>
 	sealed class FileSystemPathComparer : StringComparer
 	{
-		// Directories a session's paths pass through: a few hundred in practice. The cap only bounds a
-		// pathological run; dropping every answer at once re-asks the same file system.
-		const int MaxDirectories = 4096;
-		
 		readonly ConcurrentDictionary<string, bool> caseSensitive = new(StringComparer.Ordinal);
 		
 		public override bool Equals(string? x, string? y)
@@ -47,14 +49,12 @@ internal sealed partial class SecurityBoundary
 		public override int GetHashCode(string obj)
 			=> OrdinalIgnoreCase.GetHashCode(obj);
 		
-		// Only for a stable order (a watch-set key): equal paths sort together, case variants that are
-		// two paths sort apart by ordinal.
+		// An order for sorting, not a second equality: case-insensitive, then ordinal, which is total and
+		// transitive. Two spellings of one path compare unequal here, adjacent; asking the file system here
+		// would make the order depend on it and break transitivity (#391 review). Never key a sorted
+		// collection by it — key a dictionary or set by this comparer's Equals instead.
 		public override int Compare(string? x, string? y)
 		{
-			if(Equals(x, y))
-				
-				return 0;
-			
 			var order = OrdinalIgnoreCase.Compare(x, y);
 			
 			return order != 0 ? order : Ordinal.Compare(x, y);
@@ -97,26 +97,13 @@ internal sealed partial class SecurityBoundary
 				
 				return known;
 			
-			if(FileIdentity.IsCaseSensitiveDirectory(directory) is { } answer) {
-				
-				if(caseSensitive.Count >= MaxDirectories)
-					caseSensitive.Clear();
-				
-				caseSensitive[directory] = answer;
-				
-				return answer;
-			}
+			// A missing directory answers as its parent; with no existing ancestor at all, strictly. The
+			// first answer stored wins, so concurrent callers all see the same one.
+			var answer = FileIdentity.IsCaseSensitiveDirectory(directory)
+				?? (Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory)) is { } parent ? IsCaseSensitive(parent) : true)
+			;
 			
-			for(var ancestor = Parent(directory); ancestor is not null; ancestor = Parent(ancestor))
-				
-				if(FileIdentity.IsCaseSensitiveDirectory(ancestor) is { } inherited)
-					
-					return inherited;
-			
-			return false;
-			
-			static string? Parent(string path)
-				=> Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(path));
+			return caseSensitive.GetOrAdd(directory, answer);
 		}
 	}
 }

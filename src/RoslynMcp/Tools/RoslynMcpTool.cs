@@ -240,7 +240,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	const int pathCacheMaxSize = 500
 	;
 	
-	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
+	static readonly Dictionary<string, string> pathCache = new(SecurityBoundary.PathComparer);
 
 	// Static — must guard the static pathCache across ALL tool instances. A per-instance lock
 	// would let different tool types write the shared Dictionary concurrently and corrupt it.
@@ -1197,7 +1197,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		var suffix = Path.DirectorySeparatorChar + NormalizePath(filePath).TrimStart(Path.DirectorySeparatorChar);
 		
 		// Matched document path → first project holding it, in solution order.
-		var matches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		var matches = new Dictionary<string, string>(SecurityBoundary.PathComparer);
 		
 		foreach(var project in solution.Projects) {
 			
@@ -1209,7 +1209,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					matches.TryAdd(path, project.FilePath);
 		}
 		
-		string[] owners = [..matches.Values.Distinct(StringComparer.OrdinalIgnoreCase)];
+		string[] owners = [..matches.Values.Distinct(SecurityBoundary.PathComparer)];
 		
 		if(matches.Count > 1 && owners.Length > 1) {
 			

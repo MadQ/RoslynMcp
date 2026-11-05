@@ -40,7 +40,7 @@ internal sealed class ProjectConfig
 	const int cacheMaxSize = 500;
 	
 	// Parsed configs keyed by the normalized directory the walk started from.
-	static readonly Dictionary<string, ProjectConfig> cache = new(StringComparer.OrdinalIgnoreCase);
+	static readonly Dictionary<string, ProjectConfig> cache = new(SecurityBoundary.PathComparer);
 	
 	// Insertion order for approximate oldest-first eviction — avoids the full-cache
 	// thrash a Clear() at the cap would cause in long-running sessions.

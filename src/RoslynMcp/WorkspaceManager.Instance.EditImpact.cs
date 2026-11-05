@@ -178,7 +178,7 @@ internal sealed partial class WorkspaceManager
 			}
 			
 			static bool PathEquals(string? candidate, string fullPath) =>
-				candidate is not null && string.Equals(candidate, fullPath, StringComparison.OrdinalIgnoreCase);
+				candidate is not null && SecurityBoundary.PathComparer.Equals(candidate, fullPath);
 			
 			bool MatchesDeclaredAdditionalFile(Project project, string fullPath)
 			{

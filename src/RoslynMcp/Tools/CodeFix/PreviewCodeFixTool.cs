@@ -63,7 +63,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"file not found"));
 		
 		var document = project.Documents.FirstOrDefault(d =>
-			string.Equals(d.FilePath, fullPath, StringComparison.OrdinalIgnoreCase));
+			SecurityBoundary.PathComparer.Equals(d.FilePath, fullPath));
 		
 		if(document is null)
 			return scope.Failed("document not found", new PreviewCodeFixResult(
@@ -513,7 +513,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 	{
 		var sameFile = diagnostics
 			.Where(d => d.Location.IsInSource
-				&& string.Equals(d.Location.SourceTree?.FilePath, fullPath, StringComparison.OrdinalIgnoreCase)
+				&& SecurityBoundary.PathComparer.Equals(d.Location.SourceTree?.FilePath, fullPath)
 				&& (diagnosticId is null || string.Equals(d.Id, diagnosticId, StringComparison.OrdinalIgnoreCase)))
 			.ToArray()
 		;
