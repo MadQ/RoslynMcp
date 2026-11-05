@@ -6,17 +6,18 @@ static partial class DefaultWorkspaceTests
 {
 	static List<TestCase> ApplyTests(Fixture f)
 	{
-		var rootedCtx     = f.Rooted;
-		var fx            = f.Fx;
-		var single        = f.Single;
-		var adhocSln      = f.AdhocSln;
-		var aliasLinked   = f.AliasLinked;
-		var dirLinked     = f.DirLinked;
-		var sameDirLinked = f.SameDirLinked;
-		var caseSensitive = f.CaseSensitive;
-		var unicodeLinked = f.UnicodeLinked;
-		var caseLinked    = f.CaseLinked;
-		var libProject    = f.LibProject;
+		var rootedCtx       = f.Rooted;
+		var fx              = f.Fx;
+		var single          = f.Single;
+		var adhocSln        = f.AdhocSln;
+		var aliasLinked     = f.AliasLinked;
+		var dirLinked       = f.DirLinked;
+		var sameDirLinked   = f.SameDirLinked;
+		var caseSensitive   = f.CaseSensitive;
+		var unicodeDistinct = f.UnicodeDistinct;
+		var unicodeLinked   = f.UnicodeLinked;
+		var caseLinked      = f.CaseLinked;
+		var libProject      = f.LibProject;
 		
 		return new List<TestCase> {
 			
@@ -322,9 +323,13 @@ static partial class DefaultWorkspaceTests
 			// joined them. Brew is the NFC project's and must not be found through the NFD link.
 			new("DefaultWorkspace: a link beside a project under its name in another normalization form is not that project", async () => {
 				
+				if(!unicodeDistinct)
+					
+					return Skip.NotApplicable("an NFC and an NFD spelling are one entry on this file system");
+				
 				if(!unicodeLinked)
 					
-					return Skip.NotApplicable("the two spellings are one entry on this file system, or links cannot be created here");
+					return Skip.SetupUnavailable("cannot create symbolic links here");
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Pour", projectPath = fx.PathOf("Uni/Café.csproj") });
 				

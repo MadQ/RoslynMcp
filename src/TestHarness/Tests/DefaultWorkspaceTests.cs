@@ -161,15 +161,22 @@ static partial class DefaultWorkspaceTests
 		fx.Write($"Uni/{nfcProject}", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
 		fx.Write("Uni/Brew.cs", "namespace Uni;\n\npublic class Brew\n{\n\tpublic int Pour() => 1;\n}\n");
 		
-		var unicodeLinked = false;
+		// Probed before the link exists: where the NFD spelling already names the NFC file, the file system
+		// treats the two as one entry and the test does not apply. Anywhere else a failure to create the
+		// link is a fixture that could not be built — a failure on a CI runner, not a skip.
+		var unicodeDistinct = !File.Exists(fx.PathOf($"Uni/{nfdProject}"));
+		var unicodeLinked   = false;
 		
-		try {
+		if(unicodeDistinct) {
 			
-			File.CreateSymbolicLink(fx.PathOf($"Uni/{nfdProject}"), fx.PathOf($"Uni/{nfcProject}"));
-			
-			unicodeLinked = Directory.GetFiles(fx.PathOf("Uni"), "*.csproj").Length == 2;
+			try {
+				
+				File.CreateSymbolicLink(fx.PathOf($"Uni/{nfdProject}"), fx.PathOf($"Uni/{nfcProject}"));
+				
+				unicodeLinked = Directory.GetFiles(fx.PathOf("Uni"), "*.csproj").Length == 2;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
 		// Same file name, different files, different projects — the Program.cs-in-every-project case.
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
@@ -273,7 +280,7 @@ static partial class DefaultWorkspaceTests
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeLinked, caseLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -310,6 +317,7 @@ static partial class DefaultWorkspaceTests
 		bool           AliasLinked,
 		bool           DirLinked,
 		bool           SameDirLinked,
+		bool           UnicodeDistinct,
 		bool           UnicodeLinked,
 		bool           CaseLinked)
 	{
