@@ -84,7 +84,8 @@ static class DefaultWorkspaceTests
 			""");
 		
 		// #384 review: Twin/Lib.csproj shares only its name with Lib/Lib.csproj, a listed project, so it
-		// is not that project. Alias/Lib.csproj is a symbolic link to Lib/Lib.csproj, so it is (where
+		// is not that project. Alias/Lib.csproj is a symbolic link to Lib/Lib.csproj in another directory:
+		// the same file, but MSBuild evaluates it from Alias/, so it is not that project either (where
 		// links can be created).
 		fx.Write("Twin/Lib.csproj", """
 			<Project Sdk="Microsoft.NET.Sdk">
@@ -100,6 +101,15 @@ static class DefaultWorkspaceTests
 			
 			Directory.CreateDirectory(fx.PathOf("Alias"));
 			File.CreateSymbolicLink(fx.PathOf("Alias/Lib.csproj"), fx.PathOf("Lib/Lib.csproj"));
+			
+			// Round 4: the same kind of link, listed by a solution of its own.
+			Directory.CreateDirectory(fx.PathOf("Other"));
+			File.CreateSymbolicLink(fx.PathOf("Other/Lib.csproj"), fx.PathOf("Lib/Lib.csproj"));
+			fx.Write("Other/Other.slnx", """
+				<Solution>
+				  <Project Path="Lib.csproj" />
+				</Solution>
+				""");
 			
 			aliasLinked = true;
 		}
@@ -729,9 +739,10 @@ static class DefaultWorkspaceTests
 					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
 			}),
 			
-			// #384 review, round 2: another name of the same file still is that project — the identity
-			// check must keep what the name match was for.
-			new("DefaultWorkspace: a link to a listed project's .csproj is that project", async () => {
+			// #384 review, round 4: a link to a listed project's file in another directory is the same file,
+			// but MSBuild evaluates it from Alias/, with Alias/'s globs, so it is not that project. Greet is
+			// Lib's and must not be found through it.
+			new("DefaultWorkspace: a link to a listed project's .csproj in another directory is not that project", async () => {
 				
 				if(!aliasLinked)
 					
@@ -739,14 +750,13 @@ static class DefaultWorkspaceTests
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", projectPath = fx.PathOf("Alias/Lib.csproj") });
 				
-				return Verdict(ok && data?["error"] is null && (data?.ToJsonString() ?? "").Contains("Greet"),
-					$"expected Greet through the link, got {data?.ToJsonString() ?? "null"}");
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
 			}),
 			
-			// #384 review, round 3: dotnet is given the workspace's path of the project, not the link.
-			// MSBuild evaluates a project from the directory of the path it was given, so restoring through
-			// Alias/Lib.csproj used to write Alias/obj — another project's worth of globs and outputs.
-			new("DefaultWorkspace: restore_packages through a link to a .csproj targets the project itself", async () => {
+			// #384 review, round 4: being a project of its own, the link is what dotnet is given — restore
+			// evaluates it from Alias/ and writes Alias/obj, as for any project the solution does not list.
+			new("DefaultWorkspace: restore_packages through a link to a .csproj in another directory restores that project", async () => {
 				
 				if(!aliasLinked)
 					
@@ -754,8 +764,33 @@ static class DefaultWorkspaceTests
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_restore_packages", new { projectPath = fx.PathOf("Alias/Lib.csproj") });
 				
-				return Verdict(ok && data?["error"] is null && File.Exists(fx.PathOf("Lib/obj/project.assets.json")) && !Directory.Exists(fx.PathOf("Alias/obj")),
-					$"expected Lib restored and no Alias/obj, got {data?.ToJsonString() ?? "null"}");
+				return Verdict(ok && data?["error"] is null && File.Exists(fx.PathOf("Alias/obj/project.assets.json")),
+					$"expected Alias/Lib.csproj restored in Alias/, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review, round 4: Other.slnx lists Other/Lib.csproj, a link to Lib's file that MSBuild
+			// evaluates from Other/ — another project. A Lib token applied through it is refused, and Lib's
+			// file is left alone; matching by file alone accepted it.
+			new("DefaultWorkspace: a token is refused through a solution listing a link to its project's file elsewhere", async () => {
+				
+				if(!aliasLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Kept", newName = "Gone", containingType = "ApplyTarget", projectPath = libProject });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("Other/Other.slnx") });
+				var untouched          = !File.ReadAllText(fx.PathOf("Lib/ApplyTarget.cs")).Contains("Gone(");
+				
+				await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "n", projectPath = libProject });
+				
+				return Verdict(applyOk && applied?["error"]?.GetValue<string>() == "workspace mismatch" && untouched,
+					$"expected workspace mismatch, got {applied?.ToJsonString() ?? "null"}");
 			}),
 			
 			// #384 review, round 3: a solution that lists the token's project through a directory link

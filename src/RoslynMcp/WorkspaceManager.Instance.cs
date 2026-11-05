@@ -487,17 +487,25 @@ internal sealed partial class WorkspaceManager
 				
 				return projectMap.Count == 1 ? projectMap.Keys.First() : null;
 			
-			// Another name of one project's file — a link, a substituted drive, a short name — asked of
-			// the operating system, not read off the name: a different file that merely shares one
-			// (Twin/Lib.csproj beside Lib/Lib.csproj) is not that project, and a short name does not
-			// share it at all. Any other .csproj — one the solution does not list — is not one of these.
-			if(FileIdentity.FinalPath(path) is not { } final)
+			// Only a project file names a project; a directory or a source file is not asked about the
+			// file system for every project below.
+			if(!Path.GetExtension(path).EndsWith("proj", StringComparison.OrdinalIgnoreCase))
+				
+				return null;
+			
+			// Another name of one project — a directory link, a substituted drive, a short name — asked of
+			// the operating system, not read off the name: the same file evaluated from the same directory
+			// (FileIdentity.ProjectIdentity). A different file that merely shares the name (Twin/Lib.csproj
+			// beside Lib/Lib.csproj) is not that project, nor is a link to its file placed in another
+			// directory, which MSBuild evaluates from there. Any other .csproj — one the solution does not
+			// list — is not one of these.
+			if(FileIdentity.OfProject(path) is not { } identity)
 				
 				return null;
 			
 			foreach(var key in projectMap.Keys)
 				
-				if(FileIdentity.FinalPath(key) is { } keyFinal && SecurityBoundary.PathComparer.Equals(final, keyFinal))
+				if(FileIdentity.OfProject(key) is { } keyIdentity && keyIdentity.Matches(identity))
 					
 					return key;
 			

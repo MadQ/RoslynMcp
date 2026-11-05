@@ -5,20 +5,32 @@ using Microsoft.Win32.SafeHandles;
 namespace RoslynMcp;
 
 /// <summary>
-///     Whether two paths name the same file (compare their <see cref="FinalPath"/>s), decided by the operating system rather than by the text of the
-///     paths. <see cref="Path.GetFullPath"/> normalizes text only: a substituted drive, an 8.3 short name or a
-///     symbolic link names a file under another path, and a file name alone cannot tell a second name of one
-///     file from a different file that happens to share it (#384). The OS's final path can:
-///     <c>GetFinalPathNameByHandle</c> on Windows, <c>realpath</c> elsewhere.
+///     Whether two paths name the same file, directory or project, decided by the operating system rather
+///     than by the text of the paths. <see cref="Path.GetFullPath"/> normalizes text only: a substituted
+///     drive, an 8.3 short name or a symbolic link names an entry under another path, and a file name alone
+///     cannot tell a second name of one file from a different file that happens to share it (#384). The OS's
+///     final path can: <c>GetFinalPathNameByHandle</c> on Windows, <c>realpath</c> elsewhere.
 /// </summary>
 internal static class FileIdentity
 {
 	/// <summary>
-	///     The operating system's canonical path of an existing file — every link, substituted drive and short
-	///     name resolved — or <c>null</c> when it cannot be determined (a missing file, no access): never a
-	///     guess. Two paths are the same file when their final paths are equal under
-	///     <see cref="SecurityBoundary.PathComparer"/>. On Windows the result keeps the <c>\\?\</c> prefix; it
-	///     is meant for comparison, not for display.
+	///     What makes a project the same project: its file, and the directory MSBuild evaluates it from —
+	///     both as final paths. MSBuild evaluates a project from the directory of the path it is given, not
+	///     of the file a link leads to, so a link to <c>Lib/Lib.csproj</c> placed in <c>Other/</c> is another
+	///     project (its globs, imports and outputs are <c>Other/</c>'s), while the same file reached through
+	///     a link to <c>Lib/</c> itself is the same project (#384).
+	/// </summary>
+	public readonly record struct ProjectIdentity(string File, string Directory)
+	{
+		public bool Matches(ProjectIdentity other)
+			=> SecurityBoundary.PathComparer.Equals(File, other.File) && SecurityBoundary.PathComparer.Equals(Directory, other.Directory);
+	}
+	
+	/// <summary>
+	///     The operating system's canonical path of an existing file or directory — every link, substituted
+	///     drive and short name resolved — or <c>null</c> when it cannot be determined (a missing entry, no
+	///     access): never a guess. Compare final paths under <see cref="SecurityBoundary.PathComparer"/>. On
+	///     Windows the result keeps the <c>\\?\</c> prefix; it is meant for comparison, not for display.
 	/// </summary>
 	public static string? FinalPath(string path)
 	{
@@ -33,18 +45,49 @@ internal static class FileIdentity
 	}
 	
 	/// <summary>
-	///     Whether <paramref name="first"/> and <paramref name="second"/> are one existing file under two
-	///     names. <c>false</c> when either final path cannot be determined: an unknown is never the same
-	///     file. Costs a file open per path — compare the text of the paths first.
+	///     The <see cref="ProjectIdentity"/> of the project file at <paramref name="projectFile"/>, or
+	///     <c>null</c> when either final path cannot be determined. Costs two opens — compare the text of
+	///     the paths first.
 	/// </summary>
-	public static bool SameFile(string first, string second)
+	public static ProjectIdentity? OfProject(string projectFile)
+		=> FinalPath(projectFile) is { } file
+			&& Path.GetDirectoryName(Path.GetFullPath(projectFile)) is { } directory
+			&& FinalPath(directory) is { } finalDirectory
+			? new ProjectIdentity(file, finalDirectory)
+			: null
+	;
+	
+	/// <summary>
+	///     Whether two project file paths name the same project (<see cref="ProjectIdentity"/>).
+	///     <c>false</c> when either cannot be identified: an unknown is never the same project.
+	/// </summary>
+	public static bool SameProject(string first, string second)
+		=> OfProject(first) is { } firstIdentity && OfProject(second) is { } secondIdentity && firstIdentity.Matches(secondIdentity);
+	
+	/// <summary>
+	///     Whether two paths name one existing file or directory. <c>false</c> when either final path
+	///     cannot be determined.
+	/// </summary>
+	public static bool SamePath(string first, string second)
 		=> FinalPath(first) is { } firstFinal && FinalPath(second) is { } secondFinal && SecurityBoundary.PathComparer.Equals(firstFinal, secondFinal);
 	
 	static string? WindowsFinalPath(string path)
 	{
-		// Read access with every share mode: the file is only identified, never read, and a project file
-		// open in an editor or a build must not make it unidentifiable.
-		using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+		var full = Path.GetFullPath(path);
+		
+		// CreateFileW takes the path as given: past MAX_PATH it needs the extended-length prefix.
+		if(full.Length >= 260 && !full.StartsWith(@"\\?\", StringComparison.Ordinal))
+			
+			full = full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full[2..] : @"\\?\" + full;
+		
+		// Attributes only, with every share mode: the entry is identified, never read, so a project file
+		// open in an editor or a build stays identifiable. Backup semantics open a directory as well as a
+		// file, which File.OpenHandle cannot.
+		using var handle = CreateFile(full, FileReadAttributes, FileShare.ReadWrite | FileShare.Delete, 0, FileMode.Open, FileFlagBackupSemantics, 0);
+		
+		if(handle.IsInvalid)
+			
+			return null;
 		
 		var buffer = new char[512];
 		
@@ -80,6 +123,13 @@ internal static class FileIdentity
 		
 		return Encoding.UTF8.GetString(buffer, 0, end < 0 ? buffer.Length : end);
 	}
+	
+	const uint FileReadAttributes      = 0x80;
+	const uint FileFlagBackupSemantics = 0x02000000;
+	
+	// FileShare and FileMode.Open (3, OPEN_EXISTING) have the Win32 values.
+	[DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
+	static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, FileShare shareMode, nint securityAttributes, FileMode creationDisposition, uint flagsAndAttributes, nint templateFile);
 	
 	[DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
 	static extern uint GetFinalPathNameByHandle(SafeFileHandle file, [Out] char[] buffer, uint bufferLength, uint flags);
