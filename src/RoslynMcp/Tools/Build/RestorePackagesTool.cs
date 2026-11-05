@@ -26,7 +26,7 @@ if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 
 return scope.Error(projectError);
 
-if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
+if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out var csprojPath, out var wsError))
 
 return scope.Error(wsError);
 
@@ -34,7 +34,7 @@ if(!isMSBuild)
 return scope.Error(new ErrorResult("No .csproj found - restore requires a project file."));
 
 // A solution target restores every project in it, not just the first one the workspace lists.
-var target = ResolvedTargetPath(projectPath);
+var target = ResolvedTargetPath(projectPath, csprojPath);
 
 string output;
 int exitCode;

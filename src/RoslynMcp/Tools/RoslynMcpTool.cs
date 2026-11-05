@@ -771,7 +771,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				var bound = binding.CanonicalPath;
 				
+				// By text first; then by file, for a solution that lists the project under another name —
+				// through a directory link, say — than the workspace the preview loaded.
 				return solution.Projects.Any(project => project.FilePath is { } file && SecurityBoundary.PathComparer.Equals(Path.GetFullPath(file), bound))
+					|| FileIdentity.FinalPath(bound) is { } boundFinal
+						&& solution.Projects.Any(project => project.FilePath is { } file && FileIdentity.FinalPath(file) is { } fileFinal && SecurityBoundary.PathComparer.Equals(fileFinal, boundFinal))
 					? null
 					: new ApplyWorkspaceRefusal("workspace mismatch",
 						$"Apply aborted — this token belongs to '{bound}', which is not a project of '{solutionPath}'. Re-run {previewTool} for the intended workspace.",
@@ -1146,14 +1150,20 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		=> workspace.Resolve(projectPath) is (var path, ResolutionKind.Solution) ? path : null;
 	
 	/// <summary>
-	///     The file <paramref name="projectPath"/> resolves to — the solution, or the .csproj it names or
-	///     leads to — as the target of a <c>dotnet</c> command in an MSBuild workspace. Taken from the path
-	///     itself, never from the workspace's projects: a .csproj the loaded solution does not list is still
-	///     the project the caller asked for, not the solution's first one (#384). Call after a guarded
+	///     The target of a <c>dotnet</c> command in an MSBuild workspace: the solution
+	///     <paramref name="projectPath"/> names; else <paramref name="csprojPath"/>, the workspace's own path
+	///     of the project it names (from <see cref="TryResolveWorkspaceInfo"/>) — through a link to a .csproj,
+	///     MSBuild would evaluate globs, imports and outputs from the link's directory; else the .csproj the
+	///     path names or leads to, for a project the loaded solution does not list, which is still the
+	///     project the caller asked for, not the solution's first one (#384). Call after a guarded
 	///     resolution has succeeded and the workspace is known to be MSBuild.
 	/// </summary>
-	protected string ResolvedTargetPath(string projectPath)
-		=> workspace.Resolve(projectPath).Path;
+	protected string ResolvedTargetPath(string projectPath, string? csprojPath)
+	{
+		var (path, kind) = workspace.Resolve(projectPath);
+		
+		return kind == ResolutionKind.Solution ? path : csprojPath ?? path;
+	}
 	
 	/// <summary>
 	///     The .csproj path of the first project holding <paramref name="filePath"/> as a document or

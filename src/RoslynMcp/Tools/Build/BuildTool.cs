@@ -83,7 +83,7 @@ internal sealed class BuildTool : RoslynMcpTool
 		// A solution target builds — and fast-path checks — every project in it, not just the first
 		// one the workspace lists.
 		var solutionPath = ResolvedSolutionPath(projectPath);
-		var buildTarget  = ResolvedTargetPath(projectPath);
+		var buildTarget  = ResolvedTargetPath(projectPath, csprojPath);
 		
 		// A workspace that loaded without metadata references reports a flood of phantom
 		// CS0246/CS0234 for code that compiles fine. Short-circuiting on those would fail a healthy

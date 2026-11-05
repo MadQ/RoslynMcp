@@ -224,9 +224,14 @@ internal sealed record WorkspaceBinding(string CanonicalPath, bool IsMSBuild)
 		return new WorkspaceBinding(canonicalPath, isMSBuild);
 	}
 	
+	/// <summary>
+	///     Whether <paramref name="other"/> names the same workspace: the same path, or another name of the
+	///     same project file (a link, a substituted drive), which the operating system is asked about only
+	///     when the text differs (#384).
+	/// </summary>
 	public bool Matches(WorkspaceBinding other) =>
 		IsMSBuild == other.IsMSBuild
-		&& string.Equals(CanonicalPath, other.CanonicalPath, StringComparison.OrdinalIgnoreCase);
+		&& (string.Equals(CanonicalPath, other.CanonicalPath, StringComparison.OrdinalIgnoreCase) || FileIdentity.SameFile(CanonicalPath, other.CanonicalPath));
 }
 
 internal enum ExpectedFileState

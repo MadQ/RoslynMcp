@@ -32,6 +32,14 @@ internal static class FileIdentity
 		}
 	}
 	
+	/// <summary>
+	///     Whether <paramref name="first"/> and <paramref name="second"/> are one existing file under two
+	///     names. <c>false</c> when either final path cannot be determined: an unknown is never the same
+	///     file. Costs a file open per path — compare the text of the paths first.
+	/// </summary>
+	public static bool SameFile(string first, string second)
+		=> FinalPath(first) is { } firstFinal && FinalPath(second) is { } secondFinal && SecurityBoundary.PathComparer.Equals(firstFinal, secondFinal);
+	
 	static string? WindowsFinalPath(string path)
 	{
 		// Read access with every share mode: the file is only identified, never read, and a project file

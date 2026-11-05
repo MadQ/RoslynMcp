@@ -70,6 +70,10 @@ static class DefaultWorkspaceTests
 		// list, so that a .csproj loads the solution and still names none of its projects.
 		// #384: members of Lib, the solution's second project, renamed and re-signed through the solution.
 		fx.Write("Lib/ApplyTarget.cs", "namespace Lib;\n\npublic class ApplyTarget\n{\n\tpublic int Before(int a) => a;\n\tpublic int Shape(int a) => a;\n\tpublic int Kept(int a) => a;\n}\n");
+		// #384 review, round 3: one file per apply through Linked/, so neither depends on the other's write
+		// having reached the workspace the next preview runs in.
+		fx.Write("Lib/ViaSolution.cs", "namespace Lib;\n\npublic class ViaSolutionTarget\n{\n\tpublic int Early(int a) => a;\n}\n");
+		fx.Write("Lib/ViaProject.cs", "namespace Lib;\n\npublic class ViaProjectTarget\n{\n\tpublic int Early(int a) => a;\n}\n");
 		fx.Write("Lib/Warn.cs", "namespace Lib;\n\ninternal class WarnHolder\n{\n\tvoid M()\n\t{\n\t\tint unused;\n\t}\n}\n");
 		fx.Write("Stray/Stray.csproj", """
 			<Project Sdk="Microsoft.NET.Sdk">
@@ -98,6 +102,25 @@ static class DefaultWorkspaceTests
 			File.CreateSymbolicLink(fx.PathOf("Alias/Lib.csproj"), fx.PathOf("Lib/Lib.csproj"));
 			
 			aliasLinked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		
+		// #384 review, round 3: Linked/Linked.slnx lists Lib through a directory link, Linked/LibLink →
+		// Lib, so its project is Lib under another name. In a directory of its own: a second solution
+		// beside DefaultWs.slnx would make the default workspace ambiguous.
+		var dirLinked = false;
+		
+		try {
+			
+			Directory.CreateDirectory(fx.PathOf("Linked"));
+			Directory.CreateSymbolicLink(fx.PathOf("Linked/LibLink"), fx.PathOf("Lib"));
+			fx.Write("Linked/Linked.slnx", """
+				<Solution>
+				  <Project Path="LibLink/Lib.csproj" />
+				</Solution>
+				""");
+			
+			dirLinked = true;
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
@@ -718,6 +741,65 @@ static class DefaultWorkspaceTests
 				
 				return Verdict(ok && data?["error"] is null && (data?.ToJsonString() ?? "").Contains("Greet"),
 					$"expected Greet through the link, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review, round 3: dotnet is given the workspace's path of the project, not the link.
+			// MSBuild evaluates a project from the directory of the path it was given, so restoring through
+			// Alias/Lib.csproj used to write Alias/obj — another project's worth of globs and outputs.
+			new("DefaultWorkspace: restore_packages through a link to a .csproj targets the project itself", async () => {
+				
+				if(!aliasLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_restore_packages", new { projectPath = fx.PathOf("Alias/Lib.csproj") });
+				
+				return Verdict(ok && data?["error"] is null && File.Exists(fx.PathOf("Lib/obj/project.assets.json")) && !Directory.Exists(fx.PathOf("Alias/obj")),
+					$"expected Lib restored and no Alias/obj, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review, round 3: a solution that lists the token's project through a directory link
+			// holds that project. Membership compared path text, so the apply was refused as a mismatch.
+			new("DefaultWorkspace: a token applies through a solution that lists its project through a link", async () => {
+				
+				if(!dirLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "ViaSolutionTarget", projectPath = libProject });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("Linked/Linked.slnx") });
+				var renamed            = File.ReadAllText(fx.PathOf("Lib/ViaSolution.cs")).Contains("Late(");
+				
+				return Verdict(applyOk && applied?["error"] is null && renamed,
+					$"expected Early renamed through Linked.slnx, got {applied?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review, round 3: the same through the project's linked path itself — the binding
+			// comparison, not the solution membership.
+			new("DefaultWorkspace: a token applies through a link to its project's directory", async () => {
+				
+				if(!dirLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "ViaProjectTarget", projectPath = libProject });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("Linked/LibLink/Lib.csproj") });
+				var renamed            = File.ReadAllText(fx.PathOf("Lib/ViaProject.cs")).Contains("Late(");
+				
+				return Verdict(applyOk && applied?["error"] is null && renamed,
+					$"expected Early renamed through Linked/LibLink, got {applied?.ToJsonString() ?? "null"}");
 			}),
 			
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it
