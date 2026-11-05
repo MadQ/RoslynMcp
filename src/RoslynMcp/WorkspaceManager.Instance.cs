@@ -480,28 +480,34 @@ internal sealed partial class WorkspaceManager
 				
 				return path;
 			
-			// A solution of one project names that project. Any other .csproj — one the solution
-			// does not list, beside it in the tree — is still not it.
-			if(projectMap.Count == 1 && IsSolutionPath(path))
+			// A solution of one project names that project; a solution of several names none. Checked
+			// before the file comparison below: the default workspace is usually a solution, and its
+			// path reaches here on every call.
+			if(IsSolutionPath(path))
 				
-				return projectMap.Keys.First();
+				return projectMap.Count == 1 ? projectMap.Keys.First() : null;
 			
-			// By file name, for a path that names the same file differently (a link, a short name, a
-			// substituted drive). Only when exactly one project has that name: of two Tests.csproj,
-			// neither is the answer.
-			var fileName = Path.GetFileName(path);
-			var byName   = projectMap.Keys
-				.Where(key => string.Equals(Path.GetFileName(key), fileName, StringComparison.OrdinalIgnoreCase))
-				.Take(2)
-				.ToArray()
-			;
+			// Another name of one project's file — a link, a substituted drive, a short name — asked of
+			// the operating system, not read off the name: a different file that merely shares one
+			// (Twin/Lib.csproj beside Lib/Lib.csproj) is not that project, and a short name does not
+			// share it at all. Any other .csproj — one the solution does not list — is not one of these.
+			if(FileIdentity.FinalPath(path) is not { } final)
+				
+				return null;
 			
-			return byName.Length == 1 ? byName[0] : null;
+			foreach(var key in projectMap.Keys)
+				
+				if(FileIdentity.FinalPath(key) is { } keyFinal && SecurityBoundary.PathComparer.Equals(final, keyFinal))
+					
+					return key;
+			
+			return null;
 		}
 		
 		/// <summary>
 		///     The .csproj of the project <paramref name="normalizedPath"/> names — by the same rules as every
-		///     project lookup: the project itself, a solution of one project, or a unique file name — else
+		///     project lookup: the project itself, a solution of one project, or another name of the project's
+		///     own file (<see cref="FileIdentity"/>) — else
 		///     <c>null</c>: a solution of several projects, a project the workspace does not hold, or an adhoc
 		///     workspace. Never a guess: answering a solution with its first .csproj bound apply checks to the
 		///     wrong project (#384).

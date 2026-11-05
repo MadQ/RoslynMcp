@@ -72,7 +72,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			return scope.Error(projectError);
 		
-		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
+		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out var csprojPath, out var wsError))
 			
 			return scope.Error(wsError);
 		
@@ -93,10 +93,19 @@ internal sealed class BuildTool : RoslynMcpTool
 		var health = TryGetHealth(projectPath)
 		;
 		var unhealthyWorkspace = health is { IsHealthy: false };
+		
+		// A .csproj the loaded workspace does not hold — one its solution does not list — has no
+		// compilation for Roslyn to check, and checking another project's in its place would let that
+		// project's errors block this build (#384). dotnet builds it all the same.
+		var outsideWorkspace = solutionPath is null && csprojPath is null;
+		
+		if(outsideWorkspace)
+			
+			scope.Record("target is not a project of the loaded workspace — Roslyn check skipped");
 
-		// Fast path: check Roslyn diagnostics first (unless forceBuild=true, or the workspace
-		// itself is unhealthy and its diagnostics cannot be trusted).
-		if(!forceBuild && !unhealthyWorkspace) {
+		// Fast path: check Roslyn diagnostics first (unless forceBuild=true, the target is outside the
+		// loaded workspace, or the workspace itself is unhealthy and its diagnostics cannot be trusted).
+		if(!forceBuild && !unhealthyWorkspace && !outsideWorkspace) {
 
 			string[] fastPathProjects = [projectPath];
 			

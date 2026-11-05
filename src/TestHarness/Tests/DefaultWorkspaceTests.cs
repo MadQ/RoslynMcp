@@ -79,6 +79,28 @@ static class DefaultWorkspaceTests
 			</Project>
 			""");
 		
+		// #384 review: Twin/Lib.csproj shares only its name with Lib/Lib.csproj, a listed project, so it
+		// is not that project. Alias/Lib.csproj is a symbolic link to Lib/Lib.csproj, so it is (where
+		// links can be created).
+		fx.Write("Twin/Lib.csproj", """
+			<Project Sdk="Microsoft.NET.Sdk">
+			  <PropertyGroup>
+			    <TargetFramework>net10.0</TargetFramework>
+			  </PropertyGroup>
+			</Project>
+			""");
+		
+		var aliasLinked = false;
+		
+		try {
+			
+			Directory.CreateDirectory(fx.PathOf("Alias"));
+			File.CreateSymbolicLink(fx.PathOf("Alias/Lib.csproj"), fx.PathOf("Lib/Lib.csproj"));
+			
+			aliasLinked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		
 		// Same file name, different files, different projects — the Program.cs-in-every-project case.
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
@@ -661,6 +683,41 @@ static class DefaultWorkspaceTests
 				
 				return Verdict(ok && data?["error"] is null && File.Exists(assets),
 					$"expected Stray restored, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review, round 2: without forceBuild too. Stray has no compilation in the loaded
+			// workspace for Roslyn to check first, so the check is skipped and dotnet builds it — it used
+			// to stop at project_not_in_workspace. Needs the restore above.
+			new("DefaultWorkspace: build_project builds a .csproj its solution does not list", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = fx.PathOf("Stray/Stray.csproj") });
+				
+				return Verdict(ok && data?["succeeded"]?.GetValue<bool>() == true && data?["source"]?.GetValue<string>() != "roslyn",
+					$"expected a dotnet build of Stray, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review, round 2: a .csproj that only shares its name with a listed project is not that
+			// project — Greet is Lib's, and must not be found through Twin/Lib.csproj.
+			new("DefaultWorkspace: a .csproj that only shares a listed project's name is not that project", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", projectPath = fx.PathOf("Twin/Lib.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #384 review, round 2: another name of the same file still is that project — the identity
+			// check must keep what the name match was for.
+			new("DefaultWorkspace: a link to a listed project's .csproj is that project", async () => {
+				
+				if(!aliasLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", projectPath = fx.PathOf("Alias/Lib.csproj") });
+				
+				return Verdict(ok && data?["error"] is null && (data?.ToJsonString() ?? "").Contains("Greet"),
+					$"expected Greet through the link, got {data?.ToJsonString() ?? "null"}");
 			}),
 			
 			// Only tools whose projectPath is optional may use the default. A tool that still requires it
