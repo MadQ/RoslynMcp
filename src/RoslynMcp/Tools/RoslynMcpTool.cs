@@ -240,7 +240,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	const int pathCacheMaxSize = 500
 	;
 	
-	static readonly Dictionary<string, string> pathCache = new(SecurityBoundary.PathComparer);
+	// Keyed by the input exactly as given: a relative path has no directory the shared comparer could ask
+	// about its case, so another spelling is another key and simply misses (#392 review).
+	static readonly Dictionary<string, string> pathCache = new(StringComparer.Ordinal);
 
 	// Static — must guard the static pathCache across ALL tool instances. A per-instance lock
 	// would let different tool types write the shared Dictionary concurrently and corrupt it.

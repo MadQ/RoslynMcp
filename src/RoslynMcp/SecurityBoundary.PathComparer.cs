@@ -31,7 +31,9 @@ internal sealed partial class SecurityBoundary
 	/// </remarks>
 	sealed class FileSystemPathComparer : StringComparer
 	{
-		readonly ConcurrentDictionary<string, bool> caseSensitive = new(StringComparer.Ordinal);
+		// Each directory's answer, by its normal form; and each spelling's normal form, worked out once.
+		readonly ConcurrentDictionary<string, bool>   caseSensitive = new(StringComparer.Ordinal);
+		readonly ConcurrentDictionary<string, string> normalForms   = new(StringComparer.Ordinal);
 		
 		public override bool Equals(string? x, string? y)
 		{
@@ -93,17 +95,40 @@ internal sealed partial class SecurityBoundary
 		
 		bool IsCaseSensitive(string directory)
 		{
-			if(caseSensitive.TryGetValue(directory, out var known))
+			var key = NormalForm(directory);
+			
+			if(caseSensitive.TryGetValue(key, out var known))
 				
 				return known;
 			
 			// A missing directory answers as its parent; with no existing ancestor at all, strictly. The
 			// first answer stored wins, so concurrent callers all see the same one.
 			var answer = FileIdentity.IsCaseSensitiveDirectory(directory)
-				?? (Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory)) is { } parent ? IsCaseSensitive(parent) : true)
+				?? (Parent(directory) is { } parent ? IsCaseSensitive(parent) : true)
 			;
 			
-			return caseSensitive.GetOrAdd(directory, answer);
+			return caseSensitive.GetOrAdd(key, answer);
 		}
+		
+		// What a directory's answer is kept under: its spelling with the root, and every component whose
+		// parent matches names regardless of case, in upper case. Every spelling of one directory has the
+		// same normal form, so a probe that failed for one spelling cannot leave it with an answer another
+		// spelling contradicts (#392 review); siblings a case-sensitive parent tells apart keep two.
+		string NormalForm(string directory)
+		{
+			if(normalForms.TryGetValue(directory, out var known))
+				
+				return known;
+			
+			var normal = Parent(directory) is { } parent
+				? Path.Join(NormalForm(parent), IsCaseSensitive(parent) ? Path.GetFileName(directory) : Path.GetFileName(directory).ToUpperInvariant())
+				: directory.ToUpperInvariant()
+			;
+			
+			return normalForms.GetOrAdd(directory, normal);
+		}
+		
+		static string? Parent(string directory)
+			=> Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(directory));
 	}
 }

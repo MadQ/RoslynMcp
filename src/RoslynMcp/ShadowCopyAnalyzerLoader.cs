@@ -69,7 +69,7 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	private static string ShadowCopy(string fullPath)
 	{
 		var mtime  = File.GetLastWriteTimeUtc(fullPath);
-		var key    = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{fullPath.ToLowerInvariant()}|{mtime.Ticks}")))[..16];
+		var key    = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{fullPath}|{mtime.Ticks}")))[..16];
 		var dir    = Path.Combine(ShadowRoot, key);
 		var shadow = Path.Combine(dir, Path.GetFileName(fullPath));
 		
