@@ -14,7 +14,7 @@ static partial class DefaultWorkspaceTests
 		var dirLinked        = f.DirLinked;
 		var sameDirLinked    = f.SameDirLinked;
 		var caseDir          = f.CaseDir;
-		var caseDirSensitive = f.CaseDirSensitive;
+		var caseDirState     = f.CaseDirState;
 		var unicodeDistinct  = f.UnicodeDistinct;
 		var unicodeLinked    = f.UnicodeLinked;
 		var caseLinked       = f.CaseLinked;
@@ -343,9 +343,9 @@ static partial class DefaultWorkspaceTests
 			// identity check could run. Pick is Same's and must not be found through it.
 			new("DefaultWorkspace: a link beside a project under its name in another case is not that project", async () => {
 				
-				if(!caseDirSensitive)
+				if(caseDirState != CaseSensitivity.Sensitive)
 					
-					return Skip.NotApplicable(NoCaseSensitiveDirectory);
+					return TestFixtures.CaseSkip(caseDirState);
 				
 				if(!caseLinked)
 					
@@ -362,9 +362,9 @@ static partial class DefaultWorkspaceTests
 			// and Upper's file is left alone; the binding's text check ignored case and accepted it unexamined.
 			new("DefaultWorkspace: a token is refused through a project whose path differs only in case", async () => {
 				
-				if(!caseDirSensitive)
+				if(caseDirState != CaseSensitivity.Sensitive)
 					
-					return Skip.NotApplicable(NoCaseSensitiveDirectory);
+					return TestFixtures.CaseSkip(caseDirState);
 				
 				var upper         = caseDir.PathOf("CaseProj/Upper/Proj.csproj");
 				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "UpperTarget", projectPath = upper });

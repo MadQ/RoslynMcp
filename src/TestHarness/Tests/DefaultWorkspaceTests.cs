@@ -260,10 +260,10 @@ static partial class DefaultWorkspaceTests
 		// directory's rule, not the platform's. Kept apart from the fixtures above: Roslyn's own path lookups
 		// on Windows ignore case, so the Compile-item tests there would fail for a reason not the server's.
 		var caseDir          = TestFixtures.NewAdhocDir("DefaultWorkspaceCaseDir");
-		var caseDirSensitive = TestFixtures.MakeCaseSensitive(caseDir.Dir);
+		var caseDirState     = TestFixtures.MakeCaseSensitive(caseDir.Dir);
 		var caseLinked       = false;
 		
-		if(caseDirSensitive) {
+		if(caseDirState == CaseSensitivity.Sensitive) {
 			
 			// #390 review: Same/same.csproj, a link to Same.csproj beside it whose name differs only in
 			// case — another project where names are case-sensitive, as Alias.csproj is everywhere. The
@@ -301,7 +301,7 @@ static partial class DefaultWorkspaceTests
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseDir, caseSensitive, caseDirSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseDir, caseSensitive, caseDirState, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -337,7 +337,7 @@ static partial class DefaultWorkspaceTests
 		FixtureProject CaseFx,
 		FixtureProject CaseDir,
 		bool           CaseSensitive,
-		bool           CaseDirSensitive,
+		CaseSensitivity CaseDirState,
 		bool           AliasLinked,
 		bool           DirLinked,
 		bool           SameDirLinked,
@@ -375,9 +375,6 @@ static partial class DefaultWorkspaceTests
 	
 	static (bool pass, string message) Verdict(bool pass, string failure)
 		=> pass ? (true, "PASS") : (false, $"FAIL  ({failure})");
-	
-	// Why a #391 test that needs a case-sensitive directory did not run.
-	const string NoCaseSensitiveDirectory = "no case-sensitive directory here: a default macOS volume, or Windows without the WSL feature fsutil needs";
 	
 	// The content of Boundary/ROOT/Secret.txt, outside the workspace: it must never come back.
 	const string CaseSecret = "case-variant-sibling-secret";

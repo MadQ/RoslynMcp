@@ -50,7 +50,8 @@ static class LinkedWorkspaceTests
 		var fx = TestFixtures.NewAdhocDir("LinkedWorkspace");
 		
 		// Before anything is written into it: Windows makes only an empty directory case-sensitive (#391).
-		var casedApart = TestFixtures.MakeCaseSensitive(fx.PathOf("real"));
+		var realState  = TestFixtures.MakeCaseSensitive(fx.PathOf("real"));
+		var casedApart = realState == CaseSensitivity.Sensitive;
 		
 		fx.Write("real/proj/Probe.cs",   "class Probe { }\n");
 		fx.Write("real/proj/Notes.txt",  "inside-the-workspace\n");
@@ -242,7 +243,7 @@ static class LinkedWorkspaceTests
 					
 					if(!casedApart)
 						
-						return Skip.NotApplicable("no case-sensitive directory here: a default macOS volume, or Windows without the WSL feature fsutil needs");
+						return TestFixtures.CaseSkip(realState);
 					
 					if(!linksMade)
 						

@@ -53,6 +53,19 @@ sealed class FixtureProject : IDisposable
 	public void Dispose() => TestFixtures.DeleteTree(Dir);
 }
 
+/// <summary>What <see cref="TestFixtures.MakeCaseSensitive"/> made of a fixture directory (#391).</summary>
+enum CaseSensitivity
+{
+	/// <summary>Names that differ only in case are two entries.</summary>
+	Sensitive,
+	
+	/// <summary>The file system makes them one entry, and cannot be told otherwise here.</summary>
+	Insensitive,
+	
+	/// <summary>fsutil timed out or did not start: whether it could have worked is unknown.</summary>
+	SetupFailed,
+}
+
 /// <summary>Creates and sweeps the temp fixture trees the harness groups work in.</summary>
 static class TestFixtures
 {
@@ -136,8 +149,10 @@ static class TestFixtures
 	///     with no admin rights but the optional WSL feature — and directories created in it inherit it.
 	///     Linux directories are case-sensitive already; a default macOS volume cannot be made so. A probe
 	///     decides, not the platform or fsutil's exit code, so a case-sensitive macOS volume counts too.
+	///     An fsutil that times out or cannot be started is <see cref="CaseSensitivity.SetupFailed"/>, not a
+	///     platform without the feature: the tests then fail on a CI runner instead of passing unrun (#392 review).
 	/// </summary>
-	public static bool MakeCaseSensitive(string directory)
+	public static CaseSensitivity MakeCaseSensitive(string directory)
 	{
 		Directory.CreateDirectory(directory);
 		
@@ -154,8 +169,8 @@ static class TestFixtures
 				if(fsutil is not null) {
 					
 					// Both pipes drained concurrently, so a full one cannot stall fsutil. A run that does
-					// not finish is killed and its directory counted as not case-sensitive: probing while
-					// fsutil may still set the flag could decide either way.
+					// not finish is killed and the setup counted as failed: probing while fsutil may still
+					// set the flag could decide either way.
 					var output = fsutil.StandardOutput.ReadToEndAsync();
 					var errors = fsutil.StandardError.ReadToEndAsync();
 					
@@ -164,13 +179,16 @@ static class TestFixtures
 						fsutil.Kill();
 						fsutil.WaitForExit();
 						
-						return false;
+						return CaseSensitivity.SetupFailed;
 					}
 					
 					Task.WaitAll(output, errors);
 				}
 			}
-			catch(Exception ex) when(ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+			catch(Exception ex) when(ex is System.ComponentModel.Win32Exception or InvalidOperationException) {
+				
+				return CaseSensitivity.SetupFailed;
+			}
 		}
 		
 		var probe = Path.Combine(directory, "CaseProbe");
@@ -181,8 +199,19 @@ static class TestFixtures
 		
 		File.Delete(probe);
 		
-		return sensitive;
+		return sensitive ? CaseSensitivity.Sensitive : CaseSensitivity.Insensitive;
 	}
+	
+	/// <summary>
+	///     The skip for a test that needs a case-sensitive directory and has none: not applicable where the
+	///     file system cannot have one (a default macOS volume, Windows without the WSL feature fsutil
+	///     needs), a setup failure — which fails on a CI runner — where fsutil itself did not run.
+	/// </summary>
+	public static (bool pass, string message) CaseSkip(CaseSensitivity state)
+		=> state == CaseSensitivity.SetupFailed
+			? Skip.SetupUnavailable("fsutil could not make the fixture directory case-sensitive (timed out or did not start)")
+			: Skip.NotApplicable("no case-sensitive directory here: a default macOS volume, or Windows without the WSL feature fsutil needs")
+	;
 	
 	/// <summary>
 	///     Removes what a killed run leaves behind: fixture trees under <see cref="TempRoot"/> (and the

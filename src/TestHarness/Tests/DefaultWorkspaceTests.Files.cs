@@ -10,7 +10,7 @@ static partial class DefaultWorkspaceTests
 		var caseFx           = f.CaseFx;
 		var caseDir          = f.CaseDir;
 		var caseSensitive    = f.CaseSensitive;
-		var caseDirSensitive = f.CaseDirSensitive;
+		var caseDirState     = f.CaseDirState;
 		var appProject       = f.AppProject;
 		var libProject       = f.LibProject;
 		
@@ -192,9 +192,9 @@ static partial class DefaultWorkspaceTests
 			// it as inside on Windows and macOS — on a case-sensitive directory or volume, a way out.
 			new("DefaultWorkspace: a sibling whose name differs from the root only in case is outside the workspace", async () => {
 				
-				if(!caseDirSensitive)
+				if(caseDirState != CaseSensitivity.Sensitive)
 					
-					return Skip.NotApplicable(NoCaseSensitiveDirectory);
+					return TestFixtures.CaseSkip(caseDirState);
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_read_file", new { filePath = caseDir.PathOf("Boundary/ROOT/Secret.txt"), projectPath = caseDir.PathOf("Boundary/root/Root.csproj") });
 				var body       = data?.ToJsonString() ?? "null";
