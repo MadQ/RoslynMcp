@@ -13,6 +13,7 @@ static partial class DefaultWorkspaceTests
 		var aliasLinked   = f.AliasLinked;
 		var dirLinked     = f.DirLinked;
 		var sameDirLinked = f.SameDirLinked;
+		var caseSensitive = f.CaseSensitive;
 		var libProject    = f.LibProject;
 		
 		return new List<TestCase> {
@@ -286,10 +287,23 @@ static partial class DefaultWorkspaceTests
 					
 					return Skip.NotApplicable("8.3 short names exist only on Windows");
 				
-				var longPath  = fx.PathOf("Same/Same.csproj");
-				var buffer    = new char[1024];
-				var length    = GetShortPathName(longPath, buffer, (uint) buffer.Length);
-				var shortPath = length is > 0 and < 1024 ? new string(buffer, 0, (int) length) : longPath;
+				var longPath = fx.PathOf("Same/Same.csproj");
+				var buffer   = new char[1024];
+				var length   = GetShortPathName(longPath, buffer, (uint) buffer.Length);
+				
+				if(length >= buffer.Length) {
+					
+					buffer = new char[length];
+					length = GetShortPathName(longPath, buffer, (uint) buffer.Length);
+				}
+				
+				// A failed call is a fixture that could not be built — a failure on a CI runner, never a
+				// silent skip. A volume without short names returns the long name, and there is nothing to test.
+				if(length == 0 || length >= buffer.Length)
+					
+					return Skip.SetupUnavailable($"GetShortPathName failed (error {Marshal.GetLastPInvokeError()})");
+				
+				var shortPath = new string(buffer, 0, (int) length);
 				
 				if(string.Equals(Path.GetFileName(shortPath), Path.GetFileName(longPath), StringComparison.OrdinalIgnoreCase))
 					
@@ -299,6 +313,32 @@ static partial class DefaultWorkspaceTests
 				
 				return Verdict(ok && data?["error"] is null && (data?.ToJsonString() ?? "").Contains("Early"),
 					$"expected Early through {shortPath}, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #390 review: CaseProj/Upper/Proj.csproj and CaseProj/upper/Proj.csproj are two projects, in two
+			// workspaces, where names are case-sensitive. A token for Upper applied through upper is refused
+			// and Upper's file is left alone; the binding's text check ignored case and accepted it unexamined.
+			new("DefaultWorkspace: a token is refused through a project whose path differs only in case", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				var upper         = fx.PathOf("CaseProj/Upper/Proj.csproj");
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "UpperTarget", projectPath = upper });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("CaseProj/upper/Proj.csproj") });
+				var untouched          = !File.ReadAllText(fx.PathOf("CaseProj/Upper/UpperTarget.cs")).Contains("Late(");
+				
+				await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "n", projectPath = upper });
+				
+				return Verdict(applyOk && applied?["error"]?.GetValue<string>() == "workspace mismatch" && untouched,
+					$"expected workspace mismatch, got {applied?.ToJsonString() ?? "null"}");
 			}),
 		};
 	}

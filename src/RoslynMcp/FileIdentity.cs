@@ -61,23 +61,37 @@ internal static class FileIdentity
 			&& Path.GetFullPath(projectFile) is var fullPath
 			&& Path.GetDirectoryName(fullPath) is { } directory
 			&& FinalPath(directory) is { } finalDirectory
-			? new ProjectIdentity(file, finalDirectory, LongFileName(fullPath))
+			? new ProjectIdentity(file, finalDirectory, EntryName(fullPath))
 			: null
 	;
 	
 	/// <summary>
-	///     The file name <paramref name="fullPath"/> gives its own entry, an 8.3 short name expanded — the
-	///     name of a link, not of the file it leads to. Where the long name cannot be read, the name as
-	///     given: a mismatch then refuses rather than guesses.
+	///     The file name <paramref name="fullPath"/> gives its own entry — the name of a link, not of the
+	///     file it leads to — as <see cref="LongPath"/> spells it, and off Windows in Unicode normalization
+	///     form C: macOS treats an NFC and an NFD spelling as one entry, and the name is only compared once
+	///     the file and directory already match, so normalizing cannot join two different entries. Costs a
+	///     system call only for a Windows path holding <c>~</c>; cheap enough to filter candidates by.
 	/// </summary>
-	static string LongFileName(string fullPath)
+	public static string EntryName(string fullPath)
 	{
-		if(!OperatingSystem.IsWindows())
-			
-			return Path.GetFileName(fullPath);
+		var name = Path.GetFileName(LongPath(fullPath));
 		
-		// GetLongPathNameW expands each component's short name from its own directory entry; it does not
-		// follow a link.
+		return OperatingSystem.IsWindows() ? name : name.Normalize(NormalizationForm.FormC);
+	}
+	
+	/// <summary>
+	///     <paramref name="fullPath"/> with every 8.3 short name expanded, on Windows — <c>SAME~1.CSP</c>
+	///     routes by its extension as <c>Same.csproj</c>. Unchanged elsewhere, when the path holds no
+	///     <c>~</c> (no short name can), and when the expansion fails (a missing entry): never a guess.
+	///     <c>GetLongPathNameW</c> expands each component from its own directory entry and does not follow
+	///     a link, so a link keeps its own name (#386).
+	/// </summary>
+	public static string LongPath(string fullPath)
+	{
+		if(!OperatingSystem.IsWindows() || !fullPath.Contains('~'))
+			
+			return fullPath;
+		
 		var path   = ExtendedLength(fullPath);
 		var buffer = new char[512];
 		
@@ -87,16 +101,24 @@ internal static class FileIdentity
 			
 			if(length == 0)
 				
-				break;
+				return fullPath;
 			
-			if(length < buffer.Length)
+			if(length < buffer.Length) {
 				
-				return Path.GetFileName(new string(buffer, 0, (int) length));
+				var expanded = new string(buffer, 0, (int) length);
+				
+				// Back to the caller's form when the extended-length prefix was only added for the call.
+				return ReferenceEquals(path, fullPath) ? expanded
+					: expanded.StartsWith(@"\\?\UNC\", StringComparison.Ordinal) ? @"\\" + expanded[8..]
+					: expanded.StartsWith(@"\\?\", StringComparison.Ordinal) ? expanded[4..]
+					: expanded
+				;
+			}
 			
 			buffer = new char[length];
 		}
 		
-		return Path.GetFileName(fullPath);
+		return fullPath;
 	}
 	
 	// CreateFileW and GetLongPathNameW take a path as given: past MAX_PATH it needs the extended-length prefix.

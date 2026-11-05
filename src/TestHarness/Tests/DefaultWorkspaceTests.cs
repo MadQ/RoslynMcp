@@ -134,6 +134,8 @@ static partial class DefaultWorkspaceTests
 		// same directory, but MSBuild names the project after the link (Alias), so it is another project.
 		// Same.slnx makes Same.csproj a project of the workspace a path in Same/ loads; Other/Alias.slnx
 		// lists the link. Same.csproj is written regardless, so the short-name test has a project to name.
+		// The two share Same/obj, whose project.assets.json is not named after the project: no test here
+		// may restore or build through Alias, or Same's restore state is overwritten.
 		fx.Write("Same/Same.slnx", "<Solution>\n  <Project Path=\"Same.csproj\" />\n</Solution>\n");
 		fx.Write("Same/Same.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
 		fx.Write("Same/Pick.cs", "namespace Same;\n\npublic class Pick\n{\n\tpublic int Early(int a) => a;\n}\n");
@@ -149,7 +151,6 @@ static partial class DefaultWorkspaceTests
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
-
 		// Same file name, different files, different projects — the Program.cs-in-every-project case.
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
@@ -224,6 +225,17 @@ static partial class DefaultWorkspaceTests
 			// The same pair in an MSBuild project, where only one of the two is loaded.
 			fx.Write("App/Case/Name.cs", "namespace App.Case;\n\ninternal class UpperName { }\n");
 			fx.Write("App/Case/name.cs", "namespace App.Case;\n\ninternal class LowerName { }\n");
+			
+			// #390 review: two projects whose paths differ only in case, each in a workspace of its own —
+			// MSBuildWorkspace on Linux cannot hold both in one solution, as with the Compile items above.
+			// A token for one must not apply through the other: the binding's text check ignored case.
+			// The solutions' names differ beyond case, so no case-blind lookup can take one for the other.
+			foreach(var (dir, solution, name) in new[] { ("Upper", "A", "UpperTarget"), ("upper", "B", "LowerTarget") }) {
+				
+				fx.Write($"CaseProj/{dir}/{solution}.slnx", "<Solution>\n  <Project Path=\"Proj.csproj\" />\n</Solution>\n");
+				fx.Write($"CaseProj/{dir}/Proj.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+				fx.Write($"CaseProj/{dir}/{name}.cs", $"namespace CaseProj;\n\npublic class {name}\n{{\n\tpublic int Early(int a) => a;\n}}\n");
+			}
 		}
 		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);

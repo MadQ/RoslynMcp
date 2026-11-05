@@ -22,7 +22,8 @@ internal sealed partial class WorkspaceManager
 		if(string.IsNullOrWhiteSpace(inputPath))
 			throw new ArgumentException("projectPath is required by this tool and cannot be empty.", nameof(inputPath));
 		
-		var fullPath = Path.GetFullPath(inputPath);
+		// Short (8.3) names expanded before anything routes by extension: SAME~1.CSP is Same.csproj (#386).
+		var fullPath = FileIdentity.LongPath(Path.GetFullPath(inputPath));
 		
 		if(SecurityBoundary.IsDangerousProjectPath(fullPath))
 			throw new InvalidProjectPathException(fullPath, "Path is not a valid project location");

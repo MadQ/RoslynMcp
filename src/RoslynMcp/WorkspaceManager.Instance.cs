@@ -488,8 +488,8 @@ internal sealed partial class WorkspaceManager
 				return projectMap.Count == 1 ? projectMap.Keys.First() : null;
 			
 			// Only a project file names a project; a directory or a source file is not asked about the
-			// file system for every project below.
-			if(!Path.GetExtension(path).EndsWith("proj", StringComparison.OrdinalIgnoreCase))
+			// file system for every project below. Judged by the long name: SAME~1.CSP is a .csproj.
+			if(!Path.GetExtension(FileIdentity.LongPath(path)).EndsWith("proj", StringComparison.OrdinalIgnoreCase))
 				
 				return null;
 			
@@ -504,9 +504,13 @@ internal sealed partial class WorkspaceManager
 				
 				return null;
 			
+			// A key under another name cannot match, and its name is read without the file system: only the
+			// one or two keys that share the name pay for OfProject's opens.
 			foreach(var key in projectMap.Keys)
 				
-				if(FileIdentity.OfProject(key) is { } keyIdentity && keyIdentity.Matches(identity))
+				if(SecurityBoundary.PathComparer.Equals(FileIdentity.EntryName(key), identity.Name)
+					&& FileIdentity.OfProject(key) is { } keyIdentity
+					&& keyIdentity.Matches(identity))
 					
 					return key;
 			
