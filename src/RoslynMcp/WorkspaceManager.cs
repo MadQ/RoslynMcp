@@ -58,8 +58,9 @@ internal sealed partial class WorkspaceManager : IDisposable
 	record CacheEntry(string Key, WorkspaceInstance Instance, SecurityBoundary Boundary, DateTime LastAccess);
 	
 	// Every path-keyed structure here compares paths as the file system does (SecurityBoundary.PathComparer):
-	// on Linux Upper/ and upper/ are two directories, and a case-blind key would let one workspace answer
-	// for the other (#390 review).
+	// where names are case-sensitive Upper/ and upper/ are two directories, and a case-blind key would let
+	// one workspace answer for the other (#390 review) — on Linux, and in a case-sensitive directory on
+	// Windows or macOS (#391).
 	readonly Dictionary<string, CacheEntry> cache = new(SecurityBoundary.PathComparer);
 	
 	// Secondary index: maps normalized .csproj paths → cache keys for solution-level entries.

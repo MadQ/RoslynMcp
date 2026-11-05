@@ -268,7 +268,10 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			throw new UnsupportedCodeFixChangeException("Phase 1 code fixes cannot add or remove projects.");
 		
 		var canonicalRoot = ResolveCanonicalPath(workspaceRoot);
-		var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+		// A fix that respells a path, even only in case, moves or renames a file: Phase 1 refuses that, and
+		// the plan would write the old spelling anyway. The paths come from one workspace, so no other
+		// spelling of the same file reaches this comparison (#391).
+		var comparison = StringComparison.Ordinal;
 		var changedDocumentCount = 0;
 		
 		foreach(var projectChange in changes.GetProjectChanges()) {

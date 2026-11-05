@@ -7,21 +7,23 @@ namespace RoslynMcp;
 ///     A symbolic link inside a trusted root is followed when it leads to somewhere inside a trusted
 ///     root, and denied when it leads out — escape via symlink redirection is what this prevents.
 /// </summary>
-internal sealed class SecurityBoundary
+internal sealed partial class SecurityBoundary
 {
 	readonly string[] allowedRoots;
 	
-	// How two paths are compared. On Linux names that differ only in case are different files,
-	// and ignoring case there would count /work/ROOT/secrets as inside /work/root — a way out
-	// for a link that points at it, or for a path that simply names it. Windows and macOS
-	// file systems ignore case as a rule, and there the same file can arrive in either spelling.
-	static readonly StringComparison pathComparison = OperatingSystem.IsLinux()
-		? StringComparison.Ordinal
-		: StringComparison.OrdinalIgnoreCase
-	;
-	
-	/// <summary>The same comparison, for a set or dictionary keyed by path.</summary>
-	internal static readonly StringComparer PathComparer = StringComparer.FromComparison(pathComparison)
+	/// <summary>
+	///     How two paths are compared everywhere in the server — for the boundary, for a project's identity,
+	///     and for every set or dictionary keyed by path. Where names differ only in case, ignoring case
+	///     would count <c>/work/ROOT/secrets</c> as inside <c>/work/root</c>: a way out for a link that points
+	///     at it, or for a path that simply names it. Where the file system ignores case, the same file can
+	///     arrive in either spelling. Which one holds is the file system's answer, per directory, not the
+	///     platform's (#391): Windows directories can be made case-sensitive, and macOS volumes formatted so.
+	///     Linux compares by ordinal: its names are case-sensitive, and a case-folding mount stays strict —
+	///     a case variant there is refused, never let through.
+	/// </summary>
+	internal static readonly StringComparer PathComparer = OperatingSystem.IsLinux()
+		? StringComparer.Ordinal
+		: new FileSystemPathComparer()
 	;
 	
 	// Computed once at startup — SpecialFolder lookups involve platform invocation and filesystem access.
@@ -34,7 +36,7 @@ internal sealed class SecurityBoundary
 	/// <param name="referencedProjectRoots">Roots of directly referenced projects; each becomes a trusted root.</param>
 	public SecurityBoundary(string workspaceRoot, string? solutionRoot = null, IEnumerable<string>? referencedProjectRoots = null)
 	{
-		var roots = new HashSet<string>(StringComparer.FromComparison(pathComparison)) { workspaceRoot };
+		var roots = new HashSet<string>(PathComparer) { workspaceRoot };
 		
 		if(solutionRoot is not null)
 			roots.Add(solutionRoot);
@@ -347,15 +349,26 @@ internal sealed class SecurityBoundary
 		
 		var rootNorm = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		
-		if(string.Equals(path, rootNorm, pathComparison))
+		if(PathComparer.Equals(path, rootNorm))
 			
 			return true;
 		
-		// Check both separator styles for cross-platform compatibility.
+		// Either separator style ends the root, for cross-platform compatibility.
 		
-		return path.StartsWith(rootNorm + Path.DirectorySeparatorChar, pathComparison)
-			|| path.StartsWith(rootNorm + Path.AltDirectorySeparatorChar, pathComparison);
+		return path.Length > rootNorm.Length
+			&& path[rootNorm.Length] is var next && (next == Path.DirectorySeparatorChar || next == Path.AltDirectorySeparatorChar)
+			&& StartsWithPath(path, rootNorm);
 	}
+	
+	/// <summary>
+	///     Whether the start of <paramref name="path"/> names <paramref name="prefix"/> under
+	///     <see cref="PathComparer"/>. Says nothing about where the prefix ends: the caller checks that a
+	///     separator follows it. Allocates only for a prefix that matches in another case.
+	/// </summary>
+	internal static bool StartsWithPath(string path, ReadOnlySpan<char> prefix)
+		=> path.AsSpan().StartsWith(prefix, StringComparison.Ordinal)
+		|| path.AsSpan().StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && PathComparer.Equals(path[..prefix.Length], prefix.ToString())
+	;
 	
 	static bool IsDriveRoot(string fullPath)
 	{
@@ -370,7 +383,7 @@ internal sealed class SecurityBoundary
 		;
 		var normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 		
-		return string.Equals(normalizedFull, normalizedRoot, pathComparison);
+		return PathComparer.Equals(normalizedFull, normalizedRoot);
 	}
 	
 	static string[] BuildSystemDirectories()

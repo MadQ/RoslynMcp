@@ -131,6 +131,44 @@ static class TestFixtures
 	public static FixtureProject NewAdhocDir(string label) => new(NewDir(label), null);
 	
 	/// <summary>
+	///     Makes names in <paramref name="directory"/> case-sensitive where the platform allows it, and says
+	///     whether they are (#391). On Windows fsutil sets the directory's flag — on an empty directory only,
+	///     with no admin rights but the optional WSL feature — and directories created in it inherit it.
+	///     Linux directories are case-sensitive already; a default macOS volume cannot be made so. A probe
+	///     decides, not the platform or fsutil's exit code, so a case-sensitive macOS volume counts too.
+	/// </summary>
+	public static bool MakeCaseSensitive(string directory)
+	{
+		Directory.CreateDirectory(directory);
+		
+		if(OperatingSystem.IsWindows()) {
+			
+			try {
+				
+				using var fsutil = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("fsutil", ["file", "setCaseSensitiveInfo", directory, "enable"]) {
+					RedirectStandardOutput = true,
+					RedirectStandardError  = true,
+					UseShellExecute        = false,
+				});
+				
+				fsutil?.StandardOutput.ReadToEnd();
+				fsutil?.WaitForExit(10_000);
+			}
+			catch(Exception ex) when(ex is System.ComponentModel.Win32Exception or InvalidOperationException) { }
+		}
+		
+		var probe = Path.Combine(directory, "CaseProbe");
+		
+		File.WriteAllText(probe, "probe\n");
+		
+		var sensitive = !File.Exists(Path.Combine(directory, "caseprobe"));
+		
+		File.Delete(probe);
+		
+		return sensitive;
+	}
+	
+	/// <summary>
 	///     Removes what a killed run leaves behind: fixture trees under <see cref="TempRoot"/> (and the
 	///     legacy <c>%TEMP%\RoslynMcp_CodeFix_*</c> directories) older than <paramref name="olderThan"/>,
 	///     plus scratch files older harness binaries wrote into <c>src/RoslynMcp</c>. Every delete is

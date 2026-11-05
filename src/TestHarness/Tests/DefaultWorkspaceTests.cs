@@ -244,26 +244,41 @@ static partial class DefaultWorkspaceTests
 		caseFx.Write("Case/Name.cs", "namespace Probe;\n\ninternal class UpperName { }\n");
 		
 		var caseSensitive = !File.Exists(caseFx.PathOf("Case/name.cs"));
-		var caseLinked    = false;
 		
 		if(caseSensitive) {
-			
-			// #390 review: Same/same.csproj, a link to Same.csproj beside it whose name differs only in
-			// case — another project where names are case-sensitive, as Alias.csproj is everywhere. The
-			// project map ignored case and answered it as Same before the identity check ran.
-			try {
-				
-				File.CreateSymbolicLink(fx.PathOf("Same/same.csproj"), fx.PathOf("Same/Same.csproj"));
-				
-				caseLinked = true;
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			caseFx.Write("Case/name.cs", "namespace Probe;\n\ninternal class LowerName { }\n");
 			
 			// The same pair in an MSBuild project, where only one of the two is loaded.
 			fx.Write("App/Case/Name.cs", "namespace App.Case;\n\ninternal class UpperName { }\n");
 			fx.Write("App/Case/name.cs", "namespace App.Case;\n\ninternal class LowerName { }\n");
+		}
+		
+		// #391: a directory whose names are case-sensitive on every platform that allows one — any directory
+		// on Linux, one made so with fsutil on Windows (as WSL does; no admin rights needed, but the optional
+		// Windows Subsystem for Linux feature), none on a default macOS volume. The server must take the
+		// directory's rule, not the platform's. Kept apart from the fixtures above: Roslyn's own path lookups
+		// on Windows ignore case, so the Compile-item tests there would fail for a reason not the server's.
+		var caseDir          = TestFixtures.NewAdhocDir("DefaultWorkspaceCaseDir");
+		var caseDirSensitive = TestFixtures.MakeCaseSensitive(caseDir.Dir);
+		var caseLinked       = false;
+		
+		if(caseDirSensitive) {
+			
+			// #390 review: Same/same.csproj, a link to Same.csproj beside it whose name differs only in
+			// case — another project where names are case-sensitive, as Alias.csproj is everywhere. The
+			// project map ignored case and answered it as Same before the identity check ran.
+			caseDir.Write("Same/Same.slnx", "<Solution>\n  <Project Path=\"Same.csproj\" />\n</Solution>\n");
+			caseDir.Write("Same/Same.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+			caseDir.Write("Same/Pick.cs", "namespace Same;\n\npublic class Pick\n{\n\tpublic int Early(int a) => a;\n}\n");
+			
+			try {
+				
+				File.CreateSymbolicLink(caseDir.PathOf("Same/same.csproj"), caseDir.PathOf("Same/Same.csproj"));
+				
+				caseLinked = true;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			// #390 review: two projects whose paths differ only in case, each in a workspace of its own —
 			// MSBuildWorkspace on Linux cannot hold both in one solution, as with the Compile items above.
@@ -271,16 +286,22 @@ static partial class DefaultWorkspaceTests
 			// The solutions' names differ beyond case, so no case-blind lookup can take one for the other.
 			foreach(var (dir, solution, name) in new[] { ("Upper", "A", "UpperTarget"), ("upper", "B", "LowerTarget") }) {
 				
-				fx.Write($"CaseProj/{dir}/{solution}.slnx", "<Solution>\n  <Project Path=\"Proj.csproj\" />\n</Solution>\n");
-				fx.Write($"CaseProj/{dir}/Proj.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
-				fx.Write($"CaseProj/{dir}/{name}.cs", $"namespace CaseProj;\n\npublic class {name}\n{{\n\tpublic int Early(int a) => a;\n}}\n");
+				caseDir.Write($"CaseProj/{dir}/{solution}.slnx", "<Solution>\n  <Project Path=\"Proj.csproj\" />\n</Solution>\n");
+				caseDir.Write($"CaseProj/{dir}/Proj.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+				caseDir.Write($"CaseProj/{dir}/{name}.cs", $"namespace CaseProj;\n\npublic class {name}\n{{\n\tpublic int Early(int a) => a;\n}}\n");
 			}
+			
+			// #391: a workspace rooted at Boundary/root, and beside it Boundary/ROOT — another directory
+			// here, outside the workspace, which a case-blind prefix check counted as inside.
+			caseDir.Write("Boundary/root/Root.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+			caseDir.Write("Boundary/root/Inside.cs", "namespace Boundary;\n\ninternal class Inside { }\n");
+			caseDir.Write("Boundary/ROOT/Secret.txt", $"{CaseSecret}\n");
 		}
 		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseDir, caseSensitive, caseDirSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -293,6 +314,7 @@ static partial class DefaultWorkspaceTests
 			fx.Dispose();
 			empty.Dispose();
 			caseFx.Dispose();
+			caseDir.Dispose();
 			single.Dispose();
 			adhocSln.Dispose();
 		});
@@ -313,7 +335,9 @@ static partial class DefaultWorkspaceTests
 		FixtureProject Single,
 		FixtureProject AdhocSln,
 		FixtureProject CaseFx,
+		FixtureProject CaseDir,
 		bool           CaseSensitive,
+		bool           CaseDirSensitive,
 		bool           AliasLinked,
 		bool           DirLinked,
 		bool           SameDirLinked,
@@ -351,4 +375,10 @@ static partial class DefaultWorkspaceTests
 	
 	static (bool pass, string message) Verdict(bool pass, string failure)
 		=> pass ? (true, "PASS") : (false, $"FAIL  ({failure})");
+	
+	// Why a #391 test that needs a case-sensitive directory did not run.
+	const string NoCaseSensitiveDirectory = "no case-sensitive directory here: a default macOS volume, or Windows without the WSL feature fsutil needs";
+	
+	// The content of Boundary/ROOT/Secret.txt, outside the workspace: it must never come back.
+	const string CaseSecret = "case-variant-sibling-secret";
 }

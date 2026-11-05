@@ -28,13 +28,8 @@ internal static class WatchPlanner
 	/// </summary>
 	public const int MaxRoots = 32;
 	
-	public static readonly StringComparer PathComparer = OperatingSystem.IsLinux()
-		? StringComparer.Ordinal
-		: StringComparer.OrdinalIgnoreCase;
-	
-	static readonly StringComparison pathComparison = OperatingSystem.IsLinux()
-		? StringComparison.Ordinal
-		: StringComparison.OrdinalIgnoreCase;
+	/// <summary>The server's path comparison (<see cref="SecurityBoundary.PathComparer"/>, #391).</summary>
+	public static StringComparer PathComparer => SecurityBoundary.PathComparer;
 	
 	/// <summary>
 	///     Plans the watch roots for the workspace at <paramref name="rootPath"/>, trying three
@@ -186,7 +181,7 @@ internal static class WatchPlanner
 	{
 		var trimmed = Path.TrimEndingDirectorySeparator(ancestor.AsSpan());
 		
-		if(trimmed.IsEmpty || !path.AsSpan().StartsWith(trimmed, pathComparison))
+		if(trimmed.IsEmpty || !SecurityBoundary.StartsWithPath(path, trimmed))
 			
 			return false;
 		

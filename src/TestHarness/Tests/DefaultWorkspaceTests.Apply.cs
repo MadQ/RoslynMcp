@@ -6,18 +6,19 @@ static partial class DefaultWorkspaceTests
 {
 	static List<TestCase> ApplyTests(Fixture f)
 	{
-		var rootedCtx       = f.Rooted;
-		var fx              = f.Fx;
-		var single          = f.Single;
-		var adhocSln        = f.AdhocSln;
-		var aliasLinked     = f.AliasLinked;
-		var dirLinked       = f.DirLinked;
-		var sameDirLinked   = f.SameDirLinked;
-		var caseSensitive   = f.CaseSensitive;
-		var unicodeDistinct = f.UnicodeDistinct;
-		var unicodeLinked   = f.UnicodeLinked;
-		var caseLinked      = f.CaseLinked;
-		var libProject      = f.LibProject;
+		var rootedCtx        = f.Rooted;
+		var fx               = f.Fx;
+		var single           = f.Single;
+		var adhocSln         = f.AdhocSln;
+		var aliasLinked      = f.AliasLinked;
+		var dirLinked        = f.DirLinked;
+		var sameDirLinked    = f.SameDirLinked;
+		var caseDir          = f.CaseDir;
+		var caseDirSensitive = f.CaseDirSensitive;
+		var unicodeDistinct  = f.UnicodeDistinct;
+		var unicodeLinked    = f.UnicodeLinked;
+		var caseLinked       = f.CaseLinked;
+		var libProject       = f.LibProject;
 		
 		return new List<TestCase> {
 			
@@ -342,21 +343,15 @@ static partial class DefaultWorkspaceTests
 			// identity check could run. Pick is Same's and must not be found through it.
 			new("DefaultWorkspace: a link beside a project under its name in another case is not that project", async () => {
 				
-				if(!caseSensitive)
+				if(!caseDirSensitive)
 					
-					return Skip.NotApplicable("names that differ only in case are one file on this file system");
-				
-				// The server compares paths case-sensitively only on Linux (SecurityBoundary.PathComparer
-				// decides per platform, #391); on a case-sensitive macOS volume it still ignores case.
-				if(!OperatingSystem.IsLinux())
-					
-					return Skip.NotApplicable("the server compares paths case-sensitively only on Linux (#391)");
+					return Skip.NotApplicable(NoCaseSensitiveDirectory);
 				
 				if(!caseLinked)
 					
 					return Skip.SetupUnavailable("cannot create symbolic links here");
 				
-				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = fx.PathOf("Same/same.csproj") });
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = caseDir.PathOf("Same/same.csproj") });
 				
 				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
 					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
@@ -367,17 +362,11 @@ static partial class DefaultWorkspaceTests
 			// and Upper's file is left alone; the binding's text check ignored case and accepted it unexamined.
 			new("DefaultWorkspace: a token is refused through a project whose path differs only in case", async () => {
 				
-				if(!caseSensitive)
+				if(!caseDirSensitive)
 					
-					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+					return Skip.NotApplicable(NoCaseSensitiveDirectory);
 				
-				// The server compares paths case-sensitively only on Linux (SecurityBoundary.PathComparer
-				// decides per platform, #391); on a case-sensitive macOS volume it still ignores case.
-				if(!OperatingSystem.IsLinux())
-					
-					return Skip.NotApplicable("the server compares paths case-sensitively only on Linux (#391)");
-				
-				var upper         = fx.PathOf("CaseProj/Upper/Proj.csproj");
+				var upper         = caseDir.PathOf("CaseProj/Upper/Proj.csproj");
 				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "UpperTarget", projectPath = upper });
 				var token         = preview?["token"]?.GetValue<string>();
 				
@@ -385,8 +374,8 @@ static partial class DefaultWorkspaceTests
 					
 					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
 				
-				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("CaseProj/upper/Proj.csproj") });
-				var untouched          = !File.ReadAllText(fx.PathOf("CaseProj/Upper/UpperTarget.cs")).Contains("Late(");
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = caseDir.PathOf("CaseProj/upper/Proj.csproj") });
+				var untouched          = !File.ReadAllText(caseDir.PathOf("CaseProj/Upper/UpperTarget.cs")).Contains("Late(");
 				
 				await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "n", projectPath = upper });
 				
