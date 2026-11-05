@@ -495,10 +495,11 @@ internal sealed partial class WorkspaceManager
 			
 			// Another name of one project — a directory link, a substituted drive, a short name — asked of
 			// the operating system, not read off the name: the same file evaluated from the same directory
-			// (FileIdentity.ProjectIdentity). A different file that merely shares the name (Twin/Lib.csproj
-			// beside Lib/Lib.csproj) is not that project, nor is a link to its file placed in another
-			// directory, which MSBuild evaluates from there. Any other .csproj — one the solution does not
-			// list — is not one of these.
+			// under the same name (FileIdentity.ProjectIdentity). A different file that merely shares the
+			// name (Twin/Lib.csproj beside Lib/Lib.csproj) is not that project, nor is a link to its file
+			// placed in another directory, which MSBuild evaluates from there, or one beside it under
+			// another name, which MSBuild names after the link. Any other .csproj — one the solution does
+			// not list — is not one of these.
 			if(FileIdentity.OfProject(path) is not { } identity)
 				
 				return null;

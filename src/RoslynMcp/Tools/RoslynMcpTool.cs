@@ -773,7 +773,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				// By text first; then as a project, for a solution that lists it under another name — through
 				// a directory link, say — than the workspace the preview loaded. A link to its file in another
-				// directory is not it: MSBuild evaluates that one from there (FileIdentity.ProjectIdentity).
+				// directory, or beside it under another name, is not it: MSBuild evaluates that one from there,
+				// or names it after the link (FileIdentity.ProjectIdentity).
 				return solution.Projects.Any(project => project.FilePath is { } file && SecurityBoundary.PathComparer.Equals(Path.GetFullPath(file), bound))
 					|| FileIdentity.OfProject(bound) is { } boundIdentity
 						&& solution.Projects.Any(project => project.FilePath is { } file && FileIdentity.OfProject(file) is { } identity && identity.Matches(boundIdentity))

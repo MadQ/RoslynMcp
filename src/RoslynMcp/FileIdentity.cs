@@ -18,12 +18,19 @@ internal static class FileIdentity
 	///     both as final paths. MSBuild evaluates a project from the directory of the path it is given, not
 	///     of the file a link leads to, so a link to <c>Lib/Lib.csproj</c> placed in <c>Other/</c> is another
 	///     project (its globs, imports and outputs are <c>Other/</c>'s), while the same file reached through
-	///     a link to <c>Lib/</c> itself is the same project (#384).
+	///     a link to <c>Lib/</c> itself is the same project (#384). MSBuild also names the project after the
+	///     path — <c>$(MSBuildProjectName)</c>, and with it the assembly and the files under <c>obj/</c> — so
+	///     a link <c>Lib/Alias.csproj</c> beside <c>Lib.csproj</c> is another project too: <see cref="Name"/>
+	///     is the file name of the path, not of the file it leads to (#386). An 8.3 short name counts as its
+	///     long name: a matched project is built under the workspace's own path, never the short spelling.
 	/// </summary>
-	public readonly record struct ProjectIdentity(string File, string Directory)
+	public readonly record struct ProjectIdentity(string File, string Directory, string Name)
 	{
 		public bool Matches(ProjectIdentity other)
-			=> SecurityBoundary.PathComparer.Equals(File, other.File) && SecurityBoundary.PathComparer.Equals(Directory, other.Directory);
+			=> SecurityBoundary.PathComparer.Equals(File, other.File)
+			&& SecurityBoundary.PathComparer.Equals(Directory, other.Directory)
+			&& SecurityBoundary.PathComparer.Equals(Name, other.Name)
+		;
 	}
 	
 	/// <summary>
@@ -51,10 +58,52 @@ internal static class FileIdentity
 	/// </summary>
 	public static ProjectIdentity? OfProject(string projectFile)
 		=> FinalPath(projectFile) is { } file
-			&& Path.GetDirectoryName(Path.GetFullPath(projectFile)) is { } directory
+			&& Path.GetFullPath(projectFile) is var fullPath
+			&& Path.GetDirectoryName(fullPath) is { } directory
 			&& FinalPath(directory) is { } finalDirectory
-			? new ProjectIdentity(file, finalDirectory)
+			? new ProjectIdentity(file, finalDirectory, LongFileName(fullPath))
 			: null
+	;
+	
+	/// <summary>
+	///     The file name <paramref name="fullPath"/> gives its own entry, an 8.3 short name expanded — the
+	///     name of a link, not of the file it leads to. Where the long name cannot be read, the name as
+	///     given: a mismatch then refuses rather than guesses.
+	/// </summary>
+	static string LongFileName(string fullPath)
+	{
+		if(!OperatingSystem.IsWindows())
+			
+			return Path.GetFileName(fullPath);
+		
+		// GetLongPathNameW expands each component's short name from its own directory entry; it does not
+		// follow a link.
+		var path   = ExtendedLength(fullPath);
+		var buffer = new char[512];
+		
+		for(var attempt = 0; attempt < 2; attempt++) {
+			
+			var length = GetLongPathName(path, buffer, (uint) buffer.Length);
+			
+			if(length == 0)
+				
+				break;
+			
+			if(length < buffer.Length)
+				
+				return Path.GetFileName(new string(buffer, 0, (int) length));
+			
+			buffer = new char[length];
+		}
+		
+		return Path.GetFileName(fullPath);
+	}
+	
+	// CreateFileW and GetLongPathNameW take a path as given: past MAX_PATH it needs the extended-length prefix.
+	static string ExtendedLength(string fullPath)
+		=> fullPath.Length < 260 || fullPath.StartsWith(@"\\?\", StringComparison.Ordinal) ? fullPath
+		: fullPath.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + fullPath[2..]
+		: @"\\?\" + fullPath
 	;
 	
 	/// <summary>
@@ -73,12 +122,7 @@ internal static class FileIdentity
 	
 	static string? WindowsFinalPath(string path)
 	{
-		var full = Path.GetFullPath(path);
-		
-		// CreateFileW takes the path as given: past MAX_PATH it needs the extended-length prefix.
-		if(full.Length >= 260 && !full.StartsWith(@"\\?\", StringComparison.Ordinal))
-			
-			full = full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full[2..] : @"\\?\" + full;
+		var full = ExtendedLength(Path.GetFullPath(path));
 		
 		// Attributes only, with every share mode: the entry is identified, never read, so a project file
 		// open in an editor or a build stays identifiable. Backup semantics open a directory as well as a
@@ -130,6 +174,9 @@ internal static class FileIdentity
 	// FileShare and FileMode.Open (3, OPEN_EXISTING) have the Win32 values.
 	[DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
 	static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, FileShare shareMode, nint securityAttributes, FileMode creationDisposition, uint flagsAndAttributes, nint templateFile);
+	
+	[DllImport("kernel32.dll", EntryPoint = "GetLongPathNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+	static extern uint GetLongPathName(string shortPath, [Out] char[] buffer, uint bufferLength);
 	
 	[DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
 	static extern uint GetFinalPathNameByHandle(SafeFileHandle file, [Out] char[] buffer, uint bufferLength, uint flags);

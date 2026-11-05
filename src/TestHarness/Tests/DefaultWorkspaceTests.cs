@@ -130,6 +130,26 @@ static partial class DefaultWorkspaceTests
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
+		// #386: Same/Alias.csproj is a link to Same.csproj beside it — the same file, evaluated from the
+		// same directory, but MSBuild names the project after the link (Alias), so it is another project.
+		// Same.slnx makes Same.csproj a project of the workspace a path in Same/ loads; Other/Alias.slnx
+		// lists the link. Same.csproj is written regardless, so the short-name test has a project to name.
+		fx.Write("Same/Same.slnx", "<Solution>\n  <Project Path=\"Same.csproj\" />\n</Solution>\n");
+		fx.Write("Same/Same.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		fx.Write("Same/Pick.cs", "namespace Same;\n\npublic class Pick\n{\n\tpublic int Early(int a) => a;\n}\n");
+		
+		var sameDirLinked = false;
+		
+		try {
+			
+			File.CreateSymbolicLink(fx.PathOf("Same/Alias.csproj"), fx.PathOf("Same/Same.csproj"));
+			fx.Write("Same/Other/Alias.slnx", "<Solution>\n  <Project Path=\"../Alias.csproj\" />\n</Solution>\n");
+			
+			sameDirLinked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		
+
 		// Same file name, different files, different projects — the Program.cs-in-every-project case.
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
@@ -209,7 +229,7 @@ static partial class DefaultWorkspaceTests
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -244,7 +264,8 @@ static partial class DefaultWorkspaceTests
 		FixtureProject CaseFx,
 		bool           CaseSensitive,
 		bool           AliasLinked,
-		bool           DirLinked)
+		bool           DirLinked,
+		bool           SameDirLinked)
 	{
 		public string AppProject => Fx.PathOf("App/App.csproj");
 		public string LibProject => Fx.PathOf("Lib/Lib.csproj");

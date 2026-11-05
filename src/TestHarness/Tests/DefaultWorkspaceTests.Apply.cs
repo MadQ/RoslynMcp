@@ -1,16 +1,19 @@
-// Apply, build, clean and restore through a solution or another name of a project (#384): solution
-// membership, projects the solution does not list, and project identity through links.
+using System.Runtime.InteropServices;
+
+// Apply, build, clean and restore through a solution or another name of a project (#384, #386):
+// solution membership, projects the solution does not list, and project identity through links.
 static partial class DefaultWorkspaceTests
 {
 	static List<TestCase> ApplyTests(Fixture f)
 	{
-		var rootedCtx   = f.Rooted;
-		var fx          = f.Fx;
-		var single      = f.Single;
-		var adhocSln    = f.AdhocSln;
-		var aliasLinked = f.AliasLinked;
-		var dirLinked   = f.DirLinked;
-		var libProject  = f.LibProject;
+		var rootedCtx     = f.Rooted;
+		var fx            = f.Fx;
+		var single        = f.Single;
+		var adhocSln      = f.AdhocSln;
+		var aliasLinked   = f.AliasLinked;
+		var dirLinked     = f.DirLinked;
+		var sameDirLinked = f.SameDirLinked;
+		var libProject    = f.LibProject;
 		
 		return new List<TestCase> {
 			
@@ -233,6 +236,73 @@ static partial class DefaultWorkspaceTests
 				return Verdict(applyOk && applied?["error"] is null && renamed,
 					$"expected Early renamed through Linked/LibLink, got {applied?.ToJsonString() ?? "null"}");
 			}),
+			
+			// #386: a link beside a project's file under another name is the same file evaluated from the
+			// same directory, but MSBuild names the project after the link — Alias, with its own assembly
+			// and obj/ files — so it is not that project. Pick is Same's and must not be found through it.
+			new("DefaultWorkspace: a link beside a listed project's .csproj under another name is not that project", async () => {
+				
+				if(!sameDirLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = fx.PathOf("Same/Alias.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #386: the same through a solution that lists the link. A Same token applied through it is
+			// refused and Pick.cs is left alone; matching by file and directory alone accepted it.
+			new("DefaultWorkspace: a token is refused through a solution listing a link beside its project under another name", async () => {
+				
+				if(!sameDirLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var sameProject   = fx.PathOf("Same/Same.csproj");
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "Pick", projectPath = sameProject });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("Same/Other/Alias.slnx") });
+				var untouched          = !File.ReadAllText(fx.PathOf("Same/Pick.cs")).Contains("Late(");
+				
+				await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "n", projectPath = sameProject });
+				
+				return Verdict(applyOk && applied?["error"]?.GetValue<string>() == "workspace mismatch" && untouched,
+					$"expected workspace mismatch, got {applied?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #386: the project's name is compared as a long name, so an 8.3 short spelling of the path —
+			// SAME~1.CSP under a shortened fixture directory — still names the project. Only where the
+			// volume generates short names; elsewhere there is no short spelling to test.
+			new("DefaultWorkspace: a short (8.3) name of a listed project's .csproj is that project", async () => {
+				
+				if(!OperatingSystem.IsWindows())
+					
+					return Skip.NotApplicable("8.3 short names exist only on Windows");
+				
+				var longPath  = fx.PathOf("Same/Same.csproj");
+				var buffer    = new char[1024];
+				var length    = GetShortPathName(longPath, buffer, (uint) buffer.Length);
+				var shortPath = length is > 0 and < 1024 ? new string(buffer, 0, (int) length) : longPath;
+				
+				if(string.Equals(Path.GetFileName(shortPath), Path.GetFileName(longPath), StringComparison.OrdinalIgnoreCase))
+					
+					return Skip.NotApplicable("this volume does not generate 8.3 short names");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = shortPath });
+				
+				return Verdict(ok && data?["error"] is null && (data?.ToJsonString() ?? "").Contains("Early"),
+					$"expected Early through {shortPath}, got {data?.ToJsonString() ?? "null"}");
+			}),
 		};
 	}
+	
+	[DllImport("kernel32.dll", EntryPoint = "GetShortPathNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+	static extern uint GetShortPathName(string longPath, [Out] char[] buffer, uint bufferLength);
 }

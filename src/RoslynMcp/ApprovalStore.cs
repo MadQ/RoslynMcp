@@ -228,7 +228,7 @@ internal sealed record WorkspaceBinding(string CanonicalPath, bool IsMSBuild)
 	///     Whether <paramref name="other"/> names the same workspace: the same path, or another name of it
 	///     (a directory link, a substituted drive), which the operating system is asked about only when the
 	///     text differs (#384). A project must be the same project — the same file evaluated from the same
-	///     directory (<see cref="FileIdentity.ProjectIdentity"/>); a root directory the same directory.
+	///     directory under the same name (<see cref="FileIdentity.ProjectIdentity"/>, #386); a root directory the same directory.
 	/// </summary>
 	public bool Matches(WorkspaceBinding other) =>
 		IsMSBuild == other.IsMSBuild
