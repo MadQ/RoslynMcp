@@ -30,7 +30,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		[Description(PageTokenDescription)] string? page_token = null
 	)
 	{
-		using var scope = BeginTool("roslyn_list_files", pattern, new { recursive, skip, take });
+		using var scope = BeginTool("roslyn_list_files", pattern, new { projectPath, recursive, skip, take });
 		
 		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 			

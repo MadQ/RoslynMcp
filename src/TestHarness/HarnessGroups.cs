@@ -54,6 +54,7 @@ static class HarnessGroups
 		AsyncGroup("Incremental Additional/AnalyzerConfig Doc", g => IncrementalAdditionalDocTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Local History Tools",                  g => LocalHistoryTests.BuildAsync(g.Ctx)),
 		AsyncGroup("DefaultWorkspace",                     g => DefaultWorkspaceTests.BuildAsync(g.Ctx)),
+		Group("Parallel Load",                             g => ParallelLoadTests.Build(g.Ctx)),
 		Group("Dotnet Runner",                             g => DotnetRunnerTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		
 		// Last on purpose: it reads the server log written by everything above.

@@ -36,7 +36,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
 		[Description("1-based column for position-based resolution. Default: 1.")] int column = 1)
 	{
-		using var scope = BeginTool("roslyn_find_references", symbolName, new { containingType, skip, take, line });
+		using var scope = BeginTool("roslyn_find_references", symbolName, new { projectPath, containingType, skip, take, filePath, line, column });
 		
 		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			

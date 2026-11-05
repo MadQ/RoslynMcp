@@ -29,7 +29,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		[Description("Maximum items to return from the paged interfaces-and-derived list. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null)
 	{
-		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName, new { skip, take });
+		using var scope = BeginTool("roslyn_get_type_hierarchy", typeName, new { projectPath, skip, take });
 		
 		if(!TryStripChatSymbolRef(ref typeName, out var refError))
 			

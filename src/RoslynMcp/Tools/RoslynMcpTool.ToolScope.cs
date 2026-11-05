@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Protocol;
@@ -35,6 +36,8 @@ internal abstract partial class RoslynMcpTool
 		;
 		string? pendingCaution;
 		long    deferredElapsed;   // Elapsed time at Dispose, for an entry the call filter writes later (#371).
+		
+		internal string? PaginationKey { get; private set; }
 		
 		internal ToolScope(string name, string? subject, FileLogger log, Action onDispose, PaginationCache paginationCache)
 		{
@@ -86,6 +89,8 @@ internal abstract partial class RoslynMcpTool
 		/// </summary>
 		public bool TryServeCachedPage<T>(string? pageToken, ref int skip, ref int take, int defaultTake, int maxTake, [NotNullWhen(true)] out object? result)
 		{
+			PaginationKey = CreatePaginationKey();
+			
 			var hasCursor = PageCursor.TryParse(pageToken, out var cursor);
 			
 			if(hasCursor) {
@@ -99,10 +104,10 @@ internal abstract partial class RoslynMcpTool
 			
 			take = Math.Clamp(take, 1, maxTake);
 			
-			if(!hasCursor || !paginationCache.TryGet<T>(cursor.Id, out var cached, out var shape)) {
+			if(!hasCursor || !paginationCache.TryGet<T>(cursor.Id, PaginationKey, out var cached, out var shape)) {
 				
 				if(hasCursor)
-					Record("page token no longer cached — query re-run");
+					Record("page token not cached for this query — query re-run");
 				
 				result = null;
 				
@@ -132,6 +137,8 @@ internal abstract partial class RoslynMcpTool
 		///     Records key input arguments for failure diagnosis.
 		///     Serialized to compact JSON; included in the log entry only when the tool fails.
 		///     Truncate large string values before passing to avoid bloating the log.
+		///     Paginated tools must include every query argument, untruncated: together with the tool
+		///     name and subject these identify the cached query. Paging controls do not identify it.
 		/// </summary>
 		public void SetArgs<T>(T argsObj)
 		{
@@ -139,11 +146,39 @@ internal abstract partial class RoslynMcpTool
 				args = JsonSerializer.Serialize(argsObj, RoslynMcpJson.Compact);
 			}
 			catch {
-				// Swallowed intentionally — args is diagnostic only. Non-serializable types
-				// (anonymous objects with cyclic refs, proxies, etc.) must not crash tool calls.
-				args = null
-				;
+				// Diagnostic serialization must not crash a tool call. Without a complete identity,
+				// cache hits are disabled rather than risking a page from a different query.
+				args = null;
+				PaginationKey = null;
+				Record("arguments unavailable — pagination cache hits disabled");
 			}
+		}
+		
+		string? CreatePaginationKey()
+		{
+			if(args is null)
+				
+				return null;
+			
+			using var document = JsonDocument.Parse(args);
+			using var buffer = new MemoryStream();
+			
+			using(var writer = new Utf8JsonWriter(buffer)) {
+				
+				writer.WriteStartArray();
+				writer.WriteStringValue(name);
+				writer.WriteStringValue(subject);
+				writer.WriteStartObject();
+				
+				foreach(var property in document.RootElement.EnumerateObject())
+					if(property.Name is not ("skip" or "take" or "page_token"))
+						property.WriteTo(writer);
+				
+				writer.WriteEndObject();
+				writer.WriteEndArray();
+			}
+			
+			return Convert.ToHexString(SHA256.HashData(buffer.GetBuffer().AsSpan(0, (int) buffer.Length)));
 		}
 		
 		/// <summary>Records a success detail appended to the log line on dispose.</summary>
