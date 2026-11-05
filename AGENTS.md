@@ -684,7 +684,7 @@ The steps in full:
 
 - **Always exactly 2 critic passes per issue** — no more, no fewer. This is what prevents the fix → critic → fix → critic rabbit hole.
 - After pass 1: fix what's clearly worth it, discard style opinions and theoretical concerns.
-- After pass 2: new findings → todos → follow-up issues. Move on.
+- After pass 2: new findings in code the branch touches are fixed on the branch (see *Issue Scope Management*); only what needs a design of its own becomes a follow-up issue. Then move on — no third pass.
 - **Exception:** real correctness bugs (race conditions, use-after-dispose, data corruption, API misuse) are always fixed inline — regardless of which pass or how many passes have run.
 
 **"Right Code" filter (applied before every fix decision):**
@@ -697,7 +697,7 @@ The steps in full:
 | Category | Action |
 |----------|--------|
 | Race conditions, use-after-dispose, null refs, wrong results, API contract violations | Fix inline always |
-| Design improvements, performance, low-risk edge cases | Todo + follow-up issue |
+| Design improvements, performance, low-risk edge cases | Fix on the branch when in code it touches; otherwise todo + follow-up issue |
 | Style opinions, formatting, purely theoretical concerns | Discard |
 
 ### Review loops
@@ -707,15 +707,13 @@ Two review loops sit around the PR: a **local** one after the push and before th
 ### Issue Scope Management
 
 - **Close the original issue when its defined scope is done** — not when everything is theoretically perfect.
-- **Open fresh follow-up issues** for deferred findings — do not reopen the original. Each follow-up gets its own label, milestone, and scope.
-- **A small fix may ride along instead of becoming an issue.** The moment a problem is found is the cheapest moment to fix it, and an issue list that grows by one for every small finding stops being read. Something found while working on a branch — related to the issue or not — is fixed on that branch when **all** of these hold:
-  1. It is small: one place, roughly 30 lines or fewer.
-  2. It is in code the branch already changes and tests, or it is plainly low-risk (not the workspace boundary, concurrency or persistence).
-  3. It can be verified, by a test or by the existing harness.
-  4. The branch is not in review yet. Once a review loop has started, new scope waits for the next branch.
-
-  Each such fix gets its own commit, its own changelog entry, and a line under "Also in this PR" in the description — PRs are squash-merged, and the title alone would hide it. Say what was bundled in the report. Anything that fails one of the four becomes an issue; when in doubt, ask.
-- Rationale: clean history, accurate velocity, independent prioritization. "Done" means the stated problem is fixed, not that the universe is in order.
+- **Fold work into the branch; spawn issues sparingly.** The moment a problem is found is the cheapest moment to fix it. A follow-up issue carries the context out of the session that had it, then waits; a branch that spawns one or two of them feels like two steps back for each step forward. So the default is to fix on the branch:
+  - **Findings in code the branch changes** — from critic passes, local reviews or reviewer rounds — are fixed on the branch, **also once a review loop has started**. A review round exists to get that code right; deferring its findings only moves the work.
+  - **Tangential fixes** found along the way, related to the issue or not, ride along when they can be verified (by a test or the existing harness) and do not raise the branch's risk: a test-only branch does not pick up a change to the workspace boundary, concurrency or persistence.
+  - A folded-in fix outside the issue's own scope gets its own commit, its own changelog entry, and a line under "Also in this PR" in the description — PRs are squash-merged, and the title alone would hide it. Say what was bundled in the report.
+- **A new issue is still right** for work that needs a design decision of its own, a new feature surface (a new tool family, say), a higher risk tier than the branch, or enough size to bury the branch's own change. When in doubt, ask. When each fix exposes the next case of the same thing, the answer is a better rule on this branch, not another issue.
+- **Open fresh follow-up issues** for what is deferred — do not reopen the original. Each follow-up gets its own label, milestone, and scope.
+- Rationale: fewer, more complete pull requests, and an issue list that stays worth reading. "Done" means the stated problem is fixed, not that the universe is in order.
 
 ---
 

@@ -130,6 +130,54 @@ static partial class DefaultWorkspaceTests
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
+		// #386: Same/Alias.csproj is a link to Same.csproj beside it — the same file, evaluated from the
+		// same directory, but MSBuild names the project after the link (Alias), so it is another project.
+		// Same.slnx makes Same.csproj a project of the workspace a path in Same/ loads; Other/Alias.slnx
+		// lists the link. Same.csproj is written regardless, so the short-name test has a project to name.
+		// The two share Same/obj, whose project.assets.json is not named after the project: no test here
+		// may restore or build through Alias, or Same's restore state is overwritten.
+		fx.Write("Same/Same.slnx", "<Solution>\n  <Project Path=\"Same.csproj\" />\n</Solution>\n");
+		fx.Write("Same/Same.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		fx.Write("Same/Pick.cs", "namespace Same;\n\npublic class Pick\n{\n\tpublic int Early(int a) => a;\n}\n");
+		
+		var sameDirLinked = false;
+		
+		try {
+			
+			File.CreateSymbolicLink(fx.PathOf("Same/Alias.csproj"), fx.PathOf("Same/Same.csproj"));
+			fx.Write("Same/Other/Alias.slnx", "<Solution>\n  <Project Path=\"../Alias.csproj\" />\n</Solution>\n");
+			
+			sameDirLinked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		
+		// #390 review: Uni.slnx lists Café.csproj (NFC); Café.csproj (NFD) is a link to it
+		// beside it. Where the two spellings are two entries (Linux, NTFS) the link is another project,
+		// as Alias is above; macOS file systems make them one entry, so the link cannot be created there.
+		var nfcProject = "Café.csproj";
+		var nfdProject = "Café.csproj";
+		
+		fx.Write("Uni/Uni.slnx", $"<Solution>\n  <Project Path=\"{nfcProject}\" />\n</Solution>\n");
+		fx.Write($"Uni/{nfcProject}", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		fx.Write("Uni/Brew.cs", "namespace Uni;\n\npublic class Brew\n{\n\tpublic int Pour() => 1;\n}\n");
+		
+		// Probed before the link exists: where the NFD spelling already names the NFC file, the file system
+		// treats the two as one entry and the test does not apply. Anywhere else a failure to create the
+		// link is a fixture that could not be built — a failure on a CI runner, not a skip.
+		var unicodeDistinct = !File.Exists(fx.PathOf($"Uni/{nfdProject}"));
+		var unicodeLinked   = false;
+		
+		if(unicodeDistinct) {
+			
+			try {
+				
+				File.CreateSymbolicLink(fx.PathOf($"Uni/{nfdProject}"), fx.PathOf($"Uni/{nfcProject}"));
+				
+				unicodeLinked = Directory.GetFiles(fx.PathOf("Uni"), "*.csproj").Length == 2;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		}
+		
 		// Same file name, different files, different projects — the Program.cs-in-every-project case.
 		fx.Write("App/Shared.cs", "namespace App;\n\ninternal class AppShared { }\n");
 		fx.Write("Lib/Shared.cs", "namespace Lib;\n\ninternal class LibShared { }\n");
@@ -196,20 +244,43 @@ static partial class DefaultWorkspaceTests
 		caseFx.Write("Case/Name.cs", "namespace Probe;\n\ninternal class UpperName { }\n");
 		
 		var caseSensitive = !File.Exists(caseFx.PathOf("Case/name.cs"));
+		var caseLinked    = false;
 		
 		if(caseSensitive) {
+			
+			// #390 review: Same/same.csproj, a link to Same.csproj beside it whose name differs only in
+			// case — another project where names are case-sensitive, as Alias.csproj is everywhere. The
+			// project map ignored case and answered it as Same before the identity check ran.
+			try {
+				
+				File.CreateSymbolicLink(fx.PathOf("Same/same.csproj"), fx.PathOf("Same/Same.csproj"));
+				
+				caseLinked = true;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			caseFx.Write("Case/name.cs", "namespace Probe;\n\ninternal class LowerName { }\n");
 			
 			// The same pair in an MSBuild project, where only one of the two is loaded.
 			fx.Write("App/Case/Name.cs", "namespace App.Case;\n\ninternal class UpperName { }\n");
 			fx.Write("App/Case/name.cs", "namespace App.Case;\n\ninternal class LowerName { }\n");
+			
+			// #390 review: two projects whose paths differ only in case, each in a workspace of its own —
+			// MSBuildWorkspace on Linux cannot hold both in one solution, as with the Compile items above.
+			// A token for one must not apply through the other: the binding's text check ignored case.
+			// The solutions' names differ beyond case, so no case-blind lookup can take one for the other.
+			foreach(var (dir, solution, name) in new[] { ("Upper", "A", "UpperTarget"), ("upper", "B", "LowerTarget") }) {
+				
+				fx.Write($"CaseProj/{dir}/{solution}.slnx", "<Solution>\n  <Project Path=\"Proj.csproj\" />\n</Solution>\n");
+				fx.Write($"CaseProj/{dir}/Proj.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+				fx.Write($"CaseProj/{dir}/{name}.cs", $"namespace CaseProj;\n\npublic class {name}\n{{\n\tpublic int Early(int a) => a;\n}}\n");
+			}
 		}
 		
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseSensitive, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -244,7 +315,11 @@ static partial class DefaultWorkspaceTests
 		FixtureProject CaseFx,
 		bool           CaseSensitive,
 		bool           AliasLinked,
-		bool           DirLinked)
+		bool           DirLinked,
+		bool           SameDirLinked,
+		bool           UnicodeDistinct,
+		bool           UnicodeLinked,
+		bool           CaseLinked)
 	{
 		public string AppProject => Fx.PathOf("App/App.csproj");
 		public string LibProject => Fx.PathOf("Lib/Lib.csproj");

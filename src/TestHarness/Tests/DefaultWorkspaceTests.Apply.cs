@@ -1,16 +1,23 @@
-// Apply, build, clean and restore through a solution or another name of a project (#384): solution
-// membership, projects the solution does not list, and project identity through links.
+using System.Runtime.InteropServices;
+
+// Apply, build, clean and restore through a solution or another name of a project (#384, #386):
+// solution membership, projects the solution does not list, and project identity through links.
 static partial class DefaultWorkspaceTests
 {
 	static List<TestCase> ApplyTests(Fixture f)
 	{
-		var rootedCtx   = f.Rooted;
-		var fx          = f.Fx;
-		var single      = f.Single;
-		var adhocSln    = f.AdhocSln;
-		var aliasLinked = f.AliasLinked;
-		var dirLinked   = f.DirLinked;
-		var libProject  = f.LibProject;
+		var rootedCtx       = f.Rooted;
+		var fx              = f.Fx;
+		var single          = f.Single;
+		var adhocSln        = f.AdhocSln;
+		var aliasLinked     = f.AliasLinked;
+		var dirLinked       = f.DirLinked;
+		var sameDirLinked   = f.SameDirLinked;
+		var caseSensitive   = f.CaseSensitive;
+		var unicodeDistinct = f.UnicodeDistinct;
+		var unicodeLinked   = f.UnicodeLinked;
+		var caseLinked      = f.CaseLinked;
+		var libProject      = f.LibProject;
 		
 		return new List<TestCase> {
 			
@@ -233,6 +240,162 @@ static partial class DefaultWorkspaceTests
 				return Verdict(applyOk && applied?["error"] is null && renamed,
 					$"expected Early renamed through Linked/LibLink, got {applied?.ToJsonString() ?? "null"}");
 			}),
+			
+			// #386: a link beside a project's file under another name is the same file evaluated from the
+			// same directory, but MSBuild names the project after the link — Alias, with its own assembly
+			// and obj/ files — so it is not that project. Pick is Same's and must not be found through it.
+			new("DefaultWorkspace: a link beside a listed project's .csproj under another name is not that project", async () => {
+				
+				if(!sameDirLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = fx.PathOf("Same/Alias.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #386: the same through a solution that lists the link. A Same token applied through it is
+			// refused and Pick.cs is left alone; matching by file and directory alone accepted it.
+			new("DefaultWorkspace: a token is refused through a solution listing a link beside its project under another name", async () => {
+				
+				if(!sameDirLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var sameProject   = fx.PathOf("Same/Same.csproj");
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "Pick", projectPath = sameProject });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("Same/Other/Alias.slnx") });
+				var untouched          = !File.ReadAllText(fx.PathOf("Same/Pick.cs")).Contains("Late(");
+				
+				await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "n", projectPath = sameProject });
+				
+				return Verdict(applyOk && applied?["error"]?.GetValue<string>() == "workspace mismatch" && untouched,
+					$"expected workspace mismatch, got {applied?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #386: the project's name is compared as a long name, so an 8.3 short spelling of the path —
+			// SAME~1.CSP under a shortened fixture directory — still names the project. Only where the
+			// volume generates short names; elsewhere there is no short spelling to test.
+			new("DefaultWorkspace: a short (8.3) name of a listed project's .csproj is that project", async () => {
+				
+				if(!OperatingSystem.IsWindows())
+					
+					return Skip.NotApplicable("8.3 short names exist only on Windows");
+				
+				var longPath = fx.PathOf("Same/Same.csproj");
+				var buffer   = new char[1024];
+				var length   = GetShortPathName(longPath, buffer, (uint) buffer.Length);
+				
+				if(length >= buffer.Length) {
+					
+					buffer = new char[length];
+					length = GetShortPathName(longPath, buffer, (uint) buffer.Length);
+				}
+				
+				// A failed call is a fixture that could not be built — a failure on a CI runner, never a
+				// silent skip. A volume without short names returns the long name, and there is nothing to test.
+				if(length == 0 || length >= buffer.Length)
+					
+					return Skip.SetupUnavailable($"GetShortPathName failed (error {Marshal.GetLastPInvokeError()})");
+				
+				var shortPath = new string(buffer, 0, (int) length);
+				
+				if(string.Equals(Path.GetFileName(shortPath), Path.GetFileName(longPath), StringComparison.OrdinalIgnoreCase))
+					
+					return Skip.NotApplicable("this volume does not generate 8.3 short names");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = shortPath });
+				
+				return Verdict(ok && data?["error"] is null && (data?.ToJsonString() ?? "").Contains("Early"),
+					$"expected Early through {shortPath}, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #390 review: a link beside a project under the same name in another Unicode normalization form
+			// is another project wherever the two spellings are two entries — normalizing names everywhere
+			// joined them. Brew is the NFC project's and must not be found through the NFD link.
+			new("DefaultWorkspace: a link beside a project under its name in another normalization form is not that project", async () => {
+				
+				if(!unicodeDistinct)
+					
+					return Skip.NotApplicable("an NFC and an NFD spelling are one entry on this file system");
+				
+				if(!unicodeLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Pour", projectPath = fx.PathOf("Uni/Café.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #390 review: where names are case-sensitive, Same/same.csproj — a link to Same.csproj beside
+			// it — is another project. The project map ignored case and answered it as Same before the
+			// identity check could run. Pick is Same's and must not be found through it.
+			new("DefaultWorkspace: a link beside a project under its name in another case is not that project", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				// The server compares paths case-sensitively only on Linux (SecurityBoundary.PathComparer
+				// decides per platform, #391); on a case-sensitive macOS volume it still ignores case.
+				if(!OperatingSystem.IsLinux())
+					
+					return Skip.NotApplicable("the server compares paths case-sensitively only on Linux (#391)");
+				
+				if(!caseLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Early", projectPath = fx.PathOf("Same/same.csproj") });
+				
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "project_not_in_workspace",
+					$"expected project_not_in_workspace, got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #390 review: CaseProj/Upper/Proj.csproj and CaseProj/upper/Proj.csproj are two projects, in two
+			// workspaces, where names are case-sensitive. A token for Upper applied through upper is refused
+			// and Upper's file is left alone; the binding's text check ignored case and accepted it unexamined.
+			new("DefaultWorkspace: a token is refused through a project whose path differs only in case", async () => {
+				
+				if(!caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				// The server compares paths case-sensitively only on Linux (SecurityBoundary.PathComparer
+				// decides per platform, #391); on a case-sensitive macOS volume it still ignores case.
+				if(!OperatingSystem.IsLinux())
+					
+					return Skip.NotApplicable("the server compares paths case-sensitively only on Linux (#391)");
+				
+				var upper         = fx.PathOf("CaseProj/Upper/Proj.csproj");
+				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "UpperTarget", projectPath = upper });
+				var token         = preview?["token"]?.GetValue<string>();
+				
+				if(!ok || token is null)
+					
+					return (false, $"FAIL  (preview gave no token: {preview?.ToJsonString() ?? "null"})");
+				
+				var (applyOk, applied) = await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "y", projectPath = fx.PathOf("CaseProj/upper/Proj.csproj") });
+				var untouched          = !File.ReadAllText(fx.PathOf("CaseProj/Upper/UpperTarget.cs")).Contains("Late(");
+				
+				await Call(rootedCtx, "roslyn_apply_rename", new { token, approval = "n", projectPath = upper });
+				
+				return Verdict(applyOk && applied?["error"]?.GetValue<string>() == "workspace mismatch" && untouched,
+					$"expected workspace mismatch, got {applied?.ToJsonString() ?? "null"}");
+			}),
 		};
 	}
+	
+	[DllImport("kernel32.dll", EntryPoint = "GetShortPathNameW", CharSet = CharSet.Unicode, SetLastError = true)]
+	static extern uint GetShortPathName(string longPath, [Out] char[] buffer, uint bufferLength);
 }

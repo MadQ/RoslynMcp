@@ -37,8 +37,9 @@ internal sealed partial class WorkspaceManager
 		// live produced no event; ReconcileMissedChanges picks them up by timestamp.
 		private readonly DateTime             constructedUtc = DateTime.UtcNow;
 		
-		// Maps normalized .csproj paths → ProjectIds for all projects in the workspace.
-		private readonly Dictionary<string, ProjectId> projectMap = new(StringComparer.OrdinalIgnoreCase)
+		// Maps normalized .csproj paths → ProjectIds for all projects in the workspace. Keyed as the file
+		// system compares names: on Linux Same/same.csproj is not Same/Same.csproj (#390 review).
+		private readonly Dictionary<string, ProjectId> projectMap = new(SecurityBoundary.PathComparer)
 		;
 		
 		// Per-project compilation cache — cleared on any file change.
@@ -353,7 +354,7 @@ internal sealed partial class WorkspaceManager
 		
 		static Dictionary<string, ProjectId> BuildProjectMapFor(Workspace ws)
 		{
-			var map = new Dictionary<string, ProjectId>(StringComparer.OrdinalIgnoreCase);
+			var map = new Dictionary<string, ProjectId>(SecurityBoundary.PathComparer);
 			
 			foreach(var p in ws.CurrentSolution.Projects)
 				if(p.FilePath is not null)
@@ -488,24 +489,29 @@ internal sealed partial class WorkspaceManager
 				return projectMap.Count == 1 ? projectMap.Keys.First() : null;
 			
 			// Only a project file names a project; a directory or a source file is not asked about the
-			// file system for every project below.
-			if(!Path.GetExtension(path).EndsWith("proj", StringComparison.OrdinalIgnoreCase))
+			// file system for every project below. Judged by the long name: SAME~1.CSP is a .csproj.
+			if(!Path.GetExtension(FileIdentity.LongPath(path)).EndsWith("proj", StringComparison.OrdinalIgnoreCase))
 				
 				return null;
 			
 			// Another name of one project — a directory link, a substituted drive, a short name — asked of
 			// the operating system, not read off the name: the same file evaluated from the same directory
-			// (FileIdentity.ProjectIdentity). A different file that merely shares the name (Twin/Lib.csproj
-			// beside Lib/Lib.csproj) is not that project, nor is a link to its file placed in another
-			// directory, which MSBuild evaluates from there. Any other .csproj — one the solution does not
-			// list — is not one of these.
+			// under the same name (FileIdentity.ProjectIdentity). A different file that merely shares the
+			// name (Twin/Lib.csproj beside Lib/Lib.csproj) is not that project, nor is a link to its file
+			// placed in another directory, which MSBuild evaluates from there, or one beside it under
+			// another name, which MSBuild names after the link. Any other .csproj — one the solution does
+			// not list — is not one of these.
 			if(FileIdentity.OfProject(path) is not { } identity)
 				
 				return null;
 			
+			// A key under another name cannot match, and its name is read without the file system: only the
+			// one or two keys that share the name pay for OfProject's opens.
 			foreach(var key in projectMap.Keys)
 				
-				if(FileIdentity.OfProject(key) is { } keyIdentity && keyIdentity.Matches(identity))
+				if(SecurityBoundary.PathComparer.Equals(FileIdentity.EntryName(key), identity.Name)
+					&& FileIdentity.OfProject(key) is { } keyIdentity
+					&& keyIdentity.Matches(identity))
 					
 					return key;
 			

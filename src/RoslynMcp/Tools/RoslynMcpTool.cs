@@ -773,10 +773,14 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				// By text first; then as a project, for a solution that lists it under another name — through
 				// a directory link, say — than the workspace the preview loaded. A link to its file in another
-				// directory is not it: MSBuild evaluates that one from there (FileIdentity.ProjectIdentity).
+				// directory, or beside it under another name, is not it: MSBuild evaluates that one from there,
+				// or names it after the link (FileIdentity.ProjectIdentity).
 				return solution.Projects.Any(project => project.FilePath is { } file && SecurityBoundary.PathComparer.Equals(Path.GetFullPath(file), bound))
 					|| FileIdentity.OfProject(bound) is { } boundIdentity
-						&& solution.Projects.Any(project => project.FilePath is { } file && FileIdentity.OfProject(file) is { } identity && identity.Matches(boundIdentity))
+						&& solution.Projects.Any(project => project.FilePath is { } file
+							&& SecurityBoundary.PathComparer.Equals(FileIdentity.EntryName(Path.GetFullPath(file)), boundIdentity.Name)
+							&& FileIdentity.OfProject(file) is { } identity
+							&& identity.Matches(boundIdentity))
 					? null
 					: new ApplyWorkspaceRefusal("workspace mismatch",
 						$"Apply aborted — this token belongs to '{bound}', which is not a project of '{solutionPath}'. Re-run {previewTool} for the intended workspace.",
@@ -1156,8 +1160,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     of the project it names (from <see cref="TryResolveWorkspaceInfo"/>), so dotnet builds the project
 	///     under the name the workspace loaded it by; else the .csproj the path names or leads to, for a
 	///     project the loaded solution does not list — still the project the caller asked for, not the
-	///     solution's first one (#384). A link to a .csproj in another directory is such a project:
-	///     MSBuild evaluates it from the link's directory (<see cref="FileIdentity.ProjectIdentity"/>).
+	///     solution's first one (#384). A link to a .csproj is such a project when it sits in another
+	///     directory, which MSBuild evaluates it from, or beside the file under another name, which MSBuild
+	///     names the project after (#386, <see cref="FileIdentity.ProjectIdentity"/>).
 	///     Call after a guarded resolution has succeeded and the workspace is known to be MSBuild.
 	/// </summary>
 	protected string ResolvedTargetPath(string projectPath, string? csprojPath)
