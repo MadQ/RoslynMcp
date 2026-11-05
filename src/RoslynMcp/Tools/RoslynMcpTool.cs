@@ -752,7 +752,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		try {
 			solutionPath = ResolvedSolutionPath(projectPath);
 		}
-		catch(Exception ex) when(ex is not OutOfMemoryException) {
+		catch(Exception ex) when(!IsFatal(ex)) {
 			
 			// The guarded resolution below reports a bad path through its structured mapping.
 			solutionPath = null;
