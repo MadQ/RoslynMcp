@@ -346,6 +346,12 @@ static partial class DefaultWorkspaceTests
 					
 					return Skip.NotApplicable("names that differ only in case are one file on this file system");
 				
+				// The server compares paths case-sensitively only on Linux (SecurityBoundary.PathComparer
+				// decides per platform, #391); on a case-sensitive macOS volume it still ignores case.
+				if(!OperatingSystem.IsLinux())
+					
+					return Skip.NotApplicable("the server compares paths case-sensitively only on Linux (#391)");
+				
 				if(!caseLinked)
 					
 					return Skip.SetupUnavailable("cannot create symbolic links here");
@@ -364,6 +370,12 @@ static partial class DefaultWorkspaceTests
 				if(!caseSensitive)
 					
 					return Skip.NotApplicable("names that differ only in case are one file on this file system");
+				
+				// The server compares paths case-sensitively only on Linux (SecurityBoundary.PathComparer
+				// decides per platform, #391); on a case-sensitive macOS volume it still ignores case.
+				if(!OperatingSystem.IsLinux())
+					
+					return Skip.NotApplicable("the server compares paths case-sensitively only on Linux (#391)");
 				
 				var upper         = fx.PathOf("CaseProj/Upper/Proj.csproj");
 				var (ok, preview) = await Call(rootedCtx, "roslyn_preview_rename", new { symbolName = "Early", newName = "Late", containingType = "UpperTarget", projectPath = upper });
