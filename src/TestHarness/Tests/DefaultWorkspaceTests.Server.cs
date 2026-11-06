@@ -16,7 +16,15 @@ static partial class DefaultWorkspaceTests
 	///     logged. The server injects its process id into the file name, so the file is found by the
 	///     name's stem followed by <c>*</c>.
 	/// </summary>
-	internal static async Task<(Process process, TestContext? server)> StartServerLoggingToAsync(TestContext ctx, string root, string logPath)
+	internal static Task<(Process process, TestContext? server)> StartServerLoggingToAsync(TestContext ctx, string root, string logPath)
+		=> StartServerLoggingToAsync(ctx, root, logPath, new Dictionary<string, string>())
+	;
+	
+	/// <summary>
+	///     The same, with <paramref name="environment"/> set for the server as well — for a test that needs a
+	///     setting the harness's own server must not have (a short load timeout, say).
+	/// </summary>
+	internal static async Task<(Process process, TestContext? server)> StartServerLoggingToAsync(TestContext ctx, string root, string logPath, IReadOnlyDictionary<string, string> environment)
 	{
 		var psi = new ProcessStartInfo("dotnet")
 		{
@@ -33,6 +41,9 @@ static partial class DefaultWorkspaceTests
 		// As for the harness's own server: the debug-only fix provider for the marker types, which
 		// the code-fix round trip through a solution uses.
 		psi.Environment["ROSLYNMCP_TEST_CODE_FIXES"] = "1";
+		
+		foreach(var (name, value) in environment)
+			psi.Environment[name] = value;
 		
 		var process = Process.Start(psi)!;
 		
