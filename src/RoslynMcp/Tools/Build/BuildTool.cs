@@ -110,7 +110,14 @@ internal sealed class BuildTool : RoslynMcpTool
 			// Every target the path stands for, as roslyn_get_diagnostics checks it (#383): every project of
 			// a solution, and every target framework of a multi-targeted project — one Roslyn project per
 			// framework, each compiled on its own, so an error under one framework's #if is not missed.
-			var (targets, targetError) = await GetTargetsAsync(projectPath, forFile: false, cancellationToken);
+			// dotnet build -f builds that framework only, so an error under another one must not block it;
+			// those are left out before they are compiled. A project without a framework suffix targets one
+			// framework, which -f applies to as well. With nothing left, dotnet decides.
+			var (targets, targetError) = await GetTargetsAsync(projectPath, forFile: false,
+				project => targetFramework is null || FrameworkOf(project) is not { } framework
+					|| string.Equals(framework, targetFramework, StringComparison.OrdinalIgnoreCase),
+				cancellationToken)
+			;
 			
 			if(targetError is not null)
 				
@@ -118,17 +125,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			var aggregated = new List<DiagnosticItem>();
 			
-			foreach(var (compilation, project) in targets) {
-				
-				// dotnet build -f builds that framework only, so an error under another one must not block it.
-				// A project without a framework suffix targets one framework, which -f applies to as well.
-				if(targetFramework is not null && project is not null && FrameworkOf(project) is { } framework
-					&& !string.Equals(framework, targetFramework, StringComparison.OrdinalIgnoreCase))
-					
-					continue;
-				
+			foreach(var (compilation, _) in targets)
 				aggregated.AddRange(GetRoslynDiagnostics(compilation, rootPath));
-			}
 			
 			// A file linked into several projects, and every file of a multi-targeted project, is compiled —
 			// and diagnosed — once per target, with identical items where the targets agree (the fast path

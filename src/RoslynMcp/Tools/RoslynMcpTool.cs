@@ -626,20 +626,43 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     which has a compilation, and a solution given with a file — which reaches here only when no
 	///     project contains that file, and is answered as such by the fallback.
 	/// </summary>
-	protected async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, CancellationToken cancellationToken)
+	protected Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, CancellationToken cancellationToken)
+		=> GetTargetsAsync(projectPath, forFile, static _ => true, cancellationToken)
+	;
+	
+	/// <summary>
+	///     <see cref="GetTargetsAsync(string, bool, CancellationToken)"/>, keeping only the projects
+	///     <paramref name="include"/> accepts — decided before anything is compiled, so a project left out
+	///     costs nothing. When the path stands for projects but none of them is accepted, there are no
+	///     targets and no error: nothing was asked for.
+	/// </summary>
+	protected async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, Func<Project, bool> include, CancellationToken cancellationToken)
 	{
 		if(TryResolveSolution(projectPath, out var solution, out _)) {
 			
 			var (path, kind) = workspace.Resolve(projectPath);
 			
+			// Another name of a project — a link to its directory (#384) — is not the path the workspace
+			// holds it under. The project it resolves to carries that path.
+			var projectFile = kind != ResolutionKind.Solution && TryGetProject(projectPath, out var resolved, out _) && resolved.FilePath is { } own
+				? own
+				: path
+			;
+			
 			Project[] named = kind == ResolutionKind.Solution && forFile
 				? []
 				: [..solution.Projects.Where(candidate => candidate.FilePath is not null
-					&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(path))))];
+					&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(projectFile))))];
 			
-			var compiled = new List<(Compilation, Project?)>(named.Length);
+			Project[] included = [..named.Where(include)];
 			
-			foreach(var project in named)
+			if(named.Length > 0 && included.Length == 0)
+				
+				return ([], null);
+			
+			var compiled = new List<(Compilation, Project?)>(included.Length);
+			
+			foreach(var project in included)
 				if(await project.GetCompilationAsync(cancellationToken) is { } compilation)
 					compiled.Add((compilation, project));
 			
@@ -653,7 +676,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return ([], error);
 		
-		return ([(single, TryGetProject(projectPath, out var only, out _) ? only : null)], null);
+		var only = TryGetProject(projectPath, out var found, out _) ? found : null;
+		
+		if(only is not null && !include(only))
+			
+			return ([], null);
+		
+		return ([(single, only)], null);
 	}
 	
 	/// <summary>

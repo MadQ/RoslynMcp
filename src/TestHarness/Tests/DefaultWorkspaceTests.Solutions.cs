@@ -9,7 +9,8 @@ static partial class DefaultWorkspaceTests
 		var rootedCtx = f.Rooted;
 		var fx        = f.Fx;
 		var single    = f.Single;
-		var adhocSln  = f.AdhocSln;
+		var adhocSln    = f.AdhocSln;
+		var splitLinked = f.SplitLinked;
 		
 		return new List<TestCase> {
 			
@@ -159,6 +160,30 @@ static partial class DefaultWorkspaceTests
 				
 				return Verdict(windows.Ok && elsewhere.Ok,
 					$"expected each framework's own error only; got {windows.Got} / {elsewhere.Got}");
+			}),
+			
+			// #393 review: through a link to the project's directory, the path given is not the one the
+			// workspace holds the project under. Both tools used to match no project by it and fall back
+			// to the one compilation the path resolves to — one framework, one error.
+			new("DefaultWorkspace: build_project and get_diagnostics through a directory link check every target framework", async () => {
+				
+				if(!splitLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var project      = single.PathOf("Tfm/SplitLink/Split.csproj");
+				var (ok, built)  = await Call(rootedCtx, "roslyn_build_project", new { projectPath = project });
+				var (dOk, diags) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = project, severity = "errors" });
+				
+				static bool Both(JsonNode? items)
+				{
+					var messages = items?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+					
+					return messages.Any(message => message.Contains("missingOnWindows")) && messages.Any(message => message.Contains("missingElsewhere"));
+				}
+				
+				return Verdict(ok && dOk && built?["source"]?.GetValue<string>() == "roslyn" && Both(built?["errors"]) && Both(diags?["items"]),
+					$"expected both frameworks' errors from each tool; got {built?.ToJsonString() ?? "null"} / {diags?.ToJsonString() ?? "null"}");
 			}),
 			
 			// Review of #378: in an adhoc workspace the solution's projects have no files; the one

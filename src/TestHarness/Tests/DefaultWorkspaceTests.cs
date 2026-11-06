@@ -216,6 +216,18 @@ static partial class DefaultWorkspaceTests
 		single.Write("Tfm/Split/Split.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>\n  </PropertyGroup>\n</Project>\n");
 		single.Write("Tfm/Split/Split.cs", "namespace Split;\n\ninternal class Split\n{\n\tint M()\n\t{\n#if WINDOWS\n\t\treturn missingOnWindows;\n#else\n\t\treturn missingElsewhere;\n#endif\n\t}\n}\n");
 		
+		// #393 review: Tfm/SplitLink is a link to Tfm/Split, so SplitLink/Split.csproj is Split under
+		// another name (#384). Its frameworks are checked all the same, found through the project the
+		// link resolves to rather than by the path as given.
+		var splitLinked = false;
+		
+		try {
+			
+			Directory.CreateSymbolicLink(single.PathOf("Tfm/SplitLink"), single.PathOf("Tfm/Split"));
+			splitLinked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		
 		// Review of #378, round 2: two projects that both compile Common/SharedSource.cs, which uses
 		// a type each project declares and the other lacks — the file is an error in both, each
 		// time for the other project's reason. And a file of the second project with a code fix,
@@ -308,7 +320,7 @@ static partial class DefaultWorkspaceTests
 		var (rooted, rootedCtx)   = await StartServerAsync(ctx, "rooted", fx.Dir);
 		var (bare,   bareCtx)     = await StartServerAsync(ctx, "bare",   empty.Dir);
 		
-		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseDir, caseSensitive, caseDirState, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked);
+		var f = new Fixture(ctx, rootedCtx, bareCtx, fx, single, adhocSln, caseFx, caseDir, caseSensitive, caseDirState, aliasLinked, dirLinked, sameDirLinked, unicodeDistinct, unicodeLinked, caseLinked, splitLinked);
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
@@ -350,7 +362,8 @@ static partial class DefaultWorkspaceTests
 		bool           SameDirLinked,
 		bool           UnicodeDistinct,
 		bool           UnicodeLinked,
-		bool           CaseLinked)
+		bool           CaseLinked,
+		bool           SplitLinked)
 	{
 		public string AppProject => Fx.PathOf("App/App.csproj");
 		public string LibProject => Fx.PathOf("Lib/Lib.csproj");
