@@ -209,6 +209,13 @@ static partial class DefaultWorkspaceTests
 		single.Write("Multi/Multi.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>\n  </PropertyGroup>\n</Project>\n");
 		single.Write("Multi/Both.cs", "namespace Multi;\n\ninternal class Both\n{\n\tvoid M()\n\t{\n#if WINDOWS\n\t\tint onlyOnWindows;\n#else\n\t\tint onlyElsewhere;\n#endif\n\t}\n}\n");
 		
+		// #383: a project with two target frameworks and a compile error under each one's branch of an
+		// #if, so neither framework alone is clean and the test does not depend on which comes first.
+		// In a solution of its own, so that no other project's diagnostics mix in.
+		single.Write("Tfm/Tfm.slnx", "<Solution>\n  <Project Path=\"Split/Split.csproj\" />\n</Solution>\n");
+		single.Write("Tfm/Split/Split.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>\n    <EnableWindowsTargeting>true</EnableWindowsTargeting>\n  </PropertyGroup>\n</Project>\n");
+		single.Write("Tfm/Split/Split.cs", "namespace Split;\n\ninternal class Split\n{\n\tint M()\n\t{\n#if WINDOWS\n\t\treturn missingOnWindows;\n#else\n\t\treturn missingElsewhere;\n#endif\n\t}\n}\n");
+		
 		// Review of #378, round 2: two projects that both compile Common/SharedSource.cs, which uses
 		// a type each project declares and the other lacks — the file is an error in both, each
 		// time for the other project's reason. And a file of the second project with a code fix,

@@ -125,6 +125,42 @@ static partial class DefaultWorkspaceTests
 					$"expected the warnings of Apart and of both Multi frameworks; got {data?.ToJsonString() ?? "null"}");
 			}),
 			
+			// #383: the build's Roslyn check covers every target framework, as get_diagnostics does. It used
+			// to check one framework per project file, find that one's error only — or, with the error only
+			// under the other framework, nothing — and go on to dotnet build. Both errors stop it here.
+			new("DefaultWorkspace: build_project's Roslyn check covers every target framework", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = single.PathOf("Tfm/Tfm.slnx") });
+				var messages   = data?["errors"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				
+				bool Has(string name) => messages.Any(message => message.Contains(name));
+				
+				return Verdict(ok && data?["source"]?.GetValue<string>() == "roslyn" && Has("missingOnWindows") && Has("missingElsewhere"),
+					$"expected Roslyn errors under both frameworks; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #383: dotnet build -f builds one framework, so the Roslyn check covers that one only — an
+			// error that exists only under the other framework must not block the build. Asked once per
+			// framework, so the test does not pass by the luck of which framework a lookup lands on.
+			new("DefaultWorkspace: build_project with a target framework checks only that framework", async () => {
+				
+				async Task<(bool Ok, string Got)> Only(string framework, string expected, string excluded)
+				{
+					var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = single.PathOf("Tfm/Split/Split.csproj"), targetFramework = framework });
+					var messages   = data?["errors"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+					
+					return (ok && data?["source"]?.GetValue<string>() == "roslyn"
+						&& messages.Any(message => message.Contains(expected)) && !messages.Any(message => message.Contains(excluded)),
+						data?.ToJsonString() ?? "null");
+				}
+				
+				var windows   = await Only("net10.0-windows", "missingOnWindows", "missingElsewhere");
+				var elsewhere = await Only("net10.0",         "missingElsewhere", "missingOnWindows");
+				
+				return Verdict(windows.Ok && elsewhere.Ok,
+					$"expected each framework's own error only; got {windows.Got} / {elsewhere.Got}");
+			}),
+			
 			// Review of #378: in an adhoc workspace the solution's projects have no files; the one
 			// compilation is checked rather than none — "0 errors" for broken code was the result.
 			new("DefaultWorkspace: get_diagnostics for a solution in an adhoc workspace still checks the code", async () => {
