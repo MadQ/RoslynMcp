@@ -28,7 +28,11 @@ internal static class MSBuildGate
 	// before releasing it, so a waiter can read null in between; it then says "another MSBuild run".
 	static string? holder;
 	
-	/// <summary>What holds the gate right now, as a phrase for a wait note.</summary>
+	/// <summary>
+	///     What holds the gate right now, as a phrase for a wait note. A best guess, not part of the locking: a
+	///     waiter reads it once before waiting, so its note names the holder it found then, not any that took
+	///     the gate in between.
+	/// </summary>
 	internal static string Holder => Volatile.Read(ref holder) ?? "another MSBuild run";
 	
 	/// <summary>Takes the gate if it is free, without waiting.</summary>
