@@ -158,7 +158,58 @@ internal sealed partial class WorkspaceManager
 			lastUnhealthyLoad = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}Z] {message}";
 		}
 		
+		/// <summary>
+		///     Loads a solution as the only MSBuild run in the process (<see cref="MSBuildGate"/>, #379). The
+		///     load timeout starts once the gate is held, so time spent queued is not held against the load.
+		/// </summary>
 		static Workspace LoadSolution(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings)
+		{
+			var held = EnterMSBuildGate(solutionPath, log);
+			
+			try {
+				return LoadSolutionUngated(solutionPath, log, warnings);
+			}
+			finally {
+				
+				if(held)
+					MSBuildGate.Release();
+			}
+		}
+		
+		/// <summary>
+		///     Loads a project as the only MSBuild run in the process (<see cref="MSBuildGate"/>, #379). The
+		///     load timeout starts once the gate is held, so time spent queued is not held against the load.
+		/// </summary>
+		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings)
+		{
+			var held = EnterMSBuildGate(csprojPath, log);
+			
+			try {
+				return LoadMSBuildWorkspaceUngated(csprojPath, log, warnings);
+			}
+			finally {
+				
+				if(held)
+					MSBuildGate.Release();
+			}
+		}
+		
+		/// <summary>
+		///     Takes <see cref="MSBuildGate"/> for a load of <paramref name="path"/>, waiting at most the load
+		///     timeout. Past it the load goes ahead without the gate and says so in the log — a stuck
+		///     <c>dotnet build</c> must not stall every load behind it. With the timeout disabled, waits as long
+		///     as it takes. Returns whether the gate is held.
+		/// </summary>
+		static bool EnterMSBuildGate(string path, FileLogger? log)
+		{
+			var seconds = ServerArgs.Current.LoadTimeoutSeconds;
+			var limit   = seconds > 0 ? TimeSpan.FromSeconds(seconds) : Timeout.InfiniteTimeSpan;
+			
+			return MSBuildGate.Enter($"a workspace load ({Path.GetFileName(path)})", limit, note => log?.LogInfo("Load", $"{note}: {path}"));
+		}
+		
+
+		static Workspace LoadSolutionUngated(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings)
 		{
 			using var loadCts = CreateLoadTimeoutCts();
 			
@@ -223,7 +274,7 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
-		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings)
+		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspaceUngated(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings)
 		{
 			using var loadCts = CreateLoadTimeoutCts();
 			
