@@ -638,16 +638,17 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, Func<Project, bool> include, CancellationToken cancellationToken)
 	{
-		var resolvedSolution = TryResolveSolution(projectPath, out var solution, out var solutionError);
-		
-		// A solution that cannot be read has that for its answer: the fallback below would only say that
-		// a solution path needs a project (solution_needs_project).
-		if(!resolvedSolution && Path.GetExtension(projectPath) is var extension
-			&& (extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)))
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError)) {
 			
-			return ([], solutionError);
+			// A solution that cannot be read has that for its answer: the fallback below would only say that
+			// a solution path needs a project (solution_needs_project).
+			if(Path.GetExtension(projectPath) is var extension
+				&& (extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)))
+				
+				return ([], solutionError);
+		}
 		
-		if(resolvedSolution) {
+		else {
 			
 			var (path, kind) = workspace.Resolve(projectPath);
 			

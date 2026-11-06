@@ -82,6 +82,11 @@ internal sealed partial class WorkspaceManager
 		// running their own full load and throwing all but one result away.
 		private readonly SemaphoreSlim reloadGate = new(1, 1);
 
+		// Cancelled when disposal starts. A reload holds reloadGate while it queues on MSBuildGate, which can
+		// take as long as another workspace's load or a whole dotnet build (#379) — far past the bounded wait
+		// in Dispose, which would then skip teardown. Cancelling ends that wait, and the reload is abandoned.
+		private readonly CancellationTokenSource disposing = new();
+
 		// Consecutive reloads discarded for dropped references. Drives the deferral backoff and
 		// resets to 0 on any successful promotion.
 		private int consecutiveDiscards;
@@ -246,7 +251,7 @@ internal sealed partial class WorkspaceManager
 					
 					logger.LogInfo("Load", $"Loading solution: {path}");
 					var slnSw = System.Diagnostics.Stopwatch.StartNew();
-					workspace = LoadSolution(path, logger, loadWarnings);
+					workspace = LoadSolution(path, logger, loadWarnings, CancellationToken.None);
 					
 					// Contended design-time builds can silently drop a project's references —
 					// results would be wrong, not failed. One fresh reload usually clears it.
@@ -255,7 +260,7 @@ internal sealed partial class WorkspaceManager
 						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedSln)} — reloading once");
 						workspace.Dispose();
 						loadWarnings.Clear();
-						workspace = LoadSolution(path, logger, loadWarnings);
+						workspace = LoadSolution(path, logger, loadWarnings, CancellationToken.None);
 					}
 					
 					WarnIfReferencesDropped(workspace);
@@ -286,14 +291,14 @@ internal sealed partial class WorkspaceManager
 					logger.LogInfo("Load", $"Loading project: {path}");
 					var projSw = System.Diagnostics.Stopwatch.StartNew();
 					
-					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings);
+					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings, CancellationToken.None);
 					
 					if(ProjectsWithoutReferences(msbuildWs) is { Length: > 0 } droppedProj) {
 						
 						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedProj)} — reloading once");
 						msbuildWs.Dispose();
 						loadWarnings.Clear();
-						(msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings);
+						(msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings, CancellationToken.None);
 					}
 					
 					WarnIfReferencesDropped(msbuildWs);
@@ -580,6 +585,9 @@ internal sealed partial class WorkspaceManager
 			disposed = true
 			;
 			
+			// And a reload still queued on MSBuildGate to give up, so that the waits below are short.
+			disposing.Cancel();
+			
 			watchSet?.Dispose();
 			
 			// Quiesce the timer: wait for any in-flight callback to complete before
@@ -636,6 +644,7 @@ internal sealed partial class WorkspaceManager
 
 			@lock.Dispose();
 			workspace.Dispose();
+			disposing.Dispose();
 			
 			// One line per teardown — eviction is rare — and the line a stalled watcher.Dispose()
 			// or workspace.Dispose() would be missing from the log (#277).

@@ -182,7 +182,7 @@ static class DotnetRunnerTests
 	///     clean or restore. With fixture A warm, A's held clean (<see cref="HoldSeconds"/>) is sent and given a
 	///     second to take the gate; then roslyn_get_diagnostics is asked for fixture B, never loaded before, so
 	///     its call starts a cold load while the clean still runs. The server log must hold the load's note,
-	///     <c>Queued … behind another dotnet command (dotnet clean): &lt;B's .csproj&gt;</c>, and both calls must
+	///     <c>queued … behind another dotnet command (dotnet clean): &lt;B's .csproj&gt;</c>, and both calls must
 	///     succeed — the load is held back, not failed. Before #379 the load ran beside the clean and wrote no
 	///     such note. The note names B's project path, so a load of any other fixture cannot satisfy it.
 	/// </summary>
@@ -231,7 +231,7 @@ static class DotnetRunnerTests
 			
 			return (false, failure);
 		
-		var queued = lines.Any(line => line.Contains("Queued ", StringComparison.Ordinal)
+		var queued = lines.Any(line => line.Contains("queued ", StringComparison.Ordinal)
 			&& line.Contains("behind another dotnet command (dotnet clean)", StringComparison.Ordinal)
 			&& line.Contains(JsonEscaped(cold.Csproj!), StringComparison.OrdinalIgnoreCase));
 		
@@ -244,7 +244,6 @@ static class DotnetRunnerTests
 	// A path as it appears inside a JSON string in the log: backslashes escaped.
 	static string JsonEscaped(string path) => path.Replace("\\", "\\\\");
 	
-
 	/// <summary>
 	///     An MSBuild fixture whose clean takes <see cref="HoldSeconds"/>: a target that runs before
 	///     <c>Clean</c> and sleeps, so concurrency checks do not depend on how fast the machine is. The sleep

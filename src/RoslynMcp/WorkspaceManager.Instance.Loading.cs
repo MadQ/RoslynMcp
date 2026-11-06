@@ -161,54 +161,58 @@ internal sealed partial class WorkspaceManager
 		/// <summary>
 		///     Loads a solution as the only MSBuild run in the process (<see cref="MSBuildGate"/>, #379). The
 		///     load timeout starts once the gate is held, so time spent queued is not held against the load.
+		///     <paramref name="abandon"/> gives up a wait for the gate (see <see cref="EnterMSBuildGate"/>).
 		/// </summary>
-		static Workspace LoadSolution(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings)
+		static Workspace LoadSolution(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings, CancellationToken abandon)
 		{
-			var held = EnterMSBuildGate(solutionPath, log);
+			EnterMSBuildGate(solutionPath, log, abandon);
 			
 			try {
 				return LoadSolutionUngated(solutionPath, log, warnings);
 			}
 			finally {
-				
-				if(held)
-					MSBuildGate.Release();
+				MSBuildGate.Release();
 			}
 		}
 		
 		/// <summary>
 		///     Loads a project as the only MSBuild run in the process (<see cref="MSBuildGate"/>, #379). The
 		///     load timeout starts once the gate is held, so time spent queued is not held against the load.
+		///     <paramref name="abandon"/> gives up a wait for the gate (see <see cref="EnterMSBuildGate"/>).
 		/// </summary>
-		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings)
+		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspace(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings, CancellationToken abandon)
 		{
-			var held = EnterMSBuildGate(csprojPath, log);
+			EnterMSBuildGate(csprojPath, log, abandon);
 			
 			try {
 				return LoadMSBuildWorkspaceUngated(csprojPath, log, warnings);
 			}
 			finally {
-				
-				if(held)
-					MSBuildGate.Release();
+				MSBuildGate.Release();
 			}
 		}
 		
 		/// <summary>
 		///     Takes <see cref="MSBuildGate"/> for a load of <paramref name="path"/>, waiting at most the load
-		///     timeout. Past it the load goes ahead without the gate and says so in the log — a stuck
-		///     <c>dotnet build</c> must not stall every load behind it. With the timeout disabled, waits as long
-		///     as it takes. Returns whether the gate is held.
+		///     timeout (as long as it takes when the timeout is disabled). A load that waited that long fails
+		///     rather than run beside what holds the gate: the collision on obj\ is what the gate prevents, and
+		///     a long <c>dotnet build</c> is not a stuck one. The failure is not kept — the next call loads
+		///     afresh (#377), and a reload stays pending. <paramref name="abandon"/> ends the wait with an
+		///     <see cref="OperationCanceledException"/>: a reload queued here when its instance is disposed.
 		/// </summary>
-		static bool EnterMSBuildGate(string path, FileLogger? log)
+		static void EnterMSBuildGate(string path, FileLogger? log, CancellationToken abandon)
 		{
 			var seconds = ServerArgs.Current.LoadTimeoutSeconds;
 			var limit   = seconds > 0 ? TimeSpan.FromSeconds(seconds) : Timeout.InfiniteTimeSpan;
 			
-			return MSBuildGate.Enter($"a workspace load ({Path.GetFileName(path)})", limit, note => log?.LogInfo("Load", $"{note}: {path}"));
+			if(!MSBuildGate.Enter($"a workspace load ({Path.GetFileName(path)})", limit, note => log?.LogInfo("Load", $"{note}: {path}"), abandon, out var behind))
+				
+				throw new InvalidOperationException(
+					$"Loading '{path}' waited {seconds}s for {behind} to finish and gave up: loading beside it would " +
+					"write the same obj\\ files. Try again once it is done, or raise ROSLYNMCP_LOAD_TIMEOUT_SECONDS.");
 		}
 		
-
+		/// <summary>The load of <see cref="LoadSolution"/>, without the gate; call that instead.</summary>
 		static Workspace LoadSolutionUngated(string solutionPath, FileLogger? log, ConcurrentQueue<string> warnings)
 		{
 			using var loadCts = CreateLoadTimeoutCts();
@@ -274,6 +278,7 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		/// <summary>The load of <see cref="LoadMSBuildWorkspace"/>, without the gate; call that instead.</summary>
 		static (Workspace workspace, ProjectId projectId) LoadMSBuildWorkspaceUngated(string csprojPath, FileLogger? log, ConcurrentQueue<string> warnings)
 		{
 			using var loadCts = CreateLoadTimeoutCts();

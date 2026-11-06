@@ -53,28 +53,33 @@ internal static class MSBuildGate
 	/// <summary>
 	///     Takes the gate for a synchronous caller, waiting at most <paramref name="limit"/>
 	///     (<see cref="Timeout.InfiniteTimeSpan"/>: as long as it takes). A wait is reported to
-	///     <paramref name="record"/>. When the limit passes, returns <see langword="false"/> without the gate:
-	///     the caller goes ahead unserialized, as every load did before #379, rather than hang behind a run
-	///     that does not end — a <c>dotnet build</c> has no timeout of its own.
+	///     <paramref name="record"/>. When the limit passes, returns <see langword="false"/> without the gate,
+	///     with <paramref name="behind"/> naming what held it: the caller must then fail rather than run beside
+	///     it — the collision on obj\ is what the gate exists to prevent, and a long build is not a stuck one.
+	///     <paramref name="cancellationToken"/> abandons the wait (an <see cref="OperationCanceledException"/>,
+	///     the gate not held).
 	/// </summary>
-	internal static bool Enter(string what, TimeSpan limit, Action<string>? record)
+	internal static bool Enter(string what, TimeSpan limit, Action<string>? record, CancellationToken cancellationToken, out string behind)
 	{
+		behind = "";
+		
 		if(TryEnter(what))
 			
 			return true;
 		
-		var behind = Holder;
+		behind = Holder;
+		
 		var waited = Stopwatch.StartNew();
 		
-		if(!gate.Wait(limit)) {
+		if(!gate.Wait(limit, cancellationToken)) {
 			
-			record?.Invoke($"Waited {waited.ElapsedMilliseconds} ms behind {behind} — proceeding unserialized");
+			record?.Invoke($"gave up after {waited.ElapsedMilliseconds} ms queued behind {behind}");
 			
 			return false;
 		}
 		
 		Volatile.Write(ref holder, what);
-		record?.Invoke($"Queued {waited.ElapsedMilliseconds} ms behind {behind}");
+		record?.Invoke($"queued {waited.ElapsedMilliseconds} ms behind {behind}");
 		
 		return true;
 	}
