@@ -545,6 +545,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				or ProjectNotInWorkspaceException
 				or InvalidProjectPathException
 				or AmbiguousFileException
+				or WorkspaceLoadTimeoutException
 				or ArgumentException);
 	
 

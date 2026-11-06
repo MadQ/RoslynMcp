@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.MSBuild;
 using System.Collections.Concurrent;
+using RoslynMcp.Tools;
 
 namespace RoslynMcp;
 
@@ -118,7 +119,7 @@ internal sealed partial class WorkspaceManager
 			return cts;
 		}
 		
-		static InvalidOperationException LoadTimeout(string path) =>
+		static WorkspaceLoadTimeoutException LoadTimeout(string path) =>
 			new(
 				$"Loading '{path}' timed out after {ServerArgs.Current.LoadTimeoutSeconds}s. " +
 				"The workspace may be too large or MSBuild may be stuck. Try loading a single .csproj " +
@@ -207,7 +208,7 @@ internal sealed partial class WorkspaceManager
 			
 			if(!MSBuildGate.Enter($"a workspace load ({Path.GetFileName(path)})", limit, note => log?.LogInfo("Load", $"{note}: {path}"), abandon, out var behind))
 				
-				throw new InvalidOperationException(
+				throw new WorkspaceLoadTimeoutException(
 					$"Loading '{path}' waited {seconds}s for {behind} to finish and gave up: loading beside it would " +
 					"write the same obj\\ files. Try again once it is done, or raise ROSLYNMCP_LOAD_TIMEOUT_SECONDS.");
 		}
