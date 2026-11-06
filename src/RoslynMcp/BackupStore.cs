@@ -228,7 +228,7 @@ internal sealed class BackupStore
 			foreach(var (token, meta) in entries) {
 				
 				if(absolutePath is not null &&
-					!string.Equals(meta.AbsolutePath, absolutePath, StringComparison.OrdinalIgnoreCase))
+					!SecurityBoundary.PathComparer.Equals(meta.AbsolutePath, absolutePath))
 					continue;
 				
 				results.Add(new BackupEntry(token, meta, meta.Phase));

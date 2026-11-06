@@ -113,7 +113,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		{
 			var matches = new List<MatchResult>();
 			// seenPaths prevents searching the same physical file twice in multi-targeted projects.
-			var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+			var seenPaths = new HashSet<string>(SecurityBoundary.PathComparer)
 			;
 			
 			foreach(var project in solution.Projects)

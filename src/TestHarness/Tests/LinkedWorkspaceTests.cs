@@ -18,8 +18,8 @@ using System.Text.Json.Nodes;
 ///         covers the same escape for a write, through a link whose target does not exist yet:
 ///         <c>dangling.txt</c> points at a file under <c>outside</c> that nobody created. A fifth
 ///         reads through <c>leak.txt</c>, whose target climbs out through <c>escape</c> and
-///         <c>..</c>. A sixth, on Linux only, links to a directory whose name differs from the
-///         root's in case alone.
+///         <c>..</c>. A sixth, where a directory can be case-sensitive, links to a directory whose
+///         name differs from the root's in case alone.
 ///     </para>
 ///     <para>
 ///         The fixture builds all three on any operating system instead of relying on the
@@ -49,6 +49,10 @@ static class LinkedWorkspaceTests
 		
 		var fx = TestFixtures.NewAdhocDir("LinkedWorkspace");
 		
+		// Before anything is written into it: Windows makes only an empty directory case-sensitive (#391).
+		var realState  = TestFixtures.MakeCaseSensitive(fx.PathOf("real"));
+		var casedApart = realState == CaseSensitivity.Sensitive;
+		
 		fx.Write("real/proj/Probe.cs",   "class Probe { }\n");
 		fx.Write("real/proj/Notes.txt",  "inside-the-workspace\n");
 		fx.Write("outside/secret.txt",   Secret + "\n");
@@ -71,11 +75,12 @@ static class LinkedWorkspaceTests
 		
 		fx.Write("sibling-secret.txt", Secret + "\n");
 		
-		// A directory beside the workspace root whose name differs from the root's only in case.
-		// Only Linux can have one: elsewhere real/PROJ and real/proj are the same directory.
+		// A directory beside the workspace root whose name differs from the root's only in case — where
+		// real/ is case-sensitive: always on Linux, on Windows when fsutil could make it so (#391).
+		// Elsewhere real/PROJ and real/proj are the same directory.
 		var linkCased = fx.PathOf("real/proj/cased");
 		
-		if(OperatingSystem.IsLinux())
+		if(casedApart)
 			fx.Write("real/PROJ/secret.txt", Secret + "\n");
 		var linksMade  = false;
 		
@@ -87,7 +92,7 @@ static class LinkedWorkspaceTests
 			File.CreateSymbolicLink(linkDangling,    danglingTarget);
 			File.CreateSymbolicLink(linkLeak,        Path.Combine("escape", "..", "sibling-secret.txt"));
 			
-			if(OperatingSystem.IsLinux())
+			if(casedApart)
 				Directory.CreateSymbolicLink(linkCased, fx.PathOf("real/PROJ"));
 			
 			linksMade = true;
@@ -230,15 +235,15 @@ static class LinkedWorkspaceTests
 			
 			// "Inside the workspace" must mean the same directory, not a name that looks the
 			// same with case ignored. The link points at real/PROJ, a different directory from
-			// the workspace's real/proj on Linux; a comparison that ignores case took it for the
-			// workspace itself and served the file. The other platforms cannot build the
-			// fixture, and their file systems make the two names one directory anyway.
+			// the workspace's real/proj where real/ is case-sensitive; a comparison that ignores
+			// case took it for the workspace itself and served the file — on Windows and macOS
+			// until the case rule became the directory's own (#391).
 			new("linked workspace: a link to a directory that differs from the root only in case is not followed",
 				async () => {
 					
-					if(!OperatingSystem.IsLinux())
+					if(!casedApart)
 						
-						return Skip.NotApplicable("names that differ only in case are one directory on this platform");
+						return TestFixtures.CaseSkip(realState);
 					
 					if(!linksMade)
 						

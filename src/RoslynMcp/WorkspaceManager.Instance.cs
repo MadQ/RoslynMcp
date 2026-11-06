@@ -170,8 +170,8 @@ internal sealed partial class WorkspaceManager
 #else
 		private readonly object           debounceLock   = new();
 #endif
-		private readonly HashSet<string>  pendingChanges = new(StringComparer.OrdinalIgnoreCase);
-		private readonly HashSet<string>  pendingDeletes = new(StringComparer.OrdinalIgnoreCase);
+		private readonly HashSet<string>  pendingChanges = new(SecurityBoundary.PathComparer);
+		private readonly HashSet<string>  pendingDeletes = new(SecurityBoundary.PathComparer);
 		// The most entries ownedLinkTargets holds before it makes room.
 		private const    int                       MaxOwnedLinkTargets = 50;
 		// Files RM wrote through a symbolic link that are sources no project compiles, with the
@@ -202,14 +202,14 @@ internal sealed partial class WorkspaceManager
 		// A path is added before each RM-owned write and decremented in the finally block.
 		// ScheduleDebounced skips non-Deleted events where the count is > 0 (Deleted events
 		// use ownedDeletePaths below instead — they are intentionally excluded here).
-		private readonly ConcurrentDictionary<string, int> ignoredPaths    = new(StringComparer.OrdinalIgnoreCase)
+		private readonly ConcurrentDictionary<string, int> ignoredPaths    = new(SecurityBoundary.PathComparer)
 		;
 		// Per-path owned-delete suppression for file rename operations. When RM moves a file
 		// (old → new), the FSW fires Deleted(oldPath) which is excluded from ignoredPaths by
 		// design. This set tracks the old paths whose delete events should be consumed rather
 		// than dispatched. Ref-counted for concurrent-rename safety; consumed on first match in
 		// ScheduleDebounced.
-		private readonly ConcurrentDictionary<string, int> ownedDeletePaths = new(StringComparer.OrdinalIgnoreCase)
+		private readonly ConcurrentDictionary<string, int> ownedDeletePaths = new(SecurityBoundary.PathComparer)
 		;
 		// The files an ApplyChangesToDisk is writing at this moment — its documents, and the files
 		// behind those that are links — ref-counted like ignoredPaths (#358). Unlike ignoredPaths

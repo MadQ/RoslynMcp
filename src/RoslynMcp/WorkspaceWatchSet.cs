@@ -28,13 +28,8 @@ internal static class WatchPlanner
 	/// </summary>
 	public const int MaxRoots = 32;
 	
-	public static readonly StringComparer PathComparer = OperatingSystem.IsLinux()
-		? StringComparer.Ordinal
-		: StringComparer.OrdinalIgnoreCase;
-	
-	static readonly StringComparison pathComparison = OperatingSystem.IsLinux()
-		? StringComparison.Ordinal
-		: StringComparison.OrdinalIgnoreCase;
+	/// <summary>The server's path comparison (<see cref="SecurityBoundary.PathComparer"/>, #391).</summary>
+	public static StringComparer PathComparer => SecurityBoundary.PathComparer;
 	
 	/// <summary>
 	///     Plans the watch roots for the workspace at <paramref name="rootPath"/>, trying three
@@ -186,15 +181,19 @@ internal static class WatchPlanner
 	{
 		var trimmed = Path.TrimEndingDirectorySeparator(ancestor.AsSpan());
 		
-		if(trimmed.IsEmpty || !path.AsSpan().StartsWith(trimmed, pathComparison))
+		if(trimmed.IsEmpty || path.Length < trimmed.Length)
 			
 			return false;
 		
 		// A filesystem root ("C:\", "/") keeps its separator when trimmed, so the boundary is the
-		// root's own last character rather than the one after it.
-		return path.Length == trimmed.Length
+		// root's own last character rather than the one after it. Checked before the text, which can
+		// ask the file system about a case-only difference (#391 review).
+		var atBoundary = path.Length == trimmed.Length
 			|| IsSeparator(trimmed[^1])
-			|| IsSeparator(path[trimmed.Length]);
+			|| IsSeparator(path[trimmed.Length])
+		;
+		
+		return atBoundary && SecurityBoundary.StartsWithPath(path, trimmed);
 		
 		static bool IsSeparator(char c) => c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar;
 	}

@@ -19,7 +19,7 @@ internal static class PreviewFileStateBuilder
 		Solution newSolution,
 		CancellationToken cancellationToken)
 	{
-		var states = new Dictionary<string, PreviewFileState>(StringComparer.OrdinalIgnoreCase);
+		var states = new Dictionary<string, PreviewFileState>(SecurityBoundary.PathComparer);
 		
 		foreach(var projectChange in newSolution.GetChanges(baseSolution).GetProjectChanges()) {
 			

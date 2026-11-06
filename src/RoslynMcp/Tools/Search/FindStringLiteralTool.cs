@@ -135,7 +135,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		{
 			var matches = new List<StringLiteralMatch>();
 			// seenPaths prevents searching the same physical file twice in multi-targeted projects.
-			var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var seenPaths = new HashSet<string>(SecurityBoundary.PathComparer);
 
 			foreach(var project in solution.Projects)
 				foreach(var document in project.Documents) {

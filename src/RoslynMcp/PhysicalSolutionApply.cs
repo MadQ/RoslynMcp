@@ -72,7 +72,7 @@ internal sealed class PhysicalSolutionApplyPlan
 		if(previewFileStates is null)
 			throw new PhysicalApplyPlanException("The preview does not contain physical file states.");
 		
-		var candidates = new Dictionary<string, List<PhysicalFileCandidate>>(StringComparer.OrdinalIgnoreCase);
+		var candidates = new Dictionary<string, List<PhysicalFileCandidate>>(SecurityBoundary.PathComparer);
 		
 		foreach(var projectChange in newSolution.GetChanges(baseSolution).GetProjectChanges()) {
 			
@@ -754,7 +754,7 @@ internal static class PhysicalApplyResultMapper
 		bool backupsEnabled,
 		string changeNoun)
 	{
-		var plannedFiles = plan.Files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
+		var plannedFiles = plan.Files.ToDictionary(file => file.Path, SecurityBoundary.PathComparer);
 		
 		return report.Files
 			.Select(file => {

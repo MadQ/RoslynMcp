@@ -162,7 +162,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			// seenPaths prevents searching the same physical file twice in multi-targeted projects
 			// (e.g., net8.0 + net10.0 each have their own Document for the same .cs file).
 			// The first TFM's parse wins; #if NET10_0 blocks may be absent in the skipped parse.
-			var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+			var seenPaths = new HashSet<string>(SecurityBoundary.PathComparer)
 			;
 			
 			foreach(var project in solution.Projects)

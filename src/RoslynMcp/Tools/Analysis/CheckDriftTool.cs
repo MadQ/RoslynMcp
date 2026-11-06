@@ -118,7 +118,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		// Dedupe (multi-TFM projects surface the same file per framework) and sort for
 		// deterministic output.
 		string[] driftedFiles = [..drifted
-			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.Distinct(SecurityBoundary.PathComparer)
 			.Order(StringComparer.Ordinal)];
 		
 		// Second axis: a workspace can be perfectly in sync with disk and still be useless if its

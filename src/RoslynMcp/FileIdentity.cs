@@ -23,13 +23,14 @@ internal static class FileIdentity
 	///     a link <c>Lib/Alias.csproj</c> beside <c>Lib.csproj</c> is another project too: <see cref="Name"/>
 	///     is the file name of the path, not of the file it leads to (#386). An 8.3 short name counts as its
 	///     long name: a matched project is built under the workspace's own path, never the short spelling.
+	///     The name is compared within its directory, by that directory's case rule (#391).
 	/// </summary>
 	public readonly record struct ProjectIdentity(string File, string Directory, string Name)
 	{
 		public bool Matches(ProjectIdentity other)
 			=> SecurityBoundary.PathComparer.Equals(File, other.File)
 			&& SecurityBoundary.PathComparer.Equals(Directory, other.Directory)
-			&& SecurityBoundary.PathComparer.Equals(Name, other.Name)
+			&& SecurityBoundary.PathComparer.Equals(Path.Join(Directory, Name), Path.Join(Directory, other.Name))
 		;
 	}
 	
@@ -143,6 +144,59 @@ internal static class FileIdentity
 	public static bool SamePath(string first, string second)
 		=> FinalPath(first) is { } firstFinal && FinalPath(second) is { } secondFinal && SecurityBoundary.PathComparer.Equals(firstFinal, secondFinal);
 	
+	/// <summary>
+	///     Whether the file system matches names in the directory at <paramref name="directory"/> by case:
+	///     the directory's own flag on Windows, where any directory can be made case-sensitive
+	///     (<c>fsutil file setCaseSensitiveInfo</c>, used with WSL), and the volume's format on macOS
+	///     (<c>pathconf(_PC_CASE_SENSITIVE)</c>). <c>null</c> when the directory does not exist. Only a
+	///     confirmed answer is ever "ignores case": a Windows file system without the flag (FAT, Windows
+	///     before 1803) is one, because there names never differ by case. Anything uncertain — no access,
+	///     a sharing violation, a network error, an answer macOS will not give — is "case-sensitive": this
+	///     answer decides the workspace boundary, and a wrong "ignores case" lets a sibling directory in.
+	/// </summary>
+	public static bool? IsCaseSensitiveDirectory(string directory)
+	{
+		try {
+			
+			return OperatingSystem.IsWindows() ? WindowsCaseSensitive(directory)
+				: OperatingSystem.IsMacOS() ? MacCaseSensitive(directory)
+				: true
+			;
+		}
+		// It runs inside PathComparer.Equals, under dictionary and set lookups: nothing may escape it.
+		catch(Exception ex) when(ex is ArgumentException or NotSupportedException or IOException or UnauthorizedAccessException or System.Security.SecurityException or DllNotFoundException or EntryPointNotFoundException) {
+			
+			return true;
+		}
+	}
+	
+	static bool? WindowsCaseSensitive(string directory)
+	{
+		using var handle = CreateFile(ExtendedLength(Path.GetFullPath(directory)), FileReadAttributes, FileShare.ReadWrite | FileShare.Delete, 0, FileMode.Open, FileFlagBackupSemantics, 0);
+		
+		if(handle.IsInvalid)
+			
+			return Marshal.GetLastPInvokeError() is ErrorFileNotFound or ErrorPathNotFound ? null : true;
+		
+		if(GetFileInformationByHandleEx(handle, FileCaseSensitiveInfo, out var flags, sizeof(uint)))
+			
+			return (flags & CaseSensitiveDirectoryFlag) != 0;
+		
+		// The file system or the Windows version has no such flag: its names never differ by case.
+		return Marshal.GetLastPInvokeError() is not (ErrorInvalidFunction or ErrorNotSupported or ErrorInvalidParameter);
+	}
+	
+	static bool? MacCaseSensitive(string directory)
+	{
+		var answer = PathConf(directory, PcCaseSensitive);
+		
+		if(answer >= 0)
+			
+			return answer != 0;
+		
+		return Marshal.GetLastPInvokeError() is ErrorNoEntry or ErrorNotDirectory ? null : true;
+	}
+	
 	static string? WindowsFinalPath(string path)
 	{
 		var full = ExtendedLength(Path.GetFullPath(path));
@@ -194,6 +248,20 @@ internal static class FileIdentity
 	const uint FileReadAttributes      = 0x80;
 	const uint FileFlagBackupSemantics = 0x02000000;
 	
+	// FILE_INFO_BY_HANDLE_CLASS.FileCaseSensitiveInfo; its FILE_CASE_SENSITIVE_INFO is one ULONG of flags.
+	const int  FileCaseSensitiveInfo      = 23;
+	const uint CaseSensitiveDirectoryFlag = 0x1;
+	const int  ErrorInvalidFunction       = 1;
+	const int  ErrorFileNotFound          = 2;
+	const int  ErrorPathNotFound          = 3;
+	const int  ErrorNotSupported          = 50;
+	const int  ErrorInvalidParameter      = 87;
+	
+	// Darwin's <unistd.h> and <errno.h>.
+	const int PcCaseSensitive   = 11;
+	const int ErrorNoEntry      = 2;
+	const int ErrorNotDirectory = 20;
+	
 	// FileShare and FileMode.Open (3, OPEN_EXISTING) have the Win32 values.
 	[DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
 	static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, FileShare shareMode, nint securityAttributes, FileMode creationDisposition, uint flagsAndAttributes, nint templateFile);
@@ -203,6 +271,12 @@ internal static class FileIdentity
 	
 	[DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
 	static extern uint GetFinalPathNameByHandle(SafeFileHandle file, [Out] char[] buffer, uint bufferLength, uint flags);
+	
+	[DllImport("kernel32.dll", SetLastError = true)]
+	static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int informationClass, out uint information, uint bufferSize);
+	
+	[DllImport("libc", EntryPoint = "pathconf", SetLastError = true)]
+	static extern nint PathConf([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int name);
 	
 	[DllImport("libc", EntryPoint = "realpath", SetLastError = true)]
 	static extern nint RealPath([MarshalAs(UnmanagedType.LPUTF8Str)] string path, [Out] byte[] resolved);

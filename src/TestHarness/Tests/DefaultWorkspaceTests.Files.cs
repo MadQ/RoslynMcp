@@ -4,13 +4,15 @@ static partial class DefaultWorkspaceTests
 {
 	static List<TestCase> FileTests(Fixture f)
 	{
-		var rootedCtx     = f.Rooted;
-		var bareCtx       = f.Bare;
-		var fx            = f.Fx;
-		var caseFx        = f.CaseFx;
-		var caseSensitive = f.CaseSensitive;
-		var appProject    = f.AppProject;
-		var libProject    = f.LibProject;
+		var rootedCtx        = f.Rooted;
+		var bareCtx          = f.Bare;
+		var fx               = f.Fx;
+		var caseFx           = f.CaseFx;
+		var caseDir          = f.CaseDir;
+		var caseSensitive    = f.CaseSensitive;
+		var caseDirState     = f.CaseDirState;
+		var appProject       = f.AppProject;
+		var libProject       = f.LibProject;
 		
 		// Outlines filePath and checks it named the expected file: the type it declares, or ambiguous_file
 		// with both candidates when expectType is null. projectPath null exercises the default workspace.
@@ -183,6 +185,37 @@ static partial class DefaultWorkspaceTests
 				}
 				
 				return found > 0 ? (true, "PASS") : (false, "FAIL  (neither name resolved; expected the loaded one to)");
+			}),
+			
+			// #391: where names are case-sensitive, Boundary/ROOT is a directory beside the workspace root
+			// Boundary/root, not the root itself. The boundary decided case rules per platform and counted
+			// it as inside on Windows and macOS — on a case-sensitive directory or volume, a way out.
+			new("DefaultWorkspace: a sibling whose name differs from the root only in case is outside the workspace", async () => {
+				
+				if(caseDirState != CaseSensitivity.Sensitive)
+					
+					return TestFixtures.CaseSkip(caseDirState);
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_read_file", new { filePath = caseDir.PathOf("Boundary/ROOT/Secret.txt"), projectPath = caseDir.PathOf("Boundary/root/Root.csproj") });
+				var body       = data?.ToJsonString() ?? "null";
+				
+				return Verdict(ok && data?["error"] is not null && data?["file"] is null && !body.Contains(CaseSecret),
+					$"expected a refusal, got {body}");
+			}),
+			
+			// #391: the other half — where names ignore case, another spelling of a path inside the workspace
+			// is that path. The boundary now asks the file system about a case-only difference instead of
+			// assuming it away, and must still let this one through.
+			new("DefaultWorkspace: another case of a path inside the workspace is inside where names ignore case", async () => {
+				
+				if(caseSensitive)
+					
+					return Skip.NotApplicable("names that differ only in case are two files on this file system");
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_read_file", new { filePath = fx.PathOf("LIB/Greeter.cs"), projectPath = libProject });
+				
+				return Verdict(ok && data?["error"] is null && data?["file"] is not null,
+					$"expected the file, got {data?.ToJsonString() ?? "null"}");
 			}),
 			
 			// A position-based semantic tool needs the owning project's semantic model, not just its text.

@@ -240,7 +240,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	const int pathCacheMaxSize = 500
 	;
 	
-	static readonly Dictionary<string, string> pathCache = new(StringComparer.OrdinalIgnoreCase);
+	// Keyed by the input exactly as given: a relative path has no directory the shared comparer could ask
+	// about its case, so another spelling is another key and simply misses (#392 review).
+	static readonly Dictionary<string, string> pathCache = new(StringComparer.Ordinal);
 
 	// Static — must guard the static pathCache across ALL tool instances. A per-instance lock
 	// would let different tool types write the shared Dictionary concurrently and corrupt it.
@@ -1197,7 +1199,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		var suffix = Path.DirectorySeparatorChar + NormalizePath(filePath).TrimStart(Path.DirectorySeparatorChar);
 		
 		// Matched document path → first project holding it, in solution order.
-		var matches = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		var matches = new Dictionary<string, string>(SecurityBoundary.PathComparer);
 		
 		foreach(var project in solution.Projects) {
 			
@@ -1209,7 +1211,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					matches.TryAdd(path, project.FilePath);
 		}
 		
-		string[] owners = [..matches.Values.Distinct(StringComparer.OrdinalIgnoreCase)];
+		string[] owners = [..matches.Values.Distinct(SecurityBoundary.PathComparer)];
 		
 		if(matches.Count > 1 && owners.Length > 1) {
 			
@@ -1656,24 +1658,6 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		=> SymbolFormatter.FormatModifiers(symbol);
 	
 	/// <summary>
-	///     Returns true if <paramref name="path"/> is at or below <paramref name="root"/>.
-	///     Expects both arguments to already be normalized via <see cref="Path.GetFullPath"/>.
-	///     Uses a separator-aware comparison to prevent prefix collisions
-	///     (e.g. root <c>D:\Foo</c> must not match <c>D:\FooBar\file.cs</c>).
-	/// </summary>
-	protected static bool IsPathUnderRoot(string path, string root)
-	{
-		var rootNorm = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-		
-		if(string.Equals(path, rootNorm, StringComparison.OrdinalIgnoreCase))
-			
-			return true;
-		
-		return path.StartsWith(rootNorm + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-			|| path.StartsWith(rootNorm + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
-	}
-	
-	/// <summary>
 	///     Finds the SyntaxTree <paramref name="filePath"/> names in the compilation. An absolute path, or a
 	///     relative one that resolves under <paramref name="rootPath"/>, matches that exact file first; otherwise
 	///     the path is matched as a suffix anchored at a segment boundary. Of several suffix matches, the one
@@ -1924,12 +1908,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	// Filters out diagnostics from files outside the project root — prevents external files
 	// open in the IDE (e.g. HTML, CSS from unrelated directories) from polluting results.
-	// Diagnostics with no file path (global/assembly-level) always pass through.
+	// Diagnostics with no file path (global/assembly-level) always pass through. "Under" is the
+	// boundary's own test, with the file system's case rule (#391).
 	//
-	// Known gaps (tracked in issue #114):
-	//   - Path prefix collision: "J:\Foo" incorrectly matches "J:\FooBar\file.cs".
-	//   - Non-C# files physically inside the root (e.g. wwwroot\index.html) pass through.
-	//   A future improvement can combine LocationKind filtering with a path separator guard.
+	// Known gap (tracked in issue #114): non-C# files physically inside the root (e.g.
+	// wwwroot\index.html) pass through.
 	protected static bool IsUnderRoot(Diagnostic diagnostic, string rootPath)
 	{
 		var location = diagnostic.Location;
@@ -1949,11 +1932,16 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return true;
 		
-		if(!filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+		if(SecurityBoundary.IsUnderDirectory(filePath, rootPath))
+			
+			return true;
+		
+		// Linux keeps ignoring case here, as before #391: this decides what is reported, not what may be
+		// accessed, and on a case-folding mount the root as the user spelled it can differ in case from
+		// the paths MSBuild reports. Elsewhere the boundary's own rule already covers that.
+		if(!OperatingSystem.IsLinux() || !filePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
 			
 			return false;
-		
-		// Guard against prefix collisions (e.g. "Foo" matching "FooBar\file.cs").
 		
 		return filePath.Length == rootPath.Length || filePath[rootPath.Length] is '\\' or '/';
 	}
