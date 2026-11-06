@@ -101,3 +101,11 @@ internal sealed class AmbiguousFileException : Exception
 		CsprojPaths = csprojPaths;
 	}
 }
+
+/// <summary>
+///     Thrown when a workspace load runs out of time: its MSBuild design-time build took longer than the load
+///     timeout, or it waited that long for <see cref="MSBuildGate"/> behind another load or a <c>dotnet</c>
+///     command (#379). Not a transient fault: another attempt straight away would only wait the whole timeout
+///     again, so the tools do not retry it. Still an <see cref="InvalidOperationException"/>, as a failed load is.
+/// </summary>
+internal sealed class WorkspaceLoadTimeoutException(string message) : InvalidOperationException(message);

@@ -545,6 +545,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				or ProjectNotInWorkspaceException
 				or InvalidProjectPathException
 				or AmbiguousFileException
+				or WorkspaceLoadTimeoutException
 				or ArgumentException);
 	
 
@@ -638,48 +639,44 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, Func<Project, bool> include, CancellationToken cancellationToken)
 	{
-		var resolvedSolution = TryResolveSolution(projectPath, out var solution, out var solutionError);
-		
-		// A solution that cannot be read has that for its answer: the fallback below would only say that
-		// a solution path needs a project (solution_needs_project).
-		if(!resolvedSolution && Path.GetExtension(projectPath) is var extension
-			&& (extension.Equals(".sln", StringComparison.OrdinalIgnoreCase) || extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase)))
+		// A workspace that cannot be read has that for its answer, whatever the path. The fallback below
+		// resolves the same path: for a solution it would only say that a solution path needs a project
+		// (solution_needs_project), and for a project it would run the failed load or reload again — after
+		// a load timeout (#379), another whole timeout.
+		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
 			
 			return ([], solutionError);
 		
-		if(resolvedSolution) {
+		var (path, kind) = workspace.Resolve(projectPath);
+		
+		// Another name of a project — a link to its directory (#384) — is not the path the workspace
+		// holds it under. The project it resolves to carries that path.
+		var projectFile = kind != ResolutionKind.Solution && TryGetProject(projectPath, out var resolved, out _) && resolved.FilePath is { } own
+			? own
+			: path
+		;
+		
+		Project[] named = kind == ResolutionKind.Solution && forFile
+			? []
+			: [..solution.Projects.Where(candidate => candidate.FilePath is not null
+				&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(projectFile))))];
+		
+		Project[] included = [..named.Where(include)];
+		
+		if(named.Length > 0 && included.Length == 0)
 			
-			var (path, kind) = workspace.Resolve(projectPath);
+			return ([], null);
+		
+		var compiled = new List<(Compilation, Project?)>(included.Length);
+		
+		foreach(var project in included)
+			if(await project.GetCompilationAsync(cancellationToken) is { } compilation)
+				compiled.Add((compilation, project));
+		
+		// None at all would be "0 errors" for code nobody checked.
+		if(compiled.Count > 0)
 			
-			// Another name of a project — a link to its directory (#384) — is not the path the workspace
-			// holds it under. The project it resolves to carries that path.
-			var projectFile = kind != ResolutionKind.Solution && TryGetProject(projectPath, out var resolved, out _) && resolved.FilePath is { } own
-				? own
-				: path
-			;
-			
-			Project[] named = kind == ResolutionKind.Solution && forFile
-				? []
-				: [..solution.Projects.Where(candidate => candidate.FilePath is not null
-					&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(projectFile))))];
-			
-			Project[] included = [..named.Where(include)];
-			
-			if(named.Length > 0 && included.Length == 0)
-				
-				return ([], null);
-			
-			var compiled = new List<(Compilation, Project?)>(included.Length);
-			
-			foreach(var project in included)
-				if(await project.GetCompilationAsync(cancellationToken) is { } compilation)
-					compiled.Add((compilation, project));
-			
-			// None at all would be "0 errors" for code nobody checked.
-			if(compiled.Count > 0)
-				
-				return ([..compiled], null);
-		}
+			return ([..compiled], null);
 		
 		if(!TryGetCompilation(projectPath, out var single, out var error))
 			

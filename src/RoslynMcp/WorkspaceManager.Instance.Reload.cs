@@ -19,7 +19,7 @@ internal sealed partial class WorkspaceManager
 
 			if(loadMode is LoadMode.Solution) {
 
-				var solutionWorkspace = LoadSolution(loadPath, logger, loadWarnings)
+				var solutionWorkspace = LoadSolution(loadPath, logger, loadWarnings, disposing.Token)
 				;
 
 				return (
@@ -28,7 +28,7 @@ internal sealed partial class WorkspaceManager
 				);
 			}
 
-			return LoadMSBuildWorkspace(loadPath, logger, loadWarnings);
+			return LoadMSBuildWorkspace(loadPath, logger, loadWarnings, disposing.Token);
 		}
 
 		void ReloadIfNeeded()
@@ -70,6 +70,12 @@ internal sealed partial class WorkspaceManager
 
 				ReloadAttempt();
 			}
+			catch(OperationCanceledException) when(disposing.IsCancellationRequested) {
+
+				// Queued on MSBuildGate when disposal began: the reload is abandoned, and this caller
+				// reads the workspace it already had, as any call racing a disposal does.
+				logger.LogInfo("Reload", $"Reload abandoned: the workspace is being released ({loadPath})");
+			}
 			finally {
 				reloadGate.Release();
 			}
@@ -108,6 +114,9 @@ internal sealed partial class WorkspaceManager
 					return;
 
 				ReloadAttempt();
+			}
+			catch(OperationCanceledException) when(disposing.IsCancellationRequested) {
+				logger.LogInfo("Reload", $"Deferred reload retry abandoned: the workspace is being released ({loadPath})");
 			}
 			catch(Exception ex) {
 				// Nothing above this on a timer thread — an escape would take the process down.
