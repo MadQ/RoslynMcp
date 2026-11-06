@@ -644,7 +644,9 @@ internal sealed partial class WorkspaceManager
 
 			@lock.Dispose();
 			workspace.Dispose();
-			disposing.Dispose();
+			
+			// disposing is deliberately left undisposed: it has no timer, so there is nothing to free, and a
+			// call racing this teardown that reads its Token must not meet an ObjectDisposedException.
 			
 			// One line per teardown — eviction is rare — and the line a stalled watcher.Dispose()
 			// or workspace.Dispose() would be missing from the log (#277).
