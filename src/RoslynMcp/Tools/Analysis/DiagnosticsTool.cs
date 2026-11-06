@@ -302,46 +302,6 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		);
 	}
 	
-
-	/// <summary>
-	///     The compilations <paramref name="projectPath"/> stands for, each with its project: every
-	///     project of a solution, every target framework of a .csproj — a multi-targeted project is
-	///     one Roslyn project per framework, all with the same file. Falls back to the one compilation
-	///     the path resolves to for a workspace without project files (an AdhocWorkspace), a path that
-	///     names no project of the workspace (whose resolution error is the answer), projects none of
-	///     which has a compilation, and a solution given with a file — which reaches here only when no
-	///     project contains that file, and is answered as such by the fallback.
-	/// </summary>
-	async Task<((Compilation Compilation, Project? Project)[] Targets, ToolResult? Error)> GetTargetsAsync(string projectPath, bool forFile, CancellationToken cancellationToken)
-	{
-		if(TryResolveSolution(projectPath, out var solution, out _)) {
-			
-			var (path, kind) = workspace.Resolve(projectPath);
-			
-			Project[] named = kind == ResolutionKind.Solution && forFile
-				? []
-				: [..solution.Projects.Where(candidate => candidate.FilePath is not null
-					&& (kind == ResolutionKind.Solution || SecurityBoundary.PathComparer.Equals(Path.GetFullPath(candidate.FilePath), Path.GetFullPath(path))))];
-			
-			var compiled = new List<(Compilation, Project?)>(named.Length);
-			
-			foreach(var project in named)
-				if(await project.GetCompilationAsync(cancellationToken) is { } compilation)
-					compiled.Add((compilation, project));
-			
-			// None at all would be "0 errors" for code nobody checked.
-			if(compiled.Count > 0)
-				
-				return ([..compiled], null);
-		}
-		
-		if(!TryGetCompilation(projectPath, out var single, out var error))
-			
-			return ([], error);
-		
-		return ([(single, TryGetProject(projectPath, out var only, out _) ? only : null)], null);
-	}
-	
 	/// <summary>
 	///     Runs the project's analyzer references over the compilation via
 	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.

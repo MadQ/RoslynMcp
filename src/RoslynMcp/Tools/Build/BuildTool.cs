@@ -57,7 +57,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	public async Task<object> BuildProject(
 		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Target framework to build, e.g. 'net10.0'. Omit to build the default (first) target framework.")] string? targetFramework = null,
+		[Description("Target framework to build, e.g. 'net10.0'. Omit to build every target framework. When given, the Roslyn check also covers only that framework.")] string? targetFramework = null,
 		[Description(
 			"Default false: Roslyn errors short-circuit — dotnet build only runs when C# is clean, " +
 			"validating NuGet restore, MSBuild targets, SDK props, and source generators. " +
@@ -107,34 +107,30 @@ internal sealed class BuildTool : RoslynMcpTool
 		// loaded workspace, or the workspace itself is unhealthy and its diagnostics cannot be trusted).
 		if(!forceBuild && !unhealthyWorkspace && !outsideWorkspace) {
 
-			string[] fastPathProjects = [projectPath];
+			// Every target the path stands for, as roslyn_get_diagnostics checks it (#383): every project of
+			// a solution, and every target framework of a multi-targeted project — one Roslyn project per
+			// framework, each compiled on its own, so an error under one framework's #if is not missed.
+			// dotnet build -f builds that framework only, so an error under another one must not block it;
+			// those are left out before they are compiled. A project without a framework suffix targets one
+			// framework, which -f applies to as well. With nothing left, dotnet decides.
+			var (targets, targetError) = await GetTargetsAsync(projectPath, forFile: false,
+				project => targetFramework is null || FrameworkOf(project) is not { } framework
+					|| string.Equals(framework, targetFramework, StringComparison.OrdinalIgnoreCase),
+				cancellationToken)
+			;
 			
-			if(solutionPath is not null) {
+			if(targetError is not null)
 				
-				if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
-					
-					return scope.Error(solutionError);
-				
-				// Multi-targeted projects appear once per framework with the same file path.
-				fastPathProjects = [..solution.Projects
-					.Select(p => p.FilePath)
-					.OfType<string>()
-					.Distinct(SecurityBoundary.PathComparer)];
-			}
+				return scope.Error(targetError);
 			
 			var aggregated = new List<DiagnosticItem>();
 			
-			foreach(var project in fastPathProjects) {
-				
-				if(!TryGetCompilation(project, out var compilation, out var error))
-					
-					return scope.Error(error!);
-				
+			foreach(var (compilation, _) in targets)
 				aggregated.AddRange(GetRoslynDiagnostics(compilation, rootPath));
-			}
 			
-			// A file linked into several projects is compiled — and diagnosed — once per project, with
-			// identical items (the fast path carries no per-project or TFM context to tell them apart).
+			// A file linked into several projects, and every file of a multi-targeted project, is compiled —
+			// and diagnosed — once per target, with identical items where the targets agree (the fast path
+			// carries no per-project or TFM context to tell them apart).
 			// Record equality is exact here because TargetFrameworks is always null on this path.
 			DiagnosticItem[] roslynDiagnostics = [..aggregated.Distinct()];
 			
@@ -246,6 +242,26 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		
 		return [.. args];
+	}
+	
+	/// <summary>
+	///     The target framework of one Roslyn project of a multi-targeted project, which MSBuildWorkspace
+	///     names <c>Name(tfm)</c>; <see langword="null"/> for a project without the suffix, which targets
+	///     one framework.
+	/// </summary>
+	static string? FrameworkOf(Project project)
+	{
+		var name = project.Name;
+		
+		if(!name.EndsWith(')'))
+			
+			return null;
+		
+		var open = name.LastIndexOf('(');
+		
+		// Every TFM starts with "net" (net48, netstandard2.0, net10.0-windows); a project whose own name
+		// merely ends in parentheses is not one framework of several.
+		return open > 0 && name.AsSpan(open + 1).StartsWith("net", StringComparison.OrdinalIgnoreCase) ? name[(open + 1)..^1] : null;
 	}
 	
 	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope, CancellationToken cancellationToken)

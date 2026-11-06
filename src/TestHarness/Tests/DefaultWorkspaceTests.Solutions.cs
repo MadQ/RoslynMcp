@@ -9,7 +9,8 @@ static partial class DefaultWorkspaceTests
 		var rootedCtx = f.Rooted;
 		var fx        = f.Fx;
 		var single    = f.Single;
-		var adhocSln  = f.AdhocSln;
+		var adhocSln    = f.AdhocSln;
+		var splitLinked = f.SplitLinked;
 		
 		return new List<TestCase> {
 			
@@ -123,6 +124,66 @@ static partial class DefaultWorkspaceTests
 				
 				return Verdict(ok && Has("outsideTheSolutionDirectory") && Has("onlyOnWindows") && Has("onlyElsewhere"),
 					$"expected the warnings of Apart and of both Multi frameworks; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #383: the build's Roslyn check covers every target framework, as get_diagnostics does. It used
+			// to check one framework per project file, find that one's error only — or, with the error only
+			// under the other framework, nothing — and go on to dotnet build. Both errors stop it here.
+			new("DefaultWorkspace: build_project's Roslyn check covers every target framework", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = single.PathOf("Tfm/Tfm.slnx") });
+				var messages   = data?["errors"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				
+				bool Has(string name) => messages.Any(message => message.Contains(name));
+				
+				return Verdict(ok && data?["source"]?.GetValue<string>() == "roslyn" && Has("missingOnWindows") && Has("missingElsewhere"),
+					$"expected Roslyn errors under both frameworks; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// #383: dotnet build -f builds one framework, so the Roslyn check covers that one only — an
+			// error that exists only under the other framework must not block the build. Asked once per
+			// framework, so the test does not pass by the luck of which framework a lookup lands on.
+			new("DefaultWorkspace: build_project with a target framework checks only that framework", async () => {
+				
+				async Task<(bool Ok, string Got)> Only(string framework, string expected, string excluded)
+				{
+					var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = single.PathOf("Tfm/Split/Split.csproj"), targetFramework = framework });
+					var messages   = data?["errors"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+					
+					return (ok && data?["source"]?.GetValue<string>() == "roslyn"
+						&& messages.Any(message => message.Contains(expected)) && !messages.Any(message => message.Contains(excluded)),
+						data?.ToJsonString() ?? "null");
+				}
+				
+				var windows   = await Only("net10.0-windows", "missingOnWindows", "missingElsewhere");
+				var elsewhere = await Only("net10.0",         "missingElsewhere", "missingOnWindows");
+				
+				return Verdict(windows.Ok && elsewhere.Ok,
+					$"expected each framework's own error only; got {windows.Got} / {elsewhere.Got}");
+			}),
+			
+			// #393 review: through a link to the project's directory, the path given is not the one the
+			// workspace holds the project under. Both tools used to match no project by it and fall back
+			// to the one compilation the path resolves to — one framework, one error.
+			new("DefaultWorkspace: build_project and get_diagnostics through a directory link check every target framework", async () => {
+				
+				if(!splitLinked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var project      = single.PathOf("Tfm/SplitLink/Split.csproj");
+				var (ok, built)  = await Call(rootedCtx, "roslyn_build_project", new { projectPath = project });
+				var (dOk, diags) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = project, severity = "errors" });
+				
+				static bool Both(JsonNode? items)
+				{
+					var messages = items?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+					
+					return messages.Any(message => message.Contains("missingOnWindows")) && messages.Any(message => message.Contains("missingElsewhere"));
+				}
+				
+				return Verdict(ok && dOk && built?["source"]?.GetValue<string>() == "roslyn" && Both(built?["errors"]) && Both(diags?["items"]),
+					$"expected both frameworks' errors from each tool; got {built?.ToJsonString() ?? "null"} / {diags?.ToJsonString() ?? "null"}");
 			}),
 			
 			// Review of #378: in an adhoc workspace the solution's projects have no files; the one
