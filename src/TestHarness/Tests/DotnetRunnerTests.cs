@@ -224,8 +224,13 @@ static class DotnetRunnerTests
 				loadResponse = response;
 		}
 		
+		// Loaded means a result with content: a JSON-RPC error has no result at all, and an empty text must
+		// not pass for an answer either.
 		var loadText = loadResponse["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? "";
-		var loaded   = loadResponse["result"]?["isError"]?.GetValue<bool>() != true && !loadText.Contains("\"error\"", StringComparison.Ordinal);
+		var loaded   = loadResponse["error"] is null
+			&& loadResponse["result"]?["isError"]?.GetValue<bool>() != true
+			&& loadText.Length > 0
+			&& !loadText.Contains("\"error\"", StringComparison.Ordinal);
 		
 		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out var failure))
 			

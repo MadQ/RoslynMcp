@@ -67,6 +67,10 @@ internal static class MSBuildGate
 	{
 		behind = "";
 		
+		// Before the free-gate path too: a caller already abandoned — a reload whose instance is being
+		// disposed, between two attempts — must not start another load just because the gate is free.
+		cancellationToken.ThrowIfCancellationRequested();
+		
 		if(TryEnter(what))
 			
 			return true;
