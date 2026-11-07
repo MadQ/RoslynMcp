@@ -221,23 +221,29 @@ static class TestFixtures
 	///     pinned 10.0.302: every fixture group failed while the code was fine). The SDK resolver looks for
 	///     <c>global.json</c> in the project's directory and each one above it, so one file covers every fixture.
 	///     Written only when it differs, before any server starts: a fixture workspace counts a change to it as a
-	///     reload input.
+	///     reload input. Best-effort like <see cref="SweepStale"/>: another harness run may be writing the same
+	///     file, and a pin that could not be written leaves the fixtures on the newest SDK, as before it existed —
+	///     never a run that does not start.
 	/// </summary>
 	public static void PinSdk(string repoRoot)
 	{
 		var source = Path.Combine(repoRoot, "global.json");
 		var target = Path.Combine(TempRoot, "global.json");
 		
-		if(!File.Exists(source))
+		try {
 			
-			return;
-		
-		var pinned = File.ReadAllText(source);
-		
-		Directory.CreateDirectory(TempRoot);
-		
-		if(!File.Exists(target) || File.ReadAllText(target) != pinned)
-			File.WriteAllText(target, pinned);
+			if(!File.Exists(source))
+				
+				return;
+			
+			var pinned = File.ReadAllText(source);
+			
+			Directory.CreateDirectory(TempRoot);
+			
+			if(!File.Exists(target) || File.ReadAllText(target) != pinned)
+				File.WriteAllText(target, pinned);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 	}
 	
 	/// <summary>
