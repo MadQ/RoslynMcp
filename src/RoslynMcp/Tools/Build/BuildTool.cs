@@ -93,6 +93,14 @@ internal sealed class BuildTool : RoslynMcpTool
 		// forceBuild. Skip straight to the real build instead (issue #235).
 		var health = TryGetHealth(projectPath)
 		;
+		
+		// A project target is only as unhealthy as what it is built from (WorkspaceHealth.Covering); a
+		// solution target builds everything, so all of it counts. Narrowed against the workspace as it
+		// stands: asking for the project would run a pending reload, seconds of MSBuild that a build has
+		// no use for.
+		if(health is not null && solutionPath is null && csprojPath is not null)
+			health = health.Covering(workspace.PeekSolution(projectPath), [csprojPath]);
+		
 		var unhealthyWorkspace = health is { IsHealthy: false };
 		
 		// A .csproj the loaded workspace does not hold — one its solution does not list — has no

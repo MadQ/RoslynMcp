@@ -142,22 +142,51 @@ internal sealed partial class WorkspaceManager
 		static string[] ProjectsWithoutReferences(Workspace ws) => ProjectsWithoutReferences(ws.CurrentSolution);
 		
 		/// <summary>
-		///     Projects of <paramref name="solution"/> whose own project file one of the load's
-		///     <c>WorkspaceFailed</c> failures names (#300). Such a project can keep its references while its
-		///     compilation options fall back to defaults — a design-time build that could not write a file
-		///     under obj\ loaded <c>Nullable</c> off in a project that enables it. Roslyn reports these failures
-		///     as text only, with no project id and in the user's language, so the project file's full path in
-		///     the message is what identifies the project. The comparison ignores case: a message is not a path
-		///     comparison, and wrongly matching would take two projects whose paths differ only in case.
+		///     Projects of <paramref name="solution"/> that one of the load's <c>WorkspaceFailed</c> failures is
+		///     about (#300). Such a project can keep its references while its compilation options fall back to
+		///     defaults — a design-time build that could not write a file under obj\ loaded <c>Nullable</c> off
+		///     in a project that enables it. Roslyn reports these failures as text only, with no project id and
+		///     in the user's language, so a project file's full path in the message is what identifies the
+		///     project. A message can quote other projects too — a reference that cannot be resolved, an
+		///     import — so only the project whose path comes first is blamed: the one MSBuild was processing
+		///     (<c>Msbuild failed when processing the file '…' with message: …</c>). Every project of that file
+		///     is, one per target framework.
 		/// </summary>
-		static string[] ProjectsWithLoadFailures(Solution solution, string[] failures) =>
-			failures.Length == 0
-				? []
-				: [..solution.Projects
-					.Where(p => p.FilePath is { } path && failures.Any(f => f.Contains(path, StringComparison.OrdinalIgnoreCase)))
-					.Select(p => p.Name)
-					.Distinct()]
-		;
+		static string[] ProjectsWithLoadFailures(Solution solution, string[] failures)
+		{
+			if(failures.Length == 0)
+				
+				return [];
+			
+			var comparison = SecurityBoundary.PathInTextComparison;
+			var blamed     = new HashSet<string>(StringComparer.Ordinal);
+			
+			foreach(var failure in failures) {
+				
+				Project[] subject = [];
+				var       at      = int.MaxValue;
+				
+				foreach(var project in solution.Projects) {
+					
+					if(project.FilePath is not { } path)
+						continue;
+					
+					var index = failure.IndexOf(path, comparison);
+					
+					if(index < 0 || index > at)
+						continue;
+					
+					// The same file at the same place: another target framework of the project found first.
+					subject = index == at ? [..subject, project] : [project];
+					at      = index;
+				}
+				
+				foreach(var project in subject)
+					blamed.Add(project.Name);
+			}
+			
+			return [..blamed];
+		}
 		
 		/// <summary>
 		///     <see cref="ProjectsWithLoadFailures"/> for the load that just produced <paramref name="ws"/>.

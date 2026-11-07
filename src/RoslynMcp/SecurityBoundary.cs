@@ -26,6 +26,17 @@ internal sealed partial class SecurityBoundary
 		: new FileSystemPathComparer()
 	;
 	
+	/// <summary>
+	///     How to find a path inside free text — a message, a log line — where <see cref="PathComparer"/> cannot
+	///     be used: a search within a string has no two paths to put to the file system. Ordinal on Linux, as
+	///     <see cref="PathComparer"/> is; elsewhere case-insensitive, the default of both file systems. Never a
+	///     comparison of two paths: for those, <see cref="PathComparer"/>.
+	/// </summary>
+	internal static StringComparison PathInTextComparison => OperatingSystem.IsLinux()
+		? StringComparison.Ordinal
+		: StringComparison.OrdinalIgnoreCase
+	;
+	
 	// Computed once at startup — SpecialFolder lookups involve platform invocation and filesystem access.
 	static readonly string[] systemDirectories = BuildSystemDirectories()
 	;

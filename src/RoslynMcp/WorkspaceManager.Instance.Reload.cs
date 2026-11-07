@@ -213,21 +213,17 @@ internal sealed partial class WorkspaceManager
 			// the project's own (an edit that broke it, a new project that never loads), which no
 			// retry will clear. Discarding would then keep a workspace that ignores the edit, and
 			// reload the whole solution every half minute for as long as it lasts; promoting shows
-			// the edit, and the workspace says it is unhealthy.
-			var stillUnhealthy = UnhealthyProjects(newWorkspace, newLoadFailed);
-			var newIsWorse     = stillUnhealthy.Length > 0 && liveUnhealthy.Length == 0;
+			// the edit, and the workspace says it is unhealthy — and keeps retrying a while longer
+			// (see the healing retries below), since contention can outlast the discards too.
+			var stillUnhealthy  = UnhealthyProjects(newWorkspace, newLoadFailed);
+			var newIsWorse      = stillUnhealthy.Length > 0 && liveUnhealthy.Length == 0;
+			var promotedPastCap = newIsWorse && consecutiveDiscards >= MaxConsecutiveDiscards;
+			var discardedBefore = consecutiveDiscards;
 
-			if(newIsWorse && consecutiveDiscards >= MaxConsecutiveDiscards) {
+			if(promotedPastCap)
+				logger.LogInfo("Reload", $"Promoting an unhealthy reload ({UnhealthyReason(newWorkspace, newLoadFailed)}) after {discardedBefore} discarded in a row");
 
-				RecordUnhealthyLoad(
-					$"Reload promoted although it had {UnhealthyReason(newWorkspace, newLoadFailed)}: {consecutiveDiscards} reloads in a row "
-					+ "were discarded for it, so it is taken to be the project's own state rather than contention. "
-					+ "Call roslyn_respawn once the cause is fixed if the workspace does not recover by itself."
-				);
-
-				logger.LogInfo("Reload", $"Promoting an unhealthy reload ({UnhealthyReason(newWorkspace, newLoadFailed)}) after {consecutiveDiscards} discarded in a row");
-			}
-			else if(newIsWorse) {
+			if(newIsWorse && !promotedPastCap) {
 
 				// Seed = what this attempt actually cost, so the retry rate self-scales to the
 				// workspace instead of relying on a constant that fits neither big nor small.
@@ -258,6 +254,16 @@ internal sealed partial class WorkspaceManager
 			}
 
 			WarnIfUnhealthy(newWorkspace, newLoadFailed);
+
+			// After WarnIfUnhealthy, so last_unhealthy_load says why an unhealthy workspace replaced a healthy one.
+			if(promotedPastCap)
+				RecordUnhealthyLoad(
+					$"Reload promoted although it had {UnhealthyReason(newWorkspace, newLoadFailed)}: {discardedBefore} reloads in a row "
+					+ "were discarded for it, so it is taken to be the project's own state rather than contention. "
+					+ $"Retrying every {MaxDeferMs / 1000} s up to {MaxHealingRetries} more times; call roslyn_respawn once the cause is "
+					+ "fixed if the workspace does not recover by then."
+				);
+
 			consecutiveDiscards = 0;
 
 			var newProjectMap = BuildProjectMapFor(newWorkspace);
@@ -314,6 +320,28 @@ internal sealed partial class WorkspaceManager
 
 			MarkSynced();
 			logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({projectCount} projects)");
+
+			// Healing retries. A workspace promoted past the cap is unhealthy, and nothing else would reload
+			// it until the next edit: contention that outlasted the discards — a long build outside the
+			// server — would leave it broken although it is over. So it is retried at the longest deferral,
+			// a bounded number of times: a failure that is the project's own costs that many loads, then
+			// stops. A healthy promotion, whatever triggered it, ends the run.
+			if(stillUnhealthy.Length == 0)
+				healingRetriesLeft = 0;
+			else if(promotedPastCap)
+				healingRetriesLeft = MaxHealingRetries;
+
+			if(stillUnhealthy.Length > 0 && healingRetriesLeft > 0) {
+
+				healingRetriesLeft--;
+
+				// Pending, as it is: the deferred retry only runs while a reload is.
+				Interlocked.Increment(ref reloadVersion);
+
+				logger.LogInfo("Reload", $"Still unhealthy ({UnhealthyReason(workspace, projectsWithLoadFailures)}); healing retry in {MaxDeferMs} ms, {healingRetriesLeft} left after it");
+
+				ScheduleDeferredRetry(MaxDeferMs);
+			}
 
 			// A reload can add or remove projects; the watch set ignores this when the directories
 			// it planned for are unchanged. When it does replace watchers there is a moment with

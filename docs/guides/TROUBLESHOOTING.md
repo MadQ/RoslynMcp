@@ -184,7 +184,9 @@ roslyn_check_drift  →  "workspace_healthy": false,
 healthy workspace rather than replace it with this one, and `roslyn_build_project` runs a real
 build. When the failure is not contention but the project itself — an edit that broke an
 `<Import>`, say — reloads stop being discarded after four in a row, and the workspace reports
-itself unhealthy until the project is fixed.
+itself unhealthy until the project is fixed (it retries every 30 s for about three more minutes,
+in case the cause was contention after all). Only the projects built from the failing one are
+affected: the diagnostics of an unrelated project in the same solution are not called phantom.
 
 ### "MSBuild not found"
 

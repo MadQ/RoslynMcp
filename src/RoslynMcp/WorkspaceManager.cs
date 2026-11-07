@@ -56,6 +56,39 @@ internal sealed record WorkspaceHealth(
 	public bool IsHealthy => ProjectsWithoutReferences.Length == 0 && ProjectsWithLoadFailures.Length == 0;
 	
 	/// <summary>
+	///     This snapshot narrowed to what the projects of <paramref name="projectFiles"/> are compiled from: every
+	///     project of those files (one per target framework), and every project they depend on, directly or
+	///     not. A project's compilation is only as sound as the references it is built against, so a broken
+	///     dependency counts; a broken project beside it does not. Without this, one project that always fails
+	///     its design-time build made every project of the solution report phantom diagnostics, and every build
+	///     skip the Roslyn check (#300 review). Pass a solution that is already at hand — a peeked one, for a
+	///     caller that does not need a compilation: getting one runs a pending reload.
+	/// </summary>
+	public WorkspaceHealth Covering(Solution solution, IEnumerable<string> projectFiles)
+	{
+		var graph = solution.GetProjectDependencyGraph();
+		var files = new HashSet<string>(projectFiles, SecurityBoundary.PathComparer);
+		var names = new HashSet<string>(StringComparer.Ordinal);
+		
+		foreach(var project in solution.Projects) {
+			
+			if(project.FilePath is null || !files.Contains(project.FilePath))
+				continue;
+			
+			names.Add(project.Name);
+			
+			foreach(var dependency in graph.GetProjectsThatThisProjectTransitivelyDependsOn(project.Id))
+				if(solution.GetProject(dependency) is { } referenced)
+					names.Add(referenced.Name);
+		}
+		
+		return this with {
+			ProjectsWithoutReferences = [..ProjectsWithoutReferences.Where(names.Contains)],
+			ProjectsWithLoadFailures  = [..ProjectsWithLoadFailures.Where(names.Contains)],
+		};
+	}
+	
+	/// <summary>
 	///     What is wrong, as a clause for a hint: "loaded without metadata references on: A", "loaded with
 	///     an MSBuild failure on the project file of: B", or both joined. Empty when healthy.
 	/// </summary>

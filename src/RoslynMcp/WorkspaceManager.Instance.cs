@@ -126,6 +126,12 @@ internal sealed partial class WorkspaceManager
 		// many is the project's own, and discarding would hide the edit that caused it.
 		private const int MaxConsecutiveDiscards = 4;
 
+		// Retries, at MaxDeferMs apart, of a workspace that a promotion past MaxConsecutiveDiscards left
+		// unhealthy (see ReloadAttempt): about three minutes more for contention to end. Read and written
+		// only by ReloadAttempt, under reloadGate.
+		private const int MaxHealingRetries = 6;
+		private int       healingRetriesLeft;
+
 		// How long Dispose waits for an in-flight reload before giving up and leaking the
 		// instance. Bounded so shutdown and LRU eviction cannot wedge behind a pathological load.
 		private static readonly TimeSpan ReloadQuiesceTimeout = TimeSpan.FromSeconds(30);

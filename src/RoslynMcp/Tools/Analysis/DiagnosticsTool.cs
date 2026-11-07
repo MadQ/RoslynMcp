@@ -211,6 +211,11 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		// below the thresholds below, and would otherwise be reported as ordinary broken code.
 		var health = TryGetHealth(projectPath)
 		;
+		
+		// Only what these compilations are built from: a broken project elsewhere in the solution does not
+		// make this one's diagnostics phantom.
+		if(health is not null && targets.FirstOrDefault(target => target.Project is not null).Project is { } first)
+			health = health.Covering(first.Solution, targets.Select(target => target.Project?.FilePath).OfType<string>());
 
 		if(health is { IsHealthy: false }) {
 

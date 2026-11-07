@@ -214,12 +214,6 @@ static class TestFixtures
 	;
 	
 	/// <summary>
-	///     Removes what a killed run leaves behind: fixture trees under <see cref="TempRoot"/> (and the
-	///     legacy <c>%TEMP%\RoslynMcp_CodeFix_*</c> directories) older than <paramref name="olderThan"/>,
-	///     plus scratch files older harness binaries wrote into <c>src/RoslynMcp</c>. Every delete is
-	///     best-effort — another harness may be mid-run in a sibling tree.
-	/// </summary>
-	/// <summary>
 	///     Copies the repo's <c>global.json</c> to <see cref="TempRoot"/>, so every fixture project resolves the
 	///     SDK the repo pins. Fixtures live outside the repo, so without it each one resolves the newest SDK on
 	///     the machine — and a newer one than the server's MSBuild can load gives every unrestored fixture a
@@ -246,7 +240,12 @@ static class TestFixtures
 			File.WriteAllText(target, pinned);
 	}
 	
-
+	/// <summary>
+	///     Removes what a killed run leaves behind: fixture trees under <see cref="TempRoot"/> (and the
+	///     legacy <c>%TEMP%\RoslynMcp_CodeFix_*</c> directories) older than <paramref name="olderThan"/>,
+	///     plus scratch files older harness binaries wrote into <c>src/RoslynMcp</c>. Every delete is
+	///     best-effort — another harness may be mid-run in a sibling tree.
+	/// </summary>
 	public static void SweepStale(string repoRoot, TimeSpan olderThan)
 	{
 		var cutoff = DateTime.UtcNow - olderThan;

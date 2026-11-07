@@ -43,6 +43,22 @@ static class LoadHealthTests
 		a.Write("Probe.cs", Source);
 		b.Write("Probe.cs", Source);
 		
+		// Fixture S: a solution of two projects that do not reference each other, Bad blocked from its first
+		// load and Good fine. Health is a property of the workspace, but a broken project only makes the
+		// diagnostics of the projects built from it phantom — not Good's.
+		var s = TestFixtures.NewAdhocDir("LoadHealthSln");
+		
+		s.Write("LoadHealthSln.slnx", "<Solution>\n  <Project Path=\"Good/Good.csproj\" />\n  <Project Path=\"Bad/Bad.csproj\" />\n</Solution>\n");
+		s.Write("Good/Good.csproj", $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{ProjectXml}</Project>\n");
+		s.Write("Bad/Bad.csproj",   $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{ProjectXml}</Project>\n");
+		s.Write("Good/Probe.cs", Source);
+		s.Write("Bad/Probe.cs",  Source);
+		
+		var good = s.PathOf("Good/Good.csproj");
+		var bad  = s.PathOf("Bad/Bad.csproj");
+		
+		BlockedFile? blockedS = new(s.PathOf("Bad/obj/Debug/net10.0/Bad.AssemblyInfoInputs.cache"));
+		
 		const string nameA = "LoadHealthAFixture";
 		const string nameB = "LoadHealthBFixture";
 		
@@ -60,6 +76,7 @@ static class LoadHealthTests
 		
 		await a.WarmAsync(ctx);
 		await b.WarmAsync(ctx);
+		await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = good });
 		
 		Task<JsonNode?> Drift(FixtureProject fx) => ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = fx.Csproj });
 		
@@ -224,6 +241,34 @@ static class LoadHealthTests
 					: (true, "PASS  (healthy, Nullable back on, no CS8632)");
 			}),
 			
+			// Health narrowed to what a compilation is built from. Before, one project that failed its
+			// design-time build made every project of the solution report phantom diagnostics — and such
+			// a failure is often for good. Bad is the control: its own diagnostics are phantom.
+			new("load health: a failing project does not make a project beside it phantom", async () =>
+			{
+				var badHint  = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = bad }))?["hint"]?.GetValue<string>() ?? "";
+				var goodHint = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = good }))?["hint"]?.GetValue<string>() ?? "";
+				
+				if(!badHint.Contains("phantom"))
+					
+					return Skip.SetupUnavailable($"{NotFailed} (Bad's diagnostics carry no phantom hint: '{badHint}')");
+				
+				return goodHint.Contains("phantom")
+					? (false, $"FAIL  (Good does not depend on Bad, yet its diagnostics are called phantom: '{goodHint}')")
+					: (true, "PASS  (Bad's diagnostics phantom, Good's not)");
+			}),
+			
+			// The same narrowing for the build: Good keeps the Roslyn fast path. Whether the dotnet build
+			// that follows succeeds (the fixture is not restored) is not what is tested.
+			new("load health: build_project keeps the fast path for a project beside a failing one", async () =>
+			{
+				var hint = (await ctx.CallToolJsonAsync("roslyn_build_project", new { projectPath = good }))?["hint"]?.GetValue<string>() ?? "";
+				
+				return hint.Contains("fast-path was skipped")
+					? (false, $"FAIL  (the fast path was skipped for Good over Bad's failure: '{hint}')")
+					: (true, "PASS  (no fast-path skip for Good)");
+			}),
+			
 			// The reload path. The live workspace is healthy, so a reload that fails on the project file
 			// is worse than what it would replace: it is discarded and a retry scheduled. The caller is
 			// served the previous workspace — options intact, so no CS8632 — and told a reload is pending.
@@ -297,12 +342,13 @@ static class LoadHealthTests
 							
 							return (false, $"FAIL  (promoted, but projects_with_load_failures does not name {nameB}: {drift.ToJsonString()})");
 						
-						var info     = await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = b.Csproj });
-						var warnings = Names(info?["load_warnings"]);
+						// The record that explains an unhealthy workspace replacing a healthy one must be the one
+						// check_drift shows, not one a later warning of the same promotion overwrote.
+						var last = drift["last_unhealthy_load"]?.GetValue<string>() ?? "";
 						
-						return warnings.Any(w => w.Contains("Reload promoted although it had") && w.Contains("4 reloads in a row"))
-							? (true, "PASS  (promoted after four discards; workspace_healthy: false)")
-							: (false, $"FAIL  (load_warnings do not record the promotion after four discards: {string.Join(" | ", warnings)})");
+						return last.Contains("Reload promoted although it had") && last.Contains("4 reloads in a row")
+							? (true, "PASS  (promoted after four discards; workspace_healthy: false; last_unhealthy_load says why)")
+							: (false, $"FAIL  (last_unhealthy_load does not record the promotion after four discards: '{last}')");
 					}
 					
 					await Task.Delay(1000);
@@ -311,17 +357,15 @@ static class LoadHealthTests
 				return (false, "FAIL  (still discarding after 3 minutes: the cap did not promote the reload)");
 			}) { Slow = true },
 			
-			// Recovery for fixture B, whichever state the tests above left: a retry still scheduled (the
-			// slow test skipped), or an unhealthy workspace promoted (it ran). Either way a fresh version
-			// and a free file must end in a healthy workspace with nothing pending.
-			new("load health: the reload path recovers once the file is free", async () =>
+			// Recovery for fixture B, whichever state the tests above left — and with no edit to prompt it,
+			// as when a long build outside the server ends: a discarded reload's retry still scheduled (the
+			// slow test skipped), or an unhealthy workspace promoted past the cap (it ran), whose healing
+			// retries must pick the free file up. Before them, the promoted workspace stayed broken until
+			// the next edit (#300 review).
+			new("load health: the reload path recovers by itself once the file is free", async () =>
 			{
 				blockedB?.Dispose();
 				blockedB = null;
-				
-				if(await BumpVersionAsync(b) is { } error)
-					
-					return (false, $"FAIL  ({error})");
 				
 				if(await SettleHealthyAsync(b, TimeSpan.FromSeconds(90)) is not { } drift)
 					
@@ -337,12 +381,14 @@ static class LoadHealthTests
 		{
 			blockedA?.Dispose();
 			blockedB?.Dispose();
+			blockedS?.Dispose();
 			
 			// A retry scheduled for B must not run against a deleted tree: let it settle first.
 			await SettleHealthyAsync(b, TimeSpan.FromSeconds(30));
 			
 			a.Dispose();
 			b.Dispose();
+			s.Dispose();
 		});
 	}
 	
