@@ -13,8 +13,12 @@ record GroupInputs(TestContext Ctx, string LogDir, string LogGlob, bool FullRun)
 /// </summary>
 record GroupEntry(string Name, Func<GroupInputs, Task<TestGroup>> Build, bool FullRunOnly);
 
-/// <summary>What a run executes: the groups to build, an optional test-name filter, and the note a filtered run reports.</summary>
-record HarnessSelection(GroupEntry[] Groups, string? TestFilter, string? FilterNote);
+/// <summary>
+///     What a run executes: the groups to build, an optional test-name filter, the note a filtered run reports, and
+///     whether <see cref="TestCase.Slow"/> tests run. Leaving slow tests out does not make a run filtered: they are
+///     counted as skips and named on the summary line instead.
+/// </summary>
+record HarnessSelection(GroupEntry[] Groups, string? TestFilter, string? FilterNote, bool RunSlow);
 
 /// <summary>The test groups in run order, and the command-line selection over them (#367).</summary>
 static class HarnessGroups
@@ -61,7 +65,7 @@ static class HarnessGroups
 		new("Workspace Hygiene", g => Task.FromResult(WorkspaceHygieneTests.Build(g.Ctx, g.LogDir, g.LogGlob, g.FullRun)), FullRunOnly: true),
 	];
 	
-	static readonly string[] KnownSwitches = ["--quiet", "--list", "--only", "--test", "--only-build-diag"];
+	static readonly string[] KnownSwitches = ["--quiet", "--list", "--only", "--test", "--slow", "--only-build-diag"];
 	
 	static GroupEntry Group(string name, Func<GroupInputs, TestGroup> build)
 		=> new(name, g => Task.FromResult(build(g)), FullRunOnly: false);
@@ -73,16 +77,20 @@ static class HarnessGroups
 	///     Reads <c>--only</c>, <c>--only-build-diag</c> and <c>--test</c>. Without <c>--only</c> every group
 	///     is selected except the full-run-only ones when <c>--test</c> narrows the run. Each comma-separated
 	///     <c>--only</c> term selects every group whose name contains it (case-insensitive); a term that
-	///     selects nothing is an error, so a typo cannot pass with zero tests run.
+	///     selects nothing is an error, so a typo cannot pass with zero tests run. Slow tests run with
+	///     <c>--slow</c>, on a CI runner, or when <c>--test</c> is given — every test it keeps matches its text, so
+	///     a slow one it keeps was asked for by name.
 	/// </summary>
 	internal static bool TrySelect(string[] args, out HarnessSelection selection, out string? error)
 	{
-		selection = new([], null, null);
+		selection = new([], null, null, false);
 		error     = null;
 		
 		if(!TryValue(args, "--only", out var only, out error) || !TryValue(args, "--test", out var test, out error))
 			
 			return false;
+		
+		var runSlow = args.Contains("--slow") || Skip.OnCiRunner || test is not null;
 		
 		// An unknown switch is an error, not ignored: '--only "a,b"' passed as one argument (as
 		// Test-HarnessWsl.ps1 forwards a single string) would otherwise run the whole suite unnoticed.
@@ -110,7 +118,7 @@ static class HarnessGroups
 			
 			GroupEntry[] groups = [.. All.Where(g => test is null || !g.FullRunOnly)];
 			
-			selection = new(groups, test, test is null ? null : $"filtered: tests matching '{test}'");
+			selection = new(groups, test, test is null ? null : $"filtered: tests matching '{test}'", runSlow);
 			
 			return true;
 		}
@@ -138,7 +146,7 @@ static class HarnessGroups
 		// whole-run audits must not skip a run that did everything.
 		if(selected.Length == All.Length && test is null) {
 			
-			selection = new(selected, null, null);
+			selection = new(selected, null, null, runSlow);
 			
 			return true;
 		}
@@ -148,7 +156,7 @@ static class HarnessGroups
 		if(test is not null)
 			note += $"; tests matching '{test}'";
 		
-		selection = new(selected, test, note);
+		selection = new(selected, test, note, runSlow);
 		
 		return true;
 	}
