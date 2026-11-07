@@ -1501,8 +1501,10 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			if(segment.Length == 0 || segment == ".")
 				continue;
 			
-			// From the first wildcard on, a segment's position in the tree is unknown.
-			if(segment == ".." || segment.AsSpan().IndexOfAny("*?{}[]") >= 0) {
+			// From the first wildcard on, a segment's position in the tree is unknown. A brace is not one:
+			// a glob's {a,b} groups are expanded before this is asked (GlobBraces, #294), so a brace
+			// still here is a literal character of a directory name, as in a path.
+			if(segment == ".." || segment.AsSpan().IndexOfAny("*?[]") >= 0) {
 				
 				leading = false;
 				

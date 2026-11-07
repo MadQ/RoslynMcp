@@ -124,12 +124,27 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		return false;
 	}
 	
-	// The close matches of every expansion, first found first, at most five in all.
+	// The close matches of every expansion, at most five.
 	static string[]? BuildCloseMatches(string[] allRelativeFiles, string[] patterns)
 	{
-		string[] candidates = [.. patterns.SelectMany(pattern => FindBroadenedMatches(allRelativeFiles, pattern)).Distinct(StringComparer.Ordinal).Take(5)];
+		var candidates = FindBroadenedMatches(allRelativeFiles, patterns);
 		
 		return candidates.Length > 0 ? candidates : null;
+	}
+	
+	// The first files, up to 'limit', that any of 'includes' matches: one matcher, one scan.
+	static string[] MatchAny(string[] allRelativeFiles, IEnumerable<string> includes, int limit)
+	{
+		var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+		
+		foreach(var include in includes)
+			matcher.AddInclude(include);
+		
+		return allRelativeFiles
+			.Where(f => matcher.Match(f.Replace('\\', '/')).HasMatches)
+			.Take(limit)
+			.ToArray()
+		;
 	}
 	
 	/// <summary>
@@ -137,28 +152,34 @@ internal sealed class ListFilesTool : RoslynMcpTool
 	///     Strategy 1: strip directory constraints (try <c>**/{filename}</c>).
 	///     Strategy 2: loosen to extension only (shows what kinds of files exist nearby).
 	/// </summary>
-	static string[] FindBroadenedMatches(string[] allRelativeFiles, string pattern)
+	static string[] FindBroadenedMatches(string[] allRelativeFiles, string[] patterns)
 	{
-		var filename = Path.GetFileName(pattern);
-		if(string.IsNullOrEmpty(filename))
-			
-			return [];
+		var broad      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		
-		// Strategy 1: ignore directory prefix — find the filename pattern anywhere in the tree.
-		// Skip if pattern already has no directory component or is already a ** recursive pattern.
-		var broadPattern = $"**/{filename}"
-		;
+		foreach(var pattern in patterns) {
+			
+			var filename = Path.GetFileName(pattern);
+			
+			if(string.IsNullOrEmpty(filename))
+				continue;
+			
+			// Strategy 1 applies only to a pattern with a directory part that is not already the
+			// broad form: '**/{filename}' finds the filename pattern anywhere in the tree.
+			var broadPattern = $"**/{filename}";
+			
+			if(pattern.Contains('/') && broadPattern != pattern)
+				broad.Add(broadPattern);
+			
+			var ext = Path.GetExtension(filename);
+			
+			if(!string.IsNullOrEmpty(ext) && ext != filename)
+				extensions.Add(ext);
+		}
 		
-		if(pattern.Contains('/') && broadPattern != pattern) {
+		if(broad.Count > 0) {
 			
-			var broadMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-			broadMatcher.AddInclude(broadPattern);
-			
-			var found = allRelativeFiles
-				.Where(f => broadMatcher.Match(f.Replace('\\', '/')).HasMatches)
-				.Take(5)
-				.ToArray()
-			;
+			var found = MatchAny(allRelativeFiles, broad, 5);
 			
 			if(found.Length > 0)
 				
@@ -166,21 +187,6 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		}
 		
 		// Strategy 2: fall back to just the extension — tells the agent what kinds of files exist.
-		var ext = Path.GetExtension(filename)
-		;
-		
-		if(!string.IsNullOrEmpty(ext) && ext != filename) {
-			
-			var extMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-			extMatcher.AddInclude($"**/*{ext}");
-			
-			return allRelativeFiles
-				.Where(f => extMatcher.Match(f.Replace('\\', '/')).HasMatches)
-				.Take(3)
-				.ToArray()
-			;
-		}
-		
-		return [];
+		return extensions.Count > 0 ? MatchAny(allRelativeFiles, extensions.Select(ext => $"**/*{ext}"), 3) : [];
 	}
 }

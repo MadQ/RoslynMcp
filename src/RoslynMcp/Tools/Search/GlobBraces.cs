@@ -35,8 +35,8 @@ internal static class GlobBraces
 	
 	/// <summary>
 	///     Expands every brace group of <paramref name="pattern"/>. A pattern without one comes back alone and
-	///     unchanged. Duplicates and empty expansions are dropped, so the result can be empty (<c>{,}</c>), which
-	///     matches nothing. Fails, with the error to return for <paramref name="parameter"/>, when the pattern is
+	///     unchanged. Duplicates and empty expansions are dropped. A pattern that held a group also keeps itself,
+	///     as written, for a literal match (<c>{,}</c> then names only a file called <c>{,}</c>). Fails, with the error to return for <paramref name="parameter"/>, when the pattern is
 	///     longer than <see cref="MaxPatternLength"/> or expands to more than <see cref="MaxExpansions"/> distinct
 	///     patterns.
 	/// </summary>
@@ -63,6 +63,7 @@ internal static class GlobBraces
 		// expanded holds only literal braces, and expanding a later group cannot turn one into a group (an
 		// alternative is balanced and has no comma at its own level), so it is never scanned again.
 		List<(string Text, int From)> current = [(pattern, 0)];
+		var                           anyGroup = false;
 		
 		while(true) {
 			
@@ -82,6 +83,7 @@ internal static class GlobBraces
 				}
 				
 				expanded = true;
+				anyGroup = true;
 				
 				var head = text[..open];
 				var tail = text[(close + 1)..];
@@ -94,7 +96,14 @@ internal static class GlobBraces
 			
 			if(!expanded) {
 				
+				// The pattern as written is one more alternative, matched literally — both matchers read a
+				// brace as itself — so a file actually named 'Gen{A,B}.cs' is still found by that name.
+				// Without it, a name holding a comma-bearing group could not be matched at all: there is no
+				// escape character. Not counted toward the cap; it is one pattern whatever the groups.
 				patterns = [.. next.Select(entry => entry.Text)];
+				
+				if(anyGroup && !patterns.Contains(pattern, StringComparer.Ordinal))
+					patterns = [.. patterns, pattern];
 				
 				return true;
 			}

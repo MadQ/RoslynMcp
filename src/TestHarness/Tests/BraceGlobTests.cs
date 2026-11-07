@@ -29,32 +29,14 @@ static class BraceGlobTests
 		foreach(var file in CsFiles)
 			fx.Write(file, $"class {Path.GetFileNameWithoutExtension(file)} {{ const string Marker = \"brace-marker\"; }}\n");
 		
+		fx.Write("Gen{A,B}.cs",    "class GenLiteral { const string Marker = \"brace-marker\"; }\n");
 		fx.Write("notes.txt",      "notes\n");
 		fx.Write("{x}.txt",        "a file whose name holds braces\n");
 		fx.Write("bin/keep.txt",   "in an ignored directory\n");
 		fx.Write("docs/readme.md", "docs\n");
 		
 		// Calls a tool and returns the parsed JSON of its first content block, or null on a protocol error.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
-				@params = new { name = tool, arguments = args } });
-			
-			var resp = await ctx.ReceiveAsync();
-			var text = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
-			
-			if(resp?["error"] is not null || string.IsNullOrEmpty(text))
-				
-				return null;
-			
-			try {
-				return JsonNode.Parse(text);
-			}
-			catch {
-				return null;
-			}
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		// The paths roslyn_list_files returns, forward-slashed; null when the call failed.
 		async Task<string[]?> ListAsync(string pattern)
@@ -99,7 +81,18 @@ static class BraceGlobTests
 			// The issue's own example, from the tool's description: two extensions in one group.
 			// notes.txt and {x}.txt are the controls — neither extension.
 			new("brace globs: list_files '*.{cs,csproj}' lists both extensions",
-				async () => Exactly(await ListAsync("*.{cs,csproj}"), [.. CsFiles, csprojName], "*.{cs,csproj}")),
+				async () => Exactly(await ListAsync("*.{cs,csproj}"), [.. CsFiles, "Gen{A,B}.cs", csprojName], "*.{cs,csproj}")),
+			
+			// The pattern as written is one more alternative, matched literally: 'Gen{A,B}.cs'
+			// expands to GenA.cs and GenB.cs, which do not exist, and still names the file that is
+			// called exactly that. There is no escape character, so this is the only way to reach it.
+			new("brace globs: list_files finds a file named like a brace pattern",
+				async () => Exactly(await ListAsync("Gen{A,B}.cs"), ["Gen{A,B}.cs"], "Gen{A,B}.cs")),
+			
+			new("brace globs: a filePattern finds a file named like a brace pattern",
+				async () => Exactly(
+					await SearchedFilesAsync("roslyn_search_files", new { projectPath = csproj, pattern = "brace-marker", filePattern = "Gen{A,B}.cs" }),
+					["Gen{A,B}.cs"], "search_files")),
 			
 			// The issue's second repro: a wildcard inside one alternative, a plain name in the other.
 			// Probe.cs and Other.cs are the controls.
@@ -122,8 +115,8 @@ static class BraceGlobTests
 				async () => Exactly(await ListAsync("{x}.txt"), ["{x}.txt"], "{x}.txt")),
 			
 			// An empty alternative is the shell's optional part: 'Probe{,.bak}.cs' is Probe.cs or
-			// Probe.bak.cs. '{,}' expands to nothing but empty patterns, which name no file: an empty
-			// listing, not an error and not every file.
+			// Probe.bak.cs. '{,}' expands to nothing but empty patterns, which name no file, and to
+			// itself, which names no file here either: an empty listing, not an error and not every file.
 			new("brace globs: an empty alternative is an optional part",
 				async () => {
 					

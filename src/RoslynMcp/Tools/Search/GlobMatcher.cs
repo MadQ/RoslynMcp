@@ -33,17 +33,18 @@ internal static class GlobMatcher
 			return true;
 		}
 		
-		Func<string, bool>[] matchers = [.. patterns.Select(CreateSingle)];
+		if(patterns.Length == 0) {
+			
+			matcher = static _ => false;
+			
+			return true;
+		}
 		
-		matcher = fileName => {
-			
-			foreach(var matches in matchers)
-				if(matches(fileName))
-					
-					return true;
-			
-			return false;
-		};
+		// One regex for all expansions, not one per expansion: each BuildRegex is anchored, so their
+		// alternation matches exactly the names one of them matches.
+		var regex = new Regex(string.Join("|", patterns.Select(BuildRegex)), RegexOptions.IgnoreCase);
+		
+		matcher = regex.IsMatch;
 		
 		return true;
 	}
