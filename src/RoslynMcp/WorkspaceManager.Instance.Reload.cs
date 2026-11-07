@@ -173,37 +173,61 @@ internal sealed partial class WorkspaceManager
 			ProjectId  newProjectId;
 
 			(newWorkspace, newProjectId) = LoadForMode();
+			var newLoadFailed = LoadFailedProjects(newWorkspace);
 
-			// Contended design-time builds can silently drop a project's references — results
-			// would be wrong, not failed. The initial load retries the same way; the reload path
-			// is the likelier victim, since it is often triggered by the very file writes that
-			// cause the contention.
+			// The projects the live workspace is already unhealthy on. Stable for this attempt: only a
+			// reload replaces the workspace, and this one holds reloadGate.
+			string[] liveUnhealthy = [..ProjectsWithoutReferences(PeekSolution()).Union(projectsWithLoadFailures)];
+
+			// Contended design-time builds can silently drop a project's references, or fail on a
+			// project file and leave its options at defaults (#300) — results would be wrong, not
+			// failed. The initial load retries the same way; the reload path is the likelier victim,
+			// since it is often triggered by the very file writes that cause the contention.
+			// Contention comes and goes, so a retry is for a project the live workspace loaded well. One
+			// it is unhealthy on too is failing for good — an import that is not there, a target that
+			// always fails in a design-time build — and another load would take seconds to say so again.
 			var retry = 0;
 
 			while(retry < ReloadRetries
-			      && ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } dropped) {
+			      && UnhealthyProjects(newWorkspace, newLoadFailed).Except(liveUnhealthy).Any()) {
 
 				var retryDelayMs = Backoff.DelayMs(retry, Backoff.DefaultSeedMs, MaxRetryDelayMs)
 				;
 
-				logger.LogInfo("Reload", $"No metadata references on: {string.Join(", ", dropped)} — attempt={retry + 2} delay_ms={retryDelayMs}");
+				logger.LogInfo("Reload", $"Unhealthy reload ({UnhealthyReason(newWorkspace, newLoadFailed)}) — attempt={retry + 2} delay_ms={retryDelayMs}");
 
 				newWorkspace.Dispose();
 				Thread.Sleep(retryDelayMs);
 
 				(newWorkspace, newProjectId) = LoadForMode();
+				newLoadFailed                = LoadFailedProjects(newWorkspace);
 				retry++;
 			}
 
-			// Never replace a healthy workspace with a reference-less one. A stale-but-correct
-			// compilation beats a fresh-but-wrong one: dropped references produce plausible-looking
-			// symbol results rather than visible failures, so promoting this would silently corrupt
-			// every subsequent query. If the live workspace is equally broken there is nothing to
-			// protect, so promote regardless — otherwise a bad first load could never recover.
-			if(ProjectsWithoutReferences(newWorkspace) is { Length: > 0 } stillDropped
-			   && ProjectsWithoutReferences(PeekSolution()).Length == 0) {
+			// Never replace a healthy workspace with an unhealthy one. A stale-but-correct
+			// compilation beats a fresh-but-wrong one: dropped references and default options
+			// produce plausible-looking results rather than visible failures, so promoting this
+			// would silently corrupt every subsequent query. If the live workspace is broken too
+			// there is nothing to protect, so promote regardless — otherwise a bad first load could
+			// never recover. And not forever: past MaxConsecutiveDiscards the failure is taken to be
+			// the project's own (an edit that broke it, a new project that never loads), which no
+			// retry will clear. Discarding would then keep a workspace that ignores the edit, and
+			// reload the whole solution every half minute for as long as it lasts; promoting shows
+			// the edit, and the workspace says it is unhealthy.
+			var stillUnhealthy = UnhealthyProjects(newWorkspace, newLoadFailed);
+			var newIsWorse     = stillUnhealthy.Length > 0 && liveUnhealthy.Length == 0;
 
-				newWorkspace.Dispose();
+			if(newIsWorse && consecutiveDiscards >= MaxConsecutiveDiscards) {
+
+				RecordUnhealthyLoad(
+					$"Reload promoted although it had {UnhealthyReason(newWorkspace, newLoadFailed)}: {consecutiveDiscards} reloads in a row "
+					+ "were discarded for it, so it is taken to be the project's own state rather than contention. "
+					+ "Call roslyn_respawn once the cause is fixed if the workspace does not recover by itself."
+				);
+
+				logger.LogInfo("Reload", $"Promoting an unhealthy reload ({UnhealthyReason(newWorkspace, newLoadFailed)}) after {consecutiveDiscards} discarded in a row");
+			}
+			else if(newIsWorse) {
 
 				// Seed = what this attempt actually cost, so the retry rate self-scales to the
 				// workspace instead of relying on a constant that fits neither big nor small.
@@ -215,13 +239,17 @@ internal sealed partial class WorkspaceManager
 
 				consecutiveDiscards++;
 
+				var reason = UnhealthyReason(newWorkspace, newLoadFailed);
+
+				newWorkspace.Dispose();
+
 				RecordUnhealthyLoad(
-					$"Reload discarded — the reloaded workspace had no metadata references on: {string.Join(", ", stillDropped)}. "
+					$"Reload discarded — the reloaded workspace had {reason}. "
 					+ "Keeping the previous workspace, whose text may now be one edit stale. "
 					+ "Call roslyn_respawn if symbol results look outdated."
 				);
 
-				logger.LogInfo("Reload", $"Discarded reload — still no metadata references on: {string.Join(", ", stillDropped)}; keeping previous workspace, retry attempt={consecutiveDiscards} delay_ms={deferMs}");
+				logger.LogInfo("Reload", $"Discarded reload — still {reason}; keeping previous workspace, retry attempt={consecutiveDiscards} delay_ms={deferMs}");
 
 				// reloadVersion stays set: the deferred retry picks up the newest generation.
 				ScheduleDeferredRetry(deferMs);
@@ -229,7 +257,7 @@ internal sealed partial class WorkspaceManager
 				return;
 			}
 
-			WarnIfReferencesDropped(newWorkspace);
+			WarnIfUnhealthy(newWorkspace, newLoadFailed);
 			consecutiveDiscards = 0;
 
 			var newProjectMap = BuildProjectMapFor(newWorkspace);
@@ -264,7 +292,8 @@ internal sealed partial class WorkspaceManager
 				compilationCache.Clear();
 
 				// Swapped in with the solution it was built from, under the same lock.
-				physicalIndex = newPhysicalIndex;
+				physicalIndex            = newPhysicalIndex;
+				projectsWithLoadFailures = newLoadFailed;
 
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.

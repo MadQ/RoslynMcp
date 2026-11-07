@@ -140,11 +140,59 @@ internal sealed partial class WorkspaceManager
 				.Distinct()];
 
 		static string[] ProjectsWithoutReferences(Workspace ws) => ProjectsWithoutReferences(ws.CurrentSolution);
-
-		void WarnIfReferencesDropped(Workspace ws)
+		
+		/// <summary>
+		///     Projects of <paramref name="solution"/> whose own project file one of the load's
+		///     <c>WorkspaceFailed</c> failures names (#300). Such a project can keep its references while its
+		///     compilation options fall back to defaults — a design-time build that could not write a file
+		///     under obj\ loaded <c>Nullable</c> off in a project that enables it. Roslyn reports these failures
+		///     as text only, with no project id and in the user's language, so the project file's full path in
+		///     the message is what identifies the project. The comparison ignores case: a message is not a path
+		///     comparison, and wrongly matching would take two projects whose paths differ only in case.
+		/// </summary>
+		static string[] ProjectsWithLoadFailures(Solution solution, string[] failures) =>
+			failures.Length == 0
+				? []
+				: [..solution.Projects
+					.Where(p => p.FilePath is { } path && failures.Any(f => f.Contains(path, StringComparison.OrdinalIgnoreCase)))
+					.Select(p => p.Name)
+					.Distinct()]
+		;
+		
+		/// <summary>
+		///     <see cref="ProjectsWithLoadFailures"/> for the load that just produced <paramref name="ws"/>.
+		///     Call it straight after the load: until a finding is recorded, <see cref="loadWarnings"/> holds that
+		///     load's <c>WorkspaceFailed</c> failures and nothing else.
+		/// </summary>
+		string[] LoadFailedProjects(Workspace ws) => ProjectsWithLoadFailures(ws.CurrentSolution, [..loadWarnings]);
+		
+		/// <summary>Every project of <paramref name="ws"/> that is unhealthy for either reason, deduplicated.</summary>
+		static string[] UnhealthyProjects(Workspace ws, string[] loadFailed) =>
+			[..ProjectsWithoutReferences(ws).Union(loadFailed)];
+		
+		/// <summary>Why <paramref name="ws"/> is unhealthy, for a log line: one clause per reason that applies.</summary>
+		static string UnhealthyReason(Workspace ws, string[] loadFailed)
+		{
+			var dropped = ProjectsWithoutReferences(ws);
+			
+			return (dropped.Length > 0, loadFailed.Length > 0) switch {
+				
+				(true, true)  => $"no metadata references on: {string.Join(", ", dropped)}; an MSBuild failure on the project file of: {string.Join(", ", loadFailed)}",
+				(true, false) => $"no metadata references on: {string.Join(", ", dropped)}",
+				_             => $"an MSBuild failure on the project file of: {string.Join(", ", loadFailed)}",
+			};
+		}
+		
+		void WarnIfUnhealthy(Workspace ws, string[] loadFailed)
 		{
 			if(ProjectsWithoutReferences(ws) is { Length: > 0 } dropped)
 				RecordUnhealthyLoad($"Projects loaded without metadata references — symbol results may be incomplete: {string.Join(", ", dropped)}");
+			
+			if(loadFailed.Length > 0)
+				RecordUnhealthyLoad(
+					$"MSBuild failed on the project file of: {string.Join(", ", loadFailed)} — their compilation options "
+					+ "(Nullable, LangVersion, …) may be defaults rather than the projects' own, so diagnostics can be phantom"
+				);
 		}
 
 		/// <summary>

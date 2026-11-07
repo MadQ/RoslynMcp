@@ -86,10 +86,11 @@ internal sealed class BuildTool : RoslynMcpTool
 		var buildTarget  = ResolvedTargetPath(projectPath, csprojPath);
 		
 		// A workspace that loaded without metadata references reports a flood of phantom
-		// CS0246/CS0234 for code that compiles fine. Short-circuiting on those would fail a healthy
-		// project — and worse, this tool is what callers reach for to check whether the workspace is
-		// lying, so repeating the lie leaves them with no way out short of knowing about forceBuild.
-		// Skip straight to the real build instead (issue #235).
+		// CS0246/CS0234 for code that compiles fine, and one whose load failed on a project file can
+		// have default options (Nullable off: phantom CS8632, #300). Short-circuiting on those would
+		// fail a healthy project — and worse, this tool is what callers reach for to check whether the
+		// workspace is lying, so repeating the lie leaves them with no way out short of knowing about
+		// forceBuild. Skip straight to the real build instead (issue #235).
 		var health = TryGetHealth(projectPath)
 		;
 		var unhealthyWorkspace = health is { IsHealthy: false };
@@ -220,8 +221,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			// Say so explicitly: a build that succeeds while roslyn_get_diagnostics reports
 			// hundreds of errors is otherwise baffling.
 			Hint = unhealthyWorkspace
-				? "The Roslyn fast-path was skipped: the workspace loaded without metadata references on "
-					+ $"{string.Join(", ", health!.ProjectsWithoutReferences)}, so its diagnostics are phantom. "
+				? $"The Roslyn fast-path was skipped: the workspace {health!.Problem}, so its diagnostics are phantom. "
 					+ "This result comes from a real dotnet build. Call roslyn_respawn to reload the workspace."
 				: null
 		});

@@ -75,6 +75,11 @@ internal sealed partial class WorkspaceManager
 
 		/// <summary>Timestamped record of the last load that produced projects without metadata references.</summary>
 		public string? LastUnhealthyLoad => lastUnhealthyLoad;
+		
+		// Projects of the live workspace whose own project file a failure of the load that produced it
+		// names (#300). Kept apart from loadWarnings, which every reload clears and refills before it
+		// knows whether its workspace will be promoted: this is set only with the workspace it describes.
+		private volatile string[] projectsWithLoadFailures = [];
 
 		// ── Reload scheduling ────────────────────────────────────────────────
 		//
@@ -116,6 +121,11 @@ internal sealed partial class WorkspaceManager
 		// duration of the attempt that just failed (see ReloadAttempt).
 		private const int MaxDeferMs          = 30_000;
 
+		// Reloads discarded in a row as unhealthy before the next unhealthy one is promoted anyway
+		// (see ReloadAttempt). Contention clears within a few deferrals; a failure that outlasts this
+		// many is the project's own, and discarding would hide the edit that caused it.
+		private const int MaxConsecutiveDiscards = 4;
+
 		// How long Dispose waits for an in-flight reload before giving up and leaking the
 		// instance. Bounded so shutdown and LRU eviction cannot wedge behind a pathological load.
 		private static readonly TimeSpan ReloadQuiesceTimeout = TimeSpan.FromSeconds(30);
@@ -139,6 +149,7 @@ internal sealed partial class WorkspaceManager
 			// (see LoadAdhocWorkspace), so applying the same check would flag every adhoc
 			// workspace as broken.
 			isMSBuild ? ProjectsWithoutReferences(PeekSolution()) : [],
+			projectsWithLoadFailures,
 			[..loadWarnings],
 			lastUnhealthyLoad,
 			ReloadPending
@@ -253,17 +264,22 @@ internal sealed partial class WorkspaceManager
 					var slnSw = System.Diagnostics.Stopwatch.StartNew();
 					workspace = LoadSolution(path, logger, loadWarnings, CancellationToken.None);
 					
-					// Contended design-time builds can silently drop a project's references —
-					// results would be wrong, not failed. One fresh reload usually clears it.
-					if(ProjectsWithoutReferences(workspace) is { Length: > 0 } droppedSln) {
+					// Contended design-time builds can silently drop a project's references, or fail on a
+					// project file and leave its options at defaults — results would be wrong, not
+					// failed. One fresh reload usually clears it.
+					var slnLoadFailed = LoadFailedProjects(workspace);
+					
+					if(UnhealthyProjects(workspace, slnLoadFailed).Length > 0) {
 						
-						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedSln)} — reloading once");
+						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(workspace, slnLoadFailed)}) — reloading once");
 						workspace.Dispose();
 						loadWarnings.Clear();
-						workspace = LoadSolution(path, logger, loadWarnings, CancellationToken.None);
+						workspace     = LoadSolution(path, logger, loadWarnings, CancellationToken.None);
+						slnLoadFailed = LoadFailedProjects(workspace);
 					}
 					
-					WarnIfReferencesDropped(workspace);
+					WarnIfUnhealthy(workspace, slnLoadFailed);
+					projectsWithLoadFailures = slnLoadFailed;
 					isMSBuild = true;
 					
 					foreach(var kvp in BuildProjectMapFor(workspace))
@@ -293,15 +309,19 @@ internal sealed partial class WorkspaceManager
 					
 					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings, CancellationToken.None);
 					
-					if(ProjectsWithoutReferences(msbuildWs) is { Length: > 0 } droppedProj) {
+					var projLoadFailed = LoadFailedProjects(msbuildWs);
+					
+					if(UnhealthyProjects(msbuildWs, projLoadFailed).Length > 0) {
 						
-						logger.LogInfo("Load", $"No metadata references on: {string.Join(", ", droppedProj)} — reloading once");
+						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(msbuildWs, projLoadFailed)}) — reloading once");
 						msbuildWs.Dispose();
 						loadWarnings.Clear();
 						(msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings, CancellationToken.None);
+						projLoadFailed         = LoadFailedProjects(msbuildWs);
 					}
 					
-					WarnIfReferencesDropped(msbuildWs);
+					WarnIfUnhealthy(msbuildWs, projLoadFailed);
+					projectsWithLoadFailures = projLoadFailed;
 					workspace        = msbuildWs;
 					defaultProjectId = projectId;
 					isMSBuild        = true;

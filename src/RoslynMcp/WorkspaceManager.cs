@@ -21,13 +21,21 @@ enum ResolutionKind
 }
 
 /// <summary>
-///     Load-health snapshot for a workspace. <paramref name="ProjectsWithoutReferences"/> is the
-///     authoritative signal: a successfully built project always references at least the core
-///     library, so a non-empty set means the design-time build silently dropped them and symbol
-///     queries over those projects return wrong-but-plausible results rather than failing.
+///     Load-health snapshot for a workspace. Two signals, both authoritative, each naming the projects
+///     whose compilation cannot be trusted. <paramref name="ProjectsWithoutReferences"/>: a successfully
+///     built project always references at least the core library, so a non-empty set means the
+///     design-time build silently dropped them, and symbol queries over those projects return
+///     wrong-but-plausible results rather than failing (#235). <paramref name="ProjectsWithLoadFailures"/>:
+///     MSBuild reported a failure processing the project's own file, so the load can have kept its
+///     references while its compilation options fell back to defaults — <c>Nullable</c> off in a project
+///     that enables it, and hundreds of phantom CS8632 warnings (#300).
 /// </summary>
 /// <param name="ProjectsWithoutReferences">Projects the live workspace holds with zero metadata references.</param>
-/// <param name="LoadWarnings">Warnings from the load that produced the live workspace.</param>
+/// <param name="ProjectsWithLoadFailures">
+///     Projects of the live workspace whose own project file a <c>WorkspaceFailed</c> failure of the load
+///     that produced it names.
+/// </param>
+/// <param name="LoadWarnings">Warnings from the most recent load, which may be a reload that was discarded.</param>
 /// <param name="LastUnhealthyLoad">
 ///     Timestamped record of the most recent unhealthy load, retained across the healing reload
 ///     that clears <paramref name="LoadWarnings"/>. Non-null after an episode even once recovered.
@@ -39,12 +47,25 @@ enum ResolutionKind
 /// </param>
 internal sealed record WorkspaceHealth(
 	string[] ProjectsWithoutReferences,
+	string[] ProjectsWithLoadFailures,
 	string[] LoadWarnings,
 	string?  LastUnhealthyLoad,
 	bool     ReloadPending)
 {
-	/// <summary>True when every loaded project resolved at least one metadata reference.</summary>
-	public bool IsHealthy => ProjectsWithoutReferences.Length == 0;
+	/// <summary>True when every loaded project resolved metadata references and loaded without an MSBuild failure.</summary>
+	public bool IsHealthy => ProjectsWithoutReferences.Length == 0 && ProjectsWithLoadFailures.Length == 0;
+	
+	/// <summary>
+	///     What is wrong, as a clause for a hint: "loaded without metadata references on: A", "loaded with
+	///     an MSBuild failure on the project file of: B", or both joined. Empty when healthy.
+	/// </summary>
+	public string Problem => (ProjectsWithoutReferences.Length > 0, ProjectsWithLoadFailures.Length > 0) switch {
+		
+		(true, true)  => $"loaded without metadata references on: {string.Join(", ", ProjectsWithoutReferences)}, and with an MSBuild failure on the project file of: {string.Join(", ", ProjectsWithLoadFailures)}",
+		(true, false) => $"loaded without metadata references on: {string.Join(", ", ProjectsWithoutReferences)}",
+		(false, true) => $"loaded with an MSBuild failure on the project file of: {string.Join(", ", ProjectsWithLoadFailures)}, so its compilation options (Nullable, LangVersion, …) may be defaults rather than the project's own",
+		_             => "",
+	};
 }
 
 /// <summary>

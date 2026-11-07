@@ -218,7 +218,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 | Tool | What it does |
 |------|--------------|
-| `roslyn_check_drift` | Workspace health probe on three axes: source drift (files changed without the workspace noticing), reference health (projects that loaded with no metadata references), and pending reload (a change not yet applied — the only signal that can account for a brand-new file) |
+| `roslyn_check_drift` | Workspace health probe on three axes: source drift (files changed without the workspace noticing), load health (projects that loaded with no metadata references, or with an MSBuild failure on their project file), and pending reload (a change not yet applied — the only signal that can account for a brand-new file) |
 | `roslyn_info` | Server version, PID, uptime, MSBuild discovery, log markers |
 
 ---

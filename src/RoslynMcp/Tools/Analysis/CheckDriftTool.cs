@@ -23,16 +23,19 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"FileSystemWatcher miss (network drives, event buffer overflow, excluded directories). A healthy " +
 		"workspace reports drifted: false. Newer files are compared with workspace text, so the server's own " +
 		"edits and timestamp-only touches are not drift. Changes within the sync clock's ~2-second tolerance " +
-		"are not compared. (2) Reference health: workspace_healthy is false when a project loaded with zero " +
-		"metadata references, which happens when a contended MSBuild design-time build silently drops them. " +
+		"are not compared. (2) Load health: workspace_healthy is false when a project loaded with zero " +
+		"metadata references (projects_without_references), which happens when a contended MSBuild design-time " +
+		"build silently drops them, or when MSBuild failed on a project's own file (projects_with_load_failures), " +
+		"which can leave its compilation options at defaults — Nullable off in a project that enables it. " +
 		"That state makes symbol results wrong-but-plausible and makes roslyn_get_diagnostics report phantom " +
-		"CS0246/CS0234 errors for code that builds fine — source can be perfectly in sync while this is broken. " +
+		"CS0246/CS0234 errors or CS8632 warnings for code that builds fine — source can be perfectly in sync " +
+		"while this is broken. " +
 		"(3) Pending reload: reload_pending is true when a change could not be applied incrementally and the " +
 		"reload servicing it has not finished — the workspace is behind disk. This is the only axis that can " +
 		"account for a newly added file, because drifted_files is built from documents the workspace already " +
 		"has and a brand-new file is not one of them. " +
 		"Any of these is fixed by roslyn_respawn; drift alone can also be cleared by re-saving the files " +
-		"through roslyn editing tools. last_unhealthy_load is present when a dropped-reference load happened " +
+		"through roslyn editing tools. last_unhealthy_load is present when an unhealthy load happened " +
 		"at any point, even if the workspace has since recovered.")]
 	public async Task<object> CheckDrift(CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null)
@@ -122,7 +125,8 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			.Order(StringComparer.Ordinal)];
 		
 		// Second axis: a workspace can be perfectly in sync with disk and still be useless if its
-		// design-time build dropped every metadata reference. Report both.
+		// design-time build dropped every metadata reference, or failed on a project file and left its
+		// options at defaults. Report both.
 		var health        = TryGetHealth(projectPath);
 		var unhealthy     = health is { IsHealthy: false };
 		var reloadPending = health is { ReloadPending: true };
@@ -135,7 +139,8 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			lastSynced.ToString("O"),
 			isMSBuild,
 			WorkspaceHealthy:          !unhealthy,
-			ProjectsWithoutReferences: unhealthy ? health!.ProjectsWithoutReferences : null,
+			ProjectsWithoutReferences: health is { ProjectsWithoutReferences: { Length: > 0 } dropped } ? dropped : null,
+			ProjectsWithLoadFailures:  health is { ProjectsWithLoadFailures: { Length: > 0 } failed } ? failed : null,
 			LastUnhealthyLoad:         health?.LastUnhealthyLoad,
 			ReloadPending:             reloadPending)
 		{
@@ -150,13 +155,11 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 
 				(true, true) =>
 					"Two separate problems. Files changed on disk without the workspace noticing, AND the workspace "
-					+ $"loaded without metadata references on: {string.Join(", ", health!.ProjectsWithoutReferences)}. "
-					+ "Call roslyn_respawn — it fixes both.",
+					+ $"{health!.Problem}. Call roslyn_respawn — it fixes both.",
 
 				(false, true) =>
-					$"Source is in sync, but the workspace loaded without metadata references on: "
-					+ $"{string.Join(", ", health!.ProjectsWithoutReferences)}. Symbol results are unreliable and "
-					+ "roslyn_get_diagnostics will report phantom errors — a real build would succeed. "
+					$"Source is in sync, but the workspace {health!.Problem}. Symbol results are unreliable and "
+					+ "roslyn_get_diagnostics will report phantom errors or warnings — a real build would succeed. "
 					+ "Call roslyn_respawn to reload.",
 
 				(true, false) =>
@@ -169,8 +172,8 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 
 		var outcome = (driftedFiles.Length > 0, unhealthy) switch {
 
-			(true, true)  => $"{driftedFiles.Length} drifted, no metadata references",
-			(false, true) => "in sync, no metadata references",
+			(true, true)  => $"{driftedFiles.Length} drifted, unhealthy load",
+			(false, true) => "in sync, unhealthy load",
 			(true, false) => $"{driftedFiles.Length} drifted",
 			_             => "in sync",
 		};
