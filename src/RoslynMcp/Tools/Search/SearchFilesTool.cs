@@ -26,7 +26,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		[Description("Pattern to match against the CONTENT of each source line. Interpretation is controlled by 'mode' (default regex). This is not a filename filter — use filePattern to restrict which files are searched.")] string pattern,
 		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Filename glob filter selecting WHICH files are searched (matches the file name/path, not content): e.g. '*.cs', '*Test.cs'. Default: '*.cs'. Non-C# files are never searched regardless of this filter.")] string? filePattern = null,
+		[Description("Filename glob filter selecting WHICH files are searched (matches the file name, not content): e.g. '*.cs', '*Test.cs', '*{Glob,ListFiles}*.cs'. Supports *, ? and {a,b}. Default: '*.cs'. Non-C# files are never searched regardless of this filter.")] string? filePattern = null,
 		[Description("Case-sensitive matching. Default: false (case-insensitive).")] bool caseSensitive = false,
 		[Description(MatchModeDescription + "Default: 'regex'.")] string? mode = null,
 		[Description("Number of results to skip (for paging). Default: 0.")] int skip = 0,
@@ -69,7 +69,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			
 			return scope.Error(rootError);
 		
-		var matchesFile = GlobMatcher.CreateMatcher(filePattern);
+		if(!GlobMatcher.TryCreateMatcher(filePattern, out var matchesFile, out var globError))
+			
+			return scope.Error(new ErrorResult(globError));
+		
 
 		var allMatches = await CollectAsync(regex);
 		

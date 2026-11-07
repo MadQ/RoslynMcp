@@ -4,17 +4,52 @@ using System.Text.RegularExpressions;
 namespace RoslynMcp.Tools;
 
 // Filename-only glob matcher — callers pass Path.GetFileName(...), never a full path.
-// Supports * (any chars, no separator), ** (any chars, crosses segments), ? (single char).
-// Does NOT support {a,b} brace expansion.
+// Supports * (any chars, no separator), ** (any chars, crosses segments), ? (single char),
+// and {a,b} alternatives (GlobBraces, #294).
 internal static class GlobMatcher
 {
 	/// <summary>
-	/// Creates a reusable matcher for <paramref name="pattern"/>.
-	/// Operates on filenames only — path separators in the input produce unspecified results.
-	/// Supports * (within a segment), ** (across segments), and ? (single char).
-	/// Does NOT support {a,b} brace expansion.
+	///     Creates a reusable matcher for <paramref name="pattern"/>, a <c>filePattern</c> argument.
+	///     Operates on filenames only — path separators in the input produce unspecified results.
+	///     Supports * (within a segment), ** (across segments), ? (single char), and {a,b} (either): a name
+	///     matches when it matches any expansion. Fails, with the error to return, when the pattern
+	///     expands to more than <see cref="GlobBraces.MaxExpansions"/> patterns.
 	/// </summary>
-	public static Func<string, bool> CreateMatcher(string pattern)
+	public static bool TryCreateMatcher(string pattern, out Func<string, bool> matcher, [System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out string? error)
+	{
+		error = null;
+		
+		if(!GlobBraces.TryExpand(pattern, out var patterns)) {
+			
+			matcher = static _ => false;
+			error   = GlobBraces.TooManyExpansions("filePattern", pattern);
+			
+			return false;
+		}
+		
+		if(patterns.Length == 1) {
+			
+			matcher = CreateSingle(patterns[0]);
+			
+			return true;
+		}
+		
+		Func<string, bool>[] matchers = [.. patterns.Select(CreateSingle)];
+		
+		matcher = fileName => {
+			
+			foreach(var matches in matchers)
+				if(matches(fileName))
+					
+					return true;
+			
+			return false;
+		};
+		
+		return true;
+	}
+	
+	static Func<string, bool> CreateSingle(string pattern)
 	{
 		if(pattern is "*" or "*.*")
 			return static _ => true;

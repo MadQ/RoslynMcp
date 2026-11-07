@@ -45,7 +45,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		[Description("Case-sensitive matching. Default: false (case-insensitive).")]
 		bool caseSensitive = false,
 
-		[Description("Filename glob filter selecting WHICH workspace C# files are searched (matches the file name, not content). Default: '*.cs'.")]
+		[Description("Filename glob filter selecting WHICH workspace C# files are searched (matches the file name, not content): e.g. '*Tool.cs', '{Program,Startup}.cs'. Supports *, ? and {a,b}. Default: '*.cs'.")]
 		string? filePattern = null,
 
 		[Description("Number of results to skip. Default: 0.")]
@@ -91,7 +91,10 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			
 			return scope.Error(rootError);
 
-		var matchesFile = GlobMatcher.CreateMatcher(filePattern);
+		if(!GlobMatcher.TryCreateMatcher(filePattern, out var matchesFile, out var globError))
+			
+			return scope.Error(new ErrorResult(globError));
+		
 
 		var allMatches = await CollectAsync(regex);
 
