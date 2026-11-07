@@ -31,8 +31,9 @@ static class DotnetRunnerTests
 			new("dotnet runner: a workspace load waits for a running dotnet command",
 				() => AssertLoadWaitsForDotnetAsync(ctx, serverLogDir, serverLogGlob)),
 			
+			// About 20 s: the server's load timeout cannot go below 10 s, and the test has to wait it out.
 			new("dotnet runner: a load that waits out its timeout fails once, and loads after the command",
-				() => AssertLoadGivesUpAsync(ctx)),
+				() => AssertLoadGivesUpAsync(ctx)) { Slow = true },
 		};
 		
 		return new TestGroup($"Dotnet Runner ({tests.Count} tests)", tests);

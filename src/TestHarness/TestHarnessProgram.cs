@@ -5,11 +5,12 @@ using System.Reflection;
 
 /// <summary>
 ///     Comprehensive test harness for RoslynMcp. Tests all tools against RoslynMcp itself (dogfooding).
-///     Usage: dotnet run --project TestHarness/TestHarness.csproj [-- [--quiet] [--only &lt;groups&gt;] [--test &lt;text&gt;] [--list]]
+///     Usage: dotnet run --project TestHarness/TestHarness.csproj [-- [--quiet] [--only &lt;groups&gt;] [--test &lt;text&gt;] [--slow] [--list]]
 ///     <para>
 ///         <c>--only</c> takes comma-separated parts of group names (case-insensitive) and builds and runs
 ///         only those groups; <c>--test</c> keeps the tests whose name contains the text; <c>--list</c>
-///         prints the group names. <c>--only-build-diag</c> is <c>--only validation</c>. See
+///         prints the group names. <c>--slow</c> also runs the slow tests, which a CI runner or a matching
+///         <c>--test</c> runs anyway. <c>--only-build-diag</c> is <c>--only validation</c>. See
 ///         <see cref="HarnessGroups"/>.
 ///     </para>
 ///     <para>
@@ -79,6 +80,7 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 	Process? server;
 	string?  stopReason;
 	int      total;
+	int      slowSkipped;
 	bool     usageError;
 	
 	/// <summary>Quiet mode (#325): only failures and the final summary line reach the console.</summary>
@@ -353,9 +355,13 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 					if(!Quiet)
 						Console.Write($"  {tc.Name,-55} ");
 					
-					var (pass, msg) = await tc.Run();
+					var leftOut     = tc.Slow && !selection.RunSlow;
+					var (pass, msg) = leftOut ? Skip.SlowNotRequested() : await tc.Run();
 					
 					done++;
+					
+					if(leftOut)
+						slowSkipped++;
 					
 					// Quiet mode names a failure as it happens, with its group — the group headers
 					// that would otherwise say where it belongs are not printed. A skipped test
@@ -397,7 +403,7 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		var passed   = results.Count(r => r.pass) - skipped;
 		var failed   = results.Count - passed - skipped;
 		var failures = results.Where(r => !r.pass).ToArray();
-		var skipNote = skipped > 0 ? $", {skipped} skipped" : "";
+		var skipNote = SkipNote(skipped);
 		
 		Console.WriteLine("\n═══════════════════════════════════════════════════════════════");
 		Console.WriteLine("  Test Summary");
@@ -467,6 +473,14 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		}
 	}
 	
+	// ", 9 skipped" — and how many of them are slow tests the run did not ask for, so a local run never reads
+	// as covering what CI covers.
+	string SkipNote(int skipped)
+		=> skipped == 0  ? ""
+		: slowSkipped == 0 ? $", {skipped} skipped"
+		: $", {skipped} skipped ({slowSkipped} slow: --slow runs it)"
+	;
+	
 	/// <summary>
 	///     Returns the exit code and, in quiet mode, prints the whole report: the server's stderr and
 	///     the diagnostics when the run failed, then the one summary line. It runs after the server
@@ -480,7 +494,7 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		var passed    = results.Count(r => r.pass) - skipped;
 		var failed    = results.Count - passed - skipped;
 		var succeeded = failed == 0 && stopReason is null;
-		var skipNote  = skipped > 0 ? $", {skipped} skipped" : "";
+		var skipNote  = SkipNote(skipped);
 		
 		// A filtered run says so on the one line an agent or a script reads (#367).
 		if(selection.FilterNote is { } note)

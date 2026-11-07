@@ -18,16 +18,28 @@
 ///             failure: the release gate must not pass with a case nobody checked.
 ///         </item>
 ///     </list>
+///     A third skip is not about the machine: a <see cref="TestCase.Slow"/> test that the run did not ask for
+///     (<see cref="SlowNotRequested"/>). A CI runner always asks.
 /// </summary>
 static class Skip
 {
 	const string Prefix = "SKIP  ";
 	
-	// Set by GitHub Actions on every runner.
-	static bool OnCiRunner => Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true";
+	/// <summary>
+	///     Whether the harness runs on a CI runner — GitHub Actions sets <c>GITHUB_ACTIONS</c> on every one. The
+	///     one definition of "on CI": a setup-unavailable skip fails there, and slow tests always run there.
+	/// </summary>
+	internal static bool OnCiRunner => Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true";
 	
 	/// <summary>The test has nothing to check on this operating system.</summary>
 	public static (bool pass, string message) NotApplicable(string reason) => (true, $"{Prefix}({reason})");
+	
+	/// <summary>
+	///     A <see cref="TestCase.Slow"/> test in a run that did not ask for slow tests. A skip, never a pass: the
+	///     test checked nothing. CI always asks, so the release gate never passes without it.
+	/// </summary>
+	public static (bool pass, string message) SlowNotRequested()
+		=> (true, $"{Prefix}(slow test, not requested: run with --slow, or name it with --test; CI always runs it)");
 	
 	/// <summary>
 	///     The test applies, but its fixture cannot be built on this machine. A skip locally; a
