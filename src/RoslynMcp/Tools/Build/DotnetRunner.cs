@@ -14,15 +14,15 @@ internal static class DotnetRunner
 	// — so concurrent runs race on its state files ("Could not write state file …", "… being used by
 	// another process"), the contention that corrupted a workspace reload in #300. Agents do issue
 	// these in parallel, so the server queues them rather than trusting the tool descriptions alone.
-	// Global rather than per-solution: concurrent runs over different solutions are rare, and for a
-	// disk-mutating operation correctness beats throughput.
-	static readonly SemaphoreSlim gate = new(1, 1);
+	// The gate is MSBuildGate, shared with workspace loads, whose design-time builds write the same
+	// obj\ files (#379).
 	
 	// Runs `dotnet <args>` in workingDirectory and returns the combined stdout+stderr output,
 	// elapsed time, and exit code. Throws InvalidOperationException if the process fails to start
 	// or if output cannot be read — callers map these to their own error result types.
 	// record is an optional sink for diagnostic annotations (e.g. scope.Record in BuildTool).
-	// Waits for any other dotnet run to finish first; the wait is recorded, and is not part of the
+	// Waits for any other MSBuild run — a dotnet command or a workspace load — to finish first; the
+	// wait is recorded, naming what it waited behind, and is not part of the
 	// returned elapsed time, which stays the process's own runtime. Cancellation while queued throws
 	// OperationCanceledException without ever starting the process.
 	internal static async Task<(string combined, TimeSpan elapsed, int exitCode)> RunAsync(
@@ -43,12 +43,16 @@ internal static class DotnetRunner
 			ct.ThrowIfCancellationRequested();
 		}
 		
-		if(!gate.Wait(0)) {
+		// Named by its command, for the note of a load or another run that waits behind it.
+		var what = $"another dotnet command (dotnet {args.FirstOrDefault()})";
+		
+		if(!MSBuildGate.TryEnter(what)) {
 			
+			var behind = MSBuildGate.Holder;
 			var queued = Stopwatch.StartNew();
 			
 			try {
-				await gate.WaitAsync(ct);
+				await MSBuildGate.EnterAsync(what, ct);
 			}
 			catch(OperationCanceledException) {
 				
@@ -56,7 +60,7 @@ internal static class DotnetRunner
 				throw;
 			}
 			
-			record?.Invoke($"queued {queued.ElapsedMilliseconds} ms behind another dotnet command");
+			record?.Invoke($"queued {queued.ElapsedMilliseconds} ms behind {behind}");
 		}
 		
 		try {
@@ -73,7 +77,7 @@ internal static class DotnetRunner
 			return await RunCoreAsync(args, workingDirectory, record, ct);
 		}
 		finally {
-			gate.Release();
+			MSBuildGate.Release();
 		}
 	}
 	

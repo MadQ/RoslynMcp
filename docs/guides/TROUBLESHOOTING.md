@@ -133,7 +133,10 @@ Other MCP clients (Claude Desktop, Cursor, etc.) keep their own approval stores 
 that runs while another process holds one of the files it needs — typically your own editor or
 agent writing a source file or the `.csproj` — can fail and silently yield projects with no
 references at all. Every symbol query over that workspace is then wrong-but-plausible rather than
-failing outright. Nothing is wrong with your code, and a real build will succeed.
+failing outright. Nothing is wrong with your code, and a real build will succeed. Inside the
+server, workspace loads and `dotnet` builds, cleans and restores run one at a time, so it no
+longer collides with itself; the other side of a collision is now outside it — an editor, another
+server instance, or a build started from a terminal.
 
 **Confirm it:**
 

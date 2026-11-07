@@ -2,7 +2,8 @@ using System.Text.Json.Nodes;
 
 /// <summary>
 ///     The DotnetRunner gate (#300/#306): the server runs one dotnet build/clean/restore at a time, and a
-///     request cancelled while it waits never starts a process. Both checks read the harness server's log for
+///     request cancelled while it waits never starts a process; and since #379 the gate is MSBuildGate, which
+///     workspace loads take too, so a load waits for a running dotnet command. The checks read the harness server's log for
 ///     the entries their own requests wrote. They used to live in Workspace Hygiene for its log access, but
 ///     they need nothing from the rest of the run, so a filtered run (#367) can include or skip them.
 /// </summary>
@@ -26,6 +27,12 @@ static class DotnetRunnerTests
 			
 			new("dotnet runner: a run cancelled while queued never starts dotnet",
 				() => AssertQueuedCancellationAsync(ctx, serverLogDir, serverLogGlob)),
+			
+			new("dotnet runner: a workspace load waits for a running dotnet command",
+				() => AssertLoadWaitsForDotnetAsync(ctx, serverLogDir, serverLogGlob)),
+			
+			new("dotnet runner: a load that waits out its timeout fails once, and loads after the command",
+				() => AssertLoadGivesUpAsync(ctx)),
 		};
 		
 		return new TestGroup($"Dotnet Runner ({tests.Count} tests)", tests);
@@ -173,17 +180,194 @@ static class DotnetRunnerTests
 	}
 	
 	/// <summary>
+	///     Guards #379: a workspace load is an MSBuild design-time build, which writes the same obj\ files as a
+	///     dotnet command, so it takes the same process-wide gate (MSBuildGate) and waits for a running build,
+	///     clean or restore. With fixture A warm, A's held clean (<see cref="HoldSeconds"/>) is sent and given a
+	///     second to take the gate; then roslyn_get_diagnostics is asked for fixture B, never loaded before, so
+	///     its call starts a cold load while the clean still runs. The server log must hold the load's note,
+	///     <c>queued … behind another dotnet command (dotnet clean): &lt;B's .csproj&gt;</c>, and both calls must
+	///     succeed — the load is held back, not failed. Before #379 the load ran beside the clean and wrote no
+	///     such note. The note names B's project path, so a load of any other fixture cannot satisfy it.
+	/// </summary>
+	static async Task<(bool pass, string message)> AssertLoadWaitsForDotnetAsync(TestContext ctx, string logDir, string logGlob)
+	{
+		using var held = NewHeldCleanFixture("GateHold");
+		using var cold = TestFixtures.NewMsBuildProject("GateLoad");
+		
+		cold.Write("Probe.cs", "class Probe { }\n");
+		
+		// Loaded up front, so that the clean takes the gate within milliseconds of being sent.
+		await held.WarmAsync(ctx);
+		
+		var idClean = await SendClean(ctx, held);
+		
+		await Task.Delay(1_000);
+		
+		var idLoad = ctx.NextId();
+		
+		await ctx.SendAsync(new { jsonrpc = "2.0", id = idLoad, method = "tools/call",
+			@params = new { name = "roslyn_get_diagnostics", arguments = new { projectPath = cold.Csproj, severity = "errors", take = 0 } } });
+		
+		JsonNode? loadResponse = null;
+		var       sawClean     = false;
+		
+		while(loadResponse is null || !sawClean) {
+			
+			var response = await ctx.ReceiveAsync();
+			
+			if(response is null)
+				
+				return (false, $"FAIL  (a request timed out: clean answered={sawClean}, load answered={loadResponse is not null})");
+			
+			var id = response["id"]?.GetValue<int>();
+			
+			sawClean |= id == idClean;
+			
+			if(id == idLoad)
+				loadResponse = response;
+		}
+		
+		// Loaded means a result with content: a JSON-RPC error has no result at all, and an empty text must
+		// not pass for an answer either.
+		var loadText = loadResponse["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? "";
+		var loaded   = loadResponse["error"] is null
+			&& loadResponse["result"]?["isError"]?.GetValue<bool>() != true
+			&& loadText.Length > 0
+			&& !loadText.Contains("\"error\"", StringComparison.Ordinal);
+		
+		if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out var failure))
+			
+			return (false, failure);
+		
+		var queued = lines.Any(line => line.Contains("queued ", StringComparison.Ordinal)
+			&& line.Contains("behind another dotnet command (dotnet clean)", StringComparison.Ordinal)
+			&& line.Contains(JsonEscaped(cold.Csproj!), StringComparison.OrdinalIgnoreCase));
+		
+		return queued && loaded
+			? (true,  "PASS  (the cold load queued behind the running clean, then loaded)")
+			: (false, $"FAIL  (expected B's load queued behind the clean and loaded; queued={queued}, loaded={loaded}: {loadText})")
+		;
+	}
+	
+	/// <summary>
+	///     Guards #379's timeout path (#394 review): a load that waits out the whole load timeout behind a dotnet
+	///     command fails rather than run beside it, is not retried straight away (each retry would wait the whole
+	///     timeout again), and leaves nothing stuck. Runs on a server of its own, started with
+	///     ROSLYNMCP_LOAD_TIMEOUT_SECONDS=10 — the shortest the server accepts — so the harness's own server keeps
+	///     its default. Fixture A's clean holds for <see cref="TimeoutHoldSeconds"/>, well past the timeout; a
+	///     second after it is sent, roslyn_get_diagnostics is asked for fixture B, never loaded. That call must
+	///     answer with the gate-timeout error ("… and gave up") in under <see cref="NoRetryBoundMs"/>: a retry
+	///     would wait again and either answer after the clean ended or not before 20 s. Once the clean has
+	///     answered, the same call must load B — the gate was released and the failed load was not kept (#377).
+	/// </summary>
+	static async Task<(bool pass, string message)> AssertLoadGivesUpAsync(TestContext ctx)
+	{
+		using var held = NewHeldCleanFixture("GateTimeoutHold", TimeoutHoldSeconds);
+		using var cold = TestFixtures.NewMsBuildProject("GateTimeoutLoad");
+		
+		cold.Write("Probe.cs", "class Probe { }\n");
+		
+		var logPath           = Path.Combine(TestFixtures.TempRoot, "logs", $"gate-timeout-{Guid.NewGuid():N}.log");
+		var (process, server) = await DefaultWorkspaceTests.StartServerLoggingToAsync(ctx, held.Dir, logPath,
+			new Dictionary<string, string> { ["ROSLYNMCP_LOAD_TIMEOUT_SECONDS"] = "10" });
+		
+		try {
+			
+			if(server is null)
+				
+				return (false, "FAIL  (the server with a 10 s load timeout did not start)");
+			
+			await held.WarmAsync(server);
+			
+			var idClean = await SendClean(server, held);
+			
+			await Task.Delay(1_000);
+			
+			var timer           = System.Diagnostics.Stopwatch.StartNew();
+			var (first, sawClean) = await LoadAsync(server, cold, idClean);
+			var firstMs         = timer.ElapsedMilliseconds;
+			
+			// The clean must be done before the second load: that one has to find the gate free.
+			while(!sawClean)
+				if(await server.ReceiveAsync() is not { } response)
+					
+					return (false, "FAIL  (the held clean never answered)");
+				else
+					sawClean = response["id"]?.GetValue<int>() == idClean;
+			
+			var (second, _) = await LoadAsync(server, cold, idClean);
+			
+			var gaveUp = first.Contains("gave up", StringComparison.Ordinal);
+			var loaded = second.Length > 0 && !second.Contains("\"error\"", StringComparison.Ordinal);
+			
+			return gaveUp && firstMs < NoRetryBoundMs && loaded
+				? (true,  $"PASS  (gave up after {firstMs} ms, loaded once the clean was done)")
+				: (false, $"FAIL  (expected the gate-timeout error in under {NoRetryBoundMs} ms, then a load; first after {firstMs} ms: {first} / second: {second})")
+			;
+		}
+		finally {
+			await DefaultWorkspaceTests.StopServerAsync(process, server);
+		}
+	}
+	
+	// How long AssertLoadGivesUpAsync's clean holds: past the 10 s load timeout, with room for the second the
+	// load is sent after it and the clean's own start.
+	const int TimeoutHoldSeconds = 16;
+	
+	// The first load must have answered by then: the timeout is 10 s, and a retry would wait until the clean
+	// ended (about 17 s after it began) or another 10 s.
+	const int NoRetryBoundMs = 14_000;
+	
+	/// <summary>
+	///     Asks roslyn_get_diagnostics for <paramref name="fx"/> and reads until its answer, noting whether the
+	///     answer to request <paramref name="otherId"/> went by. Returns the answer's text, or the JSON-RPC
+	///     error as JSON, so that a failure is never an empty string.
+	/// </summary>
+	static async Task<(string Text, bool SawOther)> LoadAsync(TestContext server, FixtureProject fx, int otherId)
+	{
+		var id       = server.NextId();
+		var sawOther = false;
+		
+		await server.SendAsync(new { jsonrpc = "2.0", id, method = "tools/call",
+			@params = new { name = "roslyn_get_diagnostics", arguments = new { projectPath = fx.Csproj, severity = "errors", take = 0 } } });
+		
+		while(true) {
+			
+			if(await server.ReceiveAsync() is not { } response)
+				
+				return ("(no answer)", sawOther);
+			
+			var responseId = response["id"]?.GetValue<int>();
+			
+			sawOther |= responseId == otherId;
+			
+			if(responseId == id)
+				
+				return (response["error"] is { } error
+					? $"\"error\": {error.ToJsonString()}"
+					: response["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? "", sawOther);
+		}
+	}
+	
+
+	// A path as it appears inside a JSON string in the log: backslashes escaped.
+	static string JsonEscaped(string path) => path.Replace("\\", "\\\\");
+	
+	/// <summary>
 	///     An MSBuild fixture whose clean takes <see cref="HoldSeconds"/>: a target that runs before
 	///     <c>Clean</c> and sleeps, so concurrency checks do not depend on how fast the machine is. The sleep
 	///     is <c>ping</c> on Windows and <c>sleep</c> elsewhere (CI builds on Ubuntu); both are available
 	///     without extra tooling.
 	/// </summary>
-	static FixtureProject NewHeldCleanFixture(string label)
+	static FixtureProject NewHeldCleanFixture(string label) => NewHeldCleanFixture(label, HoldSeconds);
+	
+	/// <summary>The same, holding for <paramref name="seconds"/>.</summary>
+	static FixtureProject NewHeldCleanFixture(string label, int seconds)
 	{
 		var fx = TestFixtures.NewMsBuildProject(label, extraProjectXml: $"""
 			<Target Name="HoldClean" BeforeTargets="Clean">
-			    <Exec Command="ping -n {HoldSeconds + 1} 127.0.0.1 &gt; NUL" Condition="'$(OS)' == 'Windows_NT'" />
-			    <Exec Command="sleep {HoldSeconds}" Condition="'$(OS)' != 'Windows_NT'" />
+			    <Exec Command="ping -n {seconds + 1} 127.0.0.1 &gt; NUL" Condition="'$(OS)' == 'Windows_NT'" />
+			    <Exec Command="sleep {seconds}" Condition="'$(OS)' != 'Windows_NT'" />
 			  </Target>
 			""");
 		
