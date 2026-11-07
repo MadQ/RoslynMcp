@@ -33,15 +33,9 @@ internal static class GlobMatcher
 			return true;
 		}
 		
-		if(patterns.Length == 0) {
-			
-			matcher = static _ => false;
-			
-			return true;
-		}
-		
 		// One regex for all expansions, not one per expansion: each BuildRegex is anchored, so their
-		// alternation matches exactly the names one of them matches.
+		// alternation matches exactly the names one of them matches. Never empty: a pattern that held a
+		// group keeps itself as a literal alternative.
 		var regex = new Regex(string.Join("|", patterns.Select(BuildRegex)), RegexOptions.IgnoreCase);
 		
 		matcher = regex.IsMatch;
