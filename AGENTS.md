@@ -868,7 +868,7 @@ fx.Write("Probe.cs", "class Probe { }\n");   // before the first tool call — t
 return new TestGroup(header, tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });
 ```
 
-Write every fixture before the group's first tool call, so no test depends on the 300 ms watcher debounce, and dispose the fixture in the group's `Teardown`. `TestFixtures.SweepStale` runs at startup and removes trees a killed run left behind (plus scratch files an old harness binary wrote into `src/RoslynMcp`). The last group, `WorkspaceHygieneTests`, reads the harness server's log and fails if any reload was flagged for a path inside the repo — the log line names the file, so the offending test is one grep away. Only read-only tests run against the dogfood project.
+Write every fixture before the group's first tool call, so no test depends on the 300 ms watcher debounce, and dispose the fixture in the group's `Teardown`. Fixtures live outside the repo, so its `global.json` does not reach them: `TestFixtures.PinSdk` copies it to the fixture root at startup, or each fixture would resolve the newest SDK installed — and one newer than the server's MSBuild can load gives every unrestored fixture a load with no references. `TestFixtures.SweepStale` runs at startup and removes trees a killed run left behind (plus scratch files an old harness binary wrote into `src/RoslynMcp`). The last group, `WorkspaceHygieneTests`, reads the harness server's log and fails if any reload was flagged for a path inside the repo — the log line names the file, so the offending test is one grep away. Only read-only tests run against the dogfood project.
 
 **Live testing:** configure in `.mcp.json` and test via GitHub Copilot or any MCP client.
 

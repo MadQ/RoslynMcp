@@ -144,6 +144,9 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		// server build (#274). Fixtures now live in per-group temp projects — see TestFixtures.
 		TestFixtures.SweepStale(repoRoot, TimeSpan.FromHours(1));
 		
+		// Fixtures resolve the SDK the repo pins, not the newest one installed.
+		TestFixtures.PinSdk(repoRoot);
+		
 		// -- Server build -----------------------------------------------------------------------
 		
 		Running = "server build";
