@@ -65,6 +65,30 @@ class TestContext
 		}
 	}
 	
+	/// <summary>
+	///     Calls a tool and returns its first content block parsed as JSON: a tool's result, or the header of a
+	///     source response (#328). Null when the call failed outright (a JSON-RPC error has no result), timed
+	///     out, or answered with a block that is not JSON. The one copy of what nine test groups each wrote as
+	///     a local <c>Call</c> (#294 review).
+	/// </summary>
+	internal async Task<JsonNode?> CallToolJsonAsync(string tool, object args)
+	{
+		await SendAsync(new { jsonrpc = "2.0", id = NextId(), method = "tools/call", @params = new { name = tool, arguments = args } });
+		
+		var text = (await ReceiveAsync())?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
+		
+		if(string.IsNullOrEmpty(text))
+			
+			return null;
+		
+		try {
+			return JsonNode.Parse(text);
+		}
+		catch(System.Text.Json.JsonException) {
+			return null;
+		}
+	}
+	
 	// The common case: a tool whose whole response is its first content block.
 	internal Task<(bool pass, string message)> RunTestAsync(
 		string toolName,

@@ -78,18 +78,7 @@ static class WatcherThroughWritesTests
 		}
 		
 		// The first block parsed as JSON: a tool's result, or the header of a source response.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			var blocks = await CallBlocks(tool, args);
-			
-			if(blocks.Length == 0)
-				
-				return null;
-			
-			try { return JsonNode.Parse(blocks[0]); }
-			catch { return null; }
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		// The text the workspace serves for a file, or null when it serves none from a document.
 		async Task<string?> WorkspaceTextAsync(string path)

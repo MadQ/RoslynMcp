@@ -115,18 +115,7 @@ static class LinkedFileTests
 		}
 		
 		// The first block parsed as JSON: a tool's result, or the header of a source response.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			var blocks = await CallBlocks(tool, args);
-			
-			if(blocks.Length == 0)
-				
-				return null;
-			
-			try { return JsonNode.Parse(blocks[0]); }
-			catch { return null; }
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		// Whether the workspace serves this file from a document of its own.
 		async Task<bool> IsDocumentAsync(string? projectPath, string filePath)

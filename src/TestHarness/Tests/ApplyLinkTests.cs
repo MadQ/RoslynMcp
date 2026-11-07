@@ -88,22 +88,7 @@ static class ApplyLinkTests
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
 		// Calls a tool and returns its parsed result, or null when the call failed outright.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
-				@params = new { name = tool, arguments = args } });
-			
-			var resp = await ctx.ReceiveAsync();
-			var text = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
-			
-			if(text is null)
-				
-				return null;
-			
-			try { return JsonNode.Parse(text); }
-			catch { return null; }
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		// Previews and applies one rename; returns the apply result, or the preview when it gave no token.
 		async Task<JsonNode?> Rename(string symbolName, string newName)
