@@ -1,0 +1,570 @@
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+
+/// <summary>
+///     Covers load health beyond dropped references (#300). A design-time build that cannot write a file
+///     under obj\ — another process holds it — reports a <c>WorkspaceFailed</c> failure naming the project
+///     file, keeps the project's references, and leaves its compilation options at defaults: a project
+///     that enables <c>Nullable</c> loaded with it off, and <c>roslyn_get_diagnostics</c> reported hundreds
+///     of phantom CS8632 warnings while every probe called the workspace healthy.
+///     <para>
+///         The contention is made deterministic by putting a directory where the fixture's
+///         <c>obj\Debug\net10.0\&lt;name&gt;.AssemblyInfoInputs.cache</c> goes while the project's
+///         <c>&lt;Version&gt;</c> changes: the design-time build then has to rewrite that file (its content is
+///         a hash of the assembly attributes) and fails as it did under a concurrent <c>dotnet build</c> —
+///         the same <c>WorkspaceFailed</c> failure naming the project file, the same defaulted options, on
+///         every platform (see <see cref="BlockedFile"/>). Without a changed version the target is up to
+///         date, writes nothing, and the block proves nothing — so every load the tests want to fail is
+///         preceded by a version bump, or by a cache that no load has written yet.
+///     </para>
+///     <para>
+///         Two fixtures, because the two paths differ. Fixture A is blocked before its first load, which
+///         reloads once and then keeps what it got: an unhealthy workspace, which is what the reporting
+///         tests need. Fixture B loads healthy and is blocked before a reload, which must then be discarded
+///         in favour of the healthy workspace — and, if the failure outlasts four discards, promoted after
+///         all. The tests of each fixture run in order and hand their state on: run the group whole.
+///     </para>
+/// </summary>
+static class LoadHealthTests
+{
+	// The source every fixture compiles. With Nullable enabled it is clean; with the option defaulted
+	// off, the annotation is CS8632 — the issue's phantom warning, in one line.
+	const string Source = "public class Probe { public string? Name { get; set; } }\n";
+	
+	// Nullable and Version in the project file: the first is what a failed load loses, the second is
+	// what a test changes to make the design-time build rewrite the blocked cache.
+	const string ProjectXml = "<PropertyGroup><Nullable>enable</Nullable><Version>1.0.0</Version></PropertyGroup>";
+	
+	internal static async Task<TestGroup> BuildAsync(TestContext ctx)
+	{
+		var a = TestFixtures.NewMsBuildProject("LoadHealthA", extraProjectXml: ProjectXml);
+		var b = TestFixtures.NewMsBuildProject("LoadHealthB", extraProjectXml: ProjectXml);
+		
+		a.Write("Probe.cs", Source);
+		b.Write("Probe.cs", Source);
+		
+		// Fixture S: a solution of projects that do not reference each other. Bad is blocked from its first
+		// load, Good is fine; Client/Common and Server/Common share a name, and Server/Common is blocked too.
+		// Health is a property of the workspace, but a broken project only makes the diagnostics of the
+		// projects built from it phantom — not Good's, and not those of a namesake in another directory.
+		var s = TestFixtures.NewAdhocDir("LoadHealthSln");
+		
+		var projectXml = $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{ProjectXml}</Project>\n";
+		
+		// Lib is blocked too, App references Lib and Top references App: a broken dependency counts, directly
+		// or not, which is what WorkspaceHealth.Covering walks the project graph for.
+		s.Write("LoadHealthSln.slnx",
+			"<Solution>\n  <Project Path=\"Good/Good.csproj\" />\n  <Project Path=\"Bad/Bad.csproj\" />\n"
+			+ "  <Project Path=\"Client/Common.csproj\" />\n  <Project Path=\"Server/Common.csproj\" />\n"
+			+ "  <Project Path=\"Lib/Lib.csproj\" />\n  <Project Path=\"App/App.csproj\" />\n  <Project Path=\"Top/Top.csproj\" />\n</Solution>\n");
+		
+		foreach(var project in new[] { "Good/Good", "Bad/Bad", "Client/Common", "Server/Common", "Lib/Lib" }) {
+			
+			s.Write($"{project}.csproj", projectXml);
+			s.Write($"{Path.GetDirectoryName(project)}/Probe.cs", Source);
+		}
+		
+		string Referencing(string reference) =>
+			projectXml.Replace("</Project>", $"<ItemGroup><ProjectReference Include=\"{reference}\" /></ItemGroup></Project>");
+		
+		s.Write("App/App.csproj", Referencing("../Lib/Lib.csproj"));
+		s.Write("Top/Top.csproj", Referencing("../App/App.csproj"));
+		s.Write("App/Probe.cs", Source);
+		s.Write("Top/Probe.cs", Source);
+		
+		var good         = s.PathOf("Good/Good.csproj");
+		var bad          = s.PathOf("Bad/Bad.csproj");
+		var clientCommon = s.PathOf("Client/Common.csproj");
+		var serverCommon = s.PathOf("Server/Common.csproj");
+		var lib          = s.PathOf("Lib/Lib.csproj");
+		var app          = s.PathOf("App/App.csproj");
+		var top          = s.PathOf("Top/Top.csproj");
+		
+		BlockedFile? blockedS      = new(s.PathOf("Bad/obj/Debug/net10.0/Bad.AssemblyInfoInputs.cache"));
+		BlockedFile? blockedServer = new(s.PathOf("Server/obj/Debug/net10.0/Common.AssemblyInfoInputs.cache"));
+		BlockedFile? blockedLib    = new(s.PathOf("Lib/obj/Debug/net10.0/Lib.AssemblyInfoInputs.cache"));
+		BlockedFile? blockedGood   = null;
+		
+		const string nameA = "LoadHealthAFixture";
+		const string nameB = "LoadHealthBFixture";
+		
+		// Fixture A is blocked before any load has written its cache, so its first design-time build has
+		// to write it — and cannot. Fixture B writes its own on the healthy load.
+		BlockedFile? blockedA = Block(a, nameA);
+		BlockedFile? blockedB = null;
+		
+		// Whether the block failed the load, per fixture, as the first test of each found out.
+		// The tests after it need that failure, and skip with it rather than fail for want of it.
+		var failedA = true;
+		var failedB = true;
+		
+		const string NotFailed = "the directory in place of the assembly-info cache did not fail the design-time build";
+		
+		await a.WarmAsync(ctx);
+		await b.WarmAsync(ctx);
+		await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = good });
+		
+		Task<JsonNode?> Drift(FixtureProject fx) => ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = fx.Csproj });
+		
+		Task<JsonNode?> Diagnostics(FixtureProject fx) => ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = fx.Csproj });
+		
+		static bool HasCs8632(JsonNode? diagnostics) =>
+			diagnostics?["items"]?.AsArray().Any(d => d?["code"]?.GetValue<string>() == "CS8632") == true;
+		
+		static string[] Names(JsonNode? array) =>
+			array is JsonArray items ? [..items.Select(n => n?.GetValue<string>() ?? "")] : [];
+		
+		// Whether the most recent load reported failing on the blocked cache: what tells a load the
+		// file did not stop apart from one whose failure went undetected.
+		async Task<bool> LoadFailedAsync(FixtureProject fx)
+		{
+			var info = await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = fx.Csproj });
+			
+			return Names(info?["load_warnings"]).Any(w => w.Contains("AssemblyInfoInputs.cache"));
+		}
+		
+		// Bumps <Version> through roslyn_write_file, which flags the reload synchronously: the next
+		// compilation-needing call runs it, with no watcher timing involved.
+		Task<string?> BumpVersionAsync(FixtureProject fx) => BumpVersionAtAsync(fx.Csproj!, fx.Dir);
+		
+		// The same for one project of a solution fixture: roslyn_write_file takes the path from the
+		// workspace root, which is the solution's directory.
+		async Task<string?> BumpVersionAtAsync(string csproj, string root)
+		{
+			var xml     = File.ReadAllText(csproj);
+			var bumped  = Regex.Replace(xml, @"<Version>1\.0\.(\d+)</Version>", m => $"<Version>1.0.{int.Parse(m.Groups[1].Value) + 1}</Version>");
+			var written = await ctx.CallToolJsonAsync("roslyn_write_file", new { filePath = Path.GetRelativePath(root, csproj), content = bumped, projectPath = csproj });
+			
+			return written is null || written["error"] is not null
+				? $"roslyn_write_file failed: {written?["error"]?.GetValue<string>() ?? "no result"}"
+				: null;
+		}
+		
+		// Polls until the workspace is healthy with nothing pending, servicing reloads on the way. A
+		// discarded reload's retry runs on a timer, so the wait covers its backoff.
+		async Task<JsonNode?> SettleHealthyAsync(FixtureProject fx, TimeSpan limit)
+		{
+			var deadline = DateTime.UtcNow + limit;
+			
+			while(DateTime.UtcNow < deadline) {
+				
+				await Diagnostics(fx);
+				
+				var drift = await Drift(fx);
+				
+				if(drift?["workspace_healthy"]?.GetValue<bool>() == true && drift["reload_pending"] is null)
+					
+					return drift;
+				
+				await Task.Delay(500);
+			}
+			
+			return null;
+		}
+		
+		var tests = new List<TestCase> {
+			
+			// The headline case. Before #300 health was reference health alone, and this project kept
+			// its references, so check_drift said workspace_healthy: true over a compilation with the
+			// wrong options. The first load's single healing reload hits the same block, so the
+			// unhealthy workspace is what the load ends with.
+			new("load health: a load that MSBuild failed on the project file of is unhealthy", async () =>
+			{
+				var drift = await Drift(a);
+				
+				if(drift?["workspace_healthy"] is null)
+					
+					return (false, $"FAIL  (roslyn_check_drift returned no workspace_healthy: {drift?.ToJsonString()})");
+				
+				var failed = Names(drift["projects_with_load_failures"]);
+				
+				// Healthy with no warning at all: the build wrote the file, so there was nothing to detect.
+				// Healthy with the failure in load_warnings is the bug itself, and fails below.
+				if(drift["workspace_healthy"]!.GetValue<bool>() && !await LoadFailedAsync(a)) {
+					
+					failedA = false;
+					
+					return Skip.SetupUnavailable(NotFailed);
+				}
+				
+				if(drift["workspace_healthy"]!.GetValue<bool>())
+					
+					return (false, $"FAIL  (workspace_healthy: true for a load MSBuild failed on: {drift.ToJsonString()})");
+				
+				if(!failed.Contains(nameA))
+					
+					return (false, $"FAIL  (projects_with_load_failures does not name {nameA}: {drift.ToJsonString()})");
+				
+				if(drift["projects_without_references"] is not null)
+					
+					return (false, $"FAIL  (the project kept its references, but projects_without_references is set: {drift.ToJsonString()})");
+				
+				var last = drift["last_unhealthy_load"]?.GetValue<string>() ?? "";
+				
+				return last.Contains("MSBuild failed on the project file of")
+					? (true, $"PASS  (workspace_healthy: false; projects_with_load_failures: {string.Join(", ", failed)})")
+					: (false, $"FAIL  (last_unhealthy_load does not say what failed: '{last}')");
+			}),
+			
+			// The issue's symptom, now labelled: the option really is defaulted (CS8632 is reported), and
+			// the diagnostics carry the phantom hint instead of passing as the project's own warnings.
+			new("load health: get_diagnostics calls the defaulted-option warnings phantom", async () =>
+			{
+				if(!failedA)
+					
+					return Skip.SetupUnavailable(NotFailed);
+				
+				var diagnostics = await Diagnostics(a);
+				var hint        = diagnostics?["hint"]?.GetValue<string>() ?? "";
+				
+				if(!HasCs8632(diagnostics))
+					
+					return (false, $"FAIL  (no CS8632: the failed load did not default Nullable, so this fixture shows nothing: {diagnostics?.ToJsonString()})");
+				
+				return hint.Contains("phantom") && hint.Contains("MSBuild failure on the project file of")
+					? (true, "PASS  (CS8632 reported, with the phantom hint naming the MSBuild failure)")
+					: (false, $"FAIL  (no phantom hint naming the MSBuild failure: '{hint}')");
+			}),
+			
+			// The issue's acceptance: a Roslyn check of this compilation would be a check of the wrong
+			// options, so the tool goes straight to dotnet build and says why. The build itself may well
+			// fail — the fixture is not restored and the cache is still blocked — and is not what is tested.
+			new("load health: build_project skips the Roslyn fast path for it", async () =>
+			{
+				if(!failedA)
+					
+					return Skip.SetupUnavailable(NotFailed);
+				
+				var build = await ctx.CallToolJsonAsync("roslyn_build_project", new { projectPath = a.Csproj });
+				var hint  = build?["hint"]?.GetValue<string>() ?? "";
+				
+				if(build?["source"]?.GetValue<string>() != "msbuild")
+					
+					return (false, $"FAIL  (expected source: msbuild, the Roslyn check skipped: {build?.ToJsonString()})");
+				
+				return hint.Contains("fast-path was skipped") && hint.Contains("MSBuild failure on the project file of")
+					? (true, "PASS  (source: msbuild, hint names the MSBuild failure)")
+					: (false, $"FAIL  (hint does not say why the fast path was skipped: '{hint}')");
+			}),
+			
+			// Recovery: once the file is free, a reload is healthy and replaces the unhealthy workspace —
+			// with no retries spent, since the live workspace failed on the same project.
+			new("load health: a healthy reload replaces the unhealthy workspace", async () =>
+			{
+				blockedA?.Dispose();
+				blockedA = null;
+				
+				if(await BumpVersionAsync(a) is { } error)
+					
+					return (false, $"FAIL  ({error})");
+				
+				if(await SettleHealthyAsync(a, TimeSpan.FromSeconds(30)) is not { } drift)
+					
+					return (false, "FAIL  (the workspace did not become healthy within 30 s of the cache being freed)");
+				
+				if(drift["projects_with_load_failures"] is not null)
+					
+					return (false, $"FAIL  (projects_with_load_failures still set: {drift.ToJsonString()})");
+				
+				return HasCs8632(await Diagnostics(a))
+					? (false, "FAIL  (healthy, but CS8632 is still reported: the options were not reloaded)")
+					: (true, "PASS  (healthy, Nullable back on, no CS8632)");
+			}),
+			
+			// Health narrowed to what a compilation is built from. Before, one project that failed its
+			// design-time build made every project of the solution report phantom diagnostics — and such
+			// a failure is often for good. Bad is the control: its own diagnostics are phantom.
+			new("load health: a failing project does not make a project beside it phantom", async () =>
+			{
+				var badHint  = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = bad }))?["hint"]?.GetValue<string>() ?? "";
+				var goodHint = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = good }))?["hint"]?.GetValue<string>() ?? "";
+				
+				if(!badHint.Contains("phantom"))
+					
+					return Skip.SetupUnavailable($"{NotFailed} (Bad's diagnostics carry no phantom hint: '{badHint}')");
+				
+				return goodHint.Contains("phantom")
+					? (false, $"FAIL  (Good does not depend on Bad, yet its diagnostics are called phantom: '{goodHint}')")
+					: (true, "PASS  (Bad's diagnostics phantom, Good's not)");
+			}),
+			
+			// The same narrowing for the build: Good keeps the Roslyn fast path. Whether the dotnet build
+			// that follows succeeds (the fixture is not restored) is not what is tested.
+			new("load health: build_project keeps the fast path for a project beside a failing one", async () =>
+			{
+				var hint = (await ctx.CallToolJsonAsync("roslyn_build_project", new { projectPath = good }))?["hint"]?.GetValue<string>() ?? "";
+				
+				return hint.Contains("fast-path was skipped")
+					? (false, $"FAIL  (the fast path was skipped for Good over Bad's failure: '{hint}')")
+					: (true, "PASS  (no fast-path skip for Good)");
+			}),
+			
+			// Projects are told apart by file, not name: Client/Common and Server/Common are both "Common",
+			// and with health keyed by name, Server/Common's failure was pinned on Client/Common too. The
+			// blocked one is the control.
+			new("load health: a failing project does not make a namesake in another directory phantom", async () =>
+			{
+				var serverHint = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = serverCommon }))?["hint"]?.GetValue<string>() ?? "";
+				var clientHint = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = clientCommon }))?["hint"]?.GetValue<string>() ?? "";
+				
+				if(!serverHint.Contains("phantom"))
+					
+					return Skip.SetupUnavailable($"{NotFailed} (Server/Common's diagnostics carry no phantom hint: '{serverHint}')");
+				
+				return clientHint.Contains("phantom")
+					? (false, $"FAIL  (Client/Common is called phantom over Server/Common's failure: '{clientHint}')")
+					: (true, "PASS  (Server/Common phantom, its namesake Client/Common not)");
+			}),
+			
+			// The other side of the narrowing: a project is only as sound as what it is built from. App
+			// references the failing Lib directly and Top through App; both are told their diagnostics may be
+			// phantom. Removing the dependency walk from WorkspaceHealth.Covering, or walking dependants
+			// instead, fails this. Lib is the control.
+			new("load health: a project built from a failing one is phantom, directly or not", async () =>
+			{
+				string HintOf(JsonNode? diagnostics) => diagnostics?["hint"]?.GetValue<string>() ?? "";
+				
+				var libHint = HintOf(await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = lib }));
+				var appHint = HintOf(await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = app }));
+				var topHint = HintOf(await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = top }));
+				
+				if(!libHint.Contains("phantom"))
+					
+					return Skip.SetupUnavailable($"{NotFailed} (Lib's diagnostics carry no phantom hint: '{libHint}')");
+				
+				if(!appHint.Contains("phantom"))
+					
+					return (false, $"FAIL  (App references the failing Lib, but its diagnostics are not called phantom: '{appHint}')");
+				
+				return topHint.Contains("phantom")
+					? (true, "PASS  (Lib, App (direct) and Top (transitive) all phantom)")
+					: (false, $"FAIL  (Top depends on Lib through App, but its diagnostics are not called phantom: '{topHint}')");
+			}),
+			
+			// And the build: App's Roslyn check would be a check of a compilation built against a broken Lib.
+			new("load health: build_project skips the fast path for a project built from a failing one", async () =>
+			{
+				var hint = (await ctx.CallToolJsonAsync("roslyn_build_project", new { projectPath = app }))?["hint"]?.GetValue<string>() ?? "";
+				
+				return hint.Contains("fast-path was skipped") && hint.Contains("Lib")
+					? (true, "PASS  (fast path skipped for App, naming Lib)")
+					: (false, $"FAIL  (App's build did not skip the fast path over Lib's failure: '{hint}')");
+			}),
+			
+			// Worse is counted project by project. Bad has been broken from the start; a reload that also
+			// breaks Good loses Good, so it is discarded and Good keeps its options — before, any broken
+			// project in the live workspace let every reload through, and Good stayed broken.
+			new("load health: a reload that breaks a working project is discarded while another stays broken", async () =>
+			{
+				blockedGood = new(s.PathOf("Good/obj/Debug/net10.0/Good.AssemblyInfoInputs.cache"));
+				
+				if(await BumpVersionAtAsync(good, s.Dir) is { } error)
+					
+					return (false, $"FAIL  ({error})");
+				
+				var diagnostics = await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = good });
+				var drift       = await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = good });
+				var last        = drift?["last_unhealthy_load"]?.GetValue<string>() ?? "";
+				
+				if(HasCs8632(diagnostics))
+					
+					return (false, "FAIL  (CS8632 on Good: the reload that broke it was promoted because Bad was already broken)");
+				
+				return last.Contains("Reload discarded") && drift?["reload_pending"]?.GetValue<bool>() == true
+					? (true, "PASS  (reload discarded, Good kept its options, retry pending)")
+					: (false, $"FAIL  (no discard recorded, or no retry pending: {drift?.ToJsonString()})");
+			}),
+			
+			// And Good comes back by itself once its file is free, Bad still broken: the retry promotes a
+			// reload that breaks nothing the live workspace had working.
+			new("load health: the working project recovers while another stays broken", async () =>
+			{
+				blockedGood?.Dispose();
+				blockedGood = null;
+				
+				var deadline = DateTime.UtcNow.AddSeconds(90);
+				
+				while(DateTime.UtcNow < deadline) {
+					
+					var diagnostics = await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = good });
+					var drift       = await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = good });
+					
+					if(drift?["reload_pending"] is null && !HasCs8632(diagnostics) && diagnostics?["hint"] is null)
+						
+						return Names(drift?["projects_with_load_failures"]).Contains("Bad")
+							? (true, "PASS  (Good recovered, Bad still reported)")
+							: (false, $"FAIL  (recovered, but Bad's failure is no longer reported: {drift?.ToJsonString()})");
+					
+					await Task.Delay(500);
+				}
+				
+				return (false, "FAIL  (Good did not recover within 90 s of its cache being freed)");
+			}),
+			
+			// The reload path. The live workspace is healthy, so a reload that fails on the project file
+			// is worse than what it would replace: it is discarded and a retry scheduled. The caller is
+			// served the previous workspace — options intact, so no CS8632 — and told a reload is pending.
+			new("load health: an unhealthy reload is discarded and the healthy workspace kept", async () =>
+			{
+				var before = await Drift(b);
+				
+				if(before?["workspace_healthy"]?.GetValue<bool>() != true)
+					
+					return (false, $"FAIL  (precondition: fixture B did not load healthy: {before?.ToJsonString()})");
+				
+				blockedB = Block(b, nameB);
+				
+				if(await BumpVersionAsync(b) is { } error)
+					
+					return (false, $"FAIL  ({error})");
+				
+				var diagnostics = await Diagnostics(b);
+				var drift       = await Drift(b);
+				var last        = drift?["last_unhealthy_load"]?.GetValue<string>() ?? "";
+				
+				if(!last.Contains("Reload discarded") && !HasCs8632(diagnostics) && !await LoadFailedAsync(b)) {
+					
+					failedB = false;
+					
+					return Skip.SetupUnavailable(NotFailed);
+				}
+				
+				if(HasCs8632(diagnostics))
+					
+					return (false, "FAIL  (CS8632 reported: the unhealthy reload was promoted over a healthy workspace)");
+				
+				if(drift?["workspace_healthy"]?.GetValue<bool>() != true)
+					
+					return (false, $"FAIL  (the kept workspace should still be healthy: {drift?.ToJsonString()})");
+				
+				if(drift["reload_pending"]?.GetValue<bool>() != true)
+					
+					return (false, $"FAIL  (reload_pending should stay set while the retry is scheduled: {drift.ToJsonString()})");
+				
+				return last.Contains("Reload discarded") && last.Contains("MSBuild failure on the project file of")
+					? (true, "PASS  (reload discarded, healthy workspace kept, reload pending)")
+					: (false, $"FAIL  (last_unhealthy_load does not record the discard and its cause: '{last}')");
+			}),
+			
+			// The bound on discarding. A failure that outlasts four discarded reloads is taken to be the
+			// project's own, so the fifth attempt is promoted, and the workspace says it is unhealthy.
+			// Waiting out four deferrals — each as long as the attempt before it, doubling — takes about a
+			// minute, hence slow. On CI it runs on Linux only: the cap is a count in ReloadAttempt, the same
+			// on every platform, and the part that is not — the block failing the build — is covered on every
+			// runner by the tests above. A local --slow run checks it on any platform.
+			new("load health: an unhealthy reload is promoted after four discards in a row", async () =>
+			{
+				if(Skip.OnCiRunner && !OperatingSystem.IsLinux())
+					
+					return Skip.NotApplicable("platform-independent; on CI this slow test runs on the Linux runner only");
+				
+				if(!failedB)
+					
+					return Skip.SetupUnavailable(NotFailed);
+				
+				var deadline = DateTime.UtcNow.AddMinutes(3);
+				
+				while(DateTime.UtcNow < deadline) {
+					
+					var drift = await Drift(b);
+					
+					if(drift?["workspace_healthy"]?.GetValue<bool>() == false) {
+						
+						if(!Names(drift["projects_with_load_failures"]).Contains(nameB))
+							
+							return (false, $"FAIL  (promoted, but projects_with_load_failures does not name {nameB}: {drift.ToJsonString()})");
+						
+						// The record that explains an unhealthy workspace replacing a healthy one must be the one
+						// check_drift shows, not one a later warning of the same promotion overwrote.
+						var last = drift["last_unhealthy_load"]?.GetValue<string>() ?? "";
+						
+						return last.Contains("Reload promoted although it had") && last.Contains("4 reloads in a row")
+							? (true, "PASS  (promoted after four discards; workspace_healthy: false; last_unhealthy_load says why)")
+							: (false, $"FAIL  (last_unhealthy_load does not record the promotion after four discards: '{last}')");
+					}
+					
+					await Task.Delay(1000);
+				}
+				
+				return (false, "FAIL  (still discarding after 3 minutes: the cap did not promote the reload)");
+			}) { Slow = true },
+			
+			// Recovery for fixture B, whichever state the tests above left — and with no edit to prompt it,
+			// as when a long build outside the server ends: a discarded reload's retry still scheduled (the
+			// slow test skipped), or an unhealthy workspace promoted past the cap (it ran), whose healing
+			// retries must pick the free file up. Before them, the promoted workspace stayed broken until
+			// the next edit (#300 review).
+			new("load health: the reload path recovers by itself once the file is free", async () =>
+			{
+				blockedB?.Dispose();
+				blockedB = null;
+				
+				if(await SettleHealthyAsync(b, TimeSpan.FromSeconds(90)) is not { } drift)
+					
+					return (false, "FAIL  (fixture B did not become healthy within 90 s of the cache being freed)");
+				
+				return HasCs8632(await Diagnostics(b))
+					? (false, "FAIL  (healthy, but CS8632 is still reported)")
+					: (true, $"PASS  (healthy, nothing pending: {drift["last_synced_utc"]})");
+			}),
+		};
+		
+		return new TestGroup($"Load Health ({tests.Count} tests)", tests, Teardown: async () =>
+		{
+			blockedA?.Dispose();
+			blockedB?.Dispose();
+			blockedS?.Dispose();
+			blockedServer?.Dispose();
+			blockedLib?.Dispose();
+			blockedGood?.Dispose();
+			
+			// A retry scheduled for B must not run against a deleted tree: let it settle first.
+			await SettleHealthyAsync(b, TimeSpan.FromSeconds(30));
+			
+			a.Dispose();
+			b.Dispose();
+			s.Dispose();
+		});
+	}
+	
+	// Puts a directory where the fixture's assembly-info cache goes. The design-time build of a changed
+	// version then fails to write it.
+	static BlockedFile Block(FixtureProject fx, string name) =>
+		new(fx.PathOf($"obj/Debug/net10.0/{name}.AssemblyInfoInputs.cache"));
+	
+	/// <summary>
+	///     A file path nothing can write until disposed, because a directory stands in its place. Neither of
+	///     the obvious ways works on every platform: holding the file open binds another process on Windows
+	///     only (.NET's locks on Linux and macOS are advisory, and MSBuild's write went straight through one),
+	///     and a read-only file is replaced there by a rename onto it. A directory refuses a write and a
+	///     rename alike, for every user, root included. Disposing removes it; the next build writes the file.
+	/// </summary>
+	sealed class BlockedFile : IDisposable
+	{
+		readonly string path;
+		bool            disposed;
+		
+		public BlockedFile(string path)
+		{
+			this.path = path;
+			
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+			
+			if(File.Exists(path))
+				File.Delete(path);
+			
+			Directory.CreateDirectory(path);
+		}
+		
+		public void Dispose()
+		{
+			if(disposed)
+				
+				return;
+			
+			disposed = true;
+			
+			Directory.Delete(path);
+		}
+	}
+}

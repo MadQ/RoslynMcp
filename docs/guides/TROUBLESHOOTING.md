@@ -160,6 +160,34 @@ this state is usually transient — it most often appears on the *first* load of
 `last_unhealthy_load` on `roslyn_check_drift` is retained after recovery, so you can still tell
 whether an episode happened earlier in the session.
 
+### Hundreds of nullable warnings (CS8632), but the project enables `Nullable`
+
+**Symptom:** `roslyn_get_diagnostics` reports a flood of `CS8632` ("The annotation for nullable
+reference types should only be used in code within a '#nullable' annotations context") in a
+project whose `.csproj` sets `<Nullable>enable</Nullable>`, and `roslyn_get_project_info` shows
+`nullable: "Disable"`.
+
+**Cause:** the same contention as above, hitting a later step. The design-time build could not
+write a file under `obj\` — `load_warnings` reads like `Msbuild failed when processing the file
+'…\YourProject.csproj' with message: Could not write lines to file "obj\…\YourProject.AssemblyInfoInputs.cache"`
+— and the project kept its references but lost its compilation options, which fell back to
+defaults. Other options the project sets (`LangVersion`, `AllowUnsafeBlocks`, …) can be affected too.
+
+**Confirm it:**
+
+```
+roslyn_check_drift  →  "workspace_healthy": false,
+                       "projects_with_load_failures": ["YourProject"]
+```
+
+**Fix:** as above. The server handles it like a dropped-reference load: it retries, keeps a
+healthy workspace rather than replace it with this one, and `roslyn_build_project` runs a real
+build. When the failure is not contention but the project itself — an edit that broke an
+`<Import>`, say — reloads stop being discarded after four in a row, and the workspace reports
+itself unhealthy until the project is fixed (it retries every 30 s for about three more minutes,
+in case the cause was contention after all). Only the projects built from the failing one are
+affected: the diagnostics of an unrelated project in the same solution are not called phantom.
+
 ### "MSBuild not found"
 
 **Symptom:** Error message about MSBuild not being available.

@@ -214,6 +214,39 @@ static class TestFixtures
 	;
 	
 	/// <summary>
+	///     Copies the repo's <c>global.json</c> to <see cref="TempRoot"/>, so every fixture project resolves the
+	///     SDK the repo pins. Fixtures live outside the repo, so without it each one resolves the newest SDK on
+	///     the machine — and a newer one than the server's MSBuild can load gives every unrestored fixture a
+	///     design-time build with no references at all (it happened with a .NET 11 release candidate beside the
+	///     pinned 10.0.302: every fixture group failed while the code was fine). The SDK resolver looks for
+	///     <c>global.json</c> in the project's directory and each one above it, so one file covers every fixture.
+	///     Written only when it differs, before any server starts: a fixture workspace counts a change to it as a
+	///     reload input. Best-effort like <see cref="SweepStale"/>: another harness run may be writing the same
+	///     file, and a pin that could not be written leaves the fixtures on the newest SDK, as before it existed —
+	///     never a run that does not start.
+	/// </summary>
+	public static void PinSdk(string repoRoot)
+	{
+		var source = Path.Combine(repoRoot, "global.json");
+		var target = Path.Combine(TempRoot, "global.json");
+		
+		try {
+			
+			if(!File.Exists(source))
+				
+				return;
+			
+			var pinned = File.ReadAllText(source);
+			
+			Directory.CreateDirectory(TempRoot);
+			
+			if(!File.Exists(target) || File.ReadAllText(target) != pinned)
+				File.WriteAllText(target, pinned);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+	}
+	
+	/// <summary>
 	///     Removes what a killed run leaves behind: fixture trees under <see cref="TempRoot"/> (and the
 	///     legacy <c>%TEMP%\RoslynMcp_CodeFix_*</c> directories) older than <paramref name="olderThan"/>,
 	///     plus scratch files older harness binaries wrote into <c>src/RoslynMcp</c>. Every delete is

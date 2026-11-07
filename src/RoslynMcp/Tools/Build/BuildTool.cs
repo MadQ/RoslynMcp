@@ -86,12 +86,21 @@ internal sealed class BuildTool : RoslynMcpTool
 		var buildTarget  = ResolvedTargetPath(projectPath, csprojPath);
 		
 		// A workspace that loaded without metadata references reports a flood of phantom
-		// CS0246/CS0234 for code that compiles fine. Short-circuiting on those would fail a healthy
-		// project — and worse, this tool is what callers reach for to check whether the workspace is
-		// lying, so repeating the lie leaves them with no way out short of knowing about forceBuild.
-		// Skip straight to the real build instead (issue #235).
+		// CS0246/CS0234 for code that compiles fine, and one whose load failed on a project file can
+		// have default options (Nullable off: phantom CS8632, #300). Short-circuiting on those would
+		// fail a healthy project — and worse, this tool is what callers reach for to check whether the
+		// workspace is lying, so repeating the lie leaves them with no way out short of knowing about
+		// forceBuild. Skip straight to the real build instead (issue #235).
 		var health = TryGetHealth(projectPath)
 		;
+		
+		// A project target is only as unhealthy as what it is built from (WorkspaceHealth.Covering); a
+		// solution target builds everything, so all of it counts. Narrowed against the workspace as it
+		// stands: asking for the project would run a pending reload, seconds of MSBuild that a build has
+		// no use for.
+		if(health is not null && solutionPath is null && csprojPath is not null)
+			health = health.Covering(workspace.PeekSolution(projectPath), [csprojPath]);
+		
 		var unhealthyWorkspace = health is { IsHealthy: false };
 		
 		// A .csproj the loaded workspace does not hold — one its solution does not list — has no
@@ -136,7 +145,21 @@ internal sealed class BuildTool : RoslynMcpTool
 			
 			var roslynErrors      = roslynDiagnostics.Where(d => d.Severity == "error").ToArray();
 			
-			if(roslynErrors.Length > 0) {
+			// Health again, of the compilations just checked: getting them can wait for a reload, and a
+			// reload may promote an unhealthy workspace — past the discard cap, or one that breaks nothing
+			// the live one had working. The health read above describes the workspace before it, and its
+			// errors would then stop a build they have no say in (#300 review).
+			if(roslynErrors.Length > 0
+			   && TryGetHealth(projectPath) is { } now
+			   && targets.FirstOrDefault(target => target.Project is not null).Project is { } first
+			   && now.Covering(first.Solution, targets.Select(target => target.Project?.FilePath).OfType<string>()) is { IsHealthy: false } narrowed) {
+				
+				health             = narrowed;
+				unhealthyWorkspace = true;
+				
+				scope.Record("workspace turned unhealthy while the Roslyn check ran — building instead");
+			}
+			else if(roslynErrors.Length > 0) {
 				
 				DiagnosticItem[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
 				
@@ -220,9 +243,10 @@ internal sealed class BuildTool : RoslynMcpTool
 			// Say so explicitly: a build that succeeds while roslyn_get_diagnostics reports
 			// hundreds of errors is otherwise baffling.
 			Hint = unhealthyWorkspace
-				? "The Roslyn fast-path was skipped: the workspace loaded without metadata references on "
-					+ $"{string.Join(", ", health!.ProjectsWithoutReferences)}, so its diagnostics are phantom. "
-					+ "This result comes from a real dotnet build. Call roslyn_respawn to reload the workspace."
+				? $"The Roslyn fast-path was skipped: the workspace {health!.Problem}, so its diagnostics may be phantom. "
+					+ "This result comes from a real dotnet build. If it fails the same way, the project file itself "
+					+ "may be broken (see load_warnings from roslyn_get_project_info); if it succeeds, call "
+					+ "roslyn_respawn to reload the workspace."
 				: null
 		});
 	}

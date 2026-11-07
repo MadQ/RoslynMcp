@@ -205,22 +205,30 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		string[]? loadWarnings = null;
 
 		// Ask the workspace directly before falling back to the error-shape heuristic. A workspace
-		// that loaded without metadata references is an authoritative answer, and it does not
+		// that loaded without metadata references, or with an MSBuild failure on a project file
+		// (#300), is an authoritative answer, and it does not
 		// depend on error volume — a small project produces only a handful of phantom errors, far
 		// below the thresholds below, and would otherwise be reported as ordinary broken code.
 		var health = TryGetHealth(projectPath)
 		;
+		
+		// Only what these compilations are built from: a broken project elsewhere in the solution does not
+		// make this one's diagnostics phantom.
+		if(health is not null && targets.FirstOrDefault(target => target.Project is not null).Project is { } first)
+			health = health.Covering(first.Solution, targets.Select(target => target.Project?.FilePath).OfType<string>());
 
 		if(health is { IsHealthy: false }) {
 
 			possibleLoadIssue = true;
 			loadWarnings      = health.LoadWarnings is { Length: > 0 } w ? w : null;
 
-			hint = "These errors are phantom. The workspace loaded without metadata references on: "
-				+ $"{string.Join(", ", health.ProjectsWithoutReferences)} — usually a contended MSBuild "
-				+ "design-time build, not a problem with your code. Call roslyn_respawn to reload the "
-				+ "workspace. To confirm the code itself is fine, call roslyn_build_project — it detects "
-				+ "this state and runs a real dotnet build rather than trusting this compilation.";
+			// "May be": a failure of the project file itself (an import that is not there) and a real
+			// error in the source can come together, and no reload repairs the first (#300 review).
+			hint = $"These diagnostics may be phantom. The workspace {health.Problem}. Usually that is a contended "
+				+ "MSBuild design-time build — something else writing the same obj\\ files — and roslyn_respawn "
+				+ "reloads it. If load_warnings show a failure of the project file itself, fix that instead: no "
+				+ "reload will. roslyn_build_project tells the two apart — it detects this state and runs a real "
+				+ "dotnet build rather than trusting this compilation.";
 		}
 		else if(filePath is null && errorCount >= workspaceLoadMinErrors) {
 

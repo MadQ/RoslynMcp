@@ -424,6 +424,11 @@ internal sealed record CheckDriftResult(
 	[property: JsonPropertyName("projects_without_references")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string[]?                                            ProjectsWithoutReferences,
+	// Kept their references, but MSBuild failed on their project file, so their compilation
+	// options can be defaults: the same false all-clear, on options instead of references (#300).
+	[property: JsonPropertyName("projects_with_load_failures")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]?                                            ProjectsWithLoadFailures,
 	[property: JsonPropertyName("last_unhealthy_load")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string?                                              LastUnhealthyLoad,
