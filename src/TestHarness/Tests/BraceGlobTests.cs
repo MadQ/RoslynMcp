@@ -73,6 +73,35 @@ static class BraceGlobTests
 				: (false, $"FAIL  ({what}: missing [{string.Join(", ", missing)}], unexpected [{string.Join(", ", extra)}])");
 		}
 		
+		// A hostile-shaped pattern must be answered within 5 s: with the error containing
+		// 'expectError', or, when it is null, with a listing (no error).
+		async Task<(bool pass, string message)> Answers(string pattern, string? expectError)
+		{
+			
+			var clock = System.Diagnostics.Stopwatch.StartNew();
+			var data  = await Call("roslyn_list_files", new { projectPath = csproj, pattern });
+			var error = data?["error"]?.GetValue<string>();
+			var took  = clock.ElapsedMilliseconds;
+			
+			if(data is null)
+				
+				return (false, $"FAIL  (no response after {took} ms)");
+			
+			if(took > 5_000)
+				
+				return (false, $"FAIL  (answered after {took} ms; expected under 5 s)");
+			
+			if(expectError is null)
+				
+				return error is null
+					? (true,  $"PASS  (listed in {took} ms)")
+					: (false, $"FAIL  (expected a listing, got the error: {error})");
+			
+			return error is not null && error.Contains(expectError, StringComparison.Ordinal)
+				? (true,  $"PASS  (refused in {took} ms)")
+				: (false, $"FAIL  (expected an error containing '{expectError}', got: {error ?? "a listing"})");
+		}
+		
 		var csprojName = Path.GetFileName(csproj);
 		string[] programAndOther = ["Other.cs", "Program.cs"];
 		
@@ -179,6 +208,29 @@ static class BraceGlobTests
 						? (true,  $"PASS  (refused at the cap in {clock.ElapsedMilliseconds} ms)")
 						: (false, $"FAIL  (expected the 256 cap within 5 s; {clock.ElapsedMilliseconds} ms, error: {error ?? "none"})");
 				}),
+			
+			// Copilot's shape (#397): 590 groups, each the first alternative of the one around it,
+			// with a distinct second alternative (b0, b1, …) so every level adds one pattern. The cap
+			// is reached at level 256 — an error, quickly, and no recursion on the way down.
+			new("brace globs: deeply nested groups fail at the cap",
+				async () => await Answers(
+					string.Concat(Enumerable.Repeat("{", 590)) + "a" + string.Concat(Enumerable.Range(0, 590).Select(i => $",b{i}}}")),
+					expectError: "256")),
+			
+			// The same depth collapsing to one pattern: every level is 'x' or the rest, and the rest
+			// ends in 'x', so 800 levels each keep two patterns. Answered without an error.
+			new("brace globs: deeply nested duplicates expand without an error",
+				async () => await Answers(
+					string.Concat(Enumerable.Repeat("{", 800)) + "x" + string.Concat(Enumerable.Repeat(",x}", 800)),
+					expectError: null)),
+			
+			// 256 patterns, then 4,000 braces that never close: finding the next group used to
+			// rescan from each unmatched brace to the end, for every one of the 256 patterns —
+			// about 2 billion steps, tens of seconds. One pass per pattern answers at once.
+			new("brace globs: unmatched braces after many expansions do not stall",
+				async () => await Answers(
+					string.Concat(Enumerable.Repeat("{a,b}", 8)) + new string('{', 4000),
+					expectError: null)),
 			
 			// The filePattern of the three content searches (GlobMatcher). Each of the five files
 			// holds one match, so the files reported are exactly the files the pattern selected.
