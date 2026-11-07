@@ -272,9 +272,15 @@ static class LoadHealthTests
 			// The bound on discarding. A failure that outlasts four discarded reloads is taken to be the
 			// project's own, so the fifth attempt is promoted, and the workspace says it is unhealthy.
 			// Waiting out four deferrals — each as long as the attempt before it, doubling — takes about a
-			// minute, hence slow.
+			// minute, hence slow. On CI it runs on Linux only: the cap is a count in ReloadAttempt, the same
+			// on every platform, and the part that is not — the block failing the build — is covered on every
+			// runner by the tests above. A local --slow run checks it on any platform.
 			new("load health: an unhealthy reload is promoted after four discards in a row", async () =>
 			{
+				if(Skip.OnCiRunner && !OperatingSystem.IsLinux())
+					
+					return Skip.NotApplicable("platform-independent; on CI this slow test runs on the Linux runner only");
+				
 				if(!failedB)
 					
 					return Skip.SetupUnavailable(NotFailed);
