@@ -1098,6 +1098,16 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	;
 	
 	/// <summary>
+	///     Hint on a "symbol not found" error from a tool that looks a symbol up by name (see
+	///     <see cref="SymbolNotFoundError"/>). One constant because copies of it drifted and lost the tools'
+	///     <c>roslyn_</c> prefix (#326, now caught by RMCP010).
+	/// </summary>
+	protected const string SymbolNotFoundHint =
+		"Use roslyn_get_type_members or roslyn_find_references to verify the name."
+	;
+	
+
+	/// <summary>
 	///     Normalizes an optional <c>projectPath</c> argument for a tool with no file anchor: an omitted value
 	///     resolves to the session default workspace (a .sln/.slnx or .csproj path). This is the only way a
 	///     tool opts in to the default — <see cref="WorkspaceManager.ResolveProjectPath"/> rejects an empty
@@ -2229,7 +2239,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static ErrorResult SymbolNotFoundError(string symbolName) =>
 		new(
 			$"Symbol '{symbolName}' not found.",
-			"Use roslyn_get_type_members or roslyn_find_references to verify the name.");
+			SymbolNotFoundHint);
 	
 	/// <summary>
 	///     Detects a VS Code Copilot chat symbol-reference prefix ("sym:" or "#sym:") that chat

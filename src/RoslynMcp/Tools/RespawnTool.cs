@@ -33,7 +33,7 @@ internal sealed class RespawnTool : RoslynMcpTool
 		return scope.Outcome("terminating", new RespawnResult(
 			"RoslynMcp server terminating — client will respawn automatically.",
 			pid,
-			"Rebuild first, then call respawn to load the new build."
+			"Rebuild first, then call roslyn_respawn to load the new build."
 		));
 	}
 }

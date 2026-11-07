@@ -118,7 +118,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			
 			return scope.Failed("symbol not found", new PreviewRenameResult(
 				null, null,
-				$"Symbol '{symbolName}' not found. Use get_type_members or find_references to verify the name.",
+				$"Symbol '{symbolName}' not found. {SymbolNotFoundHint}",
 				false
 			));
 		
@@ -168,8 +168,8 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		
 		return scope.Outcome("preview ready", new PreviewRenameResult(token, diff,
 			preConfirmed
-				? $"Pre-confirmed. Call apply_rename with token '{token}' and approval 'y' or 'session'."
-				: $"Review the diff, then call apply_rename with token '{token}' and approval 'y' or 'session'.",
+				? $"Pre-confirmed. Call roslyn_apply_rename with token '{token}' and approval 'y' or 'session'."
+				: $"Review the diff, then call roslyn_apply_rename with token '{token}' and approval 'y' or 'session'.",
 			preConfirmed
 		));
 	}
