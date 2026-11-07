@@ -179,7 +179,7 @@ internal sealed partial class WorkspaceManager
 					
 					var index = failure.IndexOf(path, comparison);
 					
-					while(index >= 0 && !SecurityBoundary.PathComparer.Equals(failure.Substring(index, path.Length), path))
+					while(index >= 0 && !IsWholePath(failure, index, path))
 						index = failure.IndexOf(path, index + 1, comparison);
 					
 					if(index < 0 || index > at)
@@ -195,6 +195,35 @@ internal sealed partial class WorkspaceManager
 			}
 			
 			return [..blamed];
+		}
+		
+		/// <summary>
+		///     Whether <paramref name="path"/>, found at <paramref name="index"/> of <paramref name="text"/>, is
+		///     that path and not the start of a longer one: the file system must agree on the spelling, and no
+		///     file-name character may follow. <c>…\Core.csproj</c> is found inside <c>…\Core.csproj.Tests.csproj</c>
+		///     and inside <c>…\Core.csproj.d\Other.csproj</c>, and is neither (#300 review). A message quotes a
+		///     path, or ends it with a period or a colon; a period directly followed by another file-name
+		///     character, or a separator, is part of the name.
+		/// </summary>
+		static bool IsWholePath(string text, int index, string path)
+		{
+			if(!SecurityBoundary.PathComparer.Equals(text.Substring(index, path.Length), path))
+				
+				return false;
+			
+			var end = index + path.Length;
+			
+			if(end == text.Length)
+				
+				return true;
+			
+			var next = text[end];
+			
+			if(next is '\\' or '/' || char.IsLetterOrDigit(next) || next is '_' or '-')
+				
+				return false;
+			
+			return next != '.' || end + 1 == text.Length || !(char.IsLetterOrDigit(text[end + 1]) || text[end + 1] is '_' or '-' or '.');
 		}
 		
 		/// <summary>

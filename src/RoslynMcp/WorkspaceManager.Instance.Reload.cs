@@ -119,8 +119,21 @@ internal sealed partial class WorkspaceManager
 				logger.LogInfo("Reload", $"Deferred reload retry abandoned: the workspace is being released ({loadPath})");
 			}
 			catch(Exception ex) {
+				
 				// Nothing above this on a timer thread — an escape would take the process down.
 				logger.LogError("Reload", $"Deferred reload retry failed: {ex.GetType().Name}: {ex.Message}");
+				
+				// A healing retry that failed outright — it waited out the load timeout behind a long build,
+				// say — still has its budget: nothing else retries an unhealthy workspace while no call needs a
+				// compilation, so it is re-armed rather than dropped (#300 review). Still under reloadGate.
+				if(!disposed && healingRetriesLeft > 0 && reloadVersion != 0) {
+					
+					healingRetriesLeft--;
+					
+					logger.LogInfo("Reload", $"Healing retry re-armed after the failure: in {MaxDeferMs} ms, {healingRetriesLeft} left after it");
+					
+					ScheduleDeferredRetry(MaxDeferMs);
+				}
 			}
 			finally {
 				reloadGate.Release();

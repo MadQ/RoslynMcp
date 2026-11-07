@@ -222,10 +222,13 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			possibleLoadIssue = true;
 			loadWarnings      = health.LoadWarnings is { Length: > 0 } w ? w : null;
 
-			hint = $"These diagnostics are phantom. The workspace {health.Problem} — usually a contended MSBuild "
-				+ "design-time build, not a problem with your code. Call roslyn_respawn to reload the "
-				+ "workspace. To confirm the code itself is fine, call roslyn_build_project — it detects "
-				+ "this state and runs a real dotnet build rather than trusting this compilation.";
+			// "May be": a failure of the project file itself (an import that is not there) and a real
+			// error in the source can come together, and no reload repairs the first (#300 review).
+			hint = $"These diagnostics may be phantom. The workspace {health.Problem}. Usually that is a contended "
+				+ "MSBuild design-time build — something else writing the same obj\\ files — and roslyn_respawn "
+				+ "reloads it. If load_warnings show a failure of the project file itself, fix that instead: no "
+				+ "reload will. roslyn_build_project tells the two apart — it detects this state and runs a real "
+				+ "dotnet build rather than trusting this compilation.";
 		}
 		else if(filePath is null && errorCount >= workspaceLoadMinErrors) {
 

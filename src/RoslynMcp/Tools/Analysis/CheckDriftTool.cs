@@ -155,12 +155,17 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 
 				(true, true) =>
 					"Two separate problems. Files changed on disk without the workspace noticing, AND the workspace "
-					+ $"{health!.Problem}. Call roslyn_respawn — it fixes both.",
+					+ $"{health!.Problem}. Call roslyn_respawn — it fixes both, unless the load failure is the project "
+					+ "file's own (see load_warnings from roslyn_get_project_info), which only fixing the file does.",
 
+				// No promise that a real build succeeds: a failure of the project file itself (an import that
+				// is not there) breaks that build too, and no reload repairs it (#300 review).
 				(false, true) =>
 					$"Source is in sync, but the workspace {health!.Problem}. Symbol results are unreliable and "
-					+ "roslyn_get_diagnostics will report phantom errors or warnings — a real build would succeed. "
-					+ "Call roslyn_respawn to reload.",
+					+ "roslyn_get_diagnostics may report phantom errors or warnings. Usually that is contention — "
+					+ "something else writing the same obj\\ files — and roslyn_respawn reloads it; if load_warnings "
+					+ "(roslyn_get_project_info) show a failure of the project file itself, fix that instead. "
+					+ "roslyn_build_project runs a real build and tells the two apart.",
 
 				(true, false) =>
 					"Files changed on disk without the workspace noticing. Symbol results may be stale — call "
