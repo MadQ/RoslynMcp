@@ -41,7 +41,7 @@ built-in tools only if a roslyn tool fails.
   matches in a specific context (e.g., "TODO" in comments only).
 - `roslyn_find_string_literal` — Search C# string literals by pattern, returning
   both the raw source text and the decoded value (quotes stripped, escape
-  sequences resolved). Supports glob matching (`useGlob: true`) and decoded
+  sequences resolved). Supports glob matching (`mode: "glob"`) and decoded
   value matching (e.g., search for a tab character, not `\\t`). Use INSTEAD OF
   `roslyn_semantic_search` `context:"strings"` when you need glob patterns,
   decoded-value matching, or the separate `text`/`value` fields per match.

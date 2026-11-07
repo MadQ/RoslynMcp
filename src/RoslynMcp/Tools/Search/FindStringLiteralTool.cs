@@ -19,7 +19,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		"Covers all string forms: regular (\"\"), verbatim (@\"\"), interpolated literal parts ($\"\"), " +
 		"raw (\"\"\"...\"\"\"), and UTF-8 literal variants. " +
 		"Use this instead of roslyn_semantic_search context:\"strings\" when you need: " +
-		"(1) glob matching via useGlob: true (e.g. *roslynmcp* with no regex escaping required); " +
+		"(1) glob matching via mode: \"glob\" (e.g. *roslynmcp* with no regex escaping required); " +
 		"(2) to match against the decoded value (e.g. search for a tab character, not \\\\t); " +
 		"(3) a clean result with separate 'text' (raw) and 'value' (decoded) fields per match. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page."

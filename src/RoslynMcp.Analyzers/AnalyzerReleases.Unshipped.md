@@ -5,3 +5,4 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
+RMCP010 | RoslynMcp.Tools | Warning | A string literal names a [McpServerTool] of the compilation without its roslyn_ prefix

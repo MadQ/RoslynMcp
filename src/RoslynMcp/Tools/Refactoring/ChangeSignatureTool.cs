@@ -76,7 +76,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		if(symbol is not IMethodSymbol method)
 			
 			return scope.Failed("not a method", symbol is null
-				? new ErrorResult($"Symbol '{methodName}' not found.", "Use get_type_members or find_references to verify the name.")
+				? SymbolNotFoundError(methodName)
 				: new ErrorResult($"'{methodName}' is a {symbol.Kind}, not a method."));
 		
 		// Parse the parameters to add.
@@ -153,7 +153,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		return scope.Outcome($"+{result.ParametersAdded.Length} param ({string.Join(", ", result.ParametersAdded)})", new ChangeSignatureResult(
 			Diff:               result.Diff!,
 			Token:              token,
-			Message:            $"Review the diff, then call apply_signature_change with token '{token}' and approval 'y' or 'session'.",
+			Message:            $"Review the diff, then call roslyn_apply_signature_change with token '{token}' and approval 'y' or 'session'.",
 			ParametersAdded:    result.ParametersAdded,
 			DeprecationMessage: result.DeprecationMessage,
 			FilesAffected:      result.FilesAffected)
