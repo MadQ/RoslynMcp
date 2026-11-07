@@ -149,6 +149,44 @@ static class BraceGlobTests
 						: (false, $"FAIL  (expected an error naming the cap of 256, got: {data?.ToJsonString() ?? "no response"})");
 				}),
 			
+			// The cap counts distinct patterns: nine '{a,a}' groups are 512 ways to spell one pattern,
+			// 'aaaaaaaaa', which names no file here. Counting raw expansions refused it.
+			new("brace globs: duplicate expansions do not count toward the cap",
+				async () => Exactly(await ListAsync(string.Concat(Enumerable.Repeat("{a,a}", 9))), [], "{a,a} nine times")),
+			
+			// 20,000 groups (100 KB) used to recurse once per group before the first pattern was
+			// complete — a stack overflow, which no catch survives, so the server died. The length
+			// limit refuses it before any expansion; the next call shows the server is still up.
+			new("brace globs: an oversized pattern is refused and the server stays up",
+				async () => {
+					
+					var data  = await Call("roslyn_list_files", new { projectPath = csproj, pattern = string.Concat(Enumerable.Repeat("{a,b}", 20_000)) });
+					var error = data?["error"]?.GetValue<string>();
+					
+					if(error is null || !error.Contains("4096", StringComparison.Ordinal)) {
+						
+						var got = data?.ToJsonString() ?? "no response";
+						
+						return (false, $"FAIL  (expected an error naming the 4096-character limit, got: {got[..Math.Min(300, got.Length)]})");
+					}
+					
+					return Exactly(await ListAsync("Probe.cs"), ["Probe.cs"], "the next call");
+				}),
+			
+			// Just under the length limit, 800 groups: expansion goes a level at a time and fails at
+			// the cap after nine levels, without walking 800 levels deep first.
+			new("brace globs: many groups under the length limit fail at the cap",
+				async () => {
+					
+					var clock = System.Diagnostics.Stopwatch.StartNew();
+					var data  = await Call("roslyn_list_files", new { projectPath = csproj, pattern = string.Concat(Enumerable.Repeat("{a,b}", 800)) });
+					var error = data?["error"]?.GetValue<string>();
+					
+					return error is not null && error.Contains("256", StringComparison.Ordinal) && clock.Elapsed < TimeSpan.FromSeconds(5)
+						? (true,  $"PASS  (refused at the cap in {clock.ElapsedMilliseconds} ms)")
+						: (false, $"FAIL  (expected the 256 cap within 5 s; {clock.ElapsedMilliseconds} ms, error: {error ?? "none"})");
+				}),
+			
 			// The filePattern of the three content searches (GlobMatcher). Each of the five files
 			// holds one match, so the files reported are exactly the files the pattern selected.
 			new("brace globs: search_files filePattern '{Program,Other}.cs'",

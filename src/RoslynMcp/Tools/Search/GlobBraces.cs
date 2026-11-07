@@ -1,3 +1,5 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace RoslynMcp.Tools;
 
 /// <summary>
@@ -10,22 +12,46 @@ namespace RoslynMcp.Tools;
 ///         or a group with no comma at its own level (<c>{x}</c>), is a literal character, as in a shell, so a file
 ///         whose name holds braces can still be named. There is no escape character: the matchers have none either.
 ///     </para>
+///     <para>
+///         The pattern comes from an agent, so its size is bounded before any work: at most
+///         <see cref="MaxPatternLength"/> characters, and at most <see cref="MaxExpansions"/> distinct patterns.
+///         Expansion goes one group level at a time, without recursion, and each level at least doubles the
+///         patterns a real group produces — so a pattern that asks for too many fails within a few levels.
+///     </para>
 /// </summary>
 internal static class GlobBraces
 {
 	/// <summary>
-	///     The most patterns one glob may expand to. Each group multiplies the count, so a short pattern can ask for
-	///     thousands of matchers; past this a call fails instead of matching a silent part of what was asked.
+	///     The most distinct patterns one glob may expand to. Each group multiplies the count, so a short pattern can
+	///     ask for thousands of matchers; past this a call fails instead of matching a silent part of what was asked.
 	/// </summary>
 	internal const int MaxExpansions = 256;
 	
 	/// <summary>
-	///     Expands every brace group of <paramref name="pattern"/>. A pattern without one comes back alone and
-	///     unchanged; empty expansions are dropped, so the result can be empty (<c>{,}</c>), which matches nothing.
-	///     Returns false, with no patterns, when the expansion would exceed <see cref="MaxExpansions"/>.
+	///     The longest glob accepted. Far above any real one (a path is at most a few hundred characters), and low
+	///     enough that the scans below, quadratic in the length at worst, stay in milliseconds.
 	/// </summary>
-	internal static bool TryExpand(string pattern, out string[] patterns)
+	internal const int MaxPatternLength = 4096;
+	
+	/// <summary>
+	///     Expands every brace group of <paramref name="pattern"/>. A pattern without one comes back alone and
+	///     unchanged. Duplicates and empty expansions are dropped, so the result can be empty (<c>{,}</c>), which
+	///     matches nothing. Fails, with the error to return for <paramref name="parameter"/>, when the pattern is
+	///     longer than <see cref="MaxPatternLength"/> or expands to more than <see cref="MaxExpansions"/> distinct
+	///     patterns.
+	/// </summary>
+	internal static bool TryExpand(string pattern, string parameter, out string[] patterns, [NotNullWhen(false)] out string? error)
 	{
+		patterns = [];
+		error    = null;
+		
+		if(pattern.Length > MaxPatternLength) {
+			
+			error = $"{parameter} is {pattern.Length} characters long; a glob may have at most {MaxPatternLength}.";
+			
+			return false;
+		}
+		
 		if(pattern.IndexOf('{') < 0) {
 			
 			patterns = [pattern];
@@ -33,59 +59,78 @@ internal static class GlobBraces
 			return true;
 		}
 		
-		var results = new List<string>();
+		// Each entry carries where its search for the next group starts: everything before the group just
+		// expanded holds only literal braces, and expanding a later group cannot turn one into a group (an
+		// alternative is balanced and has no comma at its own level), so it is never scanned again.
+		List<(string Text, int From)> current = [(pattern, 0)];
 		
-		if(!Expand(pattern, "", results)) {
+		while(true) {
 			
-			patterns = [];
+			var next     = new List<(string Text, int From)>();
+			var seen     = new HashSet<string>(StringComparer.Ordinal);
+			var expanded = false;
 			
-			return false;
+			foreach(var (text, from) in current) {
+				
+				if(!TryFindGroup(text, from, out var open, out var close, out var alternatives)) {
+					
+					if(!Keep(text, text.Length))
+						
+						return TooMany(pattern, parameter, out error);
+					
+					continue;
+				}
+				
+				expanded = true;
+				
+				var head = text[..open];
+				var tail = text[(close + 1)..];
+				
+				foreach(var alternative in alternatives)
+					if(!Keep(head + alternative + tail, open))
+						
+						return TooMany(pattern, parameter, out error);
+			}
+			
+			if(!expanded) {
+				
+				patterns = [.. next.Select(entry => entry.Text)];
+				
+				return true;
+			}
+			
+			current = next;
+			
+			// '{,x}' expands to '' and 'x'. An empty pattern names no file, and Matcher is not asked what it
+			// makes of one. A duplicate ('{a,a}') is one matcher, not two, and does not count toward the cap.
+			bool Keep(string text, int from)
+			{
+				if(text.Length == 0 || !seen.Add(text))
+					
+					return true;
+				
+				next.Add((text, from));
+				
+				return next.Count <= MaxExpansions;
+			}
 		}
-		
-		// '{,x}' expands to '' and 'x'. An empty pattern names no file, and Matcher is not asked what it makes of one.
-		patterns = [.. results.Where(expanded => expanded.Length > 0).Distinct(StringComparer.Ordinal)];
-		
-		return true;
 	}
 	
-	/// <summary>The error for a pattern past <see cref="MaxExpansions"/>, naming the parameter it came in.</summary>
-	internal static string TooManyExpansions(string parameter, string pattern)
-		=> $"{parameter} '{pattern}' expands to more than {MaxExpansions} patterns. Use fewer or smaller {{a,b}} groups, or split it into several calls.";
-	
-	// Depth-first: the first group's alternatives, each followed by the rest of the pattern, which may hold more
-	// groups. Every leaf is one pattern, so the cap bounds the work as well as the result.
-	static bool Expand(string rest, string prefix, List<string> results)
+	static bool TooMany(string pattern, string parameter, out string error)
 	{
-		if(!TryFindGroup(rest, out var open, out var close, out var alternatives)) {
-			
-			if(results.Count == MaxExpansions)
-				
-				return false;
-			
-			results.Add(prefix + rest);
-			
-			return true;
-		}
+		error = $"{parameter} '{pattern}' expands to more than {MaxExpansions} patterns. Use fewer or smaller {{a,b}} groups, or split it into several calls.";
 		
-		var head = prefix + rest[..open];
-		var tail = rest[(close + 1)..];
-		
-		foreach(var alternative in alternatives)
-			if(!Expand(alternative + tail, head, results))
-				
-				return false;
-		
-		return true;
+		return false;
 	}
 	
-	// The first brace that opens a group: it has a matching close and a comma at its own depth. A brace that fails
-	// either test is literal, and the search goes on after it — so '{x}{a,b}' still expands its second group, and
-	// '{x{a,b}}' the group inside the literal one.
-	static bool TryFindGroup(string pattern, out int open, out int close, out List<string> alternatives)
+	// The first brace at or after 'from' that opens a group: it has a matching close and a comma at its own depth.
+	// A brace that fails either test is literal, and the search goes on after it — so '{x}{a,b}' still expands its
+	// second group, and '{x{a,b}}' the group inside the literal one.
+	static bool TryFindGroup(string pattern, int from, out int open, out int close, out List<string> alternatives)
 	{
 		alternatives = [];
 		
-		for(open = pattern.IndexOf('{'); open >= 0; open = pattern.IndexOf('{', open + 1)) {
+		for(open = pattern.IndexOf('{', from); open >= 0; open = pattern.IndexOf('{', open + 1)) {
 			
 			var depth = 0;
 			var start = open + 1;

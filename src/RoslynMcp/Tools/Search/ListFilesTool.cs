@@ -47,9 +47,9 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			return scope.Error(rootError);
 		
 		// Matcher has no brace expansion: each expansion of '{a,b}' is an include of its own (#294).
-		if(!GlobBraces.TryExpand(pattern, out var patterns))
+		if(!GlobBraces.TryExpand(pattern, "pattern", out var patterns, out var globError))
 			
-			return scope.Error(new ErrorResult(GlobBraces.TooManyExpansions("pattern", pattern)));
+			return scope.Error(new ErrorResult(globError));
 		
 		var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
 		

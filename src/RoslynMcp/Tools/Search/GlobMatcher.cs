@@ -19,10 +19,9 @@ internal static class GlobMatcher
 	{
 		error = null;
 		
-		if(!GlobBraces.TryExpand(pattern, out var patterns)) {
+		if(!GlobBraces.TryExpand(pattern, "filePattern", out var patterns, out error)) {
 			
 			matcher = static _ => false;
-			error   = GlobBraces.TooManyExpansions("filePattern", pattern);
 			
 			return false;
 		}
