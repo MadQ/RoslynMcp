@@ -57,22 +57,7 @@ static class PaginationTests
 		string[]? page2  = null;
 		
 		// Calls a tool and returns the parsed JSON result, or null on a protocol error.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
-				@params = new { name = tool, arguments = args } });
-			
-			var resp = await ctx.ReceiveAsync();
-			var text = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
-			
-			if(resp?["error"] is not null || text is null)
-				
-				return null;
-			
-			try { return JsonNode.Parse(text); }
-			catch { return null; }
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		// The file names on one page, in the order returned. Null when the response does not have
 		// the tool's own shape — a cached page used to come back as { items, total } instead.

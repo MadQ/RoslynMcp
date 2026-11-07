@@ -114,18 +114,7 @@ static class LinkWriteSyncTests
 		}
 		
 		// The first block parsed as JSON: a tool's result, or the header of a source response.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			var blocks = await CallBlocks(tool, args);
-			
-			if(blocks.Length == 0)
-				
-				return null;
-			
-			try { return JsonNode.Parse(blocks[0]); }
-			catch { return null; }
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		Task<JsonNode?> Write(string? projectPath, string filePath, string content)
 			=> Call("roslyn_write_file", new { filePath, content, projectPath });

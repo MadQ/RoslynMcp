@@ -57,22 +57,7 @@ static class MovedDirectoryTests
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		
 		// Calls a tool and returns the first content block parsed as JSON.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
-				@params = new { name = tool, arguments = args } });
-			
-			var resp = await ctx.ReceiveAsync();
-			var text = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
-			
-			if(text is null)
-				
-				return null;
-			
-			try { return JsonNode.Parse(text); }
-			catch { return null; }
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		// Polls until the condition holds, for at most fifteen seconds.
 		static async Task<bool> EventuallyAsync(Func<Task<bool>> condition)

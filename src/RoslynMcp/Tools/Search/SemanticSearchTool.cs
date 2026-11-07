@@ -48,7 +48,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		[Description("Case-sensitive matching. Default: false (case-insensitive).")]
 		bool caseSensitive = false,
 		
-		[Description("Filename glob filter selecting WHICH files are searched (matches the file name/path, not content): e.g. '*.cs'. Default: '*.cs'. Only C# files are processed — non-.cs files are skipped even if matched.")]
+		[Description("Filename glob filter selecting WHICH files are searched (matches the file name, not content): e.g. '*.cs', '{Program,Startup}.cs'. Supports *, ? and {a,b}. Default: '*.cs'. Only C# files are processed — non-.cs files are skipped even if matched.")]
 		string? filePattern = null,
 		
 		[Description(MatchModeDescription + "Default: 'regex'.")]
@@ -116,7 +116,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			return scope.Error(rootError);
 		
-		var matchesFile = GlobMatcher.CreateMatcher(filePattern);
+		if(!GlobMatcher.TryCreateMatcher(filePattern, out var matchesFile, out var globError))
+			
+			return scope.Error(new ErrorResult(globError));
+		
 
 		var allMatches = await CollectAsync(regex);
 		

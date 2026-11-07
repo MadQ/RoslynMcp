@@ -48,22 +48,7 @@ static class WatcherStartupTests
 		var projDoomed  = projGone.Write("Doomed.cs",  "class GoesAway { }\n");
 		
 		// Calls a tool and returns the first content block parsed as JSON.
-		async Task<JsonNode?> Call(string tool, object args)
-		{
-			
-			await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call",
-				@params = new { name = tool, arguments = args } });
-			
-			var resp = await ctx.ReceiveAsync();
-			var text = resp?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
-			
-			if(text is null)
-				
-				return null;
-			
-			try { return JsonNode.Parse(text); }
-			catch { return null; }
-		}
+		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		// Whether the workspace serves this file from a document of its own.
 		async Task<bool> IsDocumentAsync(string? projectPath, string filePath)

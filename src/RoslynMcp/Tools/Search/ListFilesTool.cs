@@ -23,7 +23,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		"For filename/path matching with no content search, this is the right tool.")]
 	public object ListFiles(
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Glob pattern matching file NAMES/PATHS, not file content (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). Default: '**/*'.")] string? pattern = null,
+		[Description("Glob pattern matching file NAMES/PATHS, not file content (e.g., '*.cs', 'Tools/*Tool.cs', '**/*.json', '*.{cs,csproj}'). {a,b} groups may nest and may appear in directory segments ('{src,tests}/**/*.cs'). Default: '**/*'.")] string? pattern = null,
 		[Description("Include subdirectories. Default: true.")] bool recursive = true,
 		[Description("Number of files to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of results. Default: 100, max: 500.")] int take = 100,
@@ -46,17 +46,25 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			
 			return scope.Error(rootError);
 		
+		// Matcher has no brace expansion: each expansion of '{a,b}' is an include of its own (#294).
+		if(!GlobBraces.TryExpand(pattern, "pattern", out var patterns, out var globError))
+			
+			return scope.Error(new ErrorResult(globError));
+		
 		var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-		matcher.AddInclude(pattern);
+		
+		foreach(var expanded in patterns)
+			matcher.AddInclude(expanded);
 		
 		string[] allRelativePaths;
 		
 		try {
 			
 			// Ignored directories are never entered — unless the pattern spells one out, which is
-			// how an agent reaches bin/ or obj/ on purpose.
+			// how an agent reaches bin/ or obj/ on purpose. With braces, a directory one expansion
+			// names ('{bin,src}/**') counts as named.
 			var rules = IgnoreRules.ForRoot(rootPath, logger);
-			var named = NamedDirectories(pattern, anchorLeadingSegments: true);
+			NamedDirectorySet[] named = [.. patterns.Select(expanded => NamedDirectories(expanded, anchorLeadingSegments: true))];
 			
 			// Materialize relative paths upfront — reused by close-match hint on miss.
 			allRelativePaths = WorkspaceWalker.EnumerateFiles(
@@ -64,7 +72,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 				"*",
 				recursive,
 				(ref FileSystemEntry directory) =>
-					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+					!IsNamed(named, WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
@@ -82,7 +90,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		
 		if(allResults.Length == 0) {
 			
-			var closeMatches = BuildCloseMatches(allRelativePaths, pattern);
+			var closeMatches = BuildCloseMatches(allRelativePaths, patterns);
 			
 			return scope.Outcome("no files matched", new ListFilesEmptyResult([], 0, closeMatches) { Caution = AdhocCaution(projectPath) });
 		}
@@ -106,11 +114,37 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		}
 	;
 	
-	static string[]? BuildCloseMatches(string[] allRelativeFiles, string pattern)
+	static bool IsNamed(NamedDirectorySet[] named, ReadOnlySpan<char> relativeParent, ReadOnlySpan<char> name)
 	{
-		var candidates = FindBroadenedMatches(allRelativeFiles, pattern);
+		foreach(var set in named)
+			if(set.Contains(relativeParent, name))
+				
+				return true;
+		
+		return false;
+	}
+	
+	// The close matches of every expansion, at most five.
+	static string[]? BuildCloseMatches(string[] allRelativeFiles, string[] patterns)
+	{
+		var candidates = FindBroadenedMatches(allRelativeFiles, patterns);
 		
 		return candidates.Length > 0 ? candidates : null;
+	}
+	
+	// The first files, up to 'limit', that any of 'includes' matches: one matcher, one scan.
+	static string[] MatchAny(string[] allRelativeFiles, IEnumerable<string> includes, int limit)
+	{
+		var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
+		
+		foreach(var include in includes)
+			matcher.AddInclude(include);
+		
+		return allRelativeFiles
+			.Where(f => matcher.Match(f.Replace('\\', '/')).HasMatches)
+			.Take(limit)
+			.ToArray()
+		;
 	}
 	
 	/// <summary>
@@ -118,28 +152,34 @@ internal sealed class ListFilesTool : RoslynMcpTool
 	///     Strategy 1: strip directory constraints (try <c>**/{filename}</c>).
 	///     Strategy 2: loosen to extension only (shows what kinds of files exist nearby).
 	/// </summary>
-	static string[] FindBroadenedMatches(string[] allRelativeFiles, string pattern)
+	static string[] FindBroadenedMatches(string[] allRelativeFiles, string[] patterns)
 	{
-		var filename = Path.GetFileName(pattern);
-		if(string.IsNullOrEmpty(filename))
-			
-			return [];
+		var broad      = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		
-		// Strategy 1: ignore directory prefix — find the filename pattern anywhere in the tree.
-		// Skip if pattern already has no directory component or is already a ** recursive pattern.
-		var broadPattern = $"**/{filename}"
-		;
+		foreach(var pattern in patterns) {
+			
+			var filename = Path.GetFileName(pattern);
+			
+			if(string.IsNullOrEmpty(filename))
+				continue;
+			
+			// Strategy 1 applies only to a pattern with a directory part that is not already the
+			// broad form: '**/{filename}' finds the filename pattern anywhere in the tree.
+			var broadPattern = $"**/{filename}";
+			
+			if(pattern.Contains('/') && broadPattern != pattern)
+				broad.Add(broadPattern);
+			
+			var ext = Path.GetExtension(filename);
+			
+			if(!string.IsNullOrEmpty(ext) && ext != filename)
+				extensions.Add(ext);
+		}
 		
-		if(pattern.Contains('/') && broadPattern != pattern) {
+		if(broad.Count > 0) {
 			
-			var broadMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-			broadMatcher.AddInclude(broadPattern);
-			
-			var found = allRelativeFiles
-				.Where(f => broadMatcher.Match(f.Replace('\\', '/')).HasMatches)
-				.Take(5)
-				.ToArray()
-			;
+			var found = MatchAny(allRelativeFiles, broad, 5);
 			
 			if(found.Length > 0)
 				
@@ -147,21 +187,6 @@ internal sealed class ListFilesTool : RoslynMcpTool
 		}
 		
 		// Strategy 2: fall back to just the extension — tells the agent what kinds of files exist.
-		var ext = Path.GetExtension(filename)
-		;
-		
-		if(!string.IsNullOrEmpty(ext) && ext != filename) {
-			
-			var extMatcher = new Matcher(StringComparison.OrdinalIgnoreCase);
-			extMatcher.AddInclude($"**/*{ext}");
-			
-			return allRelativeFiles
-				.Where(f => extMatcher.Match(f.Replace('\\', '/')).HasMatches)
-				.Take(3)
-				.ToArray()
-			;
-		}
-		
-		return [];
+		return extensions.Count > 0 ? MatchAny(allRelativeFiles, extensions.Select(ext => $"**/*{ext}"), 3) : [];
 	}
 }
