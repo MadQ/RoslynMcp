@@ -199,11 +199,12 @@ internal sealed partial class WorkspaceManager
 		
 		/// <summary>
 		///     Whether <paramref name="path"/>, found at <paramref name="index"/> of <paramref name="text"/>, is
-		///     that path and not the start of a longer one: the file system must agree on the spelling, and no
-		///     file-name character may follow. <c>…\Core.csproj</c> is found inside <c>…\Core.csproj.Tests.csproj</c>
-		///     and inside <c>…\Core.csproj.d\Other.csproj</c>, and is neither (#300 review). A message quotes a
-		///     path, or ends it with a period or a colon; a period directly followed by another file-name
-		///     character, or a separator, is part of the name.
+		///     that path and not the start of a longer one: the file system must agree on the spelling, and what
+		///     follows must end a path in a message — the end of the text, whitespace, a quote, or closing
+		///     punctuation, or a period followed by one of those. What may end a path is listed rather than what
+		///     may continue one, because a file name can hold almost anything: <c>…\Core.csproj</c> is found inside
+		///     <c>…\Core.csproj.Tests.csproj</c>, <c>…\Core.csproj+Tests.csproj</c> and <c>…\Core.csproj.d\X.csproj</c>,
+		///     and is none of them (#300 review).
 		/// </summary>
 		static bool IsWholePath(string text, int index, string path)
 		{
@@ -213,18 +214,16 @@ internal sealed partial class WorkspaceManager
 			
 			var end = index + path.Length;
 			
-			if(end == text.Length)
-				
-				return true;
+			if(end < text.Length && text[end] == '.')
+				end++;
 			
-			var next = text[end];
-			
-			if(next is '\\' or '/' || char.IsLetterOrDigit(next) || next is '_' or '-')
-				
-				return false;
-			
-			return next != '.' || end + 1 == text.Length || !(char.IsLetterOrDigit(text[end + 1]) || text[end + 1] is '_' or '-' or '.');
+			return end == text.Length || EndsPath(text[end]);
 		}
+		
+		// Characters a message puts after a path: whitespace, quotes in the forms MSBuild and translations use,
+		// and closing punctuation.
+		static bool EndsPath(char c) =>
+			char.IsWhiteSpace(c) || c is '\'' or '"' or '`' or '‘' or '’' or '“' or '”' or '«' or '»' or ',' or ';' or ':' or ')' or ']' or '>';
 		
 		/// <summary>
 		///     <see cref="ProjectsWithLoadFailures"/> for the load that just produced <paramref name="ws"/>.

@@ -51,23 +51,38 @@ static class LoadHealthTests
 		
 		var projectXml = $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{ProjectXml}</Project>\n";
 		
+		// Lib is blocked too, App references Lib and Top references App: a broken dependency counts, directly
+		// or not, which is what WorkspaceHealth.Covering walks the project graph for.
 		s.Write("LoadHealthSln.slnx",
 			"<Solution>\n  <Project Path=\"Good/Good.csproj\" />\n  <Project Path=\"Bad/Bad.csproj\" />\n"
-			+ "  <Project Path=\"Client/Common.csproj\" />\n  <Project Path=\"Server/Common.csproj\" />\n</Solution>\n");
+			+ "  <Project Path=\"Client/Common.csproj\" />\n  <Project Path=\"Server/Common.csproj\" />\n"
+			+ "  <Project Path=\"Lib/Lib.csproj\" />\n  <Project Path=\"App/App.csproj\" />\n  <Project Path=\"Top/Top.csproj\" />\n</Solution>\n");
 		
-		foreach(var project in new[] { "Good/Good", "Bad/Bad", "Client/Common", "Server/Common" }) {
+		foreach(var project in new[] { "Good/Good", "Bad/Bad", "Client/Common", "Server/Common", "Lib/Lib" }) {
 			
 			s.Write($"{project}.csproj", projectXml);
 			s.Write($"{Path.GetDirectoryName(project)}/Probe.cs", Source);
 		}
 		
+		string Referencing(string reference) =>
+			projectXml.Replace("</Project>", $"<ItemGroup><ProjectReference Include=\"{reference}\" /></ItemGroup></Project>");
+		
+		s.Write("App/App.csproj", Referencing("../Lib/Lib.csproj"));
+		s.Write("Top/Top.csproj", Referencing("../App/App.csproj"));
+		s.Write("App/Probe.cs", Source);
+		s.Write("Top/Probe.cs", Source);
+		
 		var good         = s.PathOf("Good/Good.csproj");
 		var bad          = s.PathOf("Bad/Bad.csproj");
 		var clientCommon = s.PathOf("Client/Common.csproj");
 		var serverCommon = s.PathOf("Server/Common.csproj");
+		var lib          = s.PathOf("Lib/Lib.csproj");
+		var app          = s.PathOf("App/App.csproj");
+		var top          = s.PathOf("Top/Top.csproj");
 		
 		BlockedFile? blockedS      = new(s.PathOf("Bad/obj/Debug/net10.0/Bad.AssemblyInfoInputs.cache"));
 		BlockedFile? blockedServer = new(s.PathOf("Server/obj/Debug/net10.0/Common.AssemblyInfoInputs.cache"));
+		BlockedFile? blockedLib    = new(s.PathOf("Lib/obj/Debug/net10.0/Lib.AssemblyInfoInputs.cache"));
 		BlockedFile? blockedGood   = null;
 		
 		const string nameA = "LoadHealthAFixture";
@@ -301,6 +316,41 @@ static class LoadHealthTests
 					: (true, "PASS  (Server/Common phantom, its namesake Client/Common not)");
 			}),
 			
+			// The other side of the narrowing: a project is only as sound as what it is built from. App
+			// references the failing Lib directly and Top through App; both are told their diagnostics may be
+			// phantom. Removing the dependency walk from WorkspaceHealth.Covering, or walking dependants
+			// instead, fails this. Lib is the control.
+			new("load health: a project built from a failing one is phantom, directly or not", async () =>
+			{
+				string HintOf(JsonNode? diagnostics) => diagnostics?["hint"]?.GetValue<string>() ?? "";
+				
+				var libHint = HintOf(await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = lib }));
+				var appHint = HintOf(await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = app }));
+				var topHint = HintOf(await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = top }));
+				
+				if(!libHint.Contains("phantom"))
+					
+					return Skip.SetupUnavailable($"{NotFailed} (Lib's diagnostics carry no phantom hint: '{libHint}')");
+				
+				if(!appHint.Contains("phantom"))
+					
+					return (false, $"FAIL  (App references the failing Lib, but its diagnostics are not called phantom: '{appHint}')");
+				
+				return topHint.Contains("phantom")
+					? (true, "PASS  (Lib, App (direct) and Top (transitive) all phantom)")
+					: (false, $"FAIL  (Top depends on Lib through App, but its diagnostics are not called phantom: '{topHint}')");
+			}),
+			
+			// And the build: App's Roslyn check would be a check of a compilation built against a broken Lib.
+			new("load health: build_project skips the fast path for a project built from a failing one", async () =>
+			{
+				var hint = (await ctx.CallToolJsonAsync("roslyn_build_project", new { projectPath = app }))?["hint"]?.GetValue<string>() ?? "";
+				
+				return hint.Contains("fast-path was skipped") && hint.Contains("Lib")
+					? (true, "PASS  (fast path skipped for App, naming Lib)")
+					: (false, $"FAIL  (App's build did not skip the fast path over Lib's failure: '{hint}')");
+			}),
+			
 			// Worse is counted project by project. Bad has been broken from the start; a reload that also
 			// breaks Good loses Good, so it is discarded and Good keeps its options — before, any broken
 			// project in the live workspace let every reload through, and Good stayed broken.
@@ -465,6 +515,7 @@ static class LoadHealthTests
 			blockedB?.Dispose();
 			blockedS?.Dispose();
 			blockedServer?.Dispose();
+			blockedLib?.Dispose();
 			blockedGood?.Dispose();
 			
 			// A retry scheduled for B must not run against a deleted tree: let it settle first.
