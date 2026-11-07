@@ -133,13 +133,13 @@ internal sealed partial class WorkspaceManager
 		///     workspace mitigation are undocumented MSBuild behavior, documented empirically by
 		///     MarcelRoozekrans/roslyn-codelens-mcp (no code reused).
 		/// </summary>
-		static string[] ProjectsWithoutReferences(Solution solution) =>
+		static ProjectKey[] ProjectsWithoutReferences(Solution solution) =>
 			[..solution.Projects
 				.Where(p => p.MetadataReferences.Count == 0)
-				.Select(p => p.Name)
+				.Select(ProjectKey.Of)
 				.Distinct()];
 
-		static string[] ProjectsWithoutReferences(Workspace ws) => ProjectsWithoutReferences(ws.CurrentSolution);
+		static ProjectKey[] ProjectsWithoutReferences(Workspace ws) => ProjectsWithoutReferences(ws.CurrentSolution);
 		
 		/// <summary>
 		///     Projects of <paramref name="solution"/> that one of the load's <c>WorkspaceFailed</c> failures is
@@ -151,15 +151,21 @@ internal sealed partial class WorkspaceManager
 		///     import — so only the project whose path comes first is blamed: the one MSBuild was processing
 		///     (<c>Msbuild failed when processing the file '…' with message: …</c>). Every project of that file
 		///     is, one per target framework.
+		///     <para>
+		///         Text search cannot ask the file system how it compares names, so a match is found ignoring case
+		///         where the platform usually does (<see cref="SecurityBoundary.PathInTextComparison"/>) and then
+		///         confirmed with <see cref="SecurityBoundary.PathComparer"/>: in a case-sensitive directory,
+		///         <c>foo.csproj</c> in a message is not <c>Foo.csproj</c> beside it (#300 review).
+		///     </para>
 		/// </summary>
-		static string[] ProjectsWithLoadFailures(Solution solution, string[] failures)
+		static ProjectKey[] ProjectsWithLoadFailures(Solution solution, string[] failures)
 		{
 			if(failures.Length == 0)
 				
 				return [];
 			
 			var comparison = SecurityBoundary.PathInTextComparison;
-			var blamed     = new HashSet<string>(StringComparer.Ordinal);
+			var blamed     = new HashSet<ProjectKey>();
 			
 			foreach(var failure in failures) {
 				
@@ -173,6 +179,9 @@ internal sealed partial class WorkspaceManager
 					
 					var index = failure.IndexOf(path, comparison);
 					
+					while(index >= 0 && !SecurityBoundary.PathComparer.Equals(failure.Substring(index, path.Length), path))
+						index = failure.IndexOf(path, index + 1, comparison);
+					
 					if(index < 0 || index > at)
 						continue;
 					
@@ -182,7 +191,7 @@ internal sealed partial class WorkspaceManager
 				}
 				
 				foreach(var project in subject)
-					blamed.Add(project.Name);
+					blamed.Add(ProjectKey.Of(project));
 			}
 			
 			return [..blamed];
@@ -193,33 +202,33 @@ internal sealed partial class WorkspaceManager
 		///     Call it straight after the load: until a finding is recorded, <see cref="loadWarnings"/> holds that
 		///     load's <c>WorkspaceFailed</c> failures and nothing else.
 		/// </summary>
-		string[] LoadFailedProjects(Workspace ws) => ProjectsWithLoadFailures(ws.CurrentSolution, [..loadWarnings]);
+		ProjectKey[] LoadFailedProjects(Workspace ws) => ProjectsWithLoadFailures(ws.CurrentSolution, [..loadWarnings]);
 		
 		/// <summary>Every project of <paramref name="ws"/> that is unhealthy for either reason, deduplicated.</summary>
-		static string[] UnhealthyProjects(Workspace ws, string[] loadFailed) =>
+		static ProjectKey[] UnhealthyProjects(Workspace ws, ProjectKey[] loadFailed) =>
 			[..ProjectsWithoutReferences(ws).Union(loadFailed)];
 		
 		/// <summary>Why <paramref name="ws"/> is unhealthy, for a log line: one clause per reason that applies.</summary>
-		static string UnhealthyReason(Workspace ws, string[] loadFailed)
+		static string UnhealthyReason(Workspace ws, ProjectKey[] loadFailed)
 		{
 			var dropped = ProjectsWithoutReferences(ws);
 			
 			return (dropped.Length > 0, loadFailed.Length > 0) switch {
 				
-				(true, true)  => $"no metadata references on: {string.Join(", ", dropped)}; an MSBuild failure on the project file of: {string.Join(", ", loadFailed)}",
-				(true, false) => $"no metadata references on: {string.Join(", ", dropped)}",
-				_             => $"an MSBuild failure on the project file of: {string.Join(", ", loadFailed)}",
+				(true, true)  => $"no metadata references on: {ProjectKey.Names(dropped)}; an MSBuild failure on the project file of: {ProjectKey.Names(loadFailed)}",
+				(true, false) => $"no metadata references on: {ProjectKey.Names(dropped)}",
+				_             => $"an MSBuild failure on the project file of: {ProjectKey.Names(loadFailed)}",
 			};
 		}
 		
-		void WarnIfUnhealthy(Workspace ws, string[] loadFailed)
+		void WarnIfUnhealthy(Workspace ws, ProjectKey[] loadFailed)
 		{
 			if(ProjectsWithoutReferences(ws) is { Length: > 0 } dropped)
-				RecordUnhealthyLoad($"Projects loaded without metadata references — symbol results may be incomplete: {string.Join(", ", dropped)}");
+				RecordUnhealthyLoad($"Projects loaded without metadata references — symbol results may be incomplete: {ProjectKey.Names(dropped)}");
 			
 			if(loadFailed.Length > 0)
 				RecordUnhealthyLoad(
-					$"MSBuild failed on the project file of: {string.Join(", ", loadFailed)} — their compilation options "
+					$"MSBuild failed on the project file of: {ProjectKey.Names(loadFailed)} — their compilation options "
 					+ "(Nullable, LangVersion, …) may be defaults rather than the projects' own, so diagnostics can be phantom"
 				);
 		}

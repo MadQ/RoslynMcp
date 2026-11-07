@@ -43,21 +43,32 @@ static class LoadHealthTests
 		a.Write("Probe.cs", Source);
 		b.Write("Probe.cs", Source);
 		
-		// Fixture S: a solution of two projects that do not reference each other, Bad blocked from its first
-		// load and Good fine. Health is a property of the workspace, but a broken project only makes the
-		// diagnostics of the projects built from it phantom — not Good's.
+		// Fixture S: a solution of projects that do not reference each other. Bad is blocked from its first
+		// load, Good is fine; Client/Common and Server/Common share a name, and Server/Common is blocked too.
+		// Health is a property of the workspace, but a broken project only makes the diagnostics of the
+		// projects built from it phantom — not Good's, and not those of a namesake in another directory.
 		var s = TestFixtures.NewAdhocDir("LoadHealthSln");
 		
-		s.Write("LoadHealthSln.slnx", "<Solution>\n  <Project Path=\"Good/Good.csproj\" />\n  <Project Path=\"Bad/Bad.csproj\" />\n</Solution>\n");
-		s.Write("Good/Good.csproj", $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{ProjectXml}</Project>\n");
-		s.Write("Bad/Bad.csproj",   $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{ProjectXml}</Project>\n");
-		s.Write("Good/Probe.cs", Source);
-		s.Write("Bad/Probe.cs",  Source);
+		var projectXml = $"<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>{ProjectXml}</Project>\n";
 		
-		var good = s.PathOf("Good/Good.csproj");
-		var bad  = s.PathOf("Bad/Bad.csproj");
+		s.Write("LoadHealthSln.slnx",
+			"<Solution>\n  <Project Path=\"Good/Good.csproj\" />\n  <Project Path=\"Bad/Bad.csproj\" />\n"
+			+ "  <Project Path=\"Client/Common.csproj\" />\n  <Project Path=\"Server/Common.csproj\" />\n</Solution>\n");
 		
-		BlockedFile? blockedS = new(s.PathOf("Bad/obj/Debug/net10.0/Bad.AssemblyInfoInputs.cache"));
+		foreach(var project in new[] { "Good/Good", "Bad/Bad", "Client/Common", "Server/Common" }) {
+			
+			s.Write($"{project}.csproj", projectXml);
+			s.Write($"{Path.GetDirectoryName(project)}/Probe.cs", Source);
+		}
+		
+		var good         = s.PathOf("Good/Good.csproj");
+		var bad          = s.PathOf("Bad/Bad.csproj");
+		var clientCommon = s.PathOf("Client/Common.csproj");
+		var serverCommon = s.PathOf("Server/Common.csproj");
+		
+		BlockedFile? blockedS      = new(s.PathOf("Bad/obj/Debug/net10.0/Bad.AssemblyInfoInputs.cache"));
+		BlockedFile? blockedServer = new(s.PathOf("Server/obj/Debug/net10.0/Common.AssemblyInfoInputs.cache"));
+		BlockedFile? blockedGood   = null;
 		
 		const string nameA = "LoadHealthAFixture";
 		const string nameB = "LoadHealthBFixture";
@@ -99,11 +110,15 @@ static class LoadHealthTests
 		
 		// Bumps <Version> through roslyn_write_file, which flags the reload synchronously: the next
 		// compilation-needing call runs it, with no watcher timing involved.
-		async Task<string?> BumpVersionAsync(FixtureProject fx)
+		Task<string?> BumpVersionAsync(FixtureProject fx) => BumpVersionAtAsync(fx.Csproj!, fx.Dir);
+		
+		// The same for one project of a solution fixture: roslyn_write_file takes the path from the
+		// workspace root, which is the solution's directory.
+		async Task<string?> BumpVersionAtAsync(string csproj, string root)
 		{
-			var xml     = File.ReadAllText(fx.Csproj!);
+			var xml     = File.ReadAllText(csproj);
 			var bumped  = Regex.Replace(xml, @"<Version>1\.0\.(\d+)</Version>", m => $"<Version>1.0.{int.Parse(m.Groups[1].Value) + 1}</Version>");
-			var written = await ctx.CallToolJsonAsync("roslyn_write_file", new { filePath = Path.GetFileName(fx.Csproj), content = bumped, projectPath = fx.Csproj });
+			var written = await ctx.CallToolJsonAsync("roslyn_write_file", new { filePath = Path.GetRelativePath(root, csproj), content = bumped, projectPath = csproj });
 			
 			return written is null || written["error"] is not null
 				? $"roslyn_write_file failed: {written?["error"]?.GetValue<string>() ?? "no result"}"
@@ -269,6 +284,73 @@ static class LoadHealthTests
 					: (true, "PASS  (no fast-path skip for Good)");
 			}),
 			
+			// Projects are told apart by file, not name: Client/Common and Server/Common are both "Common",
+			// and with health keyed by name, Server/Common's failure was pinned on Client/Common too. The
+			// blocked one is the control.
+			new("load health: a failing project does not make a namesake in another directory phantom", async () =>
+			{
+				var serverHint = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = serverCommon }))?["hint"]?.GetValue<string>() ?? "";
+				var clientHint = (await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = clientCommon }))?["hint"]?.GetValue<string>() ?? "";
+				
+				if(!serverHint.Contains("phantom"))
+					
+					return Skip.SetupUnavailable($"{NotFailed} (Server/Common's diagnostics carry no phantom hint: '{serverHint}')");
+				
+				return clientHint.Contains("phantom")
+					? (false, $"FAIL  (Client/Common is called phantom over Server/Common's failure: '{clientHint}')")
+					: (true, "PASS  (Server/Common phantom, its namesake Client/Common not)");
+			}),
+			
+			// Worse is counted project by project. Bad has been broken from the start; a reload that also
+			// breaks Good loses Good, so it is discarded and Good keeps its options — before, any broken
+			// project in the live workspace let every reload through, and Good stayed broken.
+			new("load health: a reload that breaks a working project is discarded while another stays broken", async () =>
+			{
+				blockedGood = new(s.PathOf("Good/obj/Debug/net10.0/Good.AssemblyInfoInputs.cache"));
+				
+				if(await BumpVersionAtAsync(good, s.Dir) is { } error)
+					
+					return (false, $"FAIL  ({error})");
+				
+				var diagnostics = await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = good });
+				var drift       = await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = good });
+				var last        = drift?["last_unhealthy_load"]?.GetValue<string>() ?? "";
+				
+				if(HasCs8632(diagnostics))
+					
+					return (false, "FAIL  (CS8632 on Good: the reload that broke it was promoted because Bad was already broken)");
+				
+				return last.Contains("Reload discarded") && drift?["reload_pending"]?.GetValue<bool>() == true
+					? (true, "PASS  (reload discarded, Good kept its options, retry pending)")
+					: (false, $"FAIL  (no discard recorded, or no retry pending: {drift?.ToJsonString()})");
+			}),
+			
+			// And Good comes back by itself once its file is free, Bad still broken: the retry promotes a
+			// reload that breaks nothing the live workspace had working.
+			new("load health: the working project recovers while another stays broken", async () =>
+			{
+				blockedGood?.Dispose();
+				blockedGood = null;
+				
+				var deadline = DateTime.UtcNow.AddSeconds(90);
+				
+				while(DateTime.UtcNow < deadline) {
+					
+					var diagnostics = await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = good });
+					var drift       = await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = good });
+					
+					if(drift?["reload_pending"] is null && !HasCs8632(diagnostics) && diagnostics?["hint"] is null)
+						
+						return Names(drift?["projects_with_load_failures"]).Contains("Bad")
+							? (true, "PASS  (Good recovered, Bad still reported)")
+							: (false, $"FAIL  (recovered, but Bad's failure is no longer reported: {drift?.ToJsonString()})");
+					
+					await Task.Delay(500);
+				}
+				
+				return (false, "FAIL  (Good did not recover within 90 s of its cache being freed)");
+			}),
+			
 			// The reload path. The live workspace is healthy, so a reload that fails on the project file
 			// is worse than what it would replace: it is discarded and a retry scheduled. The caller is
 			// served the previous workspace — options intact, so no CS8632 — and told a reload is pending.
@@ -382,6 +464,8 @@ static class LoadHealthTests
 			blockedA?.Dispose();
 			blockedB?.Dispose();
 			blockedS?.Dispose();
+			blockedServer?.Dispose();
+			blockedGood?.Dispose();
 			
 			// A retry scheduled for B must not run against a deleted tree: let it settle first.
 			await SettleHealthyAsync(b, TimeSpan.FromSeconds(30));

@@ -139,8 +139,8 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			lastSynced.ToString("O"),
 			isMSBuild,
 			WorkspaceHealthy:          !unhealthy,
-			ProjectsWithoutReferences: health is { ProjectsWithoutReferences: { Length: > 0 } dropped } ? dropped : null,
-			ProjectsWithLoadFailures:  health is { ProjectsWithLoadFailures: { Length: > 0 } failed } ? failed : null,
+			ProjectsWithoutReferences: health is { ProjectsWithoutReferences: { Length: > 0 } dropped } ? [..dropped.Select(key => key.Name)] : null,
+			ProjectsWithLoadFailures:  health is { ProjectsWithLoadFailures: { Length: > 0 } failed } ? [..failed.Select(key => key.Name)] : null,
 			LastUnhealthyLoad:         health?.LastUnhealthyLoad,
 			ReloadPending:             reloadPending)
 		{

@@ -177,7 +177,7 @@ internal sealed partial class WorkspaceManager
 
 			// The projects the live workspace is already unhealthy on. Stable for this attempt: only a
 			// reload replaces the workspace, and this one holds reloadGate.
-			string[] liveUnhealthy = [..ProjectsWithoutReferences(PeekSolution()).Union(projectsWithLoadFailures)];
+			ProjectKey[] liveUnhealthy = [..ProjectsWithoutReferences(PeekSolution()).Union(projectsWithLoadFailures)];
 
 			// Contended design-time builds can silently drop a project's references, or fail on a
 			// project file and leave its options at defaults (#300) — results would be wrong, not
@@ -204,19 +204,21 @@ internal sealed partial class WorkspaceManager
 				retry++;
 			}
 
-			// Never replace a healthy workspace with an unhealthy one. A stale-but-correct
+			// Never replace a healthy project with an unhealthy one. A stale-but-correct
 			// compilation beats a fresh-but-wrong one: dropped references and default options
 			// produce plausible-looking results rather than visible failures, so promoting this
-			// would silently corrupt every subsequent query. If the live workspace is broken too
-			// there is nothing to protect, so promote regardless — otherwise a bad first load could
-			// never recover. And not forever: past MaxConsecutiveDiscards the failure is taken to be
+			// would silently corrupt every subsequent query. Worse is counted project by project,
+			// as the retries above count it: a reload that breaks Good is worse even while Bad has
+			// been broken all along — only Bad's state was there to lose (#300 review). Where the
+			// reload breaks nothing the live workspace had working there is nothing to protect, so
+			// promote regardless — otherwise a bad first load could never recover. And not forever: past MaxConsecutiveDiscards the failure is taken to be
 			// the project's own (an edit that broke it, a new project that never loads), which no
 			// retry will clear. Discarding would then keep a workspace that ignores the edit, and
 			// reload the whole solution every half minute for as long as it lasts; promoting shows
 			// the edit, and the workspace says it is unhealthy — and keeps retrying a while longer
 			// (see the healing retries below), since contention can outlast the discards too.
 			var stillUnhealthy  = UnhealthyProjects(newWorkspace, newLoadFailed);
-			var newIsWorse      = stillUnhealthy.Length > 0 && liveUnhealthy.Length == 0;
+			var newIsWorse      = stillUnhealthy.Except(liveUnhealthy).Any();
 			var promotedPastCap = newIsWorse && consecutiveDiscards >= MaxConsecutiveDiscards;
 			var discardedBefore = consecutiveDiscards;
 

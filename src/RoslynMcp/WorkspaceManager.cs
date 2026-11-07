@@ -46,11 +46,11 @@ enum ResolutionKind
 ///     files the workspace already knows about, and cannot see a file that is not a document yet.
 /// </param>
 internal sealed record WorkspaceHealth(
-	string[] ProjectsWithoutReferences,
-	string[] ProjectsWithLoadFailures,
-	string[] LoadWarnings,
-	string?  LastUnhealthyLoad,
-	bool     ReloadPending)
+	ProjectKey[] ProjectsWithoutReferences,
+	ProjectKey[] ProjectsWithLoadFailures,
+	string[]     LoadWarnings,
+	string?      LastUnhealthyLoad,
+	bool         ReloadPending)
 {
 	/// <summary>True when every loaded project resolved metadata references and loaded without an MSBuild failure.</summary>
 	public bool IsHealthy => ProjectsWithoutReferences.Length == 0 && ProjectsWithLoadFailures.Length == 0;
@@ -66,25 +66,25 @@ internal sealed record WorkspaceHealth(
 	/// </summary>
 	public WorkspaceHealth Covering(Solution solution, IEnumerable<string> projectFiles)
 	{
-		var graph = solution.GetProjectDependencyGraph();
-		var files = new HashSet<string>(projectFiles, SecurityBoundary.PathComparer);
-		var names = new HashSet<string>(StringComparer.Ordinal);
+		var graph   = solution.GetProjectDependencyGraph();
+		var files   = new HashSet<string>(projectFiles, SecurityBoundary.PathComparer);
+		var covered = new HashSet<ProjectKey>();
 		
 		foreach(var project in solution.Projects) {
 			
 			if(project.FilePath is null || !files.Contains(project.FilePath))
 				continue;
 			
-			names.Add(project.Name);
+			covered.Add(ProjectKey.Of(project));
 			
 			foreach(var dependency in graph.GetProjectsThatThisProjectTransitivelyDependsOn(project.Id))
 				if(solution.GetProject(dependency) is { } referenced)
-					names.Add(referenced.Name);
+					covered.Add(ProjectKey.Of(referenced));
 		}
 		
 		return this with {
-			ProjectsWithoutReferences = [..ProjectsWithoutReferences.Where(names.Contains)],
-			ProjectsWithLoadFailures  = [..ProjectsWithLoadFailures.Where(names.Contains)],
+			ProjectsWithoutReferences = [..ProjectsWithoutReferences.Where(covered.Contains)],
+			ProjectsWithLoadFailures  = [..ProjectsWithLoadFailures.Where(covered.Contains)],
 		};
 	}
 	
@@ -94,11 +94,33 @@ internal sealed record WorkspaceHealth(
 	/// </summary>
 	public string Problem => (ProjectsWithoutReferences.Length > 0, ProjectsWithLoadFailures.Length > 0) switch {
 		
-		(true, true)  => $"loaded without metadata references on: {string.Join(", ", ProjectsWithoutReferences)}, and with an MSBuild failure on the project file of: {string.Join(", ", ProjectsWithLoadFailures)}",
-		(true, false) => $"loaded without metadata references on: {string.Join(", ", ProjectsWithoutReferences)}",
-		(false, true) => $"loaded with an MSBuild failure on the project file of: {string.Join(", ", ProjectsWithLoadFailures)}, so its compilation options (Nullable, LangVersion, …) may be defaults rather than the project's own",
+		(true, true)  => $"loaded without metadata references on: {ProjectKey.Names(ProjectsWithoutReferences)}, and with an MSBuild failure on the project file of: {ProjectKey.Names(ProjectsWithLoadFailures)}",
+		(true, false) => $"loaded without metadata references on: {ProjectKey.Names(ProjectsWithoutReferences)}",
+		(false, true) => $"loaded with an MSBuild failure on the project file of: {ProjectKey.Names(ProjectsWithLoadFailures)}, so its compilation options (Nullable, LangVersion, …) may be defaults rather than the project's own",
 		_             => "",
 	};
+}
+
+/// <summary>
+///     Which project of a workspace a health finding is about, in a form that survives a reload — a reload
+///     is a new workspace with new <see cref="ProjectId"/>s, and an unhealthy reload is compared with the
+///     live workspace project by project. The file says which project it is: two projects in different
+///     directories can share a name (<c>Client/Common.csproj</c>, <c>Server/Common.csproj</c>), and a health
+///     keyed by name pinned one's failure on the other (#300 review). The name says which target framework:
+///     a multi-targeting project is one project per framework, <c>Foo(net8.0)</c> and <c>Foo(net10.0)</c>.
+///     Shown by <see cref="Name"/> only; files compare as the file system does (<see cref="SecurityBoundary.PathComparer"/>).
+/// </summary>
+internal readonly record struct ProjectKey(string File, string Name)
+{
+	public static ProjectKey Of(Project project) => new(project.FilePath ?? "", project.Name);
+	
+	/// <summary>The keys' names, comma-separated, for a message or a hint.</summary>
+	public static string Names(IEnumerable<ProjectKey> keys) => string.Join(", ", keys.Select(key => key.Name));
+	
+	public bool Equals(ProjectKey other) =>
+		SecurityBoundary.PathComparer.Equals(File, other.File) && string.Equals(Name, other.Name, StringComparison.Ordinal);
+	
+	public override int GetHashCode() => HashCode.Combine(SecurityBoundary.PathComparer.GetHashCode(File), StringComparer.Ordinal.GetHashCode(Name));
 }
 
 /// <summary>

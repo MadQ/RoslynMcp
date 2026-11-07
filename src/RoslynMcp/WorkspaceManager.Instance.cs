@@ -79,7 +79,7 @@ internal sealed partial class WorkspaceManager
 		// Projects of the live workspace whose own project file a failure of the load that produced it
 		// names (#300). Kept apart from loadWarnings, which every reload clears and refills before it
 		// knows whether its workspace will be promoted: this is set only with the workspace it describes.
-		private volatile string[] projectsWithLoadFailures = [];
+		private volatile ProjectKey[] projectsWithLoadFailures = [];
 
 		// ── Reload scheduling ────────────────────────────────────────────────
 		//
@@ -147,19 +147,38 @@ internal sealed partial class WorkspaceManager
 		/// <summary>
 		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
 		///     the current load's warnings, the retained last-unhealthy-load record, and whether a
-		///     reload is still pending. Peeks — never forces a pending reload.
+		///     reload is still pending. Peeks — never forces a pending reload. The solution and its load
+		///     failures are read under one read lock, as a reload swaps them under the write lock: read
+		///     apart, a reload in between gave a snapshot of two workspaces (#300 review).
 		/// </summary>
-		public WorkspaceHealth Health => new(
-			// MSBuild only. Reference health is a property of the design-time build; an
-			// AdhocWorkspace project is constructed with no metadata references at all
-			// (see LoadAdhocWorkspace), so applying the same check would flag every adhoc
-			// workspace as broken.
-			isMSBuild ? ProjectsWithoutReferences(PeekSolution()) : [],
-			projectsWithLoadFailures,
-			[..loadWarnings],
-			lastUnhealthyLoad,
-			ReloadPending
-		);
+		public WorkspaceHealth Health {
+			get {
+				Solution     solution;
+				ProjectKey[] loadFailed;
+				
+				@lock.EnterReadLock();
+				
+				try {
+					solution   = workspace.CurrentSolution;
+					loadFailed = projectsWithLoadFailures;
+				}
+				finally {
+					@lock.ExitReadLock();
+				}
+				
+				return new(
+					// MSBuild only. Reference health is a property of the design-time build; an
+					// AdhocWorkspace project is constructed with no metadata references at all
+					// (see LoadAdhocWorkspace), so applying the same check would flag every adhoc
+					// workspace as broken.
+					isMSBuild ? ProjectsWithoutReferences(solution) : [],
+					loadFailed,
+					[..loadWarnings],
+					lastUnhealthyLoad,
+					ReloadPending
+				);
+			}
+		}
 		
 		// UTC ticks of the last event that synchronized this workspace with disk: initial load,
 		// FSW debounce flush, workspace reload, or an RM-owned write. roslyn_check_drift compares
