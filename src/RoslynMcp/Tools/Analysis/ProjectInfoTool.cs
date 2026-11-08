@@ -178,7 +178,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 	{
 		try {
 			
-			var doc = System.Xml.Linq.XDocument.Load(csprojPath);
+			var doc = FileReader.LoadXml(csprojPath);
 			
 			string? Prop(string name) =>
 				doc.Descendants(name).FirstOrDefault()?.Value?.Trim() is { Length: > 0 } v ? v : null
@@ -222,7 +222,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 	{
 		try {
 			
-			var doc = System.Xml.Linq.XDocument.Load(csprojPath);
+			var doc = FileReader.LoadXml(csprojPath);
 			
 			return [..
 				doc.Descendants("PackageReference")

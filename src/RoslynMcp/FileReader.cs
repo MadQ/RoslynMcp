@@ -76,19 +76,39 @@ internal static class FileReader
 	internal static FileStream OpenUnbounded(string path) => OpenFile(path, FileOptions.None);
 	
 	/// <summary>
-	///     How every read in the server shares the file: with readers, writers and deletes (#349).
-	///     On Windows a handle that shares for reading only refuses every open for writing while it
-	///     is held — the server's own atomic replace (a rename over the file, which needs
-	///     <see cref="FileShare.Delete"/>), a user's editor saving, and the writability check of
-	///     <c>roslyn_preview_code_fix</c> all failed against a read that happened to be in progress.
-	///     The cost is that a read can see a file someone else is writing in place, as it always
-	///     could on Linux and macOS, where sharing is advisory; that writer's own change report
-	///     then brings the text up to date. The server's own writes are not read half-done: the
-	///     atomic replace writes a temp file and renames it, and while a write goes through the
-	///     workspace (which writes in place) the watcher holds back its reports for that file
-	///     until the write is over.
+	///     Parses <paramref name="path"/> as XML, read through <see cref="OpenUnbounded(string)"/>:
+	///     a project or solution file, which MSBuild reads whole too. <c>XDocument.Load(path)</c>
+	///     opens the file without sharing it for deleting, which blocks the atomic replace of a
+	///     project file while it is held (#349).
 	/// </summary>
-	internal const FileShare ReadSharing = FileShare.ReadWrite | FileShare.Delete;
+	internal static System.Xml.Linq.XDocument LoadXml(string path)
+	{
+		using var stream = OpenUnbounded(path);
+		
+		return System.Xml.Linq.XDocument.Load(stream);
+	}
+	
+	/// <summary>
+	///     How every read in the server shares the file: with readers and deletes, not with
+	///     writers (#349).
+	///     <para>
+	///         <see cref="FileShare.Delete"/> is what the server's own atomic replace needs: it
+	///         renames a temp file over the target, and on Windows that rename fails against any
+	///         open handle that does not share for deleting. A read in progress used to make the
+	///         replace fail (it got through on the write retry). The read keeps the old content
+	///         to its end.
+	///     </para>
+	///     <para>
+	///         Writers are kept out on purpose. A read that shares for writing sees a file another
+	///         program is saving in place half-done, and several readers write what they read
+	///         back to disk — the watcher flush, the edit tools, a backup restored later — so a
+	///         partial read becomes a cut-short file. Kept out, a writer that is mid-save makes
+	///         the read fail instead, and one that starts during the read waits the milliseconds
+	///         it takes or is refused, as before. Windows only: on Linux and macOS sharing is
+	///         advisory, so there neither the conflicts nor this protection exist (#403).
+	///     </para>
+	/// </summary>
+	internal const FileShare ReadSharing = FileShare.Read | FileShare.Delete;
 	
 	static FileStream OpenFile(string path, FileOptions options)
 	{

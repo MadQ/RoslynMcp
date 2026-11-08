@@ -583,13 +583,15 @@ internal static class CodeFixTests
 			}
 		}
 		
-		// #349, the other side: a reader that shares the file for reading, writing and deleting —
-		// the way every read in the server now opens a file (FileReader.ReadSharing) — blocks
-		// neither the preview's writability check nor the apply. The apply replaces the file by
-		// renaming a temp file over it, which on Windows fails against any open handle that does not
-		// share for deleting; before #349 the server's own reads were such handles. Held across
-		// both calls, the handle stands in for a server read that happens to be in progress.
-		async Task<(bool pass, string msg)> RunFullySharedHandleAllowsFix()
+		// #349, the other side: a handle that shares the file for reading and deleting — the way
+		// every read in the server opens a file (FileReader.ReadSharing) — does not block the
+		// apply. The apply replaces the file by renaming a temp file over it, which on Windows
+		// fails against any open handle that does not share for deleting; before #349 the
+		// server's own reads were such handles, and the replace got through only on the write
+		// retry. Held across the apply, the handle stands in for a server read in progress. It
+		// is opened after the preview: it keeps writers out, so held during the preview it would
+		// fail the writability check, as the test above shows for a handle without Delete.
+		async Task<(bool pass, string msg)> RunReadDeleteSharedHandleAllowsApply()
 		{
 			if(!OperatingSystem.IsWindows())
 				
@@ -603,26 +605,33 @@ internal static class CodeFixTests
 				
 				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
 				
-				(JsonNode? Data, string Text) preview;
-				(JsonNode? Data, string Text) apply = (null, "not run");
+				var preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
 				
-				using(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+				if(preview.Data?["token"]?.GetValue<string>() is not { } token)
 					
-					preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+					return (false, $"FAIL  (preview: {preview.Text}) [{sw.ElapsedMilliseconds}ms]");
+				
+				(JsonNode? Data, string Text) apply;
+				string held;
+				
+				using(var reader = new StreamReader(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))) {
 					
-					if(preview.Data?["token"]?.GetValue<string>() is { } token)
-						apply = await Apply(token, workspacePath);
+					apply = await Apply(token, workspacePath);
+					
+					// The handle still reads what it opened: a rename replaces the name, not the
+					// file the handle has.
+					held = await reader.ReadToEndAsync();
 				}
 				
 				var updated = await File.ReadAllTextAsync(fixturePath);
-				var pass = preview.Data?["token"] is not null
-					&& apply.Data?["error"] is null
+				var pass = apply.Data?["error"] is null
 					&& HasFileState(apply.Data, "_CodeFixFixture_.cs", "written")
-					&& updated.Contains("object value", StringComparison.Ordinal);
+					&& updated.Contains("object value", StringComparison.Ordinal)
+					&& held.Contains("TestSingleWrite value", StringComparison.Ordinal);
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (preview: {preview.Text}; apply: {apply.Text}) [{sw.ElapsedMilliseconds}ms]");
+					: $"FAIL  (apply: {apply.Text}; held handle read: {held}) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				DeleteWorkspace(workspacePath);
@@ -1035,7 +1044,7 @@ internal static class CodeFixTests
 			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
 			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
 			new("a file held open without sharing for writing is rejected with a clear message", RunReadOnlySharedHandleRejectedAtPreview),
-			new("a reader that shares for writing and deleting blocks neither preview nor apply", RunFullySharedHandleAllowsFix),
+			new("a reader that shares for deleting does not block the apply's atomic replace", RunReadDeleteSharedHandleAllowsApply),
 			new("tracked additional and analyzer-config documents support safe edits only", RunTrackedNonCSharpDocuments),
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),

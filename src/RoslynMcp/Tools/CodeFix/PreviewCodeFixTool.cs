@@ -462,17 +462,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			if(File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly))
 				throw new UnauthorizedAccessException("The file has the read-only attribute.");
 			
-			// With the write retry: a handle someone else holds without sharing for writing is
-			// usually short-lived — a read in progress, an editor saving, an antivirus scan of a
-			// file just written — and refusing the fix over one is what #349 was.
-			FileWriter.WriteWithRetry(() => {
-				
-				using var stream = new FileStream(
-					path,
-					FileMode.Open,
-					FileAccess.Write,
-					FileShare.ReadWrite | FileShare.Delete);
-			}, path);
+			OpenForWriting(path);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
@@ -484,6 +474,28 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			
 			throw new UnsupportedCodeFixChangeException(
 				$"Phase 1 code fixes require writable source files; '{path}' cannot be opened for writing: {ex.Message}{held}");
+		}
+	}
+	
+	// Opens and closes the file for writing, retrying a sharing violation twice (after 50 ms, then
+	// 100 ms). A handle someone else holds without sharing for writing is usually short-lived —
+	// one of the server's own reads, which keep writers out (FileReader.ReadSharing), an editor
+	// saving, an antivirus scan of a file just written — and refusing the fix over one is what
+	// #349 was. Any other failure (no access, no file) is final at once. A check, not a write:
+	// nothing here goes to the write-retry log.
+	private static void OpenForWriting(string path)
+	{
+		for(var delay = 50; ; delay *= 2) {
+			
+			try {
+				
+				using var stream = new FileStream(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
+				
+				return;
+			}
+			catch(IOException ex) when(delay <= 100 && IsSharingViolation(ex)) {
+				Thread.Sleep(delay);
+			}
 		}
 	}
 	
