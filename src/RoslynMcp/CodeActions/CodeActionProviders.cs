@@ -103,6 +103,7 @@ internal sealed record RefactoringAction(CodeAction Action, string Title, string
 internal sealed record UnavailableAction(string Title, string Provider, string Reason);
 
 internal sealed record RefactoringQuery(
+	CodeActionSettings                   Settings,
 	ImmutableArray<RefactoringAction>    Actions,
 	ImmutableArray<UnavailableAction>    Unavailable,
 	ImmutableArray<ProviderSourceReport> Sources,

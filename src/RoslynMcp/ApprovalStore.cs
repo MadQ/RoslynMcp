@@ -211,7 +211,8 @@ internal enum ApprovalWorkflow
 {
 	Rename,
 	SignatureChange,
-	CodeFix
+	CodeFix,
+	Refactoring
 }
 
 internal sealed record WorkspaceBinding(string CanonicalPath, bool IsMSBuild)

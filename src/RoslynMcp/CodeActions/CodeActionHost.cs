@@ -127,7 +127,7 @@ internal sealed class CodeActionHost
 			? byProvider
 			: string.CompareOrdinal(left.Title, right.Title));
 		
-		return new RefactoringQuery(actions.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable());
+		return new RefactoringQuery(providers.Settings, actions.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable());
 	}
 	
 	/// <summary>

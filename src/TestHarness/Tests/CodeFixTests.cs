@@ -864,7 +864,7 @@ internal static class CodeFixTests
 			}
 		}
 		
-		async Task<(bool pass, string msg)> RunCreateDeleteRejectedAtPreview()
+		async Task<(bool pass, string msg)> RunCreateDeleteApplied()
 		{
 			var workspacePath = NewAdhocWorkspace();
 			var removedPath = Path.Combine(workspacePath, "_CodeFixRemoved_.cs");
@@ -876,11 +876,27 @@ internal static class CodeFixTests
 				const string removedContents = "class RemovedByCodeFix { }\n";
 				await File.WriteAllTextAsync(removedPath, removedContents);
 				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestMixed");
-				var currentRemovedContents = await File.ReadAllTextAsync(removedPath);
-				var pass = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
-					&& preview?["token"] is null
+				var token = preview?["token"]?.GetValue<string>();
+				var previewNamesFiles = preview?["createdFiles"]?.AsArray().Any(file => file?.GetValue<string>().EndsWith("_CodeFixCreated_.cs", StringComparison.Ordinal) == true) == true
+					&& preview?["deletedFiles"]?.AsArray().Any(file => file?.GetValue<string>().EndsWith("_CodeFixRemoved_.cs", StringComparison.Ordinal) == true) == true
 					&& !File.Exists(createdPath)
-					&& currentRemovedContents == removedContents;
+					&& await File.ReadAllTextAsync(removedPath) == removedContents;
+				
+				if(token is null || !previewNamesFiles)
+					return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+				
+				// The preview wrote nothing; the apply creates one file and deletes the other (#389).
+				var (apply, applyText) = await Apply(token, workspacePath);
+				var pass = apply?["error"] is null
+					&& HasFileState(apply, "_CodeFixCreated_.cs", "written")
+					&& HasFileState(apply, "_CodeFixRemoved_.cs", "deleted")
+					&& apply?["createdFiles"]?.AsArray().Count == 1
+					&& apply?["deletedFiles"]?.AsArray().Count == 1
+					&& File.Exists(createdPath)
+					&& (await File.ReadAllTextAsync(createdPath)).Contains("class CreatedByCodeFix", StringComparison.Ordinal)
+					&& !File.Exists(removedPath);
+				
+				previewText = $"apply: {applyText}";
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
@@ -1102,7 +1118,7 @@ internal static class CodeFixTests
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),
 			new("external file changes are rejected during preview", RunExternalPathRejectedAtPreview),
-			new("create and delete changes are rejected during preview", RunCreateDeleteRejectedAtPreview)
+			new("create and delete changes are previewed and applied", RunCreateDeleteApplied)
 		];
 		
 		return new TestGroup($"Code Fix Tools ({tests.Count} tests)", tests);
