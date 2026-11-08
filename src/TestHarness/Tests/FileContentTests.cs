@@ -22,6 +22,7 @@ static class FileContentTests
 		// Not a C# file, so it is never a tracked document: roslyn_read_file reads it from disk.
 		var lockedPath = fx.Write("locked.txt", "held\n");
 		var activeLog  = fx.Write("active.log", "one\ntwo\nthree\n");
+		var rangeLock  = fx.Write("range-locked.txt", "locked range\n");
 		
 		var tests = new List<TestCase> {
 			
@@ -97,7 +98,7 @@ static class FileContentTests
 							"roslyn_read_file",
 							new { filePath = "locked.txt", projectPath = fx.ProjectPath },
 							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
-								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry once the program has closed the file", StringComparison.Ordinal));
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry", StringComparison.Ordinal));
 					
 					if(!locked.pass)
 						
@@ -151,7 +152,36 @@ static class FileContentTests
 							"roslyn_read_file",
 							new { filePath = "active.log", projectPath = fx.ProjectPath },
 							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
-								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry once the program has closed the file", StringComparison.Ordinal));
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry", StringComparison.Ordinal));
+				}),
+			
+			// A byte-range lock rather than a sharing conflict: the handle here only reads and
+			// shares everything, so the server's open succeeds, and it is the read that fails —
+			// over the locked range, with ERROR_LOCK_VIOLATION (33), not 32. Windows words that as
+			// "used by another process" too, so it must get the same hint. Hint checked by its
+			// stable token, not its wording. Windows only: elsewhere locks are advisory.
+			new("roslyn_read_file: a file with a locked byte range is refused with a hint",
+				async () => {
+					
+					if(!OperatingSystem.IsWindows())
+						
+						return Skip.NotApplicable("file locks are advisory on this platform; the read succeeds");
+					
+					using var holder = new FileStream(rangeLock, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+					
+					holder.Lock(0, holder.Length);
+					
+					try {
+						
+						return await ctx.RunTestAsync(
+							"roslyn_read_file",
+							new { filePath = "range-locked.txt", projectPath = fx.ProjectPath },
+							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry", StringComparison.Ordinal));
+					}
+					finally {
+						holder.Unlock(0, holder.Length);
+					}
 				}),
 			
 			new("roslyn_get_line_count: single and multi-file",

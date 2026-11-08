@@ -73,7 +73,10 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 						results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, fullPath), lineCount, null));
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-						results.Add(new LineCountEntry(filePath, null, ex.Message));
+						
+						var held = FileReader.IsHeldByAnotherHandle(ex) ? $" {HeldFileHint}" : "";
+						
+						results.Add(new LineCountEntry(filePath, null, ex.Message + held));
 					}
 				}
 				

@@ -142,16 +142,16 @@ internal static class FileReader
 	internal const FileShare ObservingSharing = FileShare.ReadWrite | FileShare.Delete;
 	
 	/// <summary>
-	///     Whether <paramref name="ex"/> is Windows refusing a read over another program's hold on
-	///     the file: ERROR_SHARING_VIOLATION (32) on the open — the file is open in a handle that
-	///     does not share what this open asks for, so for a read here another program writing it
-	///     or holding it without sharing — or ERROR_LOCK_VIOLATION (33) on the read, over a byte
-	///     range another program has locked (a database, an Office document). Windows words both
-	///     as "used by another process", whoever the holder is. Elsewhere sharing and locks are
+	///     Whether <paramref name="ex"/> is Windows refusing a read over another handle's hold on
+	///     the file — another program's, or one of the server's own: ERROR_SHARING_VIOLATION (32)
+	///     on the open — the file is open in a handle that does not share what this open asks
+	///     for, so for a read here a writer, or a holder that shares nothing — or
+	///     ERROR_LOCK_VIOLATION (33) on the read, over a locked byte range (a database, an Office
+	///     document). Windows words both as "used by another process", whoever the holder is. Elsewhere sharing and locks are
 	///     advisory, and the low bits of an HRESULT can be an errno that means something else
 	///     (32 is EPIPE).
 	/// </summary>
-	internal static bool IsSharingViolation(Exception ex) =>
+	internal static bool IsHeldByAnotherHandle(Exception ex) =>
 		OperatingSystem.IsWindows() && ex is IOException && (ex.HResult & 0xFFFF) is 32 or 33
 	;
 	

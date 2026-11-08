@@ -548,7 +548,7 @@ internal static class CodeFixTests
 		// holds without sharing it for writing or deleting (as a program that has it open
 		// usually does) is previewed like any other: the preview must return a token, which is
 		// the #349 failure turned around. The apply then cannot replace it: its atomic rename
-		// needs the holder to share for deleting. It must list the file as not written, with
+		// needs the holder to share for deleting. It must list the file as untouched, with
 		// recovery guidance, and leave it exactly as it was — the guarantee the dropped check
 		// was standing in for. One handle, held across both calls. Windows only: elsewhere
 		// sharing is advisory and the rename succeeds, so there is nothing to check.
@@ -582,7 +582,7 @@ internal static class CodeFixTests
 					file?["path"]?.GetValue<string>().EndsWith("_CodeFixFixture_.cs", StringComparison.OrdinalIgnoreCase) == true);
 				var pass = preview.Data?["token"] is not null
 					&& listed is not null
-					&& listed["state"]?.GetValue<string>() is { } state && state != "written"
+					&& listed["state"]?.GetValue<string>() == "untouched"
 					&& EveryFileHasRecovery(apply.Data)
 					&& content == Fixture("TestSingleWrite");
 				

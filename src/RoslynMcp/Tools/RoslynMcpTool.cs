@@ -1677,24 +1677,27 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	/// <summary>
 	///     The result of a file read that threw: <see cref="FileTooLargeResult"/> for a file past
-	///     the <see cref="FileReader"/> limit, otherwise the read's own message. A sharing
-	///     violation gets a hint: Windows blames "another process" whoever holds the file, and
-	///     the refusal is on purpose — a read keeps writers out (<see cref="FileReader.ReadSharing"/>)
-	///     so that what it returns is never a half-saved file (#349).
+	///     the <see cref="FileReader"/> limit, otherwise the read's own message. A file held by
+	///     another handle (<see cref="FileReader.IsHeldByAnotherHandle"/>: a sharing violation on
+	///     the open or a locked byte range on the read) gets <see cref="HeldFileHint"/>: Windows
+	///     blames "another process" whoever the holder is, and a read refused by a writer is
+	///     refused on purpose (<see cref="FileReader.ReadSharing"/>) so that what it returns is
+	///     never a half-saved file (#349).
 	/// </summary>
 	protected static ErrorResult ReadFailure(Exception ex) => ex switch {
 		
-		FileTooLargeException tooLarge         => new FileTooLargeResult(tooLarge),
-		_ when FileReader.IsSharingViolation(ex) => new ErrorResult($"Failed to read file: {ex.Message}", SharingViolationHint),
-		_                                      => new ErrorResult($"Failed to read file: {ex.Message}"),
+		FileTooLargeException tooLarge              => new FileTooLargeResult(tooLarge),
+		_ when FileReader.IsHeldByAnotherHandle(ex) => new ErrorResult($"Failed to read file: {ex.Message}", HeldFileHint),
+		_                                           => new ErrorResult($"Failed to read file: {ex.Message}"),
 	};
 	
-	// For every caller of ReadFailure, the read tool and the edit tools alike: nothing in it is
-	// advice that only one of them can follow.
-	const string SharingViolationHint =
-		"Another program has the file open — writing it, holding it without sharing, or holding a lock on part " +
-		"of it. The file is not read while that is so, so nothing is ever built from half-saved content. " +
-		"Retry once the program has closed the file."
+	// Facts only, for every caller of ReadFailure, the read tool and the edit tools alike: who
+	// holds the file (another program, or one of RoslynMcp's own handles) and how long a lock
+	// lasts are not known here, so the hint names neither and promises no particular way out.
+	internal const string HeldFileHint =
+		"Another handle holds the file — open without sharing what this read needs, or with part of it locked — " +
+		"and Windows reports that as \"used by another process\" whoever the holder is. The file is not read while " +
+		"it is held, so nothing is built from half-saved content. Retry the call later."
 	;
 	
 	// Returns recovery guidance that agents can act on when a write produces bad results.

@@ -465,14 +465,16 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 	{
 		try {
 			
-			if(File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly))
+			// The file a link leads to: on Windows the attributes of a link are its own, and a
+			// link to a read-only file would pass.
+			if(File.GetAttributes(FileWriter.FollowLink(path)).HasFlag(FileAttributes.ReadOnly))
 				throw new UnauthorizedAccessException("The file has the read-only attribute.");
 		}
 		catch(Exception ex) when(ex is FileNotFoundException or DirectoryNotFoundException) {
 			
-			// Deleted since the workspace read it: not a question of writability.
+			// Deleted between the caller's existence check and this one: the caller's message.
 			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes can modify existing files only; '{path}' no longer exists.");
+				$"Phase 1 code fixes can modify existing text files only; '{path}' does not exist.");
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
