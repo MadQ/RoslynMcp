@@ -73,10 +73,10 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		string originalContent;
 		
 		try {
-			originalContent = File.ReadAllText(fullPath);
+			originalContent = FileReader.ReadAllText(fullPath, FileReader.DocumentLimit);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
+			return scope.Error(ReadFailure(ex));
 		}
 		
 		// Split into lines to compute 1-based line numbers for each match position.

@@ -73,9 +73,14 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		;
 		
 		try {
-			existingContent = await File.ReadAllTextAsync(fullPath);
+			existingContent = await FileReader.ReadAllTextAsync(fullPath, FileReader.DocumentLimit);
 		}
-		catch(FileNotFoundException) { }
+		catch(Exception ex) when(ex is FileNotFoundException or DirectoryNotFoundException) { }
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
+			// Refused before anything is written: the pre-write backup could not be taken either.
+			return scope.Error(ReadFailure(ex));
+		}
 		
 		var isNewFile = existingContent is null;
 		

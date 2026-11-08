@@ -160,7 +160,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			try {
 				
-				using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(claudeSettings));
+				using var doc = System.Text.Json.JsonDocument.Parse(FileReader.ReadAllText(claudeSettings, FileReader.DocumentLimit));
 				
 				if(ContainsRoslynMcpValue(doc.RootElement))
 					
@@ -1674,6 +1674,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				BackupRecoveryHint(filePath))
 			: null;
 	}
+	
+	/// <summary>
+	///     The result of a file read that threw: <see cref="FileTooLargeResult"/> for a file past
+	///     the <see cref="FileReader"/> limit, otherwise the read's own message.
+	/// </summary>
+	protected static ErrorResult ReadFailure(Exception ex) => ex is FileTooLargeException tooLarge
+		? new FileTooLargeResult(tooLarge)
+		: new ErrorResult($"Failed to read file: {ex.Message}")
+	;
 	
 	// Returns recovery guidance that agents can act on when a write produces bad results.
 	protected static string BackupRecoveryHint(string relPath) =>

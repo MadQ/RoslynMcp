@@ -96,6 +96,10 @@ internal sealed class IgnoreRules
 		return rules;
 	}
 	
+	// Checked on the length before the read and enforced again during it (a file can grow in
+	// between): a .gitignore past this is not one anyone wrote by hand.
+	const long maxGitIgnoreBytes = 256 * 1024;
+	
 	// Last-write ticks mixed with the length; 0 means "no usable .gitignore". A stat per lookup
 	// is what keeps an edited .gitignore from needing a server restart.
 	static long GitIgnoreStamp(string path)
@@ -105,7 +109,7 @@ internal sealed class IgnoreRules
 			var info = new FileInfo(path);
 			
 			// A symlinked .gitignore could point anywhere; the walks it steers stay inside the root.
-			if(!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length > 256 * 1024)
+			if(!info.Exists || info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length > maxGitIgnoreBytes)
 				
 				return 0;
 			
@@ -133,7 +137,7 @@ internal sealed class IgnoreRules
 		
 		try {
 			
-			foreach(var raw in File.ReadLines(path)) {
+			foreach(var raw in FileReader.ReadLines(path, maxGitIgnoreBytes)) {
 				
 				// Trailing whitespace only, as git does: a leading space is part of the name, and
 				// trimming it would turn " dist/" into a rule for a different directory.
@@ -192,6 +196,12 @@ internal sealed class IgnoreRules
 				if(!isPath)
 					paths.RemoveWhere(candidate => gitComparer.Equals(candidate[(candidate.LastIndexOf('/') + 1)..], text));
 			}
+		}
+		catch(FileTooLargeException) {
+			
+			// It grew past the limit after the length check. The unread rest could hold a
+			// negation re-including something read so far, so none of it is used.
+			return ([], []);
 		}
 		catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {
 			// Best effort — fall back to whatever was read before the failure.

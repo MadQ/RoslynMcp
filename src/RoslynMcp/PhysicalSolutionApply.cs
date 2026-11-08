@@ -271,7 +271,7 @@ internal sealed class PhysicalSolutionApplyPlan
 						"Existing file is missing after application.");
 			}
 			
-			var actualBytes = File.ReadAllBytes(file.Path);
+			var actualBytes = FileReader.ReadAllBytes(file.Path, FileReader.DocumentLimit);
 			var actualHash  = ComputeHash(actualBytes);
 			
 			if(string.Equals(actualHash, file.IntendedHash, StringComparison.OrdinalIgnoreCase))

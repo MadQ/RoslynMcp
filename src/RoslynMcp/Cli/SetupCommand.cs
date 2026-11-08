@@ -250,7 +250,7 @@ class SetupCommand : CliCommand
             // Try parsing to catch malformed JSON before we back up and modify anything.
             try
             {
-                var json = File.ReadAllText(r.ConfigPath);
+                var json = FileReader.ReadAllText(r.ConfigPath, FileReader.DocumentLimit);
                 System.Text.Json.JsonDocument.Parse(json,
                     new System.Text.Json.JsonDocumentOptions {
 
@@ -303,7 +303,7 @@ class SetupCommand : CliCommand
     {
         try
         {
-            var lines = File.ReadAllLines(path);
+            var lines = FileReader.ReadAllLines(path, FileReader.DocumentLimit);
             var start = (int) Math.Max(0, (errorLine ?? 1) - 3);
             var end = Math.Min(lines.Length, start + 6);
 

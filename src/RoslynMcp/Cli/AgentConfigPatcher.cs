@@ -52,7 +52,7 @@ static class AgentConfigPatcher
             }
             else
             {
-                var json = File.ReadAllText(configPath);
+                var json = FileReader.ReadAllText(configPath, FileReader.DocumentLimit);
 
                 // Backup before touching anything — one .roslynmcp.bak per config,
                 // overwritten on each run so it always holds the last pre-roslynmcp state.

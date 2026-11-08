@@ -235,7 +235,7 @@ internal static class FilePruner
     {
         try {
 
-            var text = File.ReadAllText(RunCountPath).Trim();
+            var text = FileReader.ReadAllText(RunCountPath, FileReader.ConfigLimit).Trim();
 
             return int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var count)
                 ? count

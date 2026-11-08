@@ -80,6 +80,29 @@ internal record ErrorResult : ToolResult, IToolError
 }
 
 /// <summary>
+///     A file that holds more than <see cref="FileReader"/> reads whole (#230). <c>error</c> is the
+///     stable code <c>file_too_large</c>; the file name and limit are in <c>message</c>.
+///     Serializes to: <c>{ "error": "file_too_large", "message": "...", "limit_bytes": N, "hint": "..." }</c>
+/// </summary>
+internal sealed record FileTooLargeResult : ErrorResult
+{
+	public FileTooLargeResult(FileTooLargeException ex)
+		: base("file_too_large", $"Files over {FileReader.Describe(ex.Limit)} are not read whole; use a tool outside RoslynMcp for this one.")
+	{
+		Message    = ex.Message;
+		LimitBytes = ex.Limit;
+	}
+	
+	[JsonPropertyName("message")]
+	[JsonPropertyOrder(-8)]
+	public string Message { get; init; }
+	
+	[JsonPropertyName("limit_bytes")]
+	[JsonPropertyOrder(-7)]
+	public long LimitBytes { get; init; }
+}
+
+/// <summary>
 ///     One candidate in an <see cref="AmbiguousSymbolResult"/>. <see cref="ContainingType"/> and
 ///     <see cref="FilePath"/>+<see cref="Line"/> are the exact values an agent copies into the
 ///     retry call's disambiguation parameters.
