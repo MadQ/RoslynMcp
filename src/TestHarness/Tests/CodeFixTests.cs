@@ -592,6 +592,9 @@ internal static class CodeFixTests
 		// (code_fix_write_check). The preview must then succeed. Released on that entry and not
 		// after a fixed delay, so the test does not depend on how long the preview takes to reach
 		// the check; a check that did not retry refuses on its first attempt and fails the test.
+		// What it does depend on is the harness letting go within the retries the entry starts
+		// (50 + 100 + 200 ms): it polls the log's new bytes every 5 ms, so the margin is wide,
+		// but a machine stalled for a third of a second would fail it.
 		// The fixture has a name of its own: the test above leaves the same log entry for
 		// _CodeFixFixture_.cs. Windows only: elsewhere sharing is advisory.
 		async Task<(bool pass, string msg)> RunShortLivedHolderWaitedOut()
@@ -666,12 +669,35 @@ internal static class CodeFixTests
 		}
 		
 		// What the server appended to its log since an offset — read on every poll, so not the
-		// whole file each time (ServerLog.TryRead reads every rotation of it).
+		// whole file each time (ServerLog.TryRead reads every rotation of it). FileLogger rotates
+		// by renaming the live file to "<log>.1" and starting a new one under the same name, so a
+		// live file shorter than the offset has rotated: the rest of the old one is in ".1".
 		static string LogSince(string logFile, long offset)
+		{
+			var length = LengthOf(logFile);
+			
+			if(length >= offset)
+				
+				return ReadFrom(logFile, offset);
+			
+			return ReadFrom(logFile + ".1", offset) + ReadFrom(logFile, 0);
+		}
+		
+		static long LengthOf(string path)
+		{
+			try {
+				return new FileInfo(path).Length;
+			}
+			catch(IOException) {
+				return 0;
+			}
+		}
+		
+		static string ReadFrom(string path, long offset)
 		{
 			try {
 				
-				using var stream = new FileStream(logFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+				using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 				
 				if(stream.Length <= offset)
 					

@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Text.RegularExpressions;
 using System.Xml;
-using System.Xml.Linq;
 using Microsoft.Build.Locator;
 using Microsoft.Win32;
 

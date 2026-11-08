@@ -131,27 +131,6 @@ static class FileContentTests
 								&& data?["files"]?[0]?["error"] is null);
 				}),
 			
-			// The same for roslyn_read_file on a file outside the workspace: its content is only
-			// returned, so it shares with writers too (FileReader.ObservingSharing) and reads a log
-			// another program is still writing. The file locked with no sharing at all, above, is
-			// still an error.
-			new("roslyn_read_file: reads a file another program has open for writing",
-				async () => {
-					
-					if(!OperatingSystem.IsWindows())
-						
-						return Skip.NotApplicable("file sharing is advisory on this platform; the read succeeds");
-					
-					using(new FileStream(activeLog, FileMode.Open, FileAccess.Write, FileShare.Read))
-						
-						return await ctx.RunTestAsync(
-							"roslyn_read_file",
-							new { filePath = "active.log", projectPath = fx.ProjectPath },
-							(data, source) => data?["error"] is null
-								&& data?["source"]?.GetValue<string>() == "disk"
-								&& source is ["one\ntwo\nthree\n\n"]);
-				}),
-			
 			new("roslyn_get_line_count: single and multi-file",
 				() => ctx.RunTestAsync(
 					"roslyn_get_line_count",

@@ -75,21 +75,27 @@ internal static class FileReader
 	/// </summary>
 	internal static FileStream OpenUnbounded(string path) => OpenFile(path, FileOptions.None, ReadSharing);
 	
-	/// <inheritdoc cref="OpenUnbounded(string)"/>
+	/// <summary>
+	///     Opens <paramref name="path"/> for a streaming read with no limit and the given
+	///     sharing. For a read that only counts and holds no copy — <c>roslyn_get_line_count</c>,
+	///     which streams the file through a fixed buffer and passes
+	///     <see cref="ObservingSharing"/>. Anything that keeps or returns the content takes a
+	///     limit and <see cref="ReadSharing"/>.
+	/// </summary>
 	/// <param name="path">The file to open.</param>
-	/// <param name="sharing"><see cref="ReadSharing"/>, or <see cref="ObservingSharing"/> for a read that is never written back.</param>
+	/// <param name="sharing"><see cref="ReadSharing"/>, or <see cref="ObservingSharing"/> for a read that only counts.</param>
 	/// <param name="options">The <see cref="FileOptions"/> to open with, e.g. <see cref="FileOptions.Asynchronous"/>.</param>
 	internal static FileStream OpenUnbounded(string path, FileShare sharing, FileOptions options) => OpenFile(path, options, sharing);
 	
 	/// <summary>
-	///     Parses <paramref name="path"/> as XML, read through <see cref="OpenUnbounded(string)"/>:
-	///     a project or solution file, which MSBuild reads whole too. <c>XDocument.Load(path)</c>
-	///     opens the file without sharing it for deleting, which blocks the atomic replace of a
-	///     project file while it is held (#349).
+	///     Parses <paramref name="path"/> as XML — a project or solution file — read with
+	///     <see cref="DocumentLimit"/> and <see cref="ReadSharing"/>. <c>XDocument.Load(path)</c>
+	///     has no limit and opens the file without sharing it for deleting, which blocks the
+	///     atomic replace of a project file while it is held (#349).
 	/// </summary>
 	internal static System.Xml.Linq.XDocument LoadXml(string path)
 	{
-		using var stream = OpenUnbounded(path);
+		using var stream = OpenRead(path, DocumentLimit);
 		
 		return System.Xml.Linq.XDocument.Load(stream);
 	}
@@ -120,18 +126,18 @@ internal static class FileReader
 	///         name stays taken until the read closes, so a delete-and-recreate can fail for those
 	///         milliseconds. Accepted: without it the server's own replace fails instead.
 	///     </para>
-	///     A read whose content is never written back can share with writers too:
-	///     <see cref="ObservingSharing"/>.
+	///     A read that only counts can share with writers too: <see cref="ObservingSharing"/>.
 	/// </summary>
 	internal const FileShare ReadSharing = FileShare.Read | FileShare.Delete;
 	
 	/// <summary>
-	///     How a read shares the file when what it reads is only returned or counted, never
-	///     written back: with readers, writers and deletes. <c>roslyn_read_file</c> on a disk file
-	///     and <c>roslyn_get_line_count</c> use it, so a log another program is still writing can
-	///     be read and counted. A file caught mid-save gives a result that is out of date a
-	///     moment later, and nothing is built on it. Never use it for a read that something
-	///     writes back, a workspace document, a backup or an edit: see <see cref="ReadSharing"/>.
+	///     How a read shares the file when nothing is ever built from what it reads — a count,
+	///     not content: with readers, writers and deletes. <c>roslyn_get_line_count</c> uses it,
+	///     so a log another program is still writing can be counted; a file caught mid-save
+	///     gives a count that is out of date a moment later. Not for any read whose content
+	///     comes out: <c>roslyn_read_file</c>'s output is copied into edits by the agent, so it
+	///     is written back as surely as a workspace document, a backup or an edit's own read.
+	///     Those use <see cref="ReadSharing"/>.
 	/// </summary>
 	internal const FileShare ObservingSharing = FileShare.ReadWrite | FileShare.Delete;
 	
@@ -185,18 +191,9 @@ internal static class FileReader
 	internal static Task<byte[]> ReadAllBytesAsync(string path, long maxBytes) => ReadAllBytesAsync(path, maxBytes, CancellationToken.None);
 	
 	/// <inheritdoc cref="ReadAllBytes"/>
-	internal static Task<byte[]> ReadAllBytesAsync(string path, long maxBytes, CancellationToken cancellationToken) =>
-		ReadAllBytesAsync(path, maxBytes, ReadSharing, cancellationToken)
-	;
-	
-	/// <inheritdoc cref="ReadAllBytes"/>
-	/// <param name="path">The file to read.</param>
-	/// <param name="maxBytes">The most bytes read before <see cref="FileTooLargeException"/>.</param>
-	/// <param name="sharing"><see cref="ReadSharing"/>, or <see cref="ObservingSharing"/> for a read that is never written back.</param>
-	/// <param name="cancellationToken">Cancels the read.</param>
-	internal static async Task<byte[]> ReadAllBytesAsync(string path, long maxBytes, FileShare sharing, CancellationToken cancellationToken)
+	internal static async Task<byte[]> ReadAllBytesAsync(string path, long maxBytes, CancellationToken cancellationToken)
 	{
-		await using var stream = BoundedStream.Open(path, maxBytes, FileOptions.Asynchronous, sharing);
+		await using var stream = BoundedStream.Open(path, maxBytes, FileOptions.Asynchronous, ReadSharing);
 		using var       rest   = new MemoryStream();
 		
 		if(stream.KnownLength is > 0 and var length) {
