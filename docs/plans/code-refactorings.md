@@ -1,7 +1,11 @@
 # Code Refactorings — Planning Doc (#389)
 
-**Status:** Draft v2, awaiting approval. Branch `feat/issue-389-refactoring-tools` off `dev`, with the
-Roslyn 5.9.0 upgrade commits cherry-picked from the earlier `feat/issue-389-code-refactorings` branch.
+**Status:** Implemented on branch `feat/issue-389-refactoring-tools` (off `dev`, with the Roslyn 5.9.0
+upgrade commits cherry-picked from the earlier `feat/issue-389-code-refactorings` branch). Tools:
+`roslyn_list_refactorings`, `roslyn_preview_refactoring`, `roslyn_apply_refactoring`. Where the implementation
+departs from this plan: the deny list matches the stem of a provider's type name, because Roslyn's export names
+turned out to be whatever the author typed (`Invert If Code Action Provider`); a name-only document rename
+(Move type's "Rename file to match type") is refused by the validator, since the diff would show nothing.
 
 Decisions taken so far: deny-list rather than allow-list (agreed); **one PR for the whole issue**, no split;
 a branch of this session's own.

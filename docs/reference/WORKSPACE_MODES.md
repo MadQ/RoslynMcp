@@ -304,6 +304,7 @@ File-based tools (`roslyn_read_file`, `roslyn_get_file_outline`, the editing too
 | **File change detection** | Roslyn internal + FileSystemWatcher | Roslyn internal + FileSystemWatcher | FileSystemWatcher |
 | **Multi-project** | ✅ Yes | ✅ Yes | ❌ No |
 | **.NET Framework** | ⚠️ Limited | ✅ Yes | ❌ No |
+| **Code refactorings and fixes (#389)** | ✅ Built-in, project (analyzer references) and configured providers | ✅ Same | ⚠️ Built-in and configured providers only — no project file, so no analyzer references; the source report says so |
 
 ---
 
