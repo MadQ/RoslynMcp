@@ -173,6 +173,7 @@ internal sealed partial class WorkspaceManager
 					// workspace as broken.
 					isMSBuild ? ProjectsWithoutReferences(solution) : [],
 					loadFailed,
+					isMSBuild ? ProjectsNotRestored(solution) : [],
 					[..loadWarnings],
 					lastUnhealthyLoad,
 					ReloadPending
@@ -294,7 +295,8 @@ internal sealed partial class WorkspaceManager
 					// failed. One fresh reload usually clears it.
 					var slnLoadFailed = LoadFailedProjects(workspace);
 					
-					if(UnhealthyProjects(workspace, slnLoadFailed).Length > 0) {
+					// Not for a project that was never restored: the second load would be the same (#399).
+					if(RetryableUnhealthy(workspace, slnLoadFailed).Length > 0) {
 						
 						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(workspace, slnLoadFailed)}) — reloading once");
 						workspace.Dispose();
@@ -336,7 +338,7 @@ internal sealed partial class WorkspaceManager
 					
 					var projLoadFailed = LoadFailedProjects(msbuildWs);
 					
-					if(UnhealthyProjects(msbuildWs, projLoadFailed).Length > 0) {
+					if(RetryableUnhealthy(msbuildWs, projLoadFailed).Length > 0) {
 						
 						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(msbuildWs, projLoadFailed)}) — reloading once");
 						msbuildWs.Dispose();

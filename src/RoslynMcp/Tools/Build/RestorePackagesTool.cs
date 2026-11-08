@@ -59,6 +59,19 @@ var message = success
 : $"Restore failed with exit code {exitCode}."
 ;
 
+// A project loaded before its restore has no references until it reloads, and nothing else would
+// reload it: the restore writes project.assets.json under obj\, which the watcher ignores (#399).
+if(success) {
+	
+	try {
+		workspace.RequestReload(projectPath, "packages restored");
+		scope.Record("workspace reload flagged");
+	}
+	catch(Exception ex) when(ex is not OperationCanceledException) {
+		scope.Record($"workspace reload not flagged: {ex.GetType().Name}");
+	}
+}
+
 return scope.Outcome(message, new RestoreResult(success, message, output));
 }
 }

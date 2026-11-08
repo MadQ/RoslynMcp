@@ -44,6 +44,7 @@ static class HarnessGroups
 		Group("File Editing Tools",                        g => EditingTests.Build(g.Ctx)),
 		AsyncGroup("Reload Flagging",                      g => ReloadFlaggingTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Load Health",                          g => LoadHealthTests.BuildAsync(g.Ctx)),
+		AsyncGroup("Unrestored Projects",                  g => UnrestoredProjectTests.BuildAsync(g.Ctx)),
 		Group("Pagination Cursor",                         g => PaginationTests.Build(g.Ctx)),
 		Group("Linked Workspace",                          g => LinkedWorkspaceTests.Build(g.Ctx)),
 		Group("File Rewrite",                              g => FileRewriteTests.Build(g.Ctx)),

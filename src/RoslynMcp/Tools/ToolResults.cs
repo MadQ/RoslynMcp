@@ -429,6 +429,11 @@ internal sealed record CheckDriftResult(
 	[property: JsonPropertyName("projects_with_load_failures")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string[]?                                            ProjectsWithLoadFailures,
+	// The projects of projects_without_references that were never restored: no assets file, so a
+	// newer SDK's design-time build gave them no references, and only a restore helps (#399).
+	[property: JsonPropertyName("projects_not_restored")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]?                                            ProjectsNotRestored,
 	[property: JsonPropertyName("last_unhealthy_load")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string?                                              LastUnhealthyLoad,

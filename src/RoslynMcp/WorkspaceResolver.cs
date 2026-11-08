@@ -171,6 +171,16 @@ internal sealed class WorkspaceResolver
 	}
 	
 	
+	/// <summary>Flags a full reload of the workspace serving <paramref name="projectPath"/> (#399).</summary>
+	public void RequestReload(string projectPath, string reason)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		manager.RequestReload(resolved, reason);
+		paginationCache.InvalidateAll();
+	}
+	
+
 	public void InvalidateFile(string projectPath, string fullPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);

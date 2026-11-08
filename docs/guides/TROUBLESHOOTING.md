@@ -160,6 +160,21 @@ this state is usually transient — it most often appears on the *first* load of
 `last_unhealthy_load` on `roslyn_check_drift` is retained after recovery, so you can still tell
 whether an episode happened earlier in the session.
 
+### A project that was never restored has no references
+
+**Symptom:** the same flood of `CS0246` / `CS0234` as above, in a project that has never been
+restored (a fresh clone, say), and `roslyn_check_drift` reports
+`"projects_not_restored": ["YourProject"]`.
+
+**Cause:** design-time builds run in Roslyn's BuildHost, on the MSBuild of whatever SDK the
+project's directory resolves: the nearest `global.json`, else the newest SDK installed. Not the
+server's. A newer SDK's design-time build (11.0.100-rc.3 was seen) resolves no references at all
+for a project without `obj\project.assets.json`, and reports no failure.
+
+**Fix:** `roslyn_restore_packages`. It restores the projects and reloads the workspace. A reload
+or `roslyn_respawn` alone repeats the same load. A `global.json` that pins an older SDK also avoids
+it, but a restore is the fix.
+
 ### Hundreds of nullable warnings (CS8632), but the project enables `Nullable`
 
 **Symptom:** `roslyn_get_diagnostics` reports a flood of `CS8632` ("The annotation for nullable

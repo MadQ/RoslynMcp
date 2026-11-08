@@ -202,7 +202,7 @@ internal sealed partial class WorkspaceManager
 			var retry = 0;
 
 			while(retry < ReloadRetries
-			      && UnhealthyProjects(newWorkspace, newLoadFailed).Except(liveUnhealthy).Any()) {
+			      && RetryableUnhealthy(newWorkspace, newLoadFailed).Except(liveUnhealthy).Any()) {
 
 				var retryDelayMs = Backoff.DelayMs(retry, Backoff.DefaultSeedMs, MaxRetryDelayMs)
 				;
@@ -224,13 +224,17 @@ internal sealed partial class WorkspaceManager
 			// as the retries above count it: a reload that breaks Good is worse even while Bad has
 			// been broken all along — only Bad's state was there to lose (#300 review). Where the
 			// reload breaks nothing the live workspace had working there is nothing to protect, so
-			// promote regardless — otherwise a bad first load could never recover. And not forever: past MaxConsecutiveDiscards the failure is taken to be
-			// the project's own (an edit that broke it, a new project that never loads), which no
-			// retry will clear. Discarding would then keep a workspace that ignores the edit, and
-			// reload the whole solution every half minute for as long as it lasts; promoting shows
-			// the edit, and the workspace says it is unhealthy — and keeps retrying a while longer
-			// (see the healing retries below), since contention can outlast the discards too.
-			var stillUnhealthy  = UnhealthyProjects(newWorkspace, newLoadFailed);
+			// promote regardless — otherwise a bad first load could never recover. And not forever:
+			// past MaxConsecutiveDiscards the failure is taken to be the project's own (an edit that
+			// broke it, a new project that never loads), which no retry will clear. Discarding would
+			// then keep a workspace that ignores the edit, and reload the whole solution every half
+			// minute for as long as it lasts; promoting shows the edit, and the workspace says it is
+			// unhealthy — and keeps retrying a while longer (see the healing retries below), since
+			// contention can outlast the discards too.
+			// A project that was never restored counts for none of this (#399): no reload heals it, so
+			// it is neither retried, nor a reason to discard, nor healed. It is promoted and reported, and
+			// roslyn_restore_packages restores it and flags the reload that does.
+			var stillUnhealthy  = RetryableUnhealthy(newWorkspace, newLoadFailed);
 			var newIsWorse      = stillUnhealthy.Except(liveUnhealthy).Any();
 			var promotedPastCap = newIsWorse && consecutiveDiscards >= MaxConsecutiveDiscards;
 			var discardedBefore = consecutiveDiscards;

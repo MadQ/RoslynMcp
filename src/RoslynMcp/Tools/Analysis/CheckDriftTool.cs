@@ -27,6 +27,8 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"metadata references (projects_without_references), which happens when a contended MSBuild design-time " +
 		"build silently drops them, or when MSBuild failed on a project's own file (projects_with_load_failures), " +
 		"which can leave its compilation options at defaults — Nullable off in a project that enables it. " +
+		"A project without references that has no project.assets.json is listed in projects_not_restored as " +
+		"well: it was never restored, and roslyn_restore_packages (not a reload) fixes it. " +
 		"That state makes symbol results wrong-but-plausible and makes roslyn_get_diagnostics report phantom " +
 		"CS0246/CS0234 errors or CS8632 warnings for code that builds fine — source can be perfectly in sync " +
 		"while this is broken. " +
@@ -141,6 +143,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			WorkspaceHealthy:          !unhealthy,
 			ProjectsWithoutReferences: health is { ProjectsWithoutReferences: { Length: > 0 } dropped } ? [..dropped.Select(key => key.Name)] : null,
 			ProjectsWithLoadFailures:  health is { ProjectsWithLoadFailures: { Length: > 0 } failed } ? [..failed.Select(key => key.Name)] : null,
+			ProjectsNotRestored:       health is { ProjectsNotRestored: { Length: > 0 } unrestored } ? [..unrestored.Select(key => key.Name)] : null,
 			LastUnhealthyLoad:         health?.LastUnhealthyLoad,
 			ReloadPending:             reloadPending)
 		{
@@ -152,6 +155,11 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 					+ "clears on its own within seconds; if it persists, something is holding a file the MSBuild "
 					+ "design-time build needs. Call roslyn_respawn to force it."
 				: (driftedFiles.Length > 0, unhealthy) switch {
+
+				// Never restored: a restore, not a reload, is the remedy (#399).
+				(var anyDrift, true) when health!.OnlyNeedsRestore =>
+					$"The workspace {health.Problem}. Call roslyn_restore_packages; no reload or respawn helps until then."
+					+ (anyDrift ? " Files also changed on disk without the workspace noticing; the reload after the restore picks them up." : ""),
 
 				(true, true) =>
 					"Two separate problems. Files changed on disk without the workspace noticing, AND the workspace "

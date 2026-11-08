@@ -242,7 +242,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		) {
 			// Say so explicitly: a build that succeeds while roslyn_get_diagnostics reports
 			// hundreds of errors is otherwise baffling.
-			Hint = unhealthyWorkspace
+			Hint = unhealthyWorkspace && health!.OnlyNeedsRestore
+				? $"The Roslyn fast-path was skipped: the workspace {health.Problem}. This result comes from a real "
+					+ "dotnet build, which runs with --no-restore: call roslyn_restore_packages first (#399)."
+				: unhealthyWorkspace
 				? $"The Roslyn fast-path was skipped: the workspace {health!.Problem}, so its diagnostics may be phantom. "
 					+ "This result comes from a real dotnet build. If it fails the same way, the project file itself "
 					+ "may be broken (see load_warnings from roslyn_get_project_info); if it succeeds, call "

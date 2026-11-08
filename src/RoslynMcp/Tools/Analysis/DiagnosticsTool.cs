@@ -224,11 +224,15 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 
 			// "May be": a failure of the project file itself (an import that is not there) and a real
 			// error in the source can come together, and no reload repairs the first (#300 review).
-			hint = $"These diagnostics may be phantom. The workspace {health.Problem}. Usually that is a contended "
-				+ "MSBuild design-time build — something else writing the same obj\\ files — and roslyn_respawn "
-				+ "reloads it. If load_warnings show a failure of the project file itself, fix that instead: no "
-				+ "reload will. roslyn_build_project tells the two apart — it detects this state and runs a real "
-				+ "dotnet build rather than trusting this compilation.";
+			// A project that was never restored is not contention, and no reload repairs it (#399).
+			hint = health.OnlyNeedsRestore
+				? $"These diagnostics are not the code's: the workspace {health.Problem}. Call roslyn_restore_packages; "
+					+ "until the projects are restored, no reload or respawn gives them references."
+				: $"These diagnostics may be phantom. The workspace {health.Problem}. Usually that is a contended "
+					+ "MSBuild design-time build — something else writing the same obj\\ files — and roslyn_respawn "
+					+ "reloads it. If load_warnings show a failure of the project file itself, fix that instead: no "
+					+ "reload will. roslyn_build_project tells the two apart — it detects this state and runs a real "
+					+ "dotnet build rather than trusting this compilation.";
 		}
 		else if(filePath is null && errorCount >= workspaceLoadMinErrors) {
 
