@@ -21,6 +21,8 @@ static class FileContentTests
 		
 		// Not a C# file, so it is never a tracked document: roslyn_read_file reads it from disk.
 		var lockedPath = fx.Write("locked.txt", "held\n");
+		var activeLog  = fx.Write("active.log", "one\ntwo\nthree\n");
+		var rangeLock  = fx.Write("range-locked.txt", "locked range\n");
 		
 		var tests = new List<TestCase> {
 			
@@ -95,7 +97,8 @@ static class FileContentTests
 						locked = await ctx.RunTestAsync(
 							"roslyn_read_file",
 							new { filePath = "locked.txt", projectPath = fx.ProjectPath },
-							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal));
+							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry", StringComparison.Ordinal));
 					
 					if(!locked.pass)
 						
@@ -105,6 +108,80 @@ static class FileContentTests
 						"roslyn_read_file",
 						new { filePath = "locked.txt", projectPath = fx.ProjectPath },
 						(data, source) => data?["source"]?.GetValue<string>() == "disk" && source is ["held\n\n"]);
+				}),
+			
+			// #349: the server's reads keep writers out (FileReader.ReadSharing), because several
+			// of them write what they read back to disk. Counting lines writes nothing back, so
+			// roslyn_get_line_count shares with writers and can count a log another program is
+			// still writing. The handle here is such a writer: open for writing, sharing for
+			// reading only, as a log writer usually opens its file. A count that shared the way
+			// the other reads do would be refused by it. Windows only: elsewhere sharing is
+			// advisory and every read succeeds.
+			new("roslyn_get_line_count: counts a file another program has open for writing",
+				async () => {
+					
+					if(!OperatingSystem.IsWindows())
+						
+						return Skip.NotApplicable("file sharing is advisory on this platform; the read succeeds");
+					
+					using(new FileStream(activeLog, FileMode.Open, FileAccess.Write, FileShare.Read))
+						
+						return await ctx.RunTestAsync(
+							"roslyn_get_line_count",
+							new { filePaths = "active.log", projectPath = fx.ProjectPath },
+							data => data?["files"]?[0]?["line_count"]?.GetValue<int>() == 4
+								&& data?["files"]?[0]?["error"] is null);
+				}),
+			
+			// The other half of that rule: roslyn_read_file returns content, which is copied into
+			// edits, so it keeps writers out (FileReader.ReadSharing) and refuses a file another
+			// program is writing — even one that shares for reading, as the log writer here does.
+			// The refusal is structured and its hint says why and to retry once the file is closed,
+			// instead of Windows' bare "used by another process".
+			// Windows only: elsewhere sharing is advisory and every read succeeds.
+			new("roslyn_read_file: a file another program is writing is refused with a hint",
+				async () => {
+					
+					if(!OperatingSystem.IsWindows())
+						
+						return Skip.NotApplicable("file sharing is advisory on this platform; the read succeeds");
+					
+					using(new FileStream(activeLog, FileMode.Open, FileAccess.Write, FileShare.Read))
+						
+						return await ctx.RunTestAsync(
+							"roslyn_read_file",
+							new { filePath = "active.log", projectPath = fx.ProjectPath },
+							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry", StringComparison.Ordinal));
+				}),
+			
+			// A byte-range lock rather than a sharing conflict: the handle here only reads and
+			// shares everything, so the server's open succeeds, and it is the read that fails —
+			// over the locked range, with ERROR_LOCK_VIOLATION (33), not 32. Windows words that as
+			// "used by another process" too, so it must get the same hint. Hint checked by its
+			// stable token, not its wording. Windows only: elsewhere locks are advisory.
+			new("roslyn_read_file: a file with a locked byte range is refused with a hint",
+				async () => {
+					
+					if(!OperatingSystem.IsWindows())
+						
+						return Skip.NotApplicable("file locks are advisory on this platform; the read succeeds");
+					
+					using var holder = new FileStream(rangeLock, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+					
+					holder.Lock(0, holder.Length);
+					
+					try {
+						
+						return await ctx.RunTestAsync(
+							"roslyn_read_file",
+							new { filePath = "range-locked.txt", projectPath = fx.ProjectPath },
+							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry", StringComparison.Ordinal));
+					}
+					finally {
+						holder.Unlock(0, holder.Length);
+					}
 				}),
 			
 			new("roslyn_get_line_count: single and multi-file",

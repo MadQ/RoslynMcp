@@ -64,15 +64,18 @@ internal sealed class ReadFileTool : RoslynMcpTool
 			else {
 				
 				// The file existed when ResolveFilePath looked, but the read can still fail: another
-				// process holding it open without read sharing (a log being written), the file
-				// vanishing in between, or no read permission. Unguarded, the exception reached the
-				// client as an opaque "An error occurred invoking" (#370); the editing tools guard
-				// their reads the same way.
+				// program has it open for writing — any writer, also one that shares for reading
+				// (a log being written), because the read keeps writers out — or holds it without
+				// sharing it, the file vanished in between, or there is no read permission.
+				// Unguarded, the exception reached the client as an opaque "An error occurred
+				// invoking" (#370); the editing tools guard their reads the same way.
 				try {
 					
 					// Bytes, not a string: SourceText decodes them itself, with the same encoding
 					// detection as from a stream. Bounded, because the whole file is read to count
-					// its lines whatever range was asked for (#230).
+					// its lines whatever range was asked for (#230). FileReader.ReadSharing, not
+					// ObservingSharing: what this returns is copied into edits, so a file another
+					// program is saving must not be read half-done (#349).
 					var bytes = await FileReader.ReadAllBytesAsync(fullPath, FileReader.DocumentLimit);
 					
 					sourceText = SourceText.From(bytes, bytes.Length);

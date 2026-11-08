@@ -542,6 +542,114 @@ internal static class CodeFixTests
 			}
 		}
 
+		// #349: the preview no longer opens a file for writing to see whether that works — such
+		// an open collided with whoever had the file open at that moment, the server's own reads
+		// included, and refused the fix over a handle gone a moment later. So a file someone
+		// holds without sharing it for writing or deleting (as a program that has it open
+		// usually does) is previewed like any other: the preview must return a token, which is
+		// the #349 failure turned around. The apply then cannot replace it: its atomic rename
+		// needs the holder to share for deleting. It must list the file as untouched, with
+		// recovery guidance, and leave it exactly as it was — the guarantee the dropped check
+		// was standing in for. One handle, held across both calls. Windows only: elsewhere
+		// sharing is advisory and the rename succeeds, so there is nothing to check.
+		async Task<(bool pass, string msg)> RunHeldFileLeftAloneByApply()
+		{
+			if(!OperatingSystem.IsWindows())
+				
+				return Skip.NotApplicable("file sharing is advisory on this platform; the rename succeeds");
+			
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
+				
+				(JsonNode? Data, string Text) preview;
+				(JsonNode? Data, string Text) apply = (null, "not run");
+				
+				using(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read)) {
+					
+					preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+					
+					if(preview.Data?["token"]?.GetValue<string>() is { } token)
+						apply = await Apply(token, workspacePath);
+				}
+				
+				var content = await File.ReadAllTextAsync(fixturePath);
+				var listed  = apply.Data?["files"]?.AsArray().FirstOrDefault(file =>
+					file?["path"]?.GetValue<string>().EndsWith("_CodeFixFixture_.cs", StringComparison.OrdinalIgnoreCase) == true);
+				var pass = preview.Data?["token"] is not null
+					&& listed is not null
+					&& listed["state"]?.GetValue<string>() == "untouched"
+					&& EveryFileHasRecovery(apply.Data)
+					&& content == Fixture("TestSingleWrite");
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {preview.Text}; apply: {apply.Text}; file now: {content}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		// #349, the other side: a handle that shares the file for reading and deleting — the way
+		// every read in the server opens a file (FileReader.ReadSharing) — does not block the
+		// apply. The apply replaces the file by renaming a temp file over it, which on Windows
+		// fails against any open handle that does not share for deleting; before #349 the
+		// server's own reads were such handles, and the replace got through only on the write
+		// retry. Held across the apply, the handle stands in for a server read in progress; the
+		// test above is the same handle without Delete, which the rename cannot get past.
+		async Task<(bool pass, string msg)> RunReadDeleteSharedHandleAllowsApply()
+		{
+			if(!OperatingSystem.IsWindows())
+				
+				return Skip.NotApplicable("file sharing is advisory on this platform; nothing to check");
+			
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
+				
+				var preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				
+				if(preview.Data?["token"]?.GetValue<string>() is not { } token)
+					
+					return (false, $"FAIL  (preview: {preview.Text}) [{sw.ElapsedMilliseconds}ms]");
+				
+				(JsonNode? Data, string Text) apply;
+				string held;
+				
+				using(var reader = new StreamReader(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))) {
+					
+					apply = await Apply(token, workspacePath);
+					
+					// The handle still reads what it opened: a rename replaces the name, not the
+					// file the handle has.
+					held = await reader.ReadToEndAsync();
+				}
+				
+				var updated = await File.ReadAllTextAsync(fixturePath);
+				var pass = apply.Data?["error"] is null
+					&& HasFileState(apply.Data, "_CodeFixFixture_.cs", "written")
+					&& updated.Contains("object value", StringComparison.Ordinal)
+					&& held.Contains("TestSingleWrite value", StringComparison.Ordinal);
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (apply: {apply.Text}; held handle read: {held}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+
 		async Task<(bool pass, string msg)> RunTrackedNonCSharpDocuments()
 		{
 			var sw = Stopwatch.StartNew();
@@ -946,6 +1054,8 @@ internal static class CodeFixTests
 			new("code-fix token is rejected by rename apply and survives", RunCodeFixTokenRejectedByRename),
 			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
 			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
+			new("a held file is previewed, and left alone by the apply", RunHeldFileLeftAloneByApply),
+			new("a reader that shares for deleting does not block the apply's atomic replace", RunReadDeleteSharedHandleAllowsApply),
 			new("tracked additional and analyzer-config documents support safe edits only", RunTrackedNonCSharpDocuments),
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),

@@ -439,7 +439,7 @@ internal sealed partial class WorkspaceManager
 				if(solutionPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)) {
 					
 					// .slnx — parse XML and load each project into the same workspace.
-					var doc    = System.Xml.Linq.XDocument.Load(solutionPath)
+					var doc    = FileReader.LoadXml(solutionPath)
 					;
 					var slnDir = Path.GetDirectoryName(solutionPath)!;
 					

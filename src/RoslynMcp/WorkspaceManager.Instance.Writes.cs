@@ -54,7 +54,7 @@ internal sealed partial class WorkspaceManager
 					
 					try {
 						
-						using var stream = File.OpenRead(fullPath);
+						using var stream = FileReader.OpenUnbounded(fullPath);
 						var newText     = SourceText.From(stream, FileWriter.Utf8NoBom);
 						var newSolution = info.WithText(currentSolution, newText);
 						

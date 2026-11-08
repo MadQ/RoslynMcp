@@ -194,7 +194,7 @@ internal sealed partial class WorkspaceManager
 						return false;
 					
 					var relativePath = NormalizeProjectRelativePath(Path.GetRelativePath(projectDir, fullPath));
-					var doc = XDocument.Load(project.FilePath);
+					var doc = FileReader.LoadXml(project.FilePath);
 					
 					foreach(var include in doc
 						.Descendants()

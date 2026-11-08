@@ -73,7 +73,10 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 						results.Add(new LineCountEntry(Path.GetRelativePath(rootPath, fullPath), lineCount, null));
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-						results.Add(new LineCountEntry(filePath, null, ex.Message));
+						
+						var held = FileReader.IsHeldByAnotherHandle(ex) ? $" {HeldFileHint}" : "";
+						
+						results.Add(new LineCountEntry(filePath, null, ex.Message + held));
 					}
 				}
 				
@@ -143,7 +146,9 @@ internal sealed class GetLineCountTool : RoslynMcpTool
         var isEmpty   = true
 ;
 
-        await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, buffer.Length, useAsync: true);
+        // Shared with writers: a count is never written back, so a log another program is still
+        // writing can be counted (#349).
+        await using var stream = FileReader.OpenForCount(fullPath);
 
         int read;
 

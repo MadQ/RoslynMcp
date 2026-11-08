@@ -93,7 +93,7 @@ internal sealed partial class WorkspaceManager
 				
 				return;
 			
-			using var stream = File.OpenRead(path);
+			using var stream = FileReader.OpenUnbounded(path);
 			
 			var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 			var name = Path.GetRelativePath(rootPath, path)

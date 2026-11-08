@@ -478,12 +478,12 @@ internal sealed class BackupStore
 		return Convert.ToHexString(bytes).ToLowerInvariant();
 	}
 	
-	// Streamed, not read through FileReader: a hash holds no copy of the file, so it needs no
-	// size limit. A limit here would turn a changed file past it into a skipped conflict check,
-	// and the restore would overwrite it.
+	// Streamed, with no limit: a hash holds no copy of the file, so it needs none. A limit here
+	// would turn a changed file past it into a skipped conflict check, and the restore would
+	// overwrite it.
 	static string ComputeFileHash(string path)
 	{
-		using var stream = File.OpenRead(path);
+		using var stream = FileReader.OpenUnbounded(path);
 		
 		return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
 	}
