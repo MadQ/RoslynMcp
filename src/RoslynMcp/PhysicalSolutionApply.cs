@@ -273,8 +273,7 @@ internal sealed class PhysicalSolutionApplyPlan
 			
 			// Streamed: verifying needs a hash and a length, not the content, so no size limit
 			// applies — a file that grew past one would otherwise read as Uncertain.
-			var actualHash   = ComputeFileHash(file.Path);
-			var actualLength = new FileInfo(file.Path).Length;
+			var (actualHash, actualLength) = ComputeFileHashAndLength(file.Path);
 			
 			if(string.Equals(actualHash, file.IntendedHash, StringComparison.OrdinalIgnoreCase))
 				return new PhysicalFileResult(file.Path, PhysicalApplyState.Written, null);
@@ -317,12 +316,18 @@ internal sealed class PhysicalSolutionApplyPlan
 		pathCandidates.Add(candidate);
 	}
 	
-	static string ComputeFileHash(string path)
+	static string ComputeFileHash(string path) => ComputeFileHashAndLength(path).Hash;
+	
+	// Both from one open stream, which follows a symbolic link: FileInfo.Length of a link on
+	// Windows is the link's own (0), and a second open could see a different file.
+	static (string Hash, long Length) ComputeFileHashAndLength(string path)
 	{
 		using var stream = File.OpenRead(path);
-		var hash = SHA256.HashData(stream);
 		
-		return Convert.ToHexString(hash);
+		var length = stream.Length;
+		var hash   = SHA256.HashData(stream);
+		
+		return (Convert.ToHexString(hash), length);
 	}
 	
 	static string ComputeHash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
