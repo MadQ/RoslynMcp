@@ -80,6 +80,10 @@ internal sealed partial class WorkspaceManager
 		// names (#300). Kept apart from loadWarnings, which every reload clears and refills before it
 		// knows whether its workspace will be promoted: this is set only with the workspace it describes.
 		private volatile ProjectKey[] projectsWithLoadFailures = [];
+		
+		// Projects of the live workspace that the load that produced it found never restored (#399). Taken
+		// at load and swapped in with the workspace, like projectsWithLoadFailures (see LoadFindings).
+		private volatile ProjectKey[] projectsNotRestored = [];
 
 		// ── Reload scheduling ────────────────────────────────────────────────
 		//
@@ -155,12 +159,14 @@ internal sealed partial class WorkspaceManager
 			get {
 				Solution     solution;
 				ProjectKey[] loadFailed;
+				ProjectKey[] notRestored;
 				
 				@lock.EnterReadLock();
 				
 				try {
-					solution   = workspace.CurrentSolution;
-					loadFailed = projectsWithLoadFailures;
+					solution    = workspace.CurrentSolution;
+					loadFailed  = projectsWithLoadFailures;
+					notRestored = projectsNotRestored;
 				}
 				finally {
 					@lock.ExitReadLock();
@@ -173,7 +179,7 @@ internal sealed partial class WorkspaceManager
 					// workspace as broken.
 					isMSBuild ? ProjectsWithoutReferences(solution) : [],
 					loadFailed,
-					isMSBuild ? ProjectsNotRestored(solution) : [],
+					isMSBuild ? notRestored : [],
 					[..loadWarnings],
 					lastUnhealthyLoad,
 					ReloadPending
@@ -293,20 +299,21 @@ internal sealed partial class WorkspaceManager
 					// Contended design-time builds can silently drop a project's references, or fail on a
 					// project file and leave its options at defaults — results would be wrong, not
 					// failed. One fresh reload usually clears it.
-					var slnLoadFailed = LoadFailedProjects(workspace);
+					var slnFindings = FindingsOf(workspace);
 					
 					// Not for a project that was never restored: the second load would be the same (#399).
-					if(RetryableUnhealthy(workspace, slnLoadFailed).Length > 0) {
+					if(RetryableUnhealthy(workspace, slnFindings).Length > 0) {
 						
-						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(workspace, slnLoadFailed)}) — reloading once");
+						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(workspace, slnFindings)}) — reloading once");
 						workspace.Dispose();
 						loadWarnings.Clear();
-						workspace     = LoadSolution(path, logger, loadWarnings, CancellationToken.None);
-						slnLoadFailed = LoadFailedProjects(workspace);
+						workspace   = LoadSolution(path, logger, loadWarnings, CancellationToken.None);
+						slnFindings = FindingsOf(workspace);
 					}
 					
-					WarnIfUnhealthy(workspace, slnLoadFailed);
-					projectsWithLoadFailures = slnLoadFailed;
+					WarnIfUnhealthy(workspace, slnFindings);
+					projectsWithLoadFailures = slnFindings.Failed;
+					projectsNotRestored      = slnFindings.NotRestored;
 					isMSBuild = true;
 					
 					foreach(var kvp in BuildProjectMapFor(workspace))
@@ -336,19 +343,20 @@ internal sealed partial class WorkspaceManager
 					
 					var (msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings, CancellationToken.None);
 					
-					var projLoadFailed = LoadFailedProjects(msbuildWs);
+					var projFindings = FindingsOf(msbuildWs);
 					
-					if(RetryableUnhealthy(msbuildWs, projLoadFailed).Length > 0) {
+					if(RetryableUnhealthy(msbuildWs, projFindings).Length > 0) {
 						
-						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(msbuildWs, projLoadFailed)}) — reloading once");
+						logger.LogInfo("Load", $"Unhealthy load ({UnhealthyReason(msbuildWs, projFindings)}) — reloading once");
 						msbuildWs.Dispose();
 						loadWarnings.Clear();
 						(msbuildWs, projectId) = LoadMSBuildWorkspace(path, logger, loadWarnings, CancellationToken.None);
-						projLoadFailed         = LoadFailedProjects(msbuildWs);
+						projFindings           = FindingsOf(msbuildWs);
 					}
 					
-					WarnIfUnhealthy(msbuildWs, projLoadFailed);
-					projectsWithLoadFailures = projLoadFailed;
+					WarnIfUnhealthy(msbuildWs, projFindings);
+					projectsWithLoadFailures = projFindings.Failed;
+					projectsNotRestored      = projFindings.NotRestored;
 					workspace        = msbuildWs;
 					defaultProjectId = projectId;
 					isMSBuild        = true;

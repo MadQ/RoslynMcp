@@ -226,8 +226,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			// error in the source can come together, and no reload repairs the first (#300 review).
 			// A project that was never restored is not contention, and no reload repairs it (#399).
 			hint = health.OnlyNeedsRestore
-				? $"These diagnostics are not the code's: the workspace {health.Problem}. Call roslyn_restore_packages; "
-					+ "until the projects are restored, no reload or respawn gives them references."
+				? $"These diagnostics are not the code's: the workspace {health.Problem}. Until the projects are restored, "
+					+ "no reload or respawn gives them references."
 				: $"These diagnostics may be phantom. The workspace {health.Problem}. Usually that is a contended "
 					+ "MSBuild design-time build — something else writing the same obj\\ files — and roslyn_respawn "
 					+ "reloads it. If load_warnings show a failure of the project file itself, fix that instead: no "

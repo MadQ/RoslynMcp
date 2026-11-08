@@ -103,6 +103,26 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		var unhealthyWorkspace = health is { IsHealthy: false };
 		
+		// Never restored: the build below runs with --no-restore and cannot succeed — it would hold the
+		// MSBuild gate for its whole length to fail with NETSDK1004 (#399 review). The advice is the
+		// answer. forceBuild still builds, as asked.
+		if(!forceBuild && health is { OnlyNeedsRestore: true }) {
+			
+			var reason = $"The workspace {health.Problem}. Builds run with --no-restore, so this one could only fail: call "
+				+ "roslyn_restore_packages first, then roslyn_build_project again.";
+			
+			return scope.Failed("not restored — build skipped", new BuildResult(
+				Succeeded:    false,
+				Errors:       [],
+				Warnings:     [],
+				Source:       "roslyn",
+				BuildSkipped: true,
+				SkipReason:   reason,
+				DurationMs:   0,
+				ExitCode:     null
+			));
+		}
+		
 		// A .csproj the loaded workspace does not hold — one its solution does not list — has no
 		// compilation for Roslyn to check, and checking another project's in its place would let that
 		// project's errors block this build (#384). dotnet builds it all the same.
@@ -244,7 +264,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			// hundreds of errors is otherwise baffling.
 			Hint = unhealthyWorkspace && health!.OnlyNeedsRestore
 				? $"The Roslyn fast-path was skipped: the workspace {health.Problem}. This result comes from a real "
-					+ "dotnet build, which runs with --no-restore: call roslyn_restore_packages first (#399)."
+					+ "dotnet build (forceBuild), which runs with --no-restore."
 				: unhealthyWorkspace
 				? $"The Roslyn fast-path was skipped: the workspace {health!.Problem}, so its diagnostics may be phantom. "
 					+ "This result comes from a real dotnet build. If it fails the same way, the project file itself "

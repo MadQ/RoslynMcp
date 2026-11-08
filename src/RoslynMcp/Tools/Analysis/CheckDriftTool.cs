@@ -158,7 +158,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 
 				// Never restored: a restore, not a reload, is the remedy (#399).
 				(var anyDrift, true) when health!.OnlyNeedsRestore =>
-					$"The workspace {health.Problem}. Call roslyn_restore_packages; no reload or respawn helps until then."
+					$"The workspace {health.Problem}. No reload or respawn helps until then."
 					+ (anyDrift ? " Files also changed on disk without the workspace noticing; the reload after the restore picks them up." : ""),
 
 				(true, true) =>

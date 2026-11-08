@@ -28,7 +28,16 @@ static class UnrestoredProjectTests
 		
 		const string name = "UnrestoredFixture";
 		
+		// A second fixture that loads healthy: on the pinned SDK a plain project has its framework references
+		// without a restore. An edit that leaves it with no references and still no assets file makes the
+		// reload "not restored", and that reload must not replace the working workspace (#399 review).
+		var healthy         = TestFixtures.NewMsBuildProject("UnrestoredHealthy");
+		var healthyOriginal = File.ReadAllText(healthy.Csproj!);
+		
+		healthy.Write("Probe.cs", "class Probe { System.Text.StringBuilder s = new(); }\n");
+		
 		await fx.WarmAsync(ctx);
+		await healthy.WarmAsync(ctx);
 		
 		Task<JsonNode?> Drift() => ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = fx.Csproj });
 		
@@ -72,6 +81,18 @@ static class UnrestoredProjectTests
 					: (false, $"FAIL  (the hint does not name the missing restore: '{hint}')");
 			}),
 			
+			// The build tool answers with the advice rather than running a dotnet build --no-restore that can
+			// only fail — holding the MSBuild gate for its whole length (#399 review).
+			new("unrestored project: build_project skips a build that could only fail", async () =>
+			{
+				var build = await ctx.CallToolJsonAsync("roslyn_build_project", new { projectPath = fx.Csproj });
+				var why   = build?["skip_reason"]?.GetValue<string>() ?? "";
+				
+				return build?["build_skipped"]?.GetValue<bool>() == true && why.Contains("roslyn_restore_packages")
+					? (true, "PASS  (no build ran; the skip reason names roslyn_restore_packages)")
+					: (false, $"FAIL  (expected a skipped build with the restore advice: {build?.ToJsonString()})");
+			}),
+			
 			// The fix: a restore flags a reload of the workspace, and the reload sees the assets file. Before,
 			// nothing reloaded — the file is written under obj\ — and the project stayed "not restored".
 			new("unrestored project: roslyn_restore_packages reloads the workspace", async () =>
@@ -99,13 +120,56 @@ static class UnrestoredProjectTests
 					? (false, $"FAIL  (still reported as not restored after the restore and reload: {drift?.ToJsonString()})")
 					: (true, "PASS  (reload flagged by the restore, and the reloaded project is no longer 'not restored')");
 			}),
+			
+			// A project that was never restored is not retried or healed, but it still counts when a reload is
+			// weighed against the live workspace: one that leaves a working project without references and
+			// without an assets file is discarded, like one that dropped them. Before, it was promoted.
+			new("unrestored project: a reload that leaves a working project unrestored-looking is discarded", async () =>
+			{
+				var before = await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = healthy.Csproj });
+				
+				if(before?["workspace_healthy"]?.GetValue<bool>() != true)
+					
+					return Skip.SetupUnavailable($"the healthy fixture did not load with references: {before?.ToJsonString()}");
+				
+				var edited  = healthyOriginal.Replace("</PropertyGroup>", "<DisableImplicitFrameworkReferences>true</DisableImplicitFrameworkReferences></PropertyGroup>");
+				var written = await ctx.CallToolJsonAsync("roslyn_write_file", new { filePath = Path.GetFileName(healthy.Csproj), content = edited, projectPath = healthy.Csproj });
+				
+				if(written is null || written["error"] is not null)
+					
+					return (false, $"FAIL  (roslyn_write_file failed: {written?.ToJsonString()})");
+				
+				await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = healthy.Csproj, take = 0 });
+				
+				var drift = await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = healthy.Csproj });
+				var last  = drift?["last_unhealthy_load"]?.GetValue<string>() ?? "";
+				
+				return drift?["workspace_healthy"]?.GetValue<bool>() == true && last.Contains("Reload discarded")
+					? (true, "PASS  (reload discarded; the working workspace was kept)")
+					: (false, $"FAIL  (the unrestored-looking reload replaced the working workspace: {drift?.ToJsonString()})");
+			}),
 		};
 		
-		return new TestGroup($"Unrestored Projects ({tests.Count} tests)", tests, Teardown: () => {
+		return new TestGroup($"Unrestored Projects ({tests.Count} tests)", tests, Teardown: async () => {
+			
+			// Undo the edit and let the deferred retry it scheduled promote a healthy reload, so no retry
+			// runs against a deleted tree.
+			await ctx.CallToolJsonAsync("roslyn_write_file", new { filePath = Path.GetFileName(healthy.Csproj), content = healthyOriginal, projectPath = healthy.Csproj });
+			
+			var deadline = DateTime.UtcNow.AddSeconds(60);
+			
+			while(DateTime.UtcNow < deadline) {
+				
+				await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = healthy.Csproj, take = 0 });
+				
+				if((await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = healthy.Csproj }))?["reload_pending"] is null)
+					break;
+				
+				await Task.Delay(500);
+			}
 			
 			fx.Dispose();
-			
-			return Task.CompletedTask;
+			healthy.Dispose();
 		});
 	}
 }

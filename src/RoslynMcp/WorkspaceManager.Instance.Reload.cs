@@ -186,7 +186,7 @@ internal sealed partial class WorkspaceManager
 			ProjectId  newProjectId;
 
 			(newWorkspace, newProjectId) = LoadForMode();
-			var newLoadFailed = LoadFailedProjects(newWorkspace);
+			var newFindings = FindingsOf(newWorkspace);
 
 			// The projects the live workspace is already unhealthy on. Stable for this attempt: only a
 			// reload replaces the workspace, and this one holds reloadGate.
@@ -202,18 +202,18 @@ internal sealed partial class WorkspaceManager
 			var retry = 0;
 
 			while(retry < ReloadRetries
-			      && RetryableUnhealthy(newWorkspace, newLoadFailed).Except(liveUnhealthy).Any()) {
+			      && RetryableUnhealthy(newWorkspace, newFindings).Except(liveUnhealthy).Any()) {
 
 				var retryDelayMs = Backoff.DelayMs(retry, Backoff.DefaultSeedMs, MaxRetryDelayMs)
 				;
 
-				logger.LogInfo("Reload", $"Unhealthy reload ({UnhealthyReason(newWorkspace, newLoadFailed)}) — attempt={retry + 2} delay_ms={retryDelayMs}");
+				logger.LogInfo("Reload", $"Unhealthy reload ({UnhealthyReason(newWorkspace, newFindings)}) — attempt={retry + 2} delay_ms={retryDelayMs}");
 
 				newWorkspace.Dispose();
 				Thread.Sleep(retryDelayMs);
 
 				(newWorkspace, newProjectId) = LoadForMode();
-				newLoadFailed                = LoadFailedProjects(newWorkspace);
+				newFindings                = FindingsOf(newWorkspace);
 				retry++;
 			}
 
@@ -231,16 +231,18 @@ internal sealed partial class WorkspaceManager
 			// minute for as long as it lasts; promoting shows the edit, and the workspace says it is
 			// unhealthy — and keeps retrying a while longer (see the healing retries below), since
 			// contention can outlast the discards too.
-			// A project that was never restored counts for none of this (#399): no reload heals it, so
-			// it is neither retried, nor a reason to discard, nor healed. It is promoted and reported, and
-			// roslyn_restore_packages restores it and flags the reload that does.
-			var stillUnhealthy  = RetryableUnhealthy(newWorkspace, newLoadFailed);
-			var newIsWorse      = stillUnhealthy.Except(liveUnhealthy).Any();
+			// A project that was never restored is not retried and not healed (#399): no reload fixes it,
+			// roslyn_restore_packages does, and flags the reload that picks it up. It still counts as worse:
+			// a reload that leaves a project the live workspace had working without references and without
+			// an assets file (obj\ deleted, say) must not replace it any more than one that dropped them
+			// (#399 review). Past the cap it is promoted and reported like any other.
+			var stillUnhealthy  = RetryableUnhealthy(newWorkspace, newFindings);
+			var newIsWorse      = UnhealthyProjects(newWorkspace, newFindings).Except(liveUnhealthy).Any();
 			var promotedPastCap = newIsWorse && consecutiveDiscards >= MaxConsecutiveDiscards;
 			var discardedBefore = consecutiveDiscards;
 
 			if(promotedPastCap)
-				logger.LogInfo("Reload", $"Promoting an unhealthy reload ({UnhealthyReason(newWorkspace, newLoadFailed)}) after {discardedBefore} discarded in a row");
+				logger.LogInfo("Reload", $"Promoting an unhealthy reload ({UnhealthyReason(newWorkspace, newFindings)}) after {discardedBefore} discarded in a row");
 
 			if(newIsWorse && !promotedPastCap) {
 
@@ -254,7 +256,7 @@ internal sealed partial class WorkspaceManager
 
 				consecutiveDiscards++;
 
-				var reason = UnhealthyReason(newWorkspace, newLoadFailed);
+				var reason = UnhealthyReason(newWorkspace, newFindings);
 
 				newWorkspace.Dispose();
 
@@ -272,12 +274,12 @@ internal sealed partial class WorkspaceManager
 				return;
 			}
 
-			WarnIfUnhealthy(newWorkspace, newLoadFailed);
+			WarnIfUnhealthy(newWorkspace, newFindings);
 
 			// After WarnIfUnhealthy, so last_unhealthy_load says why an unhealthy workspace replaced a healthy one.
 			if(promotedPastCap)
 				RecordUnhealthyLoad(
-					$"Reload promoted although it had {UnhealthyReason(newWorkspace, newLoadFailed)}: {discardedBefore} reloads in a row "
+					$"Reload promoted although it had {UnhealthyReason(newWorkspace, newFindings)}: {discardedBefore} reloads in a row "
 					+ "were discarded for it, so it is taken to be the project's own state rather than contention. "
 					+ $"Retrying every {MaxDeferMs / 1000} s up to {MaxHealingRetries} more times; call roslyn_respawn once the cause is "
 					+ "fixed if the workspace does not recover by then."
@@ -318,7 +320,8 @@ internal sealed partial class WorkspaceManager
 
 				// Swapped in with the solution it was built from, under the same lock.
 				physicalIndex            = newPhysicalIndex;
-				projectsWithLoadFailures = newLoadFailed;
+				projectsWithLoadFailures = newFindings.Failed;
+				projectsNotRestored      = newFindings.NotRestored;
 
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.
@@ -357,7 +360,7 @@ internal sealed partial class WorkspaceManager
 				// Pending, as it is: the deferred retry only runs while a reload is.
 				Interlocked.Increment(ref reloadVersion);
 
-				logger.LogInfo("Reload", $"Still unhealthy ({UnhealthyReason(workspace, projectsWithLoadFailures)}); healing retry in {MaxDeferMs} ms, {healingRetriesLeft} left after it");
+				logger.LogInfo("Reload", $"Still unhealthy ({UnhealthyReason(workspace, new LoadFindings(projectsWithLoadFailures, projectsNotRestored))}); healing retry in {MaxDeferMs} ms, {healingRetriesLeft} left after it");
 
 				ScheduleDeferredRetry(MaxDeferMs);
 			}
