@@ -103,8 +103,9 @@ internal static class FileReader
 	///         program is saving in place half-done, and several readers write what they read
 	///         back to disk — the watcher flush, the edit tools, a backup restored later — so a
 	///         partial read becomes a cut-short file. Kept out, a writer that is mid-save makes
-	///         the read fail instead, and one that starts during the read waits the milliseconds
-	///         it takes or is refused, as before. Windows only: on Linux and macOS sharing is
+	///         the read fail instead, and one that tries to open the file during the read is
+	///         refused (Windows does not make it wait), as it always was; the read takes
+	///         milliseconds. Windows only: on Linux and macOS sharing is
 	///         advisory, so there neither the conflicts nor this protection exist (#403).
 	///     </para>
 	/// </summary>
