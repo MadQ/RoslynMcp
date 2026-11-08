@@ -9,6 +9,25 @@ internal sealed partial class WorkspaceManager
 	{
 		// ── File invalidation ────────────────────────────────────────────────
 		
+		/// <summary>
+		///     Flags a full reload for a change no file the classifier sees stands for: a restore writes
+		///     <c>project.assets.json</c> under obj\, which the watcher and <see cref="EditClassifier"/> ignore,
+		///     and a project loaded before it has no references until it reloads (#399). The bump is
+		///     unconditional, as for a new evaluation input: a reload already in flight read the state before.
+		///     An AdhocWorkspace has no design-time build to repeat.
+		/// </summary>
+		public void RequestReload(string reason)
+		{
+			if(!isMSBuild)
+				
+				return;
+			
+			logger.LogInfo("Reload", $"Flagged ({reason}): {loadPath}");
+			Interlocked.Increment(ref reloadVersion);
+			InvalidateCompilation();
+		}
+		
+
 		public void InvalidateFile(string fullPath)
 		{
 			Workspace ws;

@@ -35,6 +35,11 @@ enum ResolutionKind
 ///     Projects of the live workspace whose own project file a <c>WorkspaceFailed</c> failure of the load
 ///     that produced it names.
 /// </param>
+/// <param name="ProjectsNotRestored">
+///     The projects of <paramref name="ProjectsWithoutReferences"/> that have no assets file
+///     (<c>project.assets.json</c>): never restored. A newer SDK's design-time build resolves no references
+///     for them at all, and no reload repairs that — a restore does (#399).
+/// </param>
 /// <param name="LoadWarnings">Warnings from the most recent load, which may be a reload that was discarded.</param>
 /// <param name="LastUnhealthyLoad">
 ///     Timestamped record of the most recent unhealthy load, retained across the healing reload
@@ -48,12 +53,23 @@ enum ResolutionKind
 internal sealed record WorkspaceHealth(
 	ProjectKey[] ProjectsWithoutReferences,
 	ProjectKey[] ProjectsWithLoadFailures,
+	ProjectKey[] ProjectsNotRestored,
 	string[]     LoadWarnings,
 	string?      LastUnhealthyLoad,
 	bool         ReloadPending)
 {
 	/// <summary>True when every loaded project resolved metadata references and loaded without an MSBuild failure.</summary>
 	public bool IsHealthy => ProjectsWithoutReferences.Length == 0 && ProjectsWithLoadFailures.Length == 0;
+	
+	/// <summary>
+	///     Unhealthy only for want of a restore: every project without references is one that was never
+	///     restored, and nothing failed. The advice is then <c>roslyn_restore_packages</c>, not a reload.
+	/// </summary>
+	public bool OnlyNeedsRestore =>
+		ProjectsNotRestored.Length > 0
+		&& ProjectsWithLoadFailures.Length == 0
+		&& ProjectsWithoutReferences.All(ProjectsNotRestored.Contains)
+	;
 	
 	/// <summary>
 	///     This snapshot narrowed to what the projects of <paramref name="projectFiles"/> are compiled from: every
@@ -85,20 +101,32 @@ internal sealed record WorkspaceHealth(
 		return this with {
 			ProjectsWithoutReferences = [..ProjectsWithoutReferences.Where(covered.Contains)],
 			ProjectsWithLoadFailures  = [..ProjectsWithLoadFailures.Where(covered.Contains)],
+			ProjectsNotRestored       = [..ProjectsNotRestored.Where(covered.Contains)],
 		};
 	}
 	
 	/// <summary>
-	///     What is wrong, as a clause for a hint: "loaded without metadata references on: A", "loaded with
-	///     an MSBuild failure on the project file of: B", or both joined. Empty when healthy.
+	///     What is wrong, as a clause for a hint that follows "the workspace": one part per cause that applies,
+	///     joined. A project that was never restored is named as such, not as one whose references were
+	///     dropped: the remedy differs. Empty when healthy.
 	/// </summary>
-	public string Problem => (ProjectsWithoutReferences.Length > 0, ProjectsWithLoadFailures.Length > 0) switch {
-		
-		(true, true)  => $"loaded without metadata references on: {ProjectKey.Names(ProjectsWithoutReferences)}, and with an MSBuild failure on the project file of: {ProjectKey.Names(ProjectsWithLoadFailures)}",
-		(true, false) => $"loaded without metadata references on: {ProjectKey.Names(ProjectsWithoutReferences)}",
-		(false, true) => $"loaded with an MSBuild failure on the project file of: {ProjectKey.Names(ProjectsWithLoadFailures)}, so its compilation options (Nullable, LangVersion, …) may be defaults rather than the project's own",
-		_             => "",
-	};
+	public string Problem {
+		get {
+			var dropped = ProjectsWithoutReferences.Except(ProjectsNotRestored).ToArray();
+			var parts   = new List<string>(3);
+			
+			if(dropped.Length > 0)
+				parts.Add($"loaded without metadata references on: {ProjectKey.Names(dropped)}");
+			
+			if(ProjectsNotRestored.Length > 0)
+				parts.Add($"holds projects that were never restored, so they have no metadata references: {ProjectKey.Names(ProjectsNotRestored)} (no project.assets.json — roslyn_restore_packages restores them and reloads the workspace)");
+			
+			if(ProjectsWithLoadFailures.Length > 0)
+				parts.Add($"loaded with an MSBuild failure on the project file of: {ProjectKey.Names(ProjectsWithLoadFailures)}, so its compilation options (Nullable, LangVersion, …) may be defaults rather than the project's own");
+			
+			return string.Join(", and ", parts);
+		}
+	}
 }
 
 /// <summary>
@@ -492,6 +520,24 @@ internal sealed partial class WorkspaceManager : IDisposable
 	}
 	
 	
+	/// <summary>
+	///     Flags a full reload of the workspace serving this path — see <c>WorkspaceInstance.RequestReload</c>.
+	///     A workspace that is not loaded has nothing to flag: its first load reads the new state.
+	/// </summary>
+	public void RequestReload(string resolvedProjectPath, string reason)
+	{
+		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
+		
+		lock(cacheLock) {
+			
+			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey) && cache.TryGetValue(mappedKey, out var entry))
+				entry.Instance.RequestReload(reason);
+			else if(cache.TryGetValue(normalizedPath, out var directEntry))
+				directEntry.Instance.RequestReload(reason);
+		}
+	}
+	
+
 	public void InvalidateFile(string resolvedProjectPath, string fullPath)
 	{
 		var normalizedPath = Path.GetFullPath(resolvedProjectPath);

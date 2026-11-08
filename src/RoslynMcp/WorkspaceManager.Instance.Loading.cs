@@ -142,6 +142,86 @@ internal sealed partial class WorkspaceManager
 		static ProjectKey[] ProjectsWithoutReferences(Workspace ws) => ProjectsWithoutReferences(ws.CurrentSolution);
 		
 		/// <summary>
+		///     The projects of <paramref name="solution"/> without references that were never restored: no
+		///     <c>project.assets.json</c> where their build would read it. The design-time build runs in Roslyn's
+		///     BuildHost on the MSBuild of whatever SDK the project's directory resolves, and a newer SDK's resolves
+		///     no references at all for a project with no assets file — no failure reported (11.0.100-rc.3 does;
+		///     10.0.302 resolves the framework without one). A reload repeats that; a restore fixes it (#399).
+		/// </summary>
+		static ProjectKey[] ProjectsNotRestored(Solution solution) =>
+			[..solution.Projects
+				.Where(p => p.MetadataReferences.Count == 0 && !HasAssetsFile(p))
+				.Select(ProjectKey.Of)
+				.Distinct()];
+		
+		/// <summary>
+		///     Whether a restore left an assets file for <paramref name="project"/>. The file sits in the
+		///     project's MSBuild extensions directory, which is obj\ unless a build sets it elsewhere — under
+		///     the artifacts layout, <c>artifacts\obj\&lt;project&gt;\</c>. Roslyn does not report the directory,
+		///     so it is looked for in obj\ and in every directory above the intermediate assembly up to the
+		///     project's own: <c>obj\Debug\net10.0\Foo.dll</c> and <c>artifacts\obj\Foo\debug\Foo.dll</c> both
+		///     lead to it. "Not restored" is only an answer where it was looked for: with no intermediate assembly
+		///     reported, a project counts as not restored only when its default obj\ exists — a design-time build
+		///     wrote there, so that is where the assets file belongs — and holds none. An obj\ moved elsewhere
+		///     (<c>BaseIntermediateOutputPath</c>) is then given the benefit of the doubt (#399 review), as is a
+		///     project with no file path, or one whose files cannot be checked.
+		/// </summary>
+		static bool HasAssetsFile(Project project)
+		{
+			if(Path.GetDirectoryName(project.FilePath) is not { Length: > 0 } projectDirectory)
+				
+				return true;
+			
+			try {
+				
+				var defaultObj = Path.Combine(projectDirectory, "obj");
+				
+				if(File.Exists(Path.Combine(defaultObj, "project.assets.json")))
+					
+					return true;
+				
+				if(Path.GetDirectoryName(project.CompilationOutputInfo.AssemblyPath) is not { } directory)
+					
+					return !Directory.Exists(defaultObj);
+				
+				// At most a few levels: configuration, target framework, runtime identifier, project name.
+				for(var level = 0; directory is not null && level < 5; level++, directory = Path.GetDirectoryName(directory)) {
+					
+					if(File.Exists(Path.Combine(directory, "project.assets.json")))
+						
+						return true;
+					
+					if(SecurityBoundary.PathComparer.Equals(directory, projectDirectory))
+						break;
+				}
+				
+				return false;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException) {
+				return true;
+			}
+		}
+		
+		/// <summary>
+		///     What a load found wrong beyond its references, taken once, straight after it, and kept with the
+		///     workspace it describes: the projects a <c>WorkspaceFailed</c> failure names, and those that were
+		///     never restored. Taken at load, not read from disk when asked: between a restore and the reload it
+		///     flags, the disk already has the assets file the load did not, and every decision about one reload
+		///     must see the same answer (#399 review).
+		/// </summary>
+		readonly record struct LoadFindings(ProjectKey[] Failed, ProjectKey[] NotRestored);
+		
+		/// <summary>The <see cref="LoadFindings"/> of the load that just produced <paramref name="ws"/> — see <see cref="LoadFailedProjects"/>.</summary>
+		LoadFindings FindingsOf(Workspace ws) => new(LoadFailedProjects(ws), ProjectsNotRestored(ws.CurrentSolution));
+		
+		/// <summary>
+		///     The unhealthy projects of <paramref name="ws"/> that a reload might heal — all of them but those
+		///     never restored, which only a restore heals. What the retries and the healing retries decide on.
+		/// </summary>
+		static ProjectKey[] RetryableUnhealthy(Workspace ws, LoadFindings findings) =>
+			[..UnhealthyProjects(ws, findings).Except(findings.NotRestored)];
+		
+		/// <summary>
 		///     Projects of <paramref name="solution"/> that one of the load's <c>WorkspaceFailed</c> failures is
 		///     about (#300). Such a project can keep its references while its compilation options fall back to
 		///     defaults — a design-time build that could not write a file under obj\ loaded <c>Nullable</c> off
@@ -232,31 +312,42 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		ProjectKey[] LoadFailedProjects(Workspace ws) => ProjectsWithLoadFailures(ws.CurrentSolution, [..loadWarnings]);
 		
-		/// <summary>Every project of <paramref name="ws"/> that is unhealthy for either reason, deduplicated.</summary>
-		static ProjectKey[] UnhealthyProjects(Workspace ws, ProjectKey[] loadFailed) =>
-			[..ProjectsWithoutReferences(ws).Union(loadFailed)];
+		/// <summary>Every project of <paramref name="ws"/> that is unhealthy for any reason, deduplicated.</summary>
+		static ProjectKey[] UnhealthyProjects(Workspace ws, LoadFindings findings) =>
+			[..ProjectsWithoutReferences(ws).Union(findings.Failed)];
 		
 		/// <summary>Why <paramref name="ws"/> is unhealthy, for a log line: one clause per reason that applies.</summary>
-		static string UnhealthyReason(Workspace ws, ProjectKey[] loadFailed)
+		static string UnhealthyReason(Workspace ws, LoadFindings findings)
 		{
-			var dropped = ProjectsWithoutReferences(ws);
+			var dropped = ProjectsWithoutReferences(ws).Except(findings.NotRestored).ToArray();
+			var parts   = new List<string>(3);
 			
-			return (dropped.Length > 0, loadFailed.Length > 0) switch {
-				
-				(true, true)  => $"no metadata references on: {ProjectKey.Names(dropped)}; an MSBuild failure on the project file of: {ProjectKey.Names(loadFailed)}",
-				(true, false) => $"no metadata references on: {ProjectKey.Names(dropped)}",
-				_             => $"an MSBuild failure on the project file of: {ProjectKey.Names(loadFailed)}",
-			};
+			if(dropped.Length > 0)
+				parts.Add($"no metadata references on: {ProjectKey.Names(dropped)}");
+			
+			if(findings.NotRestored.Length > 0)
+				parts.Add($"never restored (no project.assets.json): {ProjectKey.Names(findings.NotRestored)}");
+			
+			if(findings.Failed.Length > 0)
+				parts.Add($"an MSBuild failure on the project file of: {ProjectKey.Names(findings.Failed)}");
+			
+			return string.Join("; ", parts);
 		}
 		
-		void WarnIfUnhealthy(Workspace ws, ProjectKey[] loadFailed)
+		void WarnIfUnhealthy(Workspace ws, LoadFindings findings)
 		{
-			if(ProjectsWithoutReferences(ws) is { Length: > 0 } dropped)
+			if(ProjectsWithoutReferences(ws).Except(findings.NotRestored).ToArray() is { Length: > 0 } dropped)
 				RecordUnhealthyLoad($"Projects loaded without metadata references — symbol results may be incomplete: {ProjectKey.Names(dropped)}");
 			
-			if(loadFailed.Length > 0)
+			if(findings.NotRestored.Length > 0)
 				RecordUnhealthyLoad(
-					$"MSBuild failed on the project file of: {ProjectKey.Names(loadFailed)} — their compilation options "
+					$"Projects never restored, so their design-time build resolved no metadata references: {ProjectKey.Names(findings.NotRestored)} "
+					+ "— no project.assets.json. Call roslyn_restore_packages: it restores them and reloads the workspace; a reload alone does not help"
+				);
+			
+			if(findings.Failed.Length > 0)
+				RecordUnhealthyLoad(
+					$"MSBuild failed on the project file of: {ProjectKey.Names(findings.Failed)} — their compilation options "
 					+ "(Nullable, LangVersion, …) may be defaults rather than the projects' own, so diagnostics can be phantom"
 				);
 		}

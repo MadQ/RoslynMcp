@@ -111,7 +111,28 @@ internal sealed class BuildTool : RoslynMcpTool
 		if(outsideWorkspace)
 			
 			scope.Record("target is not a project of the loaded workspace — Roslyn check skipped");
-
+		
+		// Never restored: the build below runs with --no-restore and cannot succeed — it would hold the
+		// MSBuild gate for its whole length to fail with NETSDK1004 (#399 review). The advice is the
+		// answer. forceBuild still builds, as asked. Not for a target outside the loaded workspace: its
+		// health was not narrowed to it, so the workspace's other projects would decide for it.
+		if(!forceBuild && !outsideWorkspace && health is { OnlyNeedsRestore: true }) {
+			
+			var reason = $"The workspace {health.Problem}. Builds run with --no-restore, so this one could only fail: call "
+				+ "roslyn_restore_packages first, then roslyn_build_project again.";
+			
+			return scope.Failed("not restored — build skipped", new BuildResult(
+				Succeeded:    false,
+				Errors:       [],
+				Warnings:     [],
+				Source:       "roslyn",
+				BuildSkipped: true,
+				SkipReason:   reason,
+				DurationMs:   0,
+				ExitCode:     null
+			));
+		}
+		
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true, the target is outside the
 		// loaded workspace, or the workspace itself is unhealthy and its diagnostics cannot be trusted).
 		if(!forceBuild && !unhealthyWorkspace && !outsideWorkspace) {
@@ -242,7 +263,10 @@ internal sealed class BuildTool : RoslynMcpTool
 		) {
 			// Say so explicitly: a build that succeeds while roslyn_get_diagnostics reports
 			// hundreds of errors is otherwise baffling.
-			Hint = unhealthyWorkspace
+			Hint = unhealthyWorkspace && health!.OnlyNeedsRestore
+				? $"The Roslyn fast-path was skipped: the workspace {health.Problem}. This result comes from a real "
+					+ "dotnet build (forceBuild), which runs with --no-restore."
+				: unhealthyWorkspace
 				? $"The Roslyn fast-path was skipped: the workspace {health!.Problem}, so its diagnostics may be phantom. "
 					+ "This result comes from a real dotnet build. If it fails the same way, the project file itself "
 					+ "may be broken (see load_warnings from roslyn_get_project_info); if it succeeds, call "
