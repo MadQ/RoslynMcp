@@ -67,26 +67,72 @@ internal static class FileReader
 	/// </summary>
 	internal static Stream OpenRead(string path, long maxBytes) => BoundedStream.Open(path, maxBytes, FileOptions.None);
 	
+	/// <summary>
+	///     The bytes of <paramref name="path"/>. A file with a length is read straight into an
+	///     array of that length, so it is in memory once; one more byte is then asked for, which
+	///     ends the read or shows the file grew. A file without one (a device, a pipe, a
+	///     <c>/proc</c> file) and a file that grew are collected in a buffer and copied out.
+	/// </summary>
 	internal static byte[] ReadAllBytes(string path, long maxBytes)
 	{
 		using var stream = BoundedStream.Open(path, maxBytes, FileOptions.None);
-		using var buffer = new MemoryStream(stream.SizeHint);
+		using var rest   = new MemoryStream();
 		
-		stream.CopyTo(buffer);
+		if(stream.KnownLength is > 0 and var length) {
+			
+			var bytes = new byte[length];
+			var count = stream.ReadAtLeast(bytes, bytes.Length, throwOnEndOfStream: false);
+			
+			// Shorter than its length: the file shrank while it was read.
+			if(count < bytes.Length)
+				
+				return bytes[..count];
+			
+			var next = stream.ReadByte();
+			
+			if(next < 0)
+				
+				return bytes;
+			
+			rest.Write(bytes);
+			rest.WriteByte((byte) next);
+		}
 		
-		return buffer.ToArray();
+		stream.CopyTo(rest);
+		
+		return rest.ToArray();
 	}
 	
 	internal static Task<byte[]> ReadAllBytesAsync(string path, long maxBytes) => ReadAllBytesAsync(path, maxBytes, CancellationToken.None);
 	
+	/// <inheritdoc cref="ReadAllBytes"/>
 	internal static async Task<byte[]> ReadAllBytesAsync(string path, long maxBytes, CancellationToken cancellationToken)
 	{
 		await using var stream = BoundedStream.Open(path, maxBytes, FileOptions.Asynchronous);
-		using var       buffer = new MemoryStream(stream.SizeHint);
+		using var       rest   = new MemoryStream();
 		
-		await stream.CopyToAsync(buffer, cancellationToken);
+		if(stream.KnownLength is > 0 and var length) {
+			
+			var bytes = new byte[length];
+			var count = await stream.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, cancellationToken);
+			
+			if(count < bytes.Length)
+				
+				return bytes[..count];
+			
+			var next = new byte[1];
+			
+			if(await stream.ReadAsync(next, cancellationToken) == 0)
+				
+				return bytes;
+			
+			rest.Write(bytes);
+			rest.Write(next);
+		}
 		
-		return buffer.ToArray();
+		await stream.CopyToAsync(rest, cancellationToken);
+		
+		return rest.ToArray();
 	}
 	
 	internal static string ReadAllText(string path, long maxBytes)
@@ -184,11 +230,13 @@ internal static class FileReader
 			}
 		}
 		
-		/// <summary>The capacity to start a buffer with: the file's length when it has one, plus one byte to see the end.</summary>
-		internal int SizeHint => inner.CanSeek
-			? (int) Math.Min(inner.Length + 1, maxBytes + 1)
-			: (int) Math.Min(4096, maxBytes + 1)
-		;
+		/// <summary>
+		///     The file's length when the stream has one, as an array length. Capped at the limit:
+		///     <see cref="Open"/> checked the length, but the file can have grown since, and an array
+		///     sized to that would be allocated before the count refuses the file. Null for a device
+		///     or a pipe.
+		/// </summary>
+		internal int? KnownLength => inner.CanSeek ? (int) Math.Min(inner.Length, maxBytes) : null;
 		
 		public override bool CanRead  => true;
 		public override bool CanSeek  => false;
