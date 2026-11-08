@@ -14,9 +14,20 @@ static class BoundedReadTests
 	// fail here rather than be followed silently.
 	const long DocumentLimit = 64L * 1024 * 1024;
 	
-	internal static TestGroup Build(TestContext ctx)
+	/// <param name="ctx">The harness server.</param>
+	/// <param name="serverLogDir">Directory the harness pointed ROSLYNMCP_LOG_PATH at.</param>
+	/// <param name="serverLogGlob">File pattern of the server's log in that directory.</param>
+	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
 		var fx = TestFixtures.NewAdhocDir("BoundedRead");
+		
+		// roslyn_replace_in_code reads a .cs file from disk only when it is not a document of the
+		// workspace, so the oversized file is removed from the compilation. In an AdhocWorkspace
+		// every .cs file is a document, hence a project of its own.
+		var code   = TestFixtures.NewMsBuildProject("BoundedReadCode", extraProjectXml: """<ItemGroup><Compile Remove="Big.cs" /></ItemGroup>""");
+		var bigCs  = Sized(code.PathOf("Big.cs"), DocumentLimit + 1);
+		
+		code.Write("Small.cs", "class Small { }\n");
 		
 		// Every file is .txt, so none is a tracked document of the AdhocWorkspace (which tracks .cs
 		// only): each read goes to disk through FileReader, never to Roslyn's in-memory text.
@@ -57,6 +68,42 @@ static class BoundedReadTests
 					"roslyn_read_file",
 					new { filePath = "over-limit.txt", startLine = 1, endLine = 1, projectPath = fx.ProjectPath },
 					data => IsTooLarge(data))),
+			
+			// The refusal above, as the server's log recorded it. The tool returns it through a
+			// helper declared to return the base ErrorResult; a log peek serialized by that
+			// declared type would drop message and limit_bytes, and the log would not say which
+			// file was refused or why. Runs after the call it reads about: the entry is written
+			// before the response is sent.
+			new("roslyn_read_file: the log keeps the fields of a file_too_large refusal",
+				() => {
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var lines, out var failure))
+						
+						return Task.FromResult((false, $"FAIL  ({failure})"));
+					
+					// The log names a tool without its roslyn_ prefix; the subject is the file asked for.
+					var logged = lines.Any(line => line.Contains("\"tool_name\":\"read_file\"")
+						&& line.Contains("\"subject\":\"over-limit.txt\"")
+						&& line.Contains("file_too_large")
+						&& line.Contains("limit_bytes"));
+					
+					return Task.FromResult(logged
+						? (true, "PASS")
+						: (false, "FAIL  (no read_file entry for over-limit.txt whose response peek has limit_bytes)"));
+				}),
+			
+			// The one edit tool that reads a .cs file outside the workspace with its own code. It
+			// was left unbounded in the first version of #230 and loaded any size of file.
+			new("roslyn_replace_in_code: an untracked .cs file past the limit is file_too_large and left alone",
+				async () => {
+					
+					var result = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "Big.cs", nodeKind = "class", replacement = "class Big { }", projectPath = code.Csproj },
+						data => IsTooLarge(data));
+					
+					return Untouched(result, bigCs);
+				}),
 			
 			// The edit tools read the whole file before they change it. Refused, the file must be
 			// exactly as it was: the length is the check, since an edit that went ahead regardless
@@ -133,7 +180,7 @@ static class BoundedReadTests
 					data => data?["match_count"]?.GetValue<int>() == 1)),
 		};
 		
-		return new TestGroup($"Bounded Reads ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });
+		return new TestGroup($"Bounded Reads ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); code.Dispose(); return Task.CompletedTask; });
 	}
 	
 	static string Sized(string path, long length)

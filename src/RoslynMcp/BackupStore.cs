@@ -304,8 +304,7 @@ internal sealed class BackupStore
 				if(meta.PostWriteHash is not null)
 					try {
 						
-						var current     = FileReader.ReadAllBytes(meta.AbsolutePath, FileReader.DocumentLimit);
-						var currentHash = ComputeContentHash(current);
+						var currentHash = ComputeFileHash(meta.AbsolutePath);
 						
 						if(currentHash != meta.PostWriteHash)
 							
@@ -477,6 +476,16 @@ internal sealed class BackupStore
 		var bytes = SHA256.HashData(content);
 		
 		return Convert.ToHexString(bytes).ToLowerInvariant();
+	}
+	
+	// Streamed, not read through FileReader: a hash holds no copy of the file, so it needs no
+	// size limit. A limit here would turn a changed file past it into a skipped conflict check,
+	// and the restore would overwrite it.
+	static string ComputeFileHash(string path)
+	{
+		using var stream = File.OpenRead(path);
+		
+		return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
 	}
 	
 	

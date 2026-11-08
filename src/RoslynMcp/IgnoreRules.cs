@@ -197,14 +197,13 @@ internal sealed class IgnoreRules
 					paths.RemoveWhere(candidate => gitComparer.Equals(candidate[(candidate.LastIndexOf('/') + 1)..], text));
 			}
 		}
-		catch(FileTooLargeException) {
-			
-			// It grew past the limit after the length check. The unread rest could hold a
-			// negation re-including something read so far, so none of it is used.
-			return ([], []);
-		}
 		catch(Exception ex) when (ex is IOException or UnauthorizedAccessException) {
-			// Best effort — fall back to whatever was read before the failure.
+			
+			// A read that stopped partway — the file grew past the limit after the length check,
+			// or any other I/O failure. The unread rest could hold a negation re-including
+			// something read so far, so none of it is used: a directory walked that git ignores
+			// is the safe side.
+			return ([], []);
 		}
 		
 		return ([..names], [..paths]);

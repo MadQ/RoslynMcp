@@ -10,7 +10,7 @@ namespace RoslynMcp;
 internal sealed class FileTooLargeException : IOException
 {
 	internal FileTooLargeException(string path, long limit)
-		: base($"'{Path.GetFileName(path)}' is larger than {FileReader.Describe(limit)}, the most that is read from one file.")
+		: base($"'{Path.GetFileName(path)}' is larger than {FileReader.Describe(limit)}, the limit for this read.")
 	{
 		FilePath = path;
 		Limit    = limit;

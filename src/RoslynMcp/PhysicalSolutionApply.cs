@@ -271,8 +271,10 @@ internal sealed class PhysicalSolutionApplyPlan
 						"Existing file is missing after application.");
 			}
 			
-			var actualBytes = FileReader.ReadAllBytes(file.Path, FileReader.DocumentLimit);
-			var actualHash  = ComputeHash(actualBytes);
+			// Streamed: verifying needs a hash and a length, not the content, so no size limit
+			// applies — a file that grew past one would otherwise read as Uncertain.
+			var actualHash   = ComputeFileHash(file.Path);
+			var actualLength = new FileInfo(file.Path).Length;
 			
 			if(string.Equals(actualHash, file.IntendedHash, StringComparison.OrdinalIgnoreCase))
 				return new PhysicalFileResult(file.Path, PhysicalApplyState.Written, null);
@@ -281,7 +283,7 @@ internal sealed class PhysicalSolutionApplyPlan
 				&& string.Equals(actualHash, file.OriginalHash, StringComparison.OrdinalIgnoreCase))
 				return new PhysicalFileResult(file.Path, PhysicalApplyState.Untouched, null);
 			
-			if(file.IntendedBytes!.Length > 0 && actualBytes.Length <= 4)
+			if(file.IntendedBytes!.Length > 0 && actualLength <= 4)
 				return new PhysicalFileResult(
 					file.Path,
 					PhysicalApplyState.Truncated,
