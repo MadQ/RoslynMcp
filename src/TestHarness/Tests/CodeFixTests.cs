@@ -544,13 +544,14 @@ internal static class CodeFixTests
 
 		// #349: the preview no longer opens a file for writing to see whether that works — such
 		// an open collided with whoever had the file open at that moment, the server's own reads
-		// included, and refused the fix over a handle gone a moment later. A file someone holds
-		// without sharing it for deleting (as a program that has it open usually does) is
-		// previewed like any other. The apply then cannot replace it: its atomic rename needs the
-		// holder to share for deleting. It must report the file as not written and leave it
-		// exactly as it was — the guarantee the dropped check was standing in for. The handle is
-		// held across the apply only, after the preview. Windows only: elsewhere sharing is
-		// advisory and the rename succeeds, so there is nothing to check.
+		// included, and refused the fix over a handle gone a moment later. So a file someone
+		// holds without sharing it for writing or deleting (as a program that has it open
+		// usually does) is previewed like any other: the preview must return a token, which is
+		// the #349 failure turned around. The apply then cannot replace it: its atomic rename
+		// needs the holder to share for deleting. It must list the file as not written, with
+		// recovery guidance, and leave it exactly as it was — the guarantee the dropped check
+		// was standing in for. One handle, held across both calls. Windows only: elsewhere
+		// sharing is advisory and the rename succeeds, so there is nothing to check.
 		async Task<(bool pass, string msg)> RunHeldFileLeftAloneByApply()
 		{
 			if(!OperatingSystem.IsWindows())
@@ -565,24 +566,29 @@ internal static class CodeFixTests
 				
 				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
 				
-				var preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				(JsonNode? Data, string Text) preview;
+				(JsonNode? Data, string Text) apply = (null, "not run");
 				
-				if(preview.Data?["token"]?.GetValue<string>() is not { } token)
+				using(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read)) {
 					
-					return (false, $"FAIL  (preview: {preview.Text}) [{sw.ElapsedMilliseconds}ms]");
-				
-				(JsonNode? Data, string Text) apply;
-				
-				using(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-					apply = await Apply(token, workspacePath);
+					preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+					
+					if(preview.Data?["token"]?.GetValue<string>() is { } token)
+						apply = await Apply(token, workspacePath);
+				}
 				
 				var content = await File.ReadAllTextAsync(fixturePath);
-				var pass = !HasFileState(apply.Data, "_CodeFixFixture_.cs", "written")
+				var listed  = apply.Data?["files"]?.AsArray().FirstOrDefault(file =>
+					file?["path"]?.GetValue<string>().EndsWith("_CodeFixFixture_.cs", StringComparison.OrdinalIgnoreCase) == true);
+				var pass = preview.Data?["token"] is not null
+					&& listed is not null
+					&& listed["state"]?.GetValue<string>() is { } state && state != "written"
+					&& EveryFileHasRecovery(apply.Data)
 					&& content == Fixture("TestSingleWrite");
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (apply: {apply.Text}; file now: {content}) [{sw.ElapsedMilliseconds}ms]");
+					: $"FAIL  (preview: {preview.Text}; apply: {apply.Text}; file now: {content}) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				DeleteWorkspace(workspacePath);
@@ -1048,7 +1054,7 @@ internal static class CodeFixTests
 			new("code-fix token is rejected by rename apply and survives", RunCodeFixTokenRejectedByRename),
 			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
 			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
-			new("a file held without sharing for deleting is left alone by the apply", RunHeldFileLeftAloneByApply),
+			new("a held file is previewed, and left alone by the apply", RunHeldFileLeftAloneByApply),
 			new("a reader that shares for deleting does not block the apply's atomic replace", RunReadDeleteSharedHandleAllowsApply),
 			new("tracked additional and analyzer-config documents support safe edits only", RunTrackedNonCSharpDocuments),
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),

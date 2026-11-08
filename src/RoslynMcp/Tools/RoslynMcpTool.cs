@@ -1689,10 +1689,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		_                                      => new ErrorResult($"Failed to read file: {ex.Message}"),
 	};
 	
+	// For every caller of ReadFailure, the read tool and the edit tools alike: nothing in it is
+	// advice that only one of them can follow.
 	const string SharingViolationHint =
-		"Another program has the file open for writing, or without sharing it. A file is not read while another " +
-		"program may be writing it, so no half-saved content is ever returned; retry once it is closed. " +
-		"roslyn_get_line_count can count its lines in the meantime."
+		"Another program has the file open — writing it, holding it without sharing, or holding a lock on part " +
+		"of it. The file is not read while that is so, so nothing is ever built from half-saved content. " +
+		"Retry once the program has closed the file."
 	;
 	
 	// Returns recovery guidance that agents can act on when a write produces bad results.

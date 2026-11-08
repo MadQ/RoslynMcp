@@ -96,7 +96,8 @@ static class FileContentTests
 						locked = await ctx.RunTestAsync(
 							"roslyn_read_file",
 							new { filePath = "locked.txt", projectPath = fx.ProjectPath },
-							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal));
+							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry once the program has closed the file", StringComparison.Ordinal));
 					
 					if(!locked.pass)
 						
@@ -134,8 +135,8 @@ static class FileContentTests
 			// The other half of that rule: roslyn_read_file returns content, which is copied into
 			// edits, so it keeps writers out (FileReader.ReadSharing) and refuses a file another
 			// program is writing — even one that shares for reading, as the log writer here does.
-			// The refusal is structured and its hint says why and points at
-			// roslyn_get_line_count, instead of Windows' bare "used by another process".
+			// The refusal is structured and its hint says why and to retry once the file is closed,
+			// instead of Windows' bare "used by another process".
 			// Windows only: elsewhere sharing is advisory and every read succeeds.
 			new("roslyn_read_file: a file another program is writing is refused with a hint",
 				async () => {
@@ -150,7 +151,7 @@ static class FileContentTests
 							"roslyn_read_file",
 							new { filePath = "active.log", projectPath = fx.ProjectPath },
 							data => (data?["error"]?.GetValue<string>() ?? "").StartsWith("Failed to read file", StringComparison.Ordinal)
-								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("roslyn_get_line_count", StringComparison.Ordinal));
+								&& (data?["hint"]?.GetValue<string>() ?? "").Contains("Retry once the program has closed the file", StringComparison.Ordinal));
 				}),
 			
 			new("roslyn_get_line_count: single and multi-file",
