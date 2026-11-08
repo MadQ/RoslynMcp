@@ -387,7 +387,7 @@ written. It classifies the path (issue #273):
 2. **Tracked analyzer-config document** (`ClassifyTrackedDocument` says `AnalyzerConfig`) — always
    falls through to reload (case 3 below), even though it already has a `DocumentId`.
    `MSBuildWorkspace.CanApplyChange(ApplyChangesKind.ChangeAnalyzerConfigDocument)` is `false` as of
-   Roslyn 5.3.0 (verified), so `TryApplyChanges` throws `NotSupportedException` for an
+   Roslyn 5.3.0 and 5.9.0 (verified), so `TryApplyChanges` throws `NotSupportedException` for an
    `.editorconfig`/`.globalconfig` edit — there is no incremental path for this kind (#276).
 3. **Otherwise `RequiresReload(solution, path)`** decides — see [What flags a reload](#what-flags-a-reload).
    A compilation or evaluation input bumps `reloadVersion` (logged with path and reason) and the

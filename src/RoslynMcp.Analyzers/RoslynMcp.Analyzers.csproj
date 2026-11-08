@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
@@ -23,7 +23,7 @@
       Pinned to 4.11.0 / 3.11.0 for VS 2022 host compatibility.
       Roslyn analyzer DLLs must target a CodeAnalysis version that is less than or equal to the
       version shipped with the host IDE. VS 2022 ships Roslyn 4.x; targeting 5.x causes the
-      analyzer to fail to load silently. The MCP server (RoslynMcp.csproj) uses 5.3.0 freely
+      analyzer to fail to load silently. The MCP server (RoslynMcp.csproj) uses 5.9.0 freely
       because it is a standalone executable with no IDE host constraint.
       Upgrade these when VS 2022 support is intentionally dropped.
     -->
