@@ -116,7 +116,7 @@ internal class SetupProjectCommand : CliCommand
 			
 			try {
 				
-				var parsed = JsonNode.Parse(File.ReadAllText(configPath), documentOptions: new JsonDocumentOptions {
+				var parsed = JsonNode.Parse(FileReader.ReadAllText(configPath, FileReader.ConfigLimit), documentOptions: new JsonDocumentOptions {
 					
 					AllowTrailingCommas = true,
 					CommentHandling     = JsonCommentHandling.Skip,
@@ -372,7 +372,7 @@ internal class SetupProjectCommand : CliCommand
 	{
 		try {
 			
-			var root = JsonNode.Parse(File.ReadAllText(hookFile)) as JsonObject;
+			var root = JsonNode.Parse(FileReader.ReadAllText(hookFile, FileReader.ConfigLimit)) as JsonObject;
 			
 			if(root is null)
 				return null;

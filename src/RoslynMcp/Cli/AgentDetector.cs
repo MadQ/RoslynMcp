@@ -51,7 +51,7 @@ static class AgentDetector
 
         try
         {
-            var json = File.ReadAllText(configPath);
+            var json = FileReader.ReadAllText(configPath, FileReader.DocumentLimit);
             var root = JsonNode.Parse(json, documentOptions: new JsonDocumentOptions {
 
                 AllowTrailingCommas = true,

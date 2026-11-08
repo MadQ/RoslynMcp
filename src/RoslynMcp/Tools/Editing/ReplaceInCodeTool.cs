@@ -100,11 +100,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			try {
 				
-				using var stream = File.OpenRead(fullPath);
-				sourceText = SourceText.From(stream, FileWriter.Utf8NoBom);
+				var bytes = await FileReader.ReadAllBytesAsync(fullPath, FileReader.DocumentLimit, cancellationToken);
+				
+				sourceText = SourceText.From(bytes, bytes.Length, FileWriter.Utf8NoBom);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
+				return scope.Error(ReadFailure(ex));
 			}
 			
 			syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);

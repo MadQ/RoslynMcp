@@ -68,10 +68,10 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		string[] lines;
 		
 		try {
-			rawContent = File.ReadAllText(fullPath);
+			rawContent = FileReader.ReadAllText(fullPath, FileReader.DocumentLimit);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
+			return scope.Error(ReadFailure(ex));
 		}
 		
 		// Detect existing line-ending style before splitting strips them.

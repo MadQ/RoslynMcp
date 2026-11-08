@@ -34,7 +34,7 @@ internal static class PreviewFileStateBuilder
 				if(!File.Exists(oldDocument.FilePath))
 					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
 				
-				var originalBytes = await File.ReadAllBytesAsync(oldDocument.FilePath, cancellationToken);
+				var originalBytes = await FileReader.ReadAllBytesAsync(oldDocument.FilePath, FileReader.DocumentLimit, cancellationToken);
 				var intendedBytes = await EncodeChangedDocumentAsync(
 					oldDocument,
 					newDocument,
@@ -57,7 +57,7 @@ internal static class PreviewFileStateBuilder
 				if(!File.Exists(oldDocument.FilePath))
 					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
 				
-				var originalBytes = await File.ReadAllBytesAsync(oldDocument.FilePath, cancellationToken);
+				var originalBytes = await FileReader.ReadAllBytesAsync(oldDocument.FilePath, FileReader.DocumentLimit, cancellationToken);
 				var intendedBytes = await EncodeChangedDocumentAsync(
 					oldDocument,
 					newDocument,
@@ -80,7 +80,7 @@ internal static class PreviewFileStateBuilder
 				if(!File.Exists(oldDocument.FilePath))
 					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
 				
-				var originalBytes = await File.ReadAllBytesAsync(oldDocument.FilePath, cancellationToken);
+				var originalBytes = await FileReader.ReadAllBytesAsync(oldDocument.FilePath, FileReader.DocumentLimit, cancellationToken);
 				var intendedBytes = await EncodeChangedDocumentAsync(
 					oldDocument,
 					newDocument,
@@ -104,7 +104,7 @@ internal static class PreviewFileStateBuilder
 					if(!File.Exists(doc.FilePath))
 						throw new IOException($"Affected linked file '{doc.FilePath}' no longer exists while creating the preview.");
 					
-					var originalBytes = await File.ReadAllBytesAsync(doc.FilePath, cancellationToken);
+					var originalBytes = await FileReader.ReadAllBytesAsync(doc.FilePath, FileReader.DocumentLimit, cancellationToken);
 					states[doc.FilePath] = new PreviewFileState(
 						ExpectedFileState.Exists,
 						ComputeHash(originalBytes),
@@ -132,7 +132,7 @@ internal static class PreviewFileStateBuilder
 				if(!File.Exists(doc.FilePath))
 					throw new IOException($"Affected file '{doc.FilePath}' no longer exists while creating the preview.");
 				
-				var originalBytes = await File.ReadAllBytesAsync(doc.FilePath, cancellationToken);
+				var originalBytes = await FileReader.ReadAllBytesAsync(doc.FilePath, FileReader.DocumentLimit, cancellationToken);
 				states[doc.FilePath] = new PreviewFileState(
 					ExpectedFileState.Exists,
 					ComputeHash(originalBytes),

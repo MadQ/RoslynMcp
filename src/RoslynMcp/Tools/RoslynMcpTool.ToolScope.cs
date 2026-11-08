@@ -409,7 +409,13 @@ internal abstract partial class RoslynMcpTool
 		{
 			try {
 				
-				var json   = JsonSerializer.Serialize(value, RoslynMcpJson.Compact);
+				// By the runtime type, as the SDK serializes the response: a helper declared to
+				// return a base result (RoslynMcpTool.ReadFailure) would otherwise log a peek
+				// without the derived type's fields.
+				var json   = value is null
+					? "null"
+					: JsonSerializer.Serialize(value, value.GetType(), RoslynMcpJson.Compact)
+				;
 				var tokens = json.Length / 4;
 				var peek   = json.Length <= PeekLength ? json : json[..PeekLength] + "…";
 				

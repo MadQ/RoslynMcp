@@ -275,16 +275,8 @@ internal sealed class ProjectConfig
 				return Empty;
 			}
 			
-			var fileSize = info.Length;
-			
-			if(fileSize > maxFileSizeBytes) {
-				
-				logger.LogInfo("ProjectConfig", $"WARN: '{filePath}' is {fileSize} bytes (limit {maxFileSizeBytes}) — ignored");
-				
-				return Empty;
-			}
-			
-			using var doc = JsonDocument.Parse(File.ReadAllText(filePath), new JsonDocumentOptions {
+			// A file past the limit throws FileTooLargeException, logged below like any failed read.
+			using var doc = JsonDocument.Parse(FileReader.ReadAllText(filePath, maxFileSizeBytes), new JsonDocumentOptions {
 				
 				AllowTrailingCommas = true,
 				CommentHandling     = JsonCommentHandling.Skip,

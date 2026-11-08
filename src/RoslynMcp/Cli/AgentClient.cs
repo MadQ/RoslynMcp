@@ -357,7 +357,7 @@ sealed class ClaudeCodeClient : McpServersDictClient
 
         try
         {
-            var text = File.ReadAllText(path);
+            var text = FileReader.ReadAllText(path, FileReader.DocumentLimit);
 
             if(string.IsNullOrWhiteSpace(text))
                 return true;

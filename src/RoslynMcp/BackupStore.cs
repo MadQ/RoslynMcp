@@ -74,7 +74,7 @@ internal sealed class BackupStore
 		byte[] current;
 		
 		try {
-			current = File.ReadAllBytes(absolutePath);
+			current = FileReader.ReadAllBytes(absolutePath, FileReader.DocumentLimit);
 		}
 		catch(FileNotFoundException) {
 			// File does not yet exist — this is a new-file creation, no pre-snapshot to save.
@@ -304,8 +304,7 @@ internal sealed class BackupStore
 				if(meta.PostWriteHash is not null)
 					try {
 						
-						var current     = File.ReadAllBytes(meta.AbsolutePath);
-						var currentHash = ComputeContentHash(current);
+						var currentHash = ComputeFileHash(meta.AbsolutePath);
 						
 						if(currentHash != meta.PostWriteHash)
 							
@@ -318,7 +317,7 @@ internal sealed class BackupStore
 					}
 			}
 			
-			var content = File.ReadAllBytes(bakFile);
+			var content = FileReader.ReadAllBytes(bakFile, FileReader.DocumentLimit);
 			
 			return (null, new CheckedRestore(meta.AbsolutePath, content, bakFile, metaFile, token, warning));
 		}
@@ -371,7 +370,7 @@ internal sealed class BackupStore
 		try {
 			
 			var headPath = Path.Combine(gitDir, "HEAD");
-			var head     = File.ReadAllText(headPath).Trim();
+			var head     = FileReader.ReadAllText(headPath, FileReader.ConfigLimit).Trim();
 			
 			if(head.StartsWith("ref: refs/heads/", StringComparison.Ordinal)) {
 				
@@ -406,7 +405,7 @@ internal sealed class BackupStore
 			if(File.Exists(gitPath))
 				try {
 					
-					var content = File.ReadAllText(gitPath).Trim();
+					var content = FileReader.ReadAllText(gitPath, FileReader.ConfigLimit).Trim();
 					
 					if(content.StartsWith("gitdir: ", StringComparison.Ordinal))
 						
@@ -428,7 +427,7 @@ internal sealed class BackupStore
 		
 		if(File.Exists(refPath))
 			
-			return File.ReadAllText(refPath).Trim();
+			return FileReader.ReadAllText(refPath, FileReader.ConfigLimit).Trim();
 		
 		// Fall back to packed-refs.
 		var packedRefs = Path.Combine(gitDir, "packed-refs")
@@ -440,7 +439,7 @@ internal sealed class BackupStore
 		
 		var needle = $" refs/heads/{branchName}";
 		
-		foreach(var line in File.ReadLines(packedRefs)) {
+		foreach(var line in FileReader.ReadLines(packedRefs, FileReader.DocumentLimit)) {
 			
 			if(line.StartsWith('#'))
 				continue;
@@ -479,6 +478,16 @@ internal sealed class BackupStore
 		return Convert.ToHexString(bytes).ToLowerInvariant();
 	}
 	
+	// Streamed, not read through FileReader: a hash holds no copy of the file, so it needs no
+	// size limit. A limit here would turn a changed file past it into a skipped conflict check,
+	// and the restore would overwrite it.
+	static string ComputeFileHash(string path)
+	{
+		using var stream = File.OpenRead(path);
+		
+		return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+	}
+	
 	
 	// meta.json is a JSON object: { "token": BackupMeta, ... }
 	Dictionary<string, BackupMeta> ReadAllMetaEntries(string metaFile)
@@ -489,7 +498,7 @@ internal sealed class BackupStore
 		
 		try {
 			
-			var json = File.ReadAllText(metaFile);
+			var json = FileReader.ReadAllText(metaFile, FileReader.DocumentLimit);
 			
 			return JsonSerializer.Deserialize<Dictionary<string, BackupMeta>>(json, JsonOptions)
 				?? new Dictionary<string, BackupMeta>();

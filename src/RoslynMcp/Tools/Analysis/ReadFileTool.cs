@@ -70,13 +70,15 @@ internal sealed class ReadFileTool : RoslynMcpTool
 				// their reads the same way.
 				try {
 					
-					// Stream directly - avoids the ReadAllTextAsync string SourceText double-buffer.
-					using var stream = File.OpenRead(fullPath);
+					// Bytes, not a string: SourceText decodes them itself, with the same encoding
+					// detection as from a stream. Bounded, because the whole file is read to count
+					// its lines whatever range was asked for (#230).
+					var bytes = await FileReader.ReadAllBytesAsync(fullPath, FileReader.DocumentLimit);
 					
-					sourceText = SourceText.From(stream);
+					sourceText = SourceText.From(bytes, bytes.Length);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					return scope.Error(new ErrorResult($"Failed to read file: {ex.Message}"));
+					return scope.Error(ReadFailure(ex));
 				}
 				
 				canonicalPath = fullPath;
