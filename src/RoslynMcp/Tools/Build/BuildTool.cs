@@ -103,10 +103,20 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		var unhealthyWorkspace = health is { IsHealthy: false };
 		
+		// A .csproj the loaded workspace does not hold — one its solution does not list — has no
+		// compilation for Roslyn to check, and checking another project's in its place would let that
+		// project's errors block this build (#384). dotnet builds it all the same.
+		var outsideWorkspace = solutionPath is null && csprojPath is null;
+		
+		if(outsideWorkspace)
+			
+			scope.Record("target is not a project of the loaded workspace — Roslyn check skipped");
+		
 		// Never restored: the build below runs with --no-restore and cannot succeed — it would hold the
 		// MSBuild gate for its whole length to fail with NETSDK1004 (#399 review). The advice is the
-		// answer. forceBuild still builds, as asked.
-		if(!forceBuild && health is { OnlyNeedsRestore: true }) {
+		// answer. forceBuild still builds, as asked. Not for a target outside the loaded workspace: its
+		// health was not narrowed to it, so the workspace's other projects would decide for it.
+		if(!forceBuild && !outsideWorkspace && health is { OnlyNeedsRestore: true }) {
 			
 			var reason = $"The workspace {health.Problem}. Builds run with --no-restore, so this one could only fail: call "
 				+ "roslyn_restore_packages first, then roslyn_build_project again.";
@@ -123,15 +133,6 @@ internal sealed class BuildTool : RoslynMcpTool
 			));
 		}
 		
-		// A .csproj the loaded workspace does not hold — one its solution does not list — has no
-		// compilation for Roslyn to check, and checking another project's in its place would let that
-		// project's errors block this build (#384). dotnet builds it all the same.
-		var outsideWorkspace = solutionPath is null && csprojPath is null;
-		
-		if(outsideWorkspace)
-			
-			scope.Record("target is not a project of the loaded workspace — Roslyn check skipped");
-
 		// Fast path: check Roslyn diagnostics first (unless forceBuild=true, the target is outside the
 		// loaded workspace, or the workspace itself is unhealthy and its diagnostics cannot be trusted).
 		if(!forceBuild && !unhealthyWorkspace && !outsideWorkspace) {
