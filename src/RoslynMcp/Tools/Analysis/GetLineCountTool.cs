@@ -143,7 +143,10 @@ internal sealed class GetLineCountTool : RoslynMcpTool
         var isEmpty   = true
 ;
 
-        await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileReader.ReadSharing, buffer.Length, useAsync: true);
+        // Shares with writers, unlike FileReader.ReadSharing: counting a log another program is
+        // still writing is a normal request, and a count is never written back, so a file caught
+        // mid-write costs nothing but a count that is soon out of date (#349).
+        await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, buffer.Length, useAsync: true);
 
         int read;
 

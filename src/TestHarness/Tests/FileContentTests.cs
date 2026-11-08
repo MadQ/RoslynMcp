@@ -21,6 +21,7 @@ static class FileContentTests
 		
 		// Not a C# file, so it is never a tracked document: roslyn_read_file reads it from disk.
 		var lockedPath = fx.Write("locked.txt", "held\n");
+		var activeLog  = fx.Write("active.log", "one\ntwo\nthree\n");
 		
 		var tests = new List<TestCase> {
 			
@@ -105,6 +106,29 @@ static class FileContentTests
 						"roslyn_read_file",
 						new { filePath = "locked.txt", projectPath = fx.ProjectPath },
 						(data, source) => data?["source"]?.GetValue<string>() == "disk" && source is ["held\n\n"]);
+				}),
+			
+			// #349: the server's reads keep writers out (FileReader.ReadSharing), because several
+			// of them write what they read back to disk. Counting lines writes nothing back, so
+			// roslyn_get_line_count shares with writers and can count a log another program is
+			// still writing. The handle here is such a writer: open for writing, sharing for
+			// reading only, as a log writer usually opens its file. A count that shared the way
+			// the other reads do would be refused by it. Windows only: elsewhere sharing is
+			// advisory and every read succeeds.
+			new("roslyn_get_line_count: counts a file another program has open for writing",
+				async () => {
+					
+					if(!OperatingSystem.IsWindows())
+						
+						return Skip.NotApplicable("file sharing is advisory on this platform; the read succeeds");
+					
+					using(new FileStream(activeLog, FileMode.Open, FileAccess.Write, FileShare.Read))
+						
+						return await ctx.RunTestAsync(
+							"roslyn_get_line_count",
+							new { filePaths = "active.log", projectPath = fx.ProjectPath },
+							data => data?["files"]?[0]?["line_count"]?.GetValue<int>() == 4
+								&& data?["files"]?[0]?["error"] is null);
 				}),
 			
 			new("roslyn_get_line_count: single and multi-file",
