@@ -2,8 +2,19 @@ using System.Text.Json.Serialization;
 
 namespace RoslynMcp.Tools;
 
-/// <summary>One refactoring an agent can preview: the index goes back into <c>roslyn_preview_refactoring</c>.</summary>
-internal sealed record RefactoringActionChoice(int Index, string Title, string Provider, string Source, string? EquivalenceKey);
+/// <summary>
+///     One refactoring an agent can preview: the index goes back into <c>roslyn_preview_refactoring</c>.
+///     <see cref="Provider"/> is the provider's type name and <see cref="ExportName"/> its export name,
+///     when it has one. A <c>deny</c> entry names it by either, or by the stem of the type name
+///     (<c>InvertIf</c> for <c>CSharpInvertIfCodeRefactoringProvider</c>).
+/// </summary>
+internal sealed record RefactoringActionChoice(
+	int     Index,
+	string  Title,
+	string  Provider,
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExportName,
+	string  Source,
+	string? EquivalenceKey);
 
 /// <summary>An action a provider offered that the headless host cannot run, and why.</summary>
 internal sealed record UnavailableActionInfo(string Title, string Provider, string Reason);

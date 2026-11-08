@@ -97,7 +97,7 @@ internal sealed record ProviderFailure(string Provider, string Error);
 ///     An action the agent can preview. <see cref="Title"/> is the flattened title (<c>Parent › Child</c>
 ///     for a nested action); <see cref="Action"/> is the leaf, the one with operations.
 /// </summary>
-internal sealed record RefactoringAction(CodeAction Action, string Title, string Provider, string Source, string? EquivalenceKey);
+internal sealed record RefactoringAction(CodeAction Action, string Title, string Provider, string? ExportName, string Source, string? EquivalenceKey);
 
 /// <summary>An action a provider offered that a headless host cannot run, and why.</summary>
 internal sealed record UnavailableAction(string Title, string Provider, string Reason);

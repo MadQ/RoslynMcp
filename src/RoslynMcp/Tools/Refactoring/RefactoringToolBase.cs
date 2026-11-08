@@ -91,7 +91,7 @@ internal abstract class RefactoringToolBase : RoslynMcpTool
 	}
 	
 	protected static RefactoringActionChoice Choice(RefactoringAction action, int index)
-		=> new(index, action.Title, action.Provider, action.Source, action.EquivalenceKey);
+		=> new(index, action.Title, action.Provider, action.ExportName, action.Source, action.EquivalenceKey);
 	
 	protected static ErrorResult ProvidersDisabled()
 		=> new("providers_disabled",

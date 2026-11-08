@@ -28,9 +28,9 @@ internal sealed class CodeActionHost
 	// internal). The LSP host skips those too: the apply path writes documents and nothing else.
 	const string RequiresNonDocumentChangeTag = "RequiresNonDocumentChange";
 	
-	// Export names (PredefinedCodeRefactoringProviderNames) of built-ins the server never runs: the
-	// server has its own signature change; rename tracking is an editor feature; the rest open a
-	// dialog, so every action of theirs would be filtered out anyway, and not running them saves the work.
+	// Built-ins the server never runs, by the stem of their type name (see IsDenied): the server has
+	// its own signature change; rename tracking is an editor feature; the rest open a dialog, so every
+	// action of theirs would be filtered out anyway, and not running them saves the work.
 	static readonly ImmutableHashSet<string> builtInDeny = ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase,
 		"ChangeSignature", "RenameTracking", "ExtractInterface", "ExtractClass", "PullMemberUp", "MoveStaticMembers", "MoveToNamespace");
 	
@@ -41,6 +41,9 @@ internal sealed class CodeActionHost
 	// Providers from a project's analyzer references, keyed by (path, mtime) as AnalyzerLoading keys its analyzers.
 	readonly ConcurrentDictionary<(string Path, long MtimeTicks), ProviderSet> fromReferences = new();
 	
+	// Providers the config files name, keyed by the declaring file and the entry; loaded once per process.
+	readonly ConcurrentDictionary<string, ProviderSet> configured = new(StringComparer.OrdinalIgnoreCase);
+	
 	public CodeActionHost(FileLogger logger)
 	{
 		this.logger = logger;
@@ -48,10 +51,27 @@ internal sealed class CodeActionHost
 		bundled     = LoadBundled();
 	}
 	
-	/// <summary>The built-in source's report, or null while nothing has asked for it yet; reporting never forces the composition.</summary>
-	public ProviderSourceReport? BuiltInReport => builtIn.IsValueCreated ? builtIn.Value.Report : null;
-	
-	public ProviderSourceReport BundledReport => bundled.Report;
+	/// <summary>
+	///     Every source loaded so far, for <c>roslyn_info</c>: the bundled fixers, the built-in
+	///     composition once something has asked for it (reporting never forces it), and the project
+	///     references and configured entries that have been loaded.
+	/// </summary>
+	public IEnumerable<ProviderSourceReport> Reports
+	{
+		get
+		{
+			yield return bundled.Report;
+			
+			if(builtIn.IsValueCreated)
+				yield return builtIn.Value.Report;
+			
+			foreach(var set in fromReferences.Values)
+				yield return set.Report;
+			
+			foreach(var set in configured.Values)
+				yield return set.Report;
+		}
+	}
 	
 	/// <summary>
 	///     The providers that apply to <paramref name="document"/> under the effective settings: the
@@ -73,6 +93,9 @@ internal sealed class CodeActionHost
 			
 			if(settings.ProjectProviders)
 				AddProjectSets(document.Project, sets);
+			
+			foreach(var entry in settings.Providers)
+				sets.Add(configured.GetOrAdd($"{entry.DeclaredIn}|{entry.Describe()}", _ => LoadConfigured(entry, settings.TrustProjectProviders)));
 		}
 		
 		var deny = builtInDeny.Union(settings.Deny);
@@ -120,7 +143,7 @@ internal sealed class CodeActionHost
 			
 			foreach(var action in registered)
 				Flatten(action, null, entry.Name, unavailable,
-					(leaf, title) => actions.Add(new RefactoringAction(leaf, title, entry.Name, entry.Source, leaf.EquivalenceKey)));
+					(leaf, title) => actions.Add(new RefactoringAction(leaf, title, entry.Name, entry.ExportName, entry.Source, leaf.EquivalenceKey)));
 		}
 		
 		actions.Sort((left, right) => string.CompareOrdinal(left.Provider, right.Provider) is var byProvider && byProvider != 0
@@ -306,6 +329,81 @@ internal sealed class CodeActionHost
 	}
 	
 	/// <summary>
+	///     One entry of a config file: an assembly on disk, or a package in the local NuGet cache. A
+	///     path from the committed project file is third-party code from a checkout and loads only
+	///     with the per-user trust opt-in; a package entry resolves from the cache the user filled,
+	///     so it needs none. Each entry gets a load context of its own, with the assemblies beside it
+	///     as dependency locations — all but Roslyn and the framework, which must stay the server's.
+	/// </summary>
+	ProviderSet LoadConfigured(ConfiguredProvider entry, bool trusted)
+	{
+		var kind   = entry.Committed ? ProviderSourceKind.ProjectConfig : ProviderSourceKind.GlobalConfig;
+		var source = $"config: {entry.Describe()}";
+		
+		if(entry.Committed && entry.Path is not null && !trusted) {
+			
+			logger.LogInfo("CodeActions", $"{source}: skipped, untrusted (declared in '{entry.DeclaredIn}')");
+			
+			return ProviderSet.Empty(source, kind, entry.DeclaredIn,
+				"skipped: untrusted — an assembly path in a committed .madq_roslynmcp.json runs only with --trust-project-providers, " +
+				"ROSLYNMCP_TRUST_PROJECT_PROVIDERS=true, or \"trustProjectProviders\": true in the user's config.json");
+		}
+		
+		string[] assemblies;
+		
+		if(entry.Path is not null) {
+			
+			if(!File.Exists(entry.Path))
+				return ProviderSet.Empty(source, kind, entry.DeclaredIn, $"not found: '{entry.Path}' (declared in '{entry.DeclaredIn}')");
+			
+			assemblies = [entry.Path];
+		}
+		else if(!NuGetPackageLocator.TryLocate(entry.Package!, entry.Version, out assemblies, out var problem))
+			return ProviderSet.Empty(source, kind, entry.DeclaredIn, $"{problem} (declared in '{entry.DeclaredIn}')");
+		
+		var loader = new ShadowCopyAnalyzerLoader($"RoslynMcp.Providers.{configured.Count + 1}");
+		
+		foreach(var directory in assemblies.Select(Path.GetDirectoryName).Where(directory => directory is not null).Distinct(SecurityBoundary.PathComparer))
+			foreach(var dependency in Directory.EnumerateFiles(directory!, "*.dll"))
+				if(!IsHostAssembly(Path.GetFileNameWithoutExtension(dependency)))
+					loader.AddDependencyLocation(dependency);
+		
+		var refactorings = ImmutableArray.CreateBuilder<ProviderEntry<CodeRefactoringProvider>>();
+		var fixes        = ImmutableArray.CreateBuilder<ProviderEntry<CodeFixProvider>>();
+		var problems     = ImmutableArray.CreateBuilder<string>();
+		
+		foreach(var assemblyPath in assemblies) {
+			
+			try {
+				
+				var set = Discover(loader.LoadFromPath(assemblyPath), source, kind, assemblyPath);
+				
+				refactorings.AddRange(set.Refactorings);
+				fixes.AddRange(set.Fixes);
+				problems.AddRange(set.Report.Problems);
+			}
+			catch(Exception ex) when(ex is not OperationCanceledException) {
+				problems.Add($"{Path.GetFileName(assemblyPath)}: could not load: {Describe(ex)}");
+			}
+		}
+		
+		logger.LogInfo("CodeActions", $"{source}: {refactorings.Count} refactoring, {fixes.Count} fix provider(s) from {assemblies.Length} assembl{(assemblies.Length == 1 ? "y" : "ies")}" + (problems.Count == 0 ? string.Empty : $", {problems.Count} problem(s): {string.Join("; ", problems)}"));
+		
+		return new ProviderSet(
+			new ProviderSourceReport(source, kind, string.Join(Path.PathSeparator, assemblies), refactorings.Count, fixes.Count, problems.ToImmutable()),
+			refactorings.ToImmutable(),
+			fixes.ToImmutable());
+	}
+	
+	// A package that ships Roslyn or framework assemblies beside its providers must not have them
+	// loaded a second time: the provider types would then derive from another Roslyn's base types.
+	static bool IsHostAssembly(string simpleName)
+		=> simpleName.StartsWith("Microsoft.CodeAnalysis", StringComparison.OrdinalIgnoreCase)
+			|| simpleName.StartsWith("System.", StringComparison.OrdinalIgnoreCase)
+			|| simpleName.Equals("netstandard", StringComparison.OrdinalIgnoreCase)
+			|| simpleName.Equals("mscorlib", StringComparison.OrdinalIgnoreCase);
+	
+	/// <summary>
 	///     The providers an assembly exports, found as Roslyn's own project-provider loader finds them:
 	///     the types carrying an export attribute. Outside a composition a provider needs a parameterless
 	///     constructor; one whose constructor imports services is reported and skipped.
@@ -440,11 +538,30 @@ internal sealed class CodeActionHost
 		return selected.ToImmutable();
 	}
 	
-	// A deny entry names a provider by its export name, its type name or its full type name.
+	// A deny entry names a provider by its export name, its full or short type name, or the stem of
+	// the type name: InvertIf for CSharpInvertIfCodeRefactoringProvider. The stem is what the
+	// built-in deny-list and users write; export names are whatever the author typed (Roslyn's
+	// invert-if exports as "Invert If Code Action Provider"), so they cannot be the only key.
 	static bool IsDenied<TProvider>(ProviderEntry<TProvider> entry, ImmutableHashSet<string> deny) where TProvider : class
-		=> (entry.ExportName is not null && deny.Contains(entry.ExportName))
-			|| deny.Contains(entry.Name)
-			|| deny.Contains(entry.Name[(entry.Name.LastIndexOf('.') + 1)..]);
+	{
+		if(entry.ExportName is not null && deny.Contains(entry.ExportName))
+			return true;
+		
+		var shortName = entry.Name[(entry.Name.LastIndexOf('.') + 1)..];
+		
+		return deny.Contains(entry.Name) || deny.Contains(shortName) || deny.Contains(Stem(shortName));
+	}
+	
+	static string Stem(string shortName)
+	{
+		var stem = shortName.StartsWith("CSharp", StringComparison.Ordinal) ? shortName["CSharp".Length..] : shortName;
+		
+		foreach(var suffix in (ReadOnlySpan<string>) ["CodeRefactoringProvider", "CodeFixProvider", "RefactoringProvider", "Provider"])
+			if(stem.EndsWith(suffix, StringComparison.Ordinal))
+				return stem[..^suffix.Length];
+		
+		return stem;
+	}
 	
 	/// <summary>
 	///     Walks an action to its leaves: a group action has no operations of its own, only its nested
