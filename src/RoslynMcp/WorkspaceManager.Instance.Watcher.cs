@@ -776,7 +776,7 @@ internal sealed partial class WorkspaceManager
 					// between the names of a file was tried and removed: it needs to know
 					// which file a path leads to, and when that answer is out of date one
 					// file's text is written into another (#341).
-					using var stream = File.OpenRead(path);
+					using var stream = FileReader.OpenUnbounded(path);
 					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
 
 					// Already current. Applying identical text is not free: it still runs a

@@ -68,6 +68,40 @@ internal static class FileReader
 	internal static Stream OpenRead(string path, long maxBytes) => BoundedStream.Open(path, maxBytes, FileOptions.None);
 	
 	/// <summary>
+	///     Opens <paramref name="path"/> for a read with no limit, shared like every other read
+	///     here. Only for reads that are unbounded on purpose: a text document the workspace reads
+	///     back from disk (Roslyn holds it whole anyway, so a limit would save nothing) and a hash,
+	///     which streams and holds no copy. Everything else takes a limit.
+	/// </summary>
+	internal static FileStream OpenUnbounded(string path) => OpenFile(path, FileOptions.None);
+	
+	/// <summary>
+	///     How every read in the server shares the file: with readers, writers and deletes (#349).
+	///     On Windows a handle that shares for reading only refuses every open for writing while it
+	///     is held — the server's own atomic replace (a rename over the file, which needs
+	///     <see cref="FileShare.Delete"/>), a user's editor saving, and the writability check of
+	///     <c>roslyn_preview_code_fix</c> all failed against a read that happened to be in progress.
+	///     The cost is that a read can see a file someone else is writing in place, as it always
+	///     could on Linux and macOS, where sharing is advisory; that writer's own change report
+	///     then brings the text up to date. The server's own writes are not read half-done: the
+	///     atomic replace writes a temp file and renames it, and while a write goes through the
+	///     workspace (which writes in place) the watcher holds back its reports for that file
+	///     until the write is over.
+	/// </summary>
+	internal const FileShare ReadSharing = FileShare.ReadWrite | FileShare.Delete;
+	
+	static FileStream OpenFile(string path, FileOptions options)
+	{
+		return new(path, new FileStreamOptions {
+			
+			Mode    = FileMode.Open,
+			Access  = FileAccess.Read,
+			Share   = ReadSharing,
+			Options = options,
+		});
+	}
+	
+	/// <summary>
 	///     The bytes of <paramref name="path"/>. A file with a length is read straight into an
 	///     array of that length, so it is in memory once; one more byte is then asked for, which
 	///     ends the read or shows the file grew. A file without one (a device, a pipe, a
@@ -206,13 +240,7 @@ internal static class FileReader
 			ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
 			ArgumentOutOfRangeException.ThrowIfGreaterThan(maxBytes, Array.MaxLength - 1L);
 			
-			var inner = new FileStream(path, new FileStreamOptions {
-				
-				Mode    = FileMode.Open,
-				Access  = FileAccess.Read,
-				Share   = FileShare.Read,
-				Options = options,
-			});
+			var inner = OpenFile(path, options);
 			
 			try {
 				

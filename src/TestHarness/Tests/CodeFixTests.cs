@@ -542,6 +542,94 @@ internal static class CodeFixTests
 			}
 		}
 
+		// #349: a handle that shares the file for reading only refuses every open for writing on
+		// Windows, whoever holds it. The preview's writability check retries it, and when the handle
+		// is still held after the retries it refuses the fix with a message that says what is
+		// going on — not only Windows' "used by another process", which sent the reader of #349
+		// looking for some other program when the holder could have been the server itself. The
+		// handle is held across the whole call, so the retries cannot outlast it. Windows only:
+		// elsewhere sharing is advisory and the open succeeds, so there is nothing to check.
+		async Task<(bool pass, string msg)> RunReadOnlySharedHandleRejectedAtPreview()
+		{
+			if(!OperatingSystem.IsWindows())
+				
+				return Skip.NotApplicable("file sharing is advisory on this platform; the write open succeeds");
+			
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
+				
+				(JsonNode? Data, string Text) preview;
+				
+				using(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+					preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				
+				var message = preview.Data?["message"]?.GetValue<string>() ?? string.Empty;
+				var pass = preview.Data?["error"]?.GetValue<string>() == "unsupported code-fix change"
+					&& preview.Data?["token"] is null
+					&& message.Contains("cannot be opened for writing", StringComparison.Ordinal)
+					&& message.Contains("does not let others write to it", StringComparison.Ordinal);
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {preview.Text}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+		// #349, the other side: a reader that shares the file for reading, writing and deleting —
+		// the way every read in the server now opens a file (FileReader.ReadSharing) — blocks
+		// neither the preview's writability check nor the apply. The apply replaces the file by
+		// renaming a temp file over it, which on Windows fails against any open handle that does not
+		// share for deleting; before #349 the server's own reads were such handles. Held across
+		// both calls, the handle stands in for a server read that happens to be in progress.
+		async Task<(bool pass, string msg)> RunFullySharedHandleAllowsFix()
+		{
+			if(!OperatingSystem.IsWindows())
+				
+				return Skip.NotApplicable("file sharing is advisory on this platform; nothing to check");
+			
+			var workspacePath = NewAdhocWorkspace();
+			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
+				
+				(JsonNode? Data, string Text) preview;
+				(JsonNode? Data, string Text) apply = (null, "not run");
+				
+				using(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete)) {
+					
+					preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+					
+					if(preview.Data?["token"]?.GetValue<string>() is { } token)
+						apply = await Apply(token, workspacePath);
+				}
+				
+				var updated = await File.ReadAllTextAsync(fixturePath);
+				var pass = preview.Data?["token"] is not null
+					&& apply.Data?["error"] is null
+					&& HasFileState(apply.Data, "_CodeFixFixture_.cs", "written")
+					&& updated.Contains("object value", StringComparison.Ordinal);
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {preview.Text}; apply: {apply.Text}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+
 		async Task<(bool pass, string msg)> RunTrackedNonCSharpDocuments()
 		{
 			var sw = Stopwatch.StartNew();
@@ -946,6 +1034,8 @@ internal static class CodeFixTests
 			new("code-fix token is rejected by rename apply and survives", RunCodeFixTokenRejectedByRename),
 			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
 			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
+			new("a file held open without sharing for writing is rejected with a clear message", RunReadOnlySharedHandleRejectedAtPreview),
+			new("a reader that shares for writing and deleting blocks neither preview nor apply", RunFullySharedHandleAllowsFix),
 			new("tracked additional and analyzer-config documents support safe edits only", RunTrackedNonCSharpDocuments),
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),

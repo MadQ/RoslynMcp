@@ -322,7 +322,7 @@ internal sealed class PhysicalSolutionApplyPlan
 	// Windows is the link's own (0), and a second open could see a different file.
 	static (string Hash, long Length) ComputeFileHashAndLength(string path)
 	{
-		using var stream = File.OpenRead(path);
+		using var stream = FileReader.OpenUnbounded(path);
 		
 		var length = stream.Length;
 		var hash   = SHA256.HashData(stream);

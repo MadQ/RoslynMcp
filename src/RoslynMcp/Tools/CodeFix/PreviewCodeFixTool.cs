@@ -462,20 +462,38 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			if(File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly))
 				throw new UnauthorizedAccessException("The file has the read-only attribute.");
 			
-			using var stream = new FileStream(
-				path,
-				FileMode.Open,
-				FileAccess.Write,
-				FileShare.ReadWrite | FileShare.Delete);
+			// With the write retry: a handle someone else holds without sharing for writing is
+			// usually short-lived — a read in progress, an editor saving, an antivirus scan of a
+			// file just written — and refusing the fix over one is what #349 was.
+			FileWriter.WriteWithRetry(() => {
+				
+				using var stream = new FileStream(
+					path,
+					FileMode.Open,
+					FileAccess.Write,
+					FileShare.ReadWrite | FileShare.Delete);
+			}, path);
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
+			// Windows words a sharing violation as "used by another process", whoever holds it.
+			var held = IsSharingViolation(ex)
+				? " It is open in a program that does not let others write to it (an editor, a build, an antivirus scan); retry once it is closed."
+				: ""
+			;
+			
 			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes require writable source files; '{path}' cannot be opened for writing: {ex.Message}");
+				$"Phase 1 code fixes require writable source files; '{path}' cannot be opened for writing: {ex.Message}{held}");
 		}
 	}
 	
-
+	// ERROR_SHARING_VIOLATION (32) and ERROR_LOCK_VIOLATION (33), as the HRESULT an IOException
+	// carries on Windows. Elsewhere sharing is advisory, and the low bits of an HRESULT can be an
+	// errno that means something else (32 is EPIPE).
+	private static bool IsSharingViolation(Exception ex) =>
+		OperatingSystem.IsWindows() && ex is IOException && (ex.HResult & 0xFFFF) is 32 or 33
+	;
+	
 	private static string ResolveCanonicalPath(string path)
 	{
 		var fullPath = Path.GetFullPath(path);

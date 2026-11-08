@@ -143,7 +143,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
         var isEmpty   = true
 ;
 
-        await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, buffer.Length, useAsync: true);
+        await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileReader.ReadSharing, buffer.Length, useAsync: true);
 
         int read;
 

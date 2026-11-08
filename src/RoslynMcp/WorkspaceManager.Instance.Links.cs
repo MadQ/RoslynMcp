@@ -483,7 +483,7 @@ internal sealed partial class WorkspaceManager
 					
 					return false;
 				
-				using var stream = File.OpenRead(path);
+				using var stream = FileReader.OpenUnbounded(path);
 				
 				return held.ContentEquals(SourceText.From(stream, FileWriter.Utf8NoBom));
 			}

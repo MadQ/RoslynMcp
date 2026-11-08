@@ -91,7 +91,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 				try {
 					
 					var inWorkspace = await document.GetTextAsync(cancellationToken);
-					using var stream = File.OpenRead(path);
+					using var stream = FileReader.OpenUnbounded(path);
 					var onDisk       = SourceText.From(stream, inWorkspace.Encoding ?? FileWriter.Utf8NoBom);
 					
 					differs = !onDisk.ContentEquals(inWorkspace);
