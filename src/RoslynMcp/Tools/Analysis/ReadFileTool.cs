@@ -73,7 +73,9 @@ internal sealed class ReadFileTool : RoslynMcpTool
 					// Bytes, not a string: SourceText decodes them itself, with the same encoding
 					// detection as from a stream. Bounded, because the whole file is read to count
 					// its lines whatever range was asked for (#230).
-					var bytes = await FileReader.ReadAllBytesAsync(fullPath, FileReader.DocumentLimit);
+					// Shared with writers: the content is only returned, so a log another
+					// program is still writing can be read (#349).
+					var bytes = await FileReader.ReadAllBytesAsync(fullPath, FileReader.DocumentLimit, FileReader.ObservingSharing, CancellationToken.None);
 					
 					sourceText = SourceText.From(bytes, bytes.Length);
 				}

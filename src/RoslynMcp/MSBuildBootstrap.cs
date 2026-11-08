@@ -136,7 +136,7 @@ internal static partial class MSBuildBootstrap
 			var solutionDir = Path.GetDirectoryName(solutionPath) ?? "";
 			
 			var relativePaths = solutionPath.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase)
-				? LoadXml(solutionPath).Descendants("Project").Select(p => (string?) p.Attribute("Path")).OfType<string>()
+				? FileReader.LoadXml(solutionPath).Descendants("Project").Select(p => (string?) p.Attribute("Path")).OfType<string>()
 				: FileReader.ReadLines(solutionPath, FileReader.DocumentLimit).Select(line => SlnProjectLine().Match(line)).Where(m => m.Success).Select(m => m.Groups[1].Value);
 			
 			var result = new List<string>();
@@ -157,13 +157,6 @@ internal static partial class MSBuildBootstrap
 		catch(Exception ex) when (ex is IOException or UnauthorizedAccessException or XmlException or ArgumentException) {
 			return [];
 		}
-	}
-	
-	static XDocument LoadXml(string path)
-	{
-		using var stream = FileReader.OpenRead(path, FileReader.DocumentLimit);
-		
-		return XDocument.Load(stream);
 	}
 	
 	// Project("{GUID}") = "Name", "rel\path.csproj", "{GUID}" — the second quoted value is the path.

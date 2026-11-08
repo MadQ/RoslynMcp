@@ -65,7 +65,7 @@ internal static class FileReader
 	///     come out of it. For readers that stop early (the first lines of a project file) or parse
 	///     straight from a stream.
 	/// </summary>
-	internal static Stream OpenRead(string path, long maxBytes) => BoundedStream.Open(path, maxBytes, FileOptions.None);
+	internal static Stream OpenRead(string path, long maxBytes) => BoundedStream.Open(path, maxBytes, FileOptions.None, ReadSharing);
 	
 	/// <summary>
 	///     Opens <paramref name="path"/> for a read with no limit, shared like every other read
@@ -73,7 +73,13 @@ internal static class FileReader
 	///     back from disk (Roslyn holds it whole anyway, so a limit would save nothing) and a hash,
 	///     which streams and holds no copy. Everything else takes a limit.
 	/// </summary>
-	internal static FileStream OpenUnbounded(string path) => OpenFile(path, FileOptions.None);
+	internal static FileStream OpenUnbounded(string path) => OpenFile(path, FileOptions.None, ReadSharing);
+	
+	/// <inheritdoc cref="OpenUnbounded(string)"/>
+	/// <param name="path">The file to open.</param>
+	/// <param name="sharing"><see cref="ReadSharing"/>, or <see cref="ObservingSharing"/> for a read that is never written back.</param>
+	/// <param name="options">The <see cref="FileOptions"/> to open with, e.g. <see cref="FileOptions.Asynchronous"/>.</param>
+	internal static FileStream OpenUnbounded(string path, FileShare sharing, FileOptions options) => OpenFile(path, options, sharing);
 	
 	/// <summary>
 	///     Parses <paramref name="path"/> as XML, read through <see cref="OpenUnbounded(string)"/>:
@@ -105,19 +111,37 @@ internal static class FileReader
 	///         partial read becomes a cut-short file. Kept out, a writer that is mid-save makes
 	///         the read fail instead, and one that tries to open the file during the read is
 	///         refused (Windows does not make it wait), as it always was; the read takes
-	///         milliseconds. Windows only: on Linux and macOS sharing is
-	///         advisory, so there neither the conflicts nor this protection exist (#403).
+	///         milliseconds. Windows only: on Linux and macOS sharing is advisory, so there
+	///         neither the conflicts nor this protection exist (#403).
 	///     </para>
+	///     <para>
+	///         Sharing for deleting also lets someone else delete the file during a read. Where
+	///         deletes are not POSIX-style (FAT, some network shares, Windows before 10 1903), the
+	///         name stays taken until the read closes, so a delete-and-recreate can fail for those
+	///         milliseconds. Accepted: without it the server's own replace fails instead.
+	///     </para>
+	///     A read whose content is never written back can share with writers too:
+	///     <see cref="ObservingSharing"/>.
 	/// </summary>
 	internal const FileShare ReadSharing = FileShare.Read | FileShare.Delete;
 	
-	static FileStream OpenFile(string path, FileOptions options)
+	/// <summary>
+	///     How a read shares the file when what it reads is only returned or counted, never
+	///     written back: with readers, writers and deletes. <c>roslyn_read_file</c> on a disk file
+	///     and <c>roslyn_get_line_count</c> use it, so a log another program is still writing can
+	///     be read and counted. A file caught mid-save gives a result that is out of date a
+	///     moment later, and nothing is built on it. Never use it for a read that something
+	///     writes back, a workspace document, a backup or an edit: see <see cref="ReadSharing"/>.
+	/// </summary>
+	internal const FileShare ObservingSharing = FileShare.ReadWrite | FileShare.Delete;
+	
+	static FileStream OpenFile(string path, FileOptions options, FileShare sharing)
 	{
 		return new(path, new FileStreamOptions {
 			
 			Mode    = FileMode.Open,
 			Access  = FileAccess.Read,
-			Share   = ReadSharing,
+			Share   = sharing,
 			Options = options,
 		});
 	}
@@ -130,7 +154,7 @@ internal static class FileReader
 	/// </summary>
 	internal static byte[] ReadAllBytes(string path, long maxBytes)
 	{
-		using var stream = BoundedStream.Open(path, maxBytes, FileOptions.None);
+		using var stream = BoundedStream.Open(path, maxBytes, FileOptions.None, ReadSharing);
 		using var rest   = new MemoryStream();
 		
 		if(stream.KnownLength is > 0 and var length) {
@@ -161,9 +185,18 @@ internal static class FileReader
 	internal static Task<byte[]> ReadAllBytesAsync(string path, long maxBytes) => ReadAllBytesAsync(path, maxBytes, CancellationToken.None);
 	
 	/// <inheritdoc cref="ReadAllBytes"/>
-	internal static async Task<byte[]> ReadAllBytesAsync(string path, long maxBytes, CancellationToken cancellationToken)
+	internal static Task<byte[]> ReadAllBytesAsync(string path, long maxBytes, CancellationToken cancellationToken) =>
+		ReadAllBytesAsync(path, maxBytes, ReadSharing, cancellationToken)
+	;
+	
+	/// <inheritdoc cref="ReadAllBytes"/>
+	/// <param name="path">The file to read.</param>
+	/// <param name="maxBytes">The most bytes read before <see cref="FileTooLargeException"/>.</param>
+	/// <param name="sharing"><see cref="ReadSharing"/>, or <see cref="ObservingSharing"/> for a read that is never written back.</param>
+	/// <param name="cancellationToken">Cancels the read.</param>
+	internal static async Task<byte[]> ReadAllBytesAsync(string path, long maxBytes, FileShare sharing, CancellationToken cancellationToken)
 	{
-		await using var stream = BoundedStream.Open(path, maxBytes, FileOptions.Asynchronous);
+		await using var stream = BoundedStream.Open(path, maxBytes, FileOptions.Asynchronous, sharing);
 		using var       rest   = new MemoryStream();
 		
 		if(stream.KnownLength is > 0 and var length) {
@@ -229,7 +262,7 @@ internal static class FileReader
 	};
 	
 	static StreamReader OpenText(string path, long maxBytes, FileOptions options) =>
-		new(BoundedStream.Open(path, maxBytes, options), Encoding.UTF8, detectEncodingFromByteOrderMarks: true)
+		new(BoundedStream.Open(path, maxBytes, options, ReadSharing), Encoding.UTF8, detectEncodingFromByteOrderMarks: true)
 	;
 	
 	/// <summary>
@@ -256,12 +289,12 @@ internal static class FileReader
 		///     limit. A length of zero says nothing — a device or a <c>/proc</c> file reports it — so
 		///     the count while reading stays the real check.
 		/// </summary>
-		internal static BoundedStream Open(string path, long maxBytes, FileOptions options)
+		internal static BoundedStream Open(string path, long maxBytes, FileOptions options, FileShare sharing)
 		{
 			ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
 			ArgumentOutOfRangeException.ThrowIfGreaterThan(maxBytes, Array.MaxLength - 1L);
 			
-			var inner = OpenFile(path, options);
+			var inner = OpenFile(path, options, sharing);
 			
 			try {
 				

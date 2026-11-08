@@ -143,10 +143,9 @@ internal sealed class GetLineCountTool : RoslynMcpTool
         var isEmpty   = true
 ;
 
-        // Shares with writers, unlike FileReader.ReadSharing: counting a log another program is
-        // still writing is a normal request, and a count is never written back, so a file caught
-        // mid-write costs nothing but a count that is soon out of date (#349).
-        await using var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, buffer.Length, useAsync: true);
+        // Shared with writers: a count is never written back, so a log another program is still
+        // writing can be counted (#349).
+        await using var stream = FileReader.OpenUnbounded(fullPath, FileReader.ObservingSharing, FileOptions.Asynchronous);
 
         int read;
 
