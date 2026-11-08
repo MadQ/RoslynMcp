@@ -8,7 +8,7 @@ using System.Text.Json.Nodes;
 ///     document called <c>Solution.WithDocumentText</c> on a non-source <c>DocumentId</c>, which
 ///     throws <c>InvalidOperationException</c> — uncaught by the existing
 ///     <c>IOException</c>/<c>UnauthorizedAccessException</c> filter. <c>MSBuildWorkspace</c> does not
-///     support <c>TryApplyChanges</c> for analyzer-config documents (verified against Roslyn 5.3.0), so
+///     support <c>TryApplyChanges</c> for analyzer-config documents (verified against Roslyn 5.3.0 and 5.9.0), so
 ///     an <c>.editorconfig</c> edit must still fall back to a full reload — this group asserts that
 ///     fallback happens cleanly (no protocol error) rather than propagating the exception. Fixtures
 ///     live in a throwaway MSBuild project under %TEMP% per #274.

@@ -125,9 +125,13 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol" Version="1.4.1" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Features" Version="5.3.0" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.3.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Features" Version="5.9.0" />
+    <!-- The C# implementations of Roslyn's built-in code refactorings and code fixes, composed through
+         MEF by CodeActionHost (#389). MefHostServices.DefaultAssemblies loads it by name when present
+         (dotnet/roslyn src/Workspaces/Core/Portable/Workspace/Host/Mef/MefHostServices.cs). -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.9.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.9.0" />
     <PackageReference Include="Microsoft.Build.Locator" Version="1.11.2" />
     <!-- Explicit reference required by MSBL001: Build.Locator 1.11.2 requires all transitive
          Microsoft.Build.* packages to opt out of runtime assets to prevent assembly-load conflicts. -->
