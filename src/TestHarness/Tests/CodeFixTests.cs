@@ -32,7 +32,19 @@ internal static class CodeFixTests
 		static string Fixture(string marker) => $"class CodeFixFixture {{ {marker} value; }}\n";
 		
 		// Under TestFixtures.TempRoot, so a killed run's leftovers are swept by the next run (#274).
-		static string NewAdhocWorkspace() => TestFixtures.NewAdhocDir("CodeFix").Dir;
+		// These fixtures test the bundled harness provider alone: the project file turns Roslyn's own
+		// fixers off for the workspace (#389), which is also what checks that the opt-out works —
+		// CS0246 would otherwise bring Roslyn's "Generate type" actions along.
+		const string BuiltInOff = "{ \"codeActions\": { \"builtIn\": false } }\n";
+		
+		static string NewAdhocWorkspace()
+		{
+			var dir = TestFixtures.NewAdhocDir("CodeFix").Dir;
+			
+			File.WriteAllText(Path.Combine(dir, ".madq_roslynmcp.json"), BuiltInOff);
+			
+			return dir;
+		}
 		
 		static void DeleteWorkspace(string path) => TestFixtures.DeleteTree(path);
 		
@@ -669,6 +681,7 @@ internal static class CodeFixTests
 						""");
 
 				fixture.Write("Tracked.txt", "probe = before\n");
+				fixture.Write(".madq_roslynmcp.json", BuiltInOff);
 				fixture.Write(".editorconfig", "root = true\n# before\n");
 				fixture.Write("Probe.cs", $"class CodeFixFixture {{ {marker} value; }}\n");
 				await fixture.WarmAsync(ctx);
@@ -1025,7 +1038,7 @@ internal static class CodeFixTests
 				var message = preview?["message"]?.GetValue<string>() ?? string.Empty;
 				var pass = preview?["error"]?.GetValue<string>() == "no fixes"
 					&& preview?["token"] is null
-					&& message.Contains("bundled with RoslynMcp", StringComparison.Ordinal);
+					&& message.Contains("available to the server", StringComparison.Ordinal);
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
@@ -1036,8 +1049,37 @@ internal static class CodeFixTests
 			}
 		}
 		
+		// Without the fixture's opt-out, Roslyn's own fixers are offered beside the bundled one (#389):
+		// CS0246 brings "Generate type" from the Features assemblies, through the server's composition.
+		// The bundled provider stays first, so the other tests' action indices would hold either way.
+		async Task<(bool pass, string msg)> RunBuiltInFixersOffered()
+		{
+			var workspacePath = TestFixtures.NewAdhocDir("CodeFixBuiltIn").Dir;
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				var actions = preview?["actions"]?.AsArray();
+				var providers = actions?.Select(action => action?["provider"]?.GetValue<string>() ?? string.Empty).ToArray() ?? [];
+				var pass = preview?["token"] is null
+					&& providers.Length > 1
+					&& providers[0] == "RoslynMcp.Tools.CodeFixTestProvider"
+					&& providers.Any(provider => provider.EndsWith(".GenerateTypeCodeFixProvider", StringComparison.Ordinal));
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+
 		List<TestCase> tests = [
 			new("unbundled diagnostic is rejected without a token", RunUnbundledDiagnosticRejected),
+			new("Roslyn's own fixers are offered unless the project file turns them off", RunBuiltInFixersOffered),
 			new("single write reports exact state and recovery", RunSingleWrite),
 			new("MSBuild workspace previews and applies an existing-file fix", RunMsBuildSingleWrite),
 			new("linked source file is rejected without changing physical bytes", RunLinkedFileRejectedAtPreview),

@@ -423,7 +423,8 @@ internal sealed partial class WorkspaceManager
 		{
 			using var loadCts = CreateLoadTimeoutCts();
 			
-			var msbuildWorkspace = MSBuildWorkspace.Create();
+			var msbuildWorkspace = MSBuildWorkspace.Create(MefComposition.HostServices);
+			MefComposition.LogOnce(log);
 			msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
 			{
 				var level = e.Diagnostic.Kind == WorkspaceDiagnosticKind.Failure ? "ERROR" : "WARN";
@@ -489,7 +490,8 @@ internal sealed partial class WorkspaceManager
 		{
 			using var loadCts = CreateLoadTimeoutCts();
 			
-			var msbuildWorkspace = MSBuildWorkspace.Create();
+			var msbuildWorkspace = MSBuildWorkspace.Create(MefComposition.HostServices);
+			MefComposition.LogOnce(log);
 			
 			msbuildWorkspace.RegisterWorkspaceFailedHandler(e =>
 			{
@@ -518,7 +520,8 @@ internal sealed partial class WorkspaceManager
 		
 		(Workspace workspace, ProjectId projectId) LoadAdhocWorkspace()
 		{
-			var adhocWorkspace = new AdhocWorkspace();
+			var adhocWorkspace = new AdhocWorkspace(MefComposition.HostServices);
+			MefComposition.LogOnce(logger);
 			
 			var projectInfo = ProjectInfo.Create(
 				id:             ProjectId.CreateNewId(),

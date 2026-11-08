@@ -15,13 +15,13 @@ namespace RoslynMcp.Tools;
 internal sealed class PreviewCodeFixTool : RoslynMcpTool
 {
 	readonly ApprovalStore approvals;
-	readonly CodeFixHost   codeFixHost;
+	readonly CodeActionHost codeActionHost;
 	
-	public PreviewCodeFixTool(WorkspaceResolver workspace, ApprovalStore approvals, CodeFixHost codeFixHost, FileLogger logger, PaginationCache paginationCache)
+	public PreviewCodeFixTool(WorkspaceResolver workspace, ApprovalStore approvals, CodeActionHost codeActionHost, FileLogger logger, PaginationCache paginationCache)
 		: base(workspace, logger, paginationCache)
 	{
-		this.approvals   = approvals;
-		this.codeFixHost = codeFixHost;
+		this.approvals      = approvals;
+		this.codeActionHost = codeActionHost;
 	}
 	
 	[McpServerTool(Name = "roslyn_preview_code_fix", ReadOnly = true, Title = "Preview Code Fix", OpenWorld = false)]
@@ -100,19 +100,19 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				matches.Length > 1 ? "diagnostic ambiguous" : "diagnostic not found"));
 		}
 		
-		ImmutableArray<AvailableCodeFix> fixes;
+		var query = await codeActionHost.GetFixesAsync(document, diagnostic, cancellationToken);
+		var fixes = query.Fixes;
 		
-		try {
-			
-			fixes = await codeFixHost.GetFixesAsync(document, diagnostic, cancellationToken);
-		}
-		catch(CodeFixProviderException ex) {
-			
+		// A provider that throws no longer sinks the preview: the fixes of the others are still offered,
+		// and the failure is only the answer when nothing is left.
+		if(fixes.IsEmpty && !query.Failures.IsEmpty)
 			return scope.Failed("code fix provider failed", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				ex.Message,
+				string.Join(" ", query.Failures.Select(failure => $"Code fix provider '{failure.Provider}' failed: {failure.Error}")),
 				"code fix provider failed"));
-		}
+		
+		if(!query.Failures.IsEmpty)
+			scope.Record($"{query.Failures.Length} provider failure(s): {string.Join("; ", query.Failures.Select(failure => failure.Provider))}");
 		
 		var choices = fixes
 			.Select((f, i) => new CodeFixActionChoice(i, diagnostic.Id, diagnostic.GetMessage(), f.Title, f.ProviderName, f.EquivalenceKey))
@@ -122,7 +122,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		if(fixes.Length == 0)
 			return scope.Failed("no fixes", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider bundled with RoslynMcp supports it.",
+				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.",
 				"no fixes"));
 		
 		if(fixes.Length > 1 && actionIndex is null)
