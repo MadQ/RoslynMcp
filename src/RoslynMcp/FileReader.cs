@@ -76,16 +76,15 @@ internal static class FileReader
 	internal static FileStream OpenUnbounded(string path) => OpenFile(path, FileOptions.None, ReadSharing);
 	
 	/// <summary>
-	///     Opens <paramref name="path"/> for a streaming read with no limit and the given
-	///     sharing. For a read that only counts and holds no copy — <c>roslyn_get_line_count</c>,
-	///     which streams the file through a fixed buffer and passes
-	///     <see cref="ObservingSharing"/>. Anything that keeps or returns the content takes a
-	///     limit and <see cref="ReadSharing"/>.
+	///     Opens <paramref name="path"/> to count its lines (<c>roslyn_get_line_count</c>): an
+	///     asynchronous read with <see cref="ObservingSharing"/>, so a log another program is
+	///     still writing can be counted. Its own method, with no sharing parameter, so that
+	///     <see cref="ObservingSharing"/> cannot spread to a read whose content comes out.
+	///     No limit: the count streams through a fixed buffer and keeps nothing. The cost is that
+	///     a file without an end — a link to a device that never stops producing bytes — keeps
+	///     it counting until the call is given up; it was so before #230 and #349 as well.
 	/// </summary>
-	/// <param name="path">The file to open.</param>
-	/// <param name="sharing"><see cref="ReadSharing"/>, or <see cref="ObservingSharing"/> for a read that only counts.</param>
-	/// <param name="options">The <see cref="FileOptions"/> to open with, e.g. <see cref="FileOptions.Asynchronous"/>.</param>
-	internal static FileStream OpenUnbounded(string path, FileShare sharing, FileOptions options) => OpenFile(path, options, sharing);
+	internal static FileStream OpenForCount(string path) => OpenFile(path, FileOptions.Asynchronous | FileOptions.SequentialScan, ObservingSharing);
 	
 	/// <summary>
 	///     Parses <paramref name="path"/> as XML — a project or solution file — read with
@@ -133,13 +132,26 @@ internal static class FileReader
 	/// <summary>
 	///     How a read shares the file when nothing is ever built from what it reads — a count,
 	///     not content: with readers, writers and deletes. <c>roslyn_get_line_count</c> uses it,
-	///     so a log another program is still writing can be counted; a file caught mid-save
-	///     gives a count that is out of date a moment later. Not for any read whose content
+	///     so a log another program is still writing can be counted (see
+	///     <see cref="OpenForCount"/>); a file caught mid-save gives a count that is out of date
+	///     a moment later. Not for any read whose content
 	///     comes out: <c>roslyn_read_file</c>'s output is copied into edits by the agent, so it
 	///     is written back as surely as a workspace document, a backup or an edit's own read.
 	///     Those use <see cref="ReadSharing"/>.
 	/// </summary>
 	internal const FileShare ObservingSharing = FileShare.ReadWrite | FileShare.Delete;
+	
+	/// <summary>
+	///     Whether <paramref name="ex"/> is Windows' sharing violation (ERROR_SHARING_VIOLATION,
+	///     32): the file is open in a handle that does not share what this open asks for —
+	///     for a read here, another program writing it, or holding it without sharing at all.
+	///     Windows words it as "used by another process", whoever the holder is. Elsewhere
+	///     sharing is advisory, and the low bits of an HRESULT can be an errno that means
+	///     something else (32 is EPIPE).
+	/// </summary>
+	internal static bool IsSharingViolation(Exception ex) =>
+		OperatingSystem.IsWindows() && ex is IOException && (ex.HResult & 0xFFFF) == 32
+	;
 	
 	static FileStream OpenFile(string path, FileOptions options, FileShare sharing)
 	{

@@ -145,7 +145,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 
         // Shared with writers: a count is never written back, so a log another program is still
         // writing can be counted (#349).
-        await using var stream = FileReader.OpenUnbounded(fullPath, FileReader.ObservingSharing, FileOptions.Asynchronous);
+        await using var stream = FileReader.OpenForCount(fullPath);
 
         int read;
 

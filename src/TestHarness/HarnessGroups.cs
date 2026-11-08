@@ -38,7 +38,7 @@ static class HarnessGroups
 		Group("Code Generation Tools",                     g => CodeGenerationTests.Build(g.Ctx)),
 		Group("File Content Tools",                        g => FileContentTests.Build(g.Ctx)),
 		Group("Bounded Reads",                             g => BoundedReadTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
-		Group("Code Fix Tools",                            g => CodeFixTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
+		Group("Code Fix Tools",                            g => CodeFixTests.Build(g.Ctx)),
 		Group("Validation Tools",                          g => ValidationTests.Build(g.Ctx)),
 		Group("Source Drift",                              g => DriftTests.Build(g.Ctx)),
 		Group("Refactoring Tools",                         g => RefactoringTests.Build(g.Ctx)),

@@ -1677,11 +1677,22 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	
 	/// <summary>
 	///     The result of a file read that threw: <see cref="FileTooLargeResult"/> for a file past
-	///     the <see cref="FileReader"/> limit, otherwise the read's own message.
+	///     the <see cref="FileReader"/> limit, otherwise the read's own message. A sharing
+	///     violation gets a hint: Windows blames "another process" whoever holds the file, and
+	///     the refusal is on purpose — a read keeps writers out (<see cref="FileReader.ReadSharing"/>)
+	///     so that what it returns is never a half-saved file (#349).
 	/// </summary>
-	protected static ErrorResult ReadFailure(Exception ex) => ex is FileTooLargeException tooLarge
-		? new FileTooLargeResult(tooLarge)
-		: new ErrorResult($"Failed to read file: {ex.Message}")
+	protected static ErrorResult ReadFailure(Exception ex) => ex switch {
+		
+		FileTooLargeException tooLarge         => new FileTooLargeResult(tooLarge),
+		_ when FileReader.IsSharingViolation(ex) => new ErrorResult($"Failed to read file: {ex.Message}", SharingViolationHint),
+		_                                      => new ErrorResult($"Failed to read file: {ex.Message}"),
+	};
+	
+	const string SharingViolationHint =
+		"Another program has the file open for writing, or without sharing it. A file is not read while another " +
+		"program may be writing it, so no half-saved content is ever returned; retry once it is closed. " +
+		"roslyn_get_line_count can count its lines in the meantime."
 	;
 	
 	// Returns recovery guidance that agents can act on when a write produces bad results.

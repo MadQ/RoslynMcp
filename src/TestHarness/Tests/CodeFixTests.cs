@@ -4,10 +4,7 @@ using System.Text.Json.Nodes;
 
 internal static class CodeFixTests
 {
-	/// <param name="ctx">The harness server.</param>
-	/// <param name="serverLogDir">Directory the harness pointed ROSLYNMCP_LOG_PATH at.</param>
-	/// <param name="serverLogGlob">File pattern of the server's log in that directory.</param>
-	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
+	internal static TestGroup Build(TestContext ctx)
 	{
 		async Task<(JsonNode? Data, string Text)> Call(string tool, object args)
 		{
@@ -545,18 +542,20 @@ internal static class CodeFixTests
 			}
 		}
 
-		// #349: a handle that shares the file for reading only refuses every open for writing on
-		// Windows, whoever holds it. The preview's writability check retries it, and when the handle
-		// is still held after the retries it refuses the fix with a message that says what is
-		// going on — not only Windows' "used by another process", which sent the reader of #349
-		// looking for some other program when the holder could have been the server itself. The
-		// handle is held across the whole call, so the retries cannot outlast it. Windows only:
-		// elsewhere sharing is advisory and the open succeeds, so there is nothing to check.
-		async Task<(bool pass, string msg)> RunReadOnlySharedHandleRejectedAtPreview()
+		// #349: the preview no longer opens a file for writing to see whether that works — such
+		// an open collided with whoever had the file open at that moment, the server's own reads
+		// included, and refused the fix over a handle gone a moment later. A file someone holds
+		// without sharing it for deleting (as a program that has it open usually does) is
+		// previewed like any other. The apply then cannot replace it: its atomic rename needs the
+		// holder to share for deleting. It must report the file as not written and leave it
+		// exactly as it was — the guarantee the dropped check was standing in for. The handle is
+		// held across the apply only, after the preview. Windows only: elsewhere sharing is
+		// advisory and the rename succeeds, so there is nothing to check.
+		async Task<(bool pass, string msg)> RunHeldFileLeftAloneByApply()
 		{
 			if(!OperatingSystem.IsWindows())
 				
-				return Skip.NotApplicable("file sharing is advisory on this platform; the write open succeeds");
+				return Skip.NotApplicable("file sharing is advisory on this platform; the rename succeeds");
 			
 			var workspacePath = NewAdhocWorkspace();
 			var fixturePath = Path.Combine(workspacePath, "_CodeFixFixture_.cs");
@@ -566,163 +565,37 @@ internal static class CodeFixTests
 				
 				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
 				
-				(JsonNode? Data, string Text) preview;
+				var preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				
+				if(preview.Data?["token"]?.GetValue<string>() is not { } token)
+					
+					return (false, $"FAIL  (preview: {preview.Text}) [{sw.ElapsedMilliseconds}ms]");
+				
+				(JsonNode? Data, string Text) apply;
 				
 				using(new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-					preview = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+					apply = await Apply(token, workspacePath);
 				
-				var message = preview.Data?["message"]?.GetValue<string>() ?? string.Empty;
-				var pass = preview.Data?["error"]?.GetValue<string>() == "unsupported code-fix change"
-					&& preview.Data?["token"] is null
-					&& message.Contains("cannot be opened for writing", StringComparison.Ordinal)
-					&& message.Contains("does not let others write to it", StringComparison.Ordinal);
+				var content = await File.ReadAllTextAsync(fixturePath);
+				var pass = !HasFileState(apply.Data, "_CodeFixFixture_.cs", "written")
+					&& content == Fixture("TestSingleWrite");
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (preview: {preview.Text}) [{sw.ElapsedMilliseconds}ms]");
+					: $"FAIL  (apply: {apply.Text}; file now: {content}) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				DeleteWorkspace(workspacePath);
 			}
 		}
 		
-		// #349, what the retry is for: a holder that lets go while the check is waiting. The
-		// harness holds the file without sharing it for writing, sends the preview, and releases
-		// the file only once the server's log says the check met the handle and is waiting
-		// (code_fix_write_check). The preview must then succeed. Released on that entry and not
-		// after a fixed delay, so the test does not depend on how long the preview takes to reach
-		// the check; a check that did not retry refuses on its first attempt and fails the test.
-		// What it does depend on is the harness letting go within the retries the entry starts
-		// (50 + 100 + 200 ms): it polls the log's new bytes every 5 ms, so the margin is wide,
-		// but a machine stalled for a third of a second would fail it.
-		// The fixture has a name of its own: the test above leaves the same log entry for
-		// _CodeFixFixture_.cs. Windows only: elsewhere sharing is advisory.
-		async Task<(bool pass, string msg)> RunShortLivedHolderWaitedOut()
-		{
-			if(!OperatingSystem.IsWindows())
-				
-				return Skip.NotApplicable("file sharing is advisory on this platform; nothing to check");
-			
-			const string fileName = "_HeldBriefly_.cs";
-			
-			var workspacePath = NewAdhocWorkspace();
-			var fixturePath = Path.Combine(workspacePath, fileName);
-			var sw = Stopwatch.StartNew();
-			
-			try {
-				
-				await File.WriteAllTextAsync(fixturePath, Fixture("TestSingleWrite"));
-				
-				var logFile = Directory.EnumerateFiles(serverLogDir, serverLogGlob).OrderBy(File.GetLastWriteTimeUtc).LastOrDefault();
-				
-				if(logFile is null)
-					
-					return (false, $"FAIL  (server log not found in {serverLogDir}) [{sw.ElapsedMilliseconds}ms]");
-				
-				var logStart = new FileInfo(logFile).Length;
-				var waited   = false;
-				
-				using(var holder = new FileStream(fixturePath, FileMode.Open, FileAccess.Read, FileShare.Read)) {
-					
-					await ctx.SendAsync(new {
-						jsonrpc = "2.0",
-						id      = ctx.NextId(),
-						method  = "tools/call",
-						@params = new {
-							name      = "roslyn_preview_code_fix",
-							arguments = new { projectPath = workspacePath, filePath = fileName, line = 1, column = 24, diagnosticId = "CS0246" }
-						}
-					});
-					
-					var deadline = DateTime.UtcNow.AddSeconds(20);
-					
-					while(!waited && DateTime.UtcNow < deadline) {
-						
-						// By its two parts: the log is NDJSON, and the dash and quotes in the message
-						// may be escaped there.
-						waited = LogSince(logFile, logStart)
-							.Split('\n')
-							.Any(line => line.Contains("code_fix_write_check", StringComparison.Ordinal) && line.Contains(fileName, StringComparison.Ordinal))
-						;
-						
-						if(!waited)
-							await Task.Delay(5);
-					}
-				}
-				
-				var response = await ctx.ReceiveAsync();
-				var text     = response?["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? string.Empty;
-				JsonNode? preview = null;
-				
-				try { preview = JsonNode.Parse(text); }
-				catch { }
-				
-				var pass = waited && preview?["token"] is not null;
-				
-				return (pass, pass
-					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (retry entry seen: {waited}; preview: {text}) [{sw.ElapsedMilliseconds}ms]");
-			}
-			finally {
-				DeleteWorkspace(workspacePath);
-			}
-		}
-		
-		// What the server appended to its log since an offset — read on every poll, so not the
-		// whole file each time (ServerLog.TryRead reads every rotation of it). FileLogger rotates
-		// by renaming the live file to "<log>.1" and starting a new one under the same name, so a
-		// live file shorter than the offset has rotated: the rest of the old one is in ".1".
-		static string LogSince(string logFile, long offset)
-		{
-			var length = LengthOf(logFile);
-			
-			if(length >= offset)
-				
-				return ReadFrom(logFile, offset);
-			
-			return ReadFrom(logFile + ".1", offset) + ReadFrom(logFile, 0);
-		}
-		
-		static long LengthOf(string path)
-		{
-			try {
-				return new FileInfo(path).Length;
-			}
-			catch(IOException) {
-				return 0;
-			}
-		}
-		
-		static string ReadFrom(string path, long offset)
-		{
-			try {
-				
-				using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-				
-				if(stream.Length <= offset)
-					
-					return string.Empty;
-				
-				stream.Seek(offset, SeekOrigin.Begin);
-				
-				using var reader = new StreamReader(stream);
-				
-				return reader.ReadToEnd();
-			}
-			catch(IOException) {
-				return string.Empty;
-			}
-		}
-		
-
 		// #349, the other side: a handle that shares the file for reading and deleting — the way
 		// every read in the server opens a file (FileReader.ReadSharing) — does not block the
 		// apply. The apply replaces the file by renaming a temp file over it, which on Windows
 		// fails against any open handle that does not share for deleting; before #349 the
 		// server's own reads were such handles, and the replace got through only on the write
-		// retry. Held across the apply, the handle stands in for a server read in progress. It
-		// is opened after the preview: it keeps writers out, so held during the preview it would
-		// fail the writability check, as the test above shows for a handle without Delete.
+		// retry. Held across the apply, the handle stands in for a server read in progress; the
+		// test above is the same handle without Delete, which the rename cannot get past.
 		async Task<(bool pass, string msg)> RunReadDeleteSharedHandleAllowsApply()
 		{
 			if(!OperatingSystem.IsWindows())
@@ -1175,9 +1048,8 @@ internal static class CodeFixTests
 			new("code-fix token is rejected by rename apply and survives", RunCodeFixTokenRejectedByRename),
 			new("generated source files are rejected during preview", RunGeneratedFileRejectedAtPreview),
 			new("read-only source files are rejected during preview", RunReadOnlyFileRejectedAtPreview),
-			new("a file held open without sharing for writing is rejected with a clear message", RunReadOnlySharedHandleRejectedAtPreview),
+			new("a file held without sharing for deleting is left alone by the apply", RunHeldFileLeftAloneByApply),
 			new("a reader that shares for deleting does not block the apply's atomic replace", RunReadDeleteSharedHandleAllowsApply),
-			new("a holder that lets go while the writability check waits is waited out", RunShortLivedHolderWaitedOut),
 			new("tracked additional and analyzer-config documents support safe edits only", RunTrackedNonCSharpDocuments),
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),
