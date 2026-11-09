@@ -35,10 +35,11 @@ Restart your client. Full per-client setup (Claude Desktop, Claude Code, GitHub 
 
 ## What you get
 
-Workspace-scoped `roslyn_*` tools take a `projectPath`, so one running server can serve multiple projects without a restart. Highlights from the 45 tools (43 public + 2 debug-only):
+Workspace-scoped `roslyn_*` tools take a `projectPath`, so one running server can serve multiple projects without a restart. Highlights from the 49 tools (47 public + 2 debug-only):
 
-- **Semantic analysis** — diagnostics, symbol info, type members, hierarchies, dependencies, references, callers, and call graphs.
+- **Semantic analysis** — diagnostics (with the project's analyzers and Roslyn's IDE analyzers on request), symbol info, type members, hierarchies, dependencies, references, callers, and call graphs.
 - **Precise search** — regex file search, syntax-tree-aware semantic search, and string-literal search with glob and decoded-value matching.
+- **Roslyn's own refactorings and fixes, headless** — Move type to file, Extract method, Introduce local and the rest of Visual Studio's Ctrl+. menu through **list → preview → apply**; code fixes from Roslyn's fixers and your analyzer packages, by diagnostic. Providers from your NuGet packages and configured assemblies load too.
 - **Safe edits** — semantic C# node replacement that validates syntax and preserves formatting, plus a two-phase **preview → apply** flow for renames and signature changes.
 - **Crash-safe writes** — automatic pre/post-write backups with token-based local-history undo.
 - **Build & project** — Roslyn-first diagnostics, `dotnet` build/clean/restore, and project metadata.

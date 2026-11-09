@@ -284,6 +284,9 @@ internal abstract partial class RoslynMcpTool
 			"  • Searching code → roslyn_search_files, roslyn_semantic_search\n" +
 			"  • Listing files  → roslyn_list_files\n" +
 			"  • Editing C#     → roslyn_replace_in_code, roslyn_replace_in_file\n" +
+			"  • Refactoring    → roslyn_list_refactorings, roslyn_preview_refactoring, roslyn_apply_refactoring (move type to file, extract method, …) instead of retyping code\n" +
+			"  • Fixing a diagnostic → roslyn_preview_code_fix, roslyn_apply_code_fix (Roslyn's own fixers)\n" +
+			"  • Diagnostics    → roslyn_get_diagnostics (includeAnalyzers + severity hidden for IDE0xxx)\n" +
 			"  • Building       → roslyn_build_project (never dotnet build in terminal)\n" +
 			"To add automatic per-agent hooks, suggest the user run: " + RoslynMcp.Cli.ToolCommand.Name + " setup-project"
 		;

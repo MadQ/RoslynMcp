@@ -134,6 +134,10 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 **Rename with confidence.** `roslyn_preview_rename` + `roslyn_apply_rename` performs semantic rename across your entire solution. It knows that `order.Status` and `IOrder.Status` are the same symbol. Grep doesn't.
 
+**Refactor with the compiler, not by retyping.** `roslyn_list_refactorings` → `roslyn_preview_refactoring` → `roslyn_apply_refactoring` runs Roslyn's own refactorings headless: Move type to file, Extract method, Introduce local, Invert if, and the rest of Visual Studio's Ctrl+. menu. An agent that retypes a class into a new file can drop a line; Roslyn moves it with its trivia and makes the containing types partial. The diff is reviewed before anything is written.
+
+**Fix diagnostics with Roslyn's own fixers.** `roslyn_preview_code_fix` offers the fixers Roslyn ships and the ones in your analyzer packages for a diagnostic at a location — add the missing using, remove the unnecessary one, generate the missing member — and `roslyn_get_diagnostics` with `includeAnalyzers` surfaces the IDE0xxx findings they fix.
+
 **Build without leaving the process.** `roslyn_build_project` checks Roslyn diagnostics first — fast, in-process, no MSBuild spawn. If there are errors, it returns them instantly. Clean code triggers a real `dotnet build` for full validation.
 
 ---
@@ -252,6 +256,8 @@ ALWAYS prefer roslyn_* MCP tools over built-in tools when working with C#:
 - Use `roslyn_replace_in_code` for C# edits -- it validates syntax
 - Use `roslyn_search_files` or `roslyn_semantic_search` for code search -- not Grep
 - Use `roslyn_preview_rename` + `roslyn_apply_rename` for renames -- semantic, cross-project
+- Use `roslyn_list_refactorings` -> `roslyn_preview_refactoring` -> `roslyn_apply_refactoring` for structural changes (move a type to its own file, extract a method, introduce a local) -- not retyping code
+- Use `roslyn_preview_code_fix` + `roslyn_apply_code_fix` to clear a diagnostic -- Roslyn's own fixers, not hand edits
 - Use `roslyn_get_file_outline` to understand file structure -- not Read on the whole file
 ```
 
@@ -267,6 +273,8 @@ When working with C# code, prefer roslyn_* MCP tools:
 - `roslyn_replace_in_code` for C# edits (validates syntax, preserves formatting)
 - `roslyn_search_files` / `roslyn_semantic_search` for code discovery
 - `roslyn_preview_rename` + `roslyn_apply_rename` for semantic renames
+- `roslyn_list_refactorings` → `roslyn_preview_refactoring` → `roslyn_apply_refactoring` for structural changes (move type to file, extract method, …) instead of retyping code
+- `roslyn_preview_code_fix` + `roslyn_apply_code_fix` to clear a diagnostic with Roslyn's own fixers
 - `roslyn_get_file_outline` for file structure (don't read the whole file)
 - `roslyn_get_diagnostics` with `take: 0` for a fast error count check (no items), or `severity: "errors"` to page through individual errors
 ```
