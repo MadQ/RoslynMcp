@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.CodeFixes;
 using Microsoft.CodeAnalysis.CodeRefactorings;
+using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace RoslynMcp;
 
@@ -70,18 +71,40 @@ internal sealed record ProviderSourceReport(
 	string?                Origin,
 	int                    Refactorings,
 	int                    Fixes,
-	ImmutableArray<string> Problems);
+	ImmutableArray<string> Problems)
+{
+	/// <summary>Diagnostic analyzers the source carries beside its providers; only the built-in source has any (Roslyn's IDE analyzers).</summary>
+	public int Analyzers { get; init; }
+}
 
-/// <summary>The providers one source yielded, with its report.</summary>
+/// <summary>
+///     The providers one source yielded, with its report. <see cref="Analyzers"/> holds the diagnostic
+///     analyzers found beside them — Roslyn's IDE analyzers (IDE0xxx) live in the Features assemblies
+///     with their fixers, and a fixer is only as useful as the diagnostic it fixes.
+/// </summary>
 internal sealed record ProviderSet(
 	ProviderSourceReport                                   Report,
 	ImmutableArray<ProviderEntry<CodeRefactoringProvider>> Refactorings,
-	ImmutableArray<ProviderEntry<CodeFixProvider>>         Fixes)
+	ImmutableArray<ProviderEntry<CodeFixProvider>>         Fixes,
+	ImmutableArray<DiagnosticAnalyzer>                     Analyzers)
 {
+	public ProviderSet(
+		ProviderSourceReport report,
+		ImmutableArray<ProviderEntry<CodeRefactoringProvider>> refactorings,
+		ImmutableArray<ProviderEntry<CodeFixProvider>> fixes)
+		: this(report, refactorings, fixes, [])
+	{ }
+	
 	/// <summary>A source that yielded nothing, for the reason given.</summary>
 	public static ProviderSet Empty(string source, ProviderSourceKind kind, string? origin, string problem)
 		=> new(new ProviderSourceReport(source, kind, origin, 0, 0, [problem]), [], []);
 }
+
+/// <summary>
+///     The analyzers that run for a project when analyzers are asked for: the project's own analyzer
+///     references, and Roslyn's IDE analyzers while built-in code actions are on for it.
+/// </summary>
+internal sealed record AnalyzerSet(ImmutableArray<DiagnosticAnalyzer> Analyzers, int FromProject, int BuiltIn);
 
 /// <summary>The providers that apply to one document, after the settings and the deny-list.</summary>
 internal sealed record ResolvedProviders(

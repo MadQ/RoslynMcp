@@ -101,6 +101,26 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		}
 		
 		var query = await codeActionHost.GetFixesAsync(document, diagnostic, cancellationToken);
+		
+		// Roslyn attaches some fixers to a companion of the diagnostic it shows: the unnecessary-using
+		// fixer answers to RemoveUnnecessaryImportsFixable, not to the IDE0005 beside it at the same
+		// span. When the diagnostic asked for has no fixer, its companions at the position are tried,
+		// smallest span first, and the one that has a fixer is the one fixed — the choices say which.
+		if(query.Fixes.IsEmpty && query.Failures.IsEmpty)
+			foreach(var companion in CompanionsAt(diagnostics, diagnostic, fullPath, position)) {
+				
+				var companionQuery = await codeActionHost.GetFixesAsync(document, companion, cancellationToken);
+				
+				if(companionQuery.Fixes.IsEmpty)
+					continue;
+				
+				scope.Record($"fixed through companion diagnostic {companion.Id}");
+				diagnostic = companion;
+				query      = companionQuery;
+				
+				break;
+			}
+		
 		var fixes = query.Fixes;
 		
 		// A provider that throws no longer sinks the preview: the fixes of the others are still offered,
@@ -241,6 +261,16 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		});
 	}
 	
+	// The other diagnostics reported at the position: same file, span containing it, another id.
+	private static IEnumerable<Diagnostic> CompanionsAt(ImmutableArray<Diagnostic> diagnostics, Diagnostic requested, string fullPath, int position)
+		=> diagnostics
+			.Where(d => d.Location.IsInSource
+				&& d.Id != requested.Id
+				&& SecurityBoundary.PathComparer.Equals(d.Location.SourceTree?.FilePath, fullPath)
+				&& (d.Location.SourceSpan.Contains(position) || d.Location.SourceSpan.Start == position))
+			.OrderBy(d => d.Location.SourceSpan.Length);
+	
+
 	private static Diagnostic? SelectDiagnostic(
 		ImmutableArray<Diagnostic> diagnostics,
 		string fullPath,
@@ -286,28 +316,27 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		if(tree is null)
 			return [];
 		
-		var builder = ImmutableArray.CreateBuilder<Diagnostic>();
-		builder.AddRange(compilation.GetSemanticModel(tree).GetDiagnostics(cancellationToken: cancellationToken));
+		var semanticModel = compilation.GetSemanticModel(tree);
+		var builder       = ImmutableArray.CreateBuilder<Diagnostic>();
+		
+		builder.AddRange(semanticModel.GetDiagnostics(cancellationToken: cancellationToken));
 		
 		// Analyzer failures must never sink the whole preview: the compiler diagnostics above (with
 		// their fixes) are already collected. A broken or throwing project analyzer degrades
 		// to compiler-only diagnostics instead of aborting; cancellation still propagates. Assemblies
 		// load through the shared shadow-copy loader so the analyzed project's outputs stay unlocked.
+		// The project's analyzers and Roslyn's IDE analyzers (#389) run over this document alone, as
+		// an editor's light bulb does: a whole-compilation analysis is not needed to fix one diagnostic.
 		try {
 			
-			var analyzers = project.AnalyzerReferences
-				.SelectMany(reference => AnalyzerLoading.GetShadowedAnalyzers(reference, project.Language))
-				.ToImmutableArray()
-			;
+			var set = codeActionHost.AnalyzersFor(project);
 			
-			if(!analyzers.IsEmpty) {
+			if(!set.Analyzers.IsEmpty) {
 				
-				var withAnalyzers = compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
-				var analyzerDiagnostics = await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken)
-					.ConfigureAwait(false)
-				;
+				var withAnalyzers = compilation.WithAnalyzers(set.Analyzers, project.AnalyzerOptions);
 				
-				builder.AddRange(analyzerDiagnostics.Where(d => d.Location.SourceTree == tree));
+				builder.AddRange(await withAnalyzers.GetAnalyzerSyntaxDiagnosticsAsync(tree, cancellationToken).ConfigureAwait(false));
+				builder.AddRange(await withAnalyzers.GetAnalyzerSemanticDiagnosticsAsync(semanticModel, filterSpan: null, cancellationToken).ConfigureAwait(false));
 			}
 		}
 		catch(Exception ex) when(ex is not OperationCanceledException) {

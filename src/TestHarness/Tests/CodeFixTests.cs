@@ -1093,9 +1093,76 @@ internal static class CodeFixTests
 		}
 		
 
+		// Roslyn's IDE analyzers run with the code fixes (#389): an unnecessary using is IDE0005,
+		// reported hidden, so the diagnostics tool shows it only at severity 'hidden', and Roslyn's own
+		// fixer removes it. An MSBuild fixture: the using must resolve for it to be unnecessary rather
+		// than unknown.
+		async Task<(bool pass, string msg)> RunIdeAnalyzerFixOffered()
+		{
+			using var fixture = TestFixtures.NewMsBuildProject("CodeFixIde");
+			var sw = Stopwatch.StartNew();
+			
+			fixture.Write("Probe.cs", "using System.Text;\n\nclass UsingFixture { }\n");
+			await fixture.WarmAsync(ctx);
+			
+			var (diagnostics, diagnosticsText) = await Call("roslyn_get_diagnostics", new {
+				projectPath = fixture.Csproj,
+				filePath = "Probe.cs",
+				severity = "hidden",
+				includeAnalyzers = true
+			});
+			var listed = diagnostics?["items"]?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "IDE0005") == true;
+			
+			if(!listed)
+				return (false, $"FAIL  (diagnostics: {diagnosticsText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (choices, choicesText) = await Call("roslyn_preview_code_fix", new {
+				projectPath = fixture.Csproj,
+				filePath = "Probe.cs",
+				line = 1,
+				column = 1,
+				diagnosticId = "IDE0005"
+			});
+			var actions = choices?["actions"]?.AsArray();
+			var index = actions?.Select((action, i) => (Action: action, Index: i))
+				.Where(pair => pair.Action?["provider"]?.GetValue<string>().EndsWith("RemoveUnnecessaryImportsCodeFixProvider", StringComparison.Ordinal) == true)
+				.Select(pair => (int?) pair.Index)
+				.FirstOrDefault();
+			
+			if(index is null)
+				return (false, $"FAIL  (no remove-usings fixer: {choicesText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (preview, previewText) = choices?["token"] is not null
+				? (choices, choicesText)
+				: await Call("roslyn_preview_code_fix", new {
+					projectPath = fixture.Csproj,
+					filePath = "Probe.cs",
+					line = 1,
+					column = 1,
+					diagnosticId = "IDE0005",
+					actionIndex = index
+				});
+			var token = preview?["token"]?.GetValue<string>();
+			
+			if(token is null)
+				return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (apply, applyText) = await Apply(token, fixture.Csproj!);
+			var after = await File.ReadAllTextAsync(fixture.PathOf("Probe.cs"));
+			var pass = apply?["error"] is null
+				&& !after.Contains("using System.Text", StringComparison.Ordinal)
+				&& after.Contains("class UsingFixture", StringComparison.Ordinal);
+			
+			return (pass, pass
+				? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  (apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+
 		List<TestCase> tests = [
 			new("unbundled diagnostic is rejected without a token", RunUnbundledDiagnosticRejected),
 			new("Roslyn's own fixers are offered unless the project file turns them off", RunBuiltInFixersOffered),
+			new("Roslyn's IDE analyzers surface IDE0005 and its fixer removes the using", RunIdeAnalyzerFixOffered),
 			new("single write reports exact state and recovery", RunSingleWrite),
 			new("MSBuild workspace previews and applies an existing-file fix", RunMsBuildSingleWrite),
 			new("linked source file is rejected without changing physical bytes", RunLinkedFileRejectedAtPreview),

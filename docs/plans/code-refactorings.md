@@ -6,6 +6,10 @@ upgrade commits cherry-picked from the earlier `feat/issue-389-code-refactorings
 departs from this plan: the deny list matches the stem of a provider's type name, because Roslyn's export names
 turned out to be whatever the author typed (`Invert If Code Action Provider`); a name-only document rename
 (Move type's "Rename file to match type") is refused by the validator, since the diff would show nothing.
+Beyond the plan: Roslyn's IDE analyzers run with `includeAnalyzers` and under the code-fix preview, so the
+IDE0xxx fixers have diagnostics to fix (`severity: "info"` / `"hidden"` show them; a fixer that answers to a
+companion diagnostic, like the unnecessary-using one, is found through the companions at the position), and
+`setup-project` prompts for the `codeActions` section.
 
 Decisions taken so far: deny-list rather than allow-list (agreed); **one PR for the whole issue**, no split;
 a branch of this session's own.

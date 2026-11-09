@@ -8,8 +8,8 @@ namespace RoslynMcp.Cli;
 ///     per-project files to the nearest git repository root: a hook file under <c>.github/</c>
 ///     enabling per-agent tool guidance for .cs file operations, and (opt-in) a
 ///     <c>.madq_roslynmcp.json</c> server config holding commit-worthy server settings
-///     (<c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>) that the server folds in where no CLI arg or env var
-///     was given — see <see cref="ProjectConfig"/>.
+///     (<c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>, <c>codeActions</c>) that the server folds in where no
+///     CLI arg or env var was given — see <see cref="ProjectConfig"/>.
 /// </summary>
 internal class SetupProjectCommand : CliCommand
 {
@@ -80,7 +80,7 @@ internal class SetupProjectCommand : CliCommand
 		if(wroteConfig) {
 			
 			Console.WriteLine();
-			Console.WriteLine("  Note: --elicit/--workspace/--vs-version args in an agent's global MCP config (written by");
+			Console.WriteLine("  Note: --elicit/--workspace/--vs-version/--code-actions args in an agent's global MCP config (written by");
 			Console.WriteLine("  '" + ToolCommand.Name + " setup') override the project file. Precedence:");
 			Console.WriteLine("  CLI arg > env var > project file > default. Running servers pick up changes");
 			Console.WriteLine("  on restart.");
@@ -266,7 +266,63 @@ internal class SetupProjectCommand : CliCommand
 			}
 		}
 		
-		var nothingChosen = !elicit && workspace == "auto" && vsVersion.Length == 0;
+		// Roslyn's code refactorings and fixes (#389): on by default, with the project's own analyzer
+		// packages as a source; a team can turn either off here, or add provider packages. Packages
+		// resolve from each contributor's local NuGet cache and need no trust. Assembly paths are not
+		// offered: a committed path runs only once each user trusts it, so it is theirs to type by hand.
+		var codeActionsSection = root[CodeActionConfig.SectionName] as JsonObject;
+		var section            = codeActionsSection ?? new JsonObject();
+		
+		var currentCodeActions = section["enabled"] is not JsonValue enabledNode
+			|| !enabledNode.TryGetValue<bool>(out var existingEnabled)
+			|| existingEnabled;
+		
+		var currentProjectProviders = section["projectProviders"] is not JsonValue projectProvidersNode
+			|| !projectProvidersNode.TryGetValue<bool>(out var existingProjectProviders)
+			|| existingProjectProviders;
+		
+		var currentPackages = section["providers"] is JsonArray existingProviders
+			? existingProviders.OfType<JsonObject>()
+				.Select(entry => entry["package"] is JsonValue packageNode && packageNode.TryGetValue<string>(out var id) ? id.Trim() : null)
+				.Where(id => !string.IsNullOrEmpty(id))
+				.Select(id => id!)
+				.ToArray()
+			: [];
+		
+		Console.WriteLine();
+		Console.WriteLine("  roslyn_list_refactorings, roslyn_preview_refactoring and roslyn_preview_code_fix run");
+		Console.WriteLine("  Roslyn's own refactorings and fixers (Move type to file, Extract method, …) and the");
+		Console.WriteLine("  ones shipped in this project's analyzer packages.");
+		Console.Write($"  Enable Roslyn's code actions for this project? [{(currentCodeActions ? "Y/n" : "y/N")}]: ");
+		
+		var codeActions      = YesNo(Console.ReadLine(), currentCodeActions);
+		var projectProviders = currentProjectProviders;
+		var packages         = currentPackages;
+		
+		if(codeActions) {
+			
+			Console.WriteLine();
+			Console.Write($"  Also load refactoring and fix providers from the project's analyzer packages? [{(currentProjectProviders ? "Y/n" : "y/N")}]: ");
+			
+			projectProviders = YesNo(Console.ReadLine(), currentProjectProviders);
+			
+			Console.WriteLine();
+			Console.WriteLine("  Extra provider packages by NuGet id, comma-separated (resolved from the local package");
+			Console.WriteLine("  cache, so each contributor needs them restored). Enter keeps the current list; 'none'");
+			Console.WriteLine("  clears it.");
+			Console.Write($"  Provider packages [{(currentPackages.Length == 0 ? "none" : string.Join(", ", currentPackages))}]: ");
+			
+			var packagesAnswer = Console.ReadLine()?.Trim() ?? "";
+			
+			if(packagesAnswer.Equals("none", StringComparison.OrdinalIgnoreCase))
+				packages = [];
+			
+			else if(packagesAnswer.Length > 0)
+				packages = [..packagesAnswer.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase)];
+		}
+		
+		var codeActionsDefault = codeActions && projectProviders && packages.Length == 0;
+		var nothingChosen      = !elicit && workspace == "auto" && vsVersion.Length == 0 && codeActionsDefault;
 		
 		// Nothing meaningful chosen and nothing to preserve — don't create the file at all.
 		if(!exists && nothingChosen) {
@@ -285,7 +341,8 @@ internal class SetupProjectCommand : CliCommand
 			Console.WriteLine();
 			Console.WriteLine($"  ⚠ Existing {ProjectConfig.FileName} is unreadable and no explicit settings were chosen.");
 			Console.WriteLine("    Not overwriting to avoid data loss. To proceed, rerun and select elicit=yes,");
-			Console.WriteLine("    a specific workspace mode, or a Visual Studio version pin — or manually fix/delete the file.");
+			Console.WriteLine("    a specific workspace mode, a Visual Studio version pin, or a code-action setting — or");
+			Console.WriteLine("    manually fix/delete the file.");
 			
 			return false;
 		}
@@ -304,6 +361,39 @@ internal class SetupProjectCommand : CliCommand
 			root.Remove("vsVersion");
 		else
 			root["vsVersion"] = vsVersion;
+		
+		// codeActions: only what differs from the defaults, so a file with none stays small. Path
+		// entries and keys this wizard does not ask about (deny, builtIn) are preserved.
+		if(codeActions)
+			section.Remove("enabled");
+		else
+			section["enabled"] = false;
+		
+		if(projectProviders)
+			section.Remove("projectProviders");
+		else
+			section["projectProviders"] = false;
+		
+		var providerEntries = new JsonArray();
+		
+		if(section["providers"] is JsonArray oldProviders)
+			foreach(var entry in oldProviders.OfType<JsonObject>())
+				if(entry["package"] is null)
+					providerEntries.Add(entry.DeepClone());
+		
+		foreach(var package in packages)
+			providerEntries.Add(new JsonObject { ["package"] = package });
+		
+		if(providerEntries.Count == 0)
+			section.Remove("providers");
+		else
+			section["providers"] = providerEntries;
+		
+		// A node already in the document cannot be assigned to it again.
+		if(section.Count == 0)
+			root.Remove(CodeActionConfig.SectionName);
+		else if(codeActionsSection is null)
+			root[CodeActionConfig.SectionName] = section;
 		
 		string? backupPath = null;
 		
@@ -336,6 +426,20 @@ internal class SetupProjectCommand : CliCommand
 			Console.WriteLine($"      Backup: {Path.GetRelativePath(Environment.CurrentDirectory, backupPath)}");
 		
 		return true;
+	}
+	
+	// A yes/no answer: Enter (or anything unrecognized) keeps the current value.
+	static bool YesNo(string? answer, bool current)
+	{
+		var trimmed = answer?.Trim() ?? "";
+		
+		if(trimmed.Equals("y", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("yes", StringComparison.OrdinalIgnoreCase))
+			return true;
+		
+		if(trimmed.Equals("n", StringComparison.OrdinalIgnoreCase) || trimmed.Equals("no", StringComparison.OrdinalIgnoreCase))
+			return false;
+		
+		return current;
 	}
 	
 	// Builds a fresh hook config JSON string.

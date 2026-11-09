@@ -208,12 +208,38 @@ internal sealed class CodeActionHost
 		return new CodeFixQuery(fixes.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable());
 	}
 	
+	/// <summary>
+	///     The analyzers that run for <paramref name="project"/> when a tool asks for analyzers: its
+	///     analyzer references (through the shadow copies, as always), and Roslyn's IDE analyzers while
+	///     built-in code actions are on for it. The IDE analyzers are what produce the IDE0xxx
+	///     diagnostics the built-in fixers fix — without them `roslyn_preview_code_fix` could offer
+	///     "remove unnecessary using" and never find the diagnostic to apply it to.
+	/// </summary>
+	public AnalyzerSet AnalyzersFor(Project project)
+	{
+		var fromProject = project.AnalyzerReferences
+			.SelectMany(reference => AnalyzerLoading.GetShadowedAnalyzers(reference, project.Language))
+			.ToImmutableArray()
+		;
+		
+		// An AdhocWorkspace project has no file; its directory is where a project config would be.
+		var settings = CodeActionSettings.Resolve(project.FilePath ?? project.Documents.FirstOrDefault()?.FilePath ?? string.Empty, logger);
+		
+		if(!settings.Enabled || !settings.BuiltIn || project.Language != LanguageNames.CSharp)
+			return new AnalyzerSet(fromProject, fromProject.Length, 0);
+		
+		var ide = builtIn.Value.Analyzers;
+		
+		return new AnalyzerSet([..fromProject, ..ide], fromProject.Length, ide.Length);
+	}
+	
 	// ── Sources ──────────────────────────────────────────────────────────────
 	
 	ProviderSet LoadBuiltIn()
 	{
 		var refactorings = ImmutableArray.CreateBuilder<ProviderEntry<CodeRefactoringProvider>>();
 		var fixes        = ImmutableArray.CreateBuilder<ProviderEntry<CodeFixProvider>>();
+		var analyzers    = ImmutableArray.CreateBuilder<DiagnosticAnalyzer>();
 		var problems     = ImmutableArray.CreateBuilder<string>();
 		
 		try {
@@ -225,17 +251,62 @@ internal sealed class CodeActionHost
 			
 			foreach(var export in container.GetExports<Lazy<CodeFixProvider, ExportMetadata>>())
 				AddExport(export, fixes, problems);
+			
+			// The IDE analyzers are not MEF parts: Roslyn's hosts find them by their attribute, as here.
+			foreach(var assembly in MefComposition.Assemblies)
+				DiscoverAnalyzers(assembly, analyzers, problems);
 		}
 		catch(Exception ex) {
 			problems.Add($"composition failed: {Describe(ex)}");
 		}
 		
-		logger.LogInfo("CodeActions", $"built-in providers: {refactorings.Count} refactoring, {fixes.Count} fix" + (problems.Count == 0 ? string.Empty : $", {problems.Count} problem(s): {string.Join("; ", problems)}"));
+		logger.LogInfo("CodeActions", $"built-in providers: {refactorings.Count} refactoring, {fixes.Count} fix, {analyzers.Count} analyzer(s)" + (problems.Count == 0 ? string.Empty : $", {problems.Count} problem(s): {string.Join("; ", problems)}"));
 		
 		return new ProviderSet(
-			new ProviderSourceReport("built-in", ProviderSourceKind.BuiltIn, null, refactorings.Count, fixes.Count, problems.ToImmutable()),
+			new ProviderSourceReport("built-in", ProviderSourceKind.BuiltIn, null, refactorings.Count, fixes.Count, problems.ToImmutable()) { Analyzers = analyzers.Count },
 			refactorings.ToImmutable(),
-			fixes.ToImmutable());
+			fixes.ToImmutable(),
+			analyzers.ToImmutable());
+	}
+	
+	// The C# diagnostic analyzers of an assembly: every non-abstract [DiagnosticAnalyzer] type for
+	// C# with a parameterless constructor, as AnalyzerFileReference would find them in a file — but
+	// these assemblies are already loaded (and have no file of their own in a single-file publish).
+	static void DiscoverAnalyzers(Assembly assembly, ImmutableArray<DiagnosticAnalyzer>.Builder into, ImmutableArray<string>.Builder problems)
+	{
+		foreach(var type in SafeGetTypes(assembly, problems)) {
+			
+			if(type.IsAbstract || type.IsInterface || !typeof(DiagnosticAnalyzer).IsAssignableFrom(type))
+				continue;
+			
+			try {
+				
+				if(type.GetCustomAttribute<DiagnosticAnalyzerAttribute>() is not { } attribute || !attribute.Languages.Contains(LanguageNames.CSharp))
+					continue;
+				
+				if(type.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, Type.EmptyTypes) is not { } constructor)
+					continue;
+				
+				into.Add((DiagnosticAnalyzer) constructor.Invoke(null));
+			}
+			catch(Exception ex) {
+				problems.Add($"analyzer {type.FullName}: {Describe(ex)}");
+			}
+		}
+	}
+	
+	// The types of an assembly, with the ones that cannot be loaded left out and counted, not thrown.
+	static Type[] SafeGetTypes(Assembly assembly, ImmutableArray<string>.Builder problems)
+	{
+		try {
+			return assembly.GetTypes();
+		}
+		catch(ReflectionTypeLoadException ex) {
+			
+			problems.Add($"{assembly.GetName().Name}: {ex.LoaderExceptions.Length} type(s) could not be loaded: {ex.LoaderExceptions.FirstOrDefault()?.Message ?? "no detail"}");
+			
+			return [..ex.Types.Where(type => type is not null)!];
+		}
 	}
 	
 	// A part whose imports cannot be satisfied throws when its value is first asked for; that is one
@@ -413,18 +484,8 @@ internal sealed class CodeActionHost
 		var refactorings = ImmutableArray.CreateBuilder<ProviderEntry<CodeRefactoringProvider>>();
 		var fixes        = ImmutableArray.CreateBuilder<ProviderEntry<CodeFixProvider>>();
 		var problems     = ImmutableArray.CreateBuilder<string>();
-		Type[] types;
 		
-		try {
-			types = assembly.GetTypes();
-		}
-		catch(ReflectionTypeLoadException ex) {
-			
-			types = [..ex.Types.Where(type => type is not null)!];
-			problems.Add($"{ex.LoaderExceptions.Length} type(s) could not be loaded: {ex.LoaderExceptions.FirstOrDefault()?.Message ?? "no detail"}");
-		}
-		
-		foreach(var type in types) {
+		foreach(var type in SafeGetTypes(assembly, problems)) {
 			
 			if(type.IsAbstract || type.IsInterface)
 				continue;

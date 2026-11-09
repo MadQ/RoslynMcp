@@ -11,7 +11,7 @@ namespace RoslynMcp.Tools;
 
 
 [McpServerToolType]
-internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : RoslynMcpTool(workspace, logger, paginationCache)
+internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHost codeActionHost, FileLogger logger, PaginationCache paginationCache) : RoslynMcpTool(workspace, logger, paginationCache)
 {
 	// Heuristic for detecting transient workspace-load noise — a flood of type-resolution errors
 	// across many files that usually clears once Roslyn finishes resolving dependencies.
@@ -31,19 +31,21 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 		"with no items returned. When take: 0, the response includes full counts but items is null — " +
 		"not an empty array. An empty array means items were requested but none matched; null means items were not requested. " +
 		"Covers C# type/symbol errors by default; set includeAnalyzers: true to also run the project's " +
-		"analyzer references and include their diagnostics — slower; analyzer assemblies are shadow-copied " +
-		"before loading, so the originals are never locked. " +
+		"analyzer references and Roslyn's IDE analyzers (IDE0xxx: unnecessary usings, unused values, code style) and include " +
+		"their diagnostics — slower; analyzer assemblies are shadow-copied before loading, so the originals are never locked. " +
+		"IDE diagnostics are mostly info or hidden, so pass severity 'info' or 'hidden' to list them; " +
+		"roslyn_preview_code_fix then fixes them by id. " +
 		"For NuGet restore failures, MSBuild target errors, or " +
 		"source generator issues, use roslyn_build_project instead.")]
 	public async Task<object> GetDiagnostics(
 		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
 		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project. A path that names no file in the compilation is an error, never an empty (clean) result.")] string? filePath = null,
-		[Description("Filter by severity: 'errors', 'warnings', or 'all'. Omit to return all (errors and warnings).")] string? severity = null,
+		[Description("Filter by severity: 'errors', 'warnings', 'all' (errors and warnings — the default), 'info' (info and above), or 'hidden' (everything, the IDE analyzers' hidden findings included).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items. When take: 0, items in the response is null (not an empty array).")] int take = 50,
 		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null,
-		[Description("When true, also runs the project's analyzer references (NuGet + project analyzers) via CompilationWithAnalyzers and includes their diagnostics. Slower than compiler-only; assemblies are shadow-copied so the originals are never locked. Default: false.")] bool includeAnalyzers = false)
+		[Description("When true, also runs the project's analyzer references (NuGet + project analyzers) and Roslyn's IDE analyzers via CompilationWithAnalyzers and includes their diagnostics. Slower than compiler-only; assemblies are shadow-copied so the originals are never locked. IDE findings are mostly info or hidden: see severity. Default: false.")] bool includeAnalyzers = false)
 	{
 		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { severity, skip, take, includeAnalyzers });
 		
@@ -147,7 +149,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 			
 			if(includeAnalyzers && project is not null) {
 				
-				var (analyzerDiags, note) = await RunAnalyzersAsync(project, compilation, cancellationToken);
+				var (analyzerDiags, note) = await RunAnalyzersAsync(project, compilation, severity, cancellationToken);
 				
 				// Across several compilations a note is about one of them: "no analyzer references"
 				// for one project is not that no analyzer ran.
@@ -315,25 +317,23 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 	}
 	
 	/// <summary>
-	///     Runs the project's analyzer references over the compilation via
-	///     CompilationWithAnalyzers.GetAnalysisResultAsync — the non-deprecated entry point.
-	///     Analyzer failures must never break compiler diagnostics: any error (misbehaving
-	///     analyzer, unresolved analyzer reference) degrades to compiler-only output with an
-	///     explanatory note. Assemblies load through <see cref="ShadowCopyAnalyzerLoader"/> so the
-	///     analyzed project's outputs are never locked.
+	///     Runs the project's analyzer references and Roslyn's IDE analyzers (<see cref="CodeActionHost.AnalyzersFor"/>,
+	///     #389) over the compilation via CompilationWithAnalyzers.GetAnalysisResultAsync — the
+	///     non-deprecated entry point. Analyzer failures must never break compiler diagnostics: any
+	///     error (misbehaving analyzer, unresolved analyzer reference) degrades to compiler-only output
+	///     with an explanatory note. Assemblies load through <see cref="ShadowCopyAnalyzerLoader"/> so
+	///     the analyzed project's outputs are never locked. The IDE analyzers report mostly at info and
+	///     hidden, so a default severity filter hides their output; the note says how to see it.
 	/// </summary>
-	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(Project project, Compilation compilation, CancellationToken cancellationToken)
+	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(Project project, Compilation compilation, string? severity, CancellationToken cancellationToken)
 	{
 		try {
 			
-			var analyzers = project.AnalyzerReferences
-				.SelectMany(r => AnalyzerLoading.GetShadowedAnalyzers(r, LanguageNames.CSharp))
-				.ToImmutableArray()
-			;
+			var set = codeActionHost.AnalyzersFor(project);
 			
-			if(analyzers.IsEmpty)
+			if(set.Analyzers.IsEmpty)
 				
-				return ([], "includeAnalyzers was requested, but the project has no analyzer references.");
+				return ([], "includeAnalyzers was requested, but the project has no analyzer references, and Roslyn's IDE analyzers are turned off for it (codeActions).");
 			
 			var options = new CompilationWithAnalyzersOptions(
 				project.AnalyzerOptions,
@@ -341,11 +341,17 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, FileLogger lo
 				concurrentAnalysis: true,
 				logAnalyzerExecutionTime: false);
 			
-			var result = await new CompilationWithAnalyzers(compilation, analyzers, options)
+			var result = await new CompilationWithAnalyzers(compilation, set.Analyzers, options)
 				.GetAnalysisResultAsync(cancellationToken)
 			;
 			
-			return ([..result.GetAllDiagnostics()], null);
+			var showsIdeOutput = severity?.ToLowerInvariant() is "info" or "hidden";
+			var note = set.BuiltIn > 0 && !showsIdeOutput
+				? $"Roslyn's IDE analyzers ran ({set.BuiltIn}, beside {set.FromProject} from the project's analyzer references); their findings are mostly info or hidden, which severity '{severity ?? "all"}' leaves out — pass severity 'info' or 'hidden' to list them."
+				: null
+			;
+			
+			return ([..result.GetAllDiagnostics()], note);
 		}
 		catch(Exception ex) when(ex is not OperationCanceledException) {
 			

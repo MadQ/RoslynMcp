@@ -1994,7 +1994,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			"errors"   => static d => d.Severity == DiagnosticSeverity.Error,
 			"warnings" => static d => d.Severity == DiagnosticSeverity.Warning,
 			
-			// Info and Hidden are deferred — see #111 and #110.
+			// Roslyn's IDE analyzers (#389) report most of their findings as info or hidden — an
+			// unnecessary using is IDE0005 at hidden — so these two are how an agent gets to see
+			// them. The default stays errors and warnings: the IDE's hidden output is a lot of it.
+			"info"     => static d => d.Severity >= DiagnosticSeverity.Info,
+			"hidden"   => static _ => true,
 			_          => static d => d.Severity >= DiagnosticSeverity.Warning
 		};
 	
