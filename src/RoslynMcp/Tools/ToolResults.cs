@@ -733,5 +733,25 @@ internal sealed record InfoResult(
 	IReadOnlyDictionary<string, DateTimeOffset[]>?    PruneErrors = null,
 	[property: JsonPropertyName("marker")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	string?                                           Marker = null
+	string?                                           Marker = null,
+	[property: JsonPropertyName("code_actions")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	CodeActionsInfo?                                  CodeActions = null
 ) : ToolResult;
+
+/// <summary>
+///     The code-action host as <c>roslyn_info</c> reports it (#389): whether the Features composition
+///     has happened and what it cost, and every provider source loaded so far with what it yielded
+///     and what went wrong — the place to look when a configured provider does not show up.
+/// </summary>
+internal sealed record CodeActionsInfo(
+	[property: JsonPropertyName("composed")]       bool                 Composed,
+	[property: JsonPropertyName("composition_ms")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	long?                                                               CompositionMs,
+	[property: JsonPropertyName("assemblies")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]?                                                           Assemblies,
+	[property: JsonPropertyName("user_config")]    string               UserConfig,
+	[property: JsonPropertyName("sources")]        ProviderSourceInfo[] Sources
+);

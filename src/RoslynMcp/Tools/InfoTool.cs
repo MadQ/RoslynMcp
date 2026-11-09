@@ -8,12 +8,19 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class InfoTool : RoslynMcpTool
 {
-	public InfoTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache)
-		: base(workspace, logger, paginationCache) { }
+	readonly CodeActionHost codeActionHost;
+	
+	public InfoTool(WorkspaceResolver workspace, CodeActionHost codeActionHost, FileLogger logger, PaginationCache paginationCache)
+		: base(workspace, logger, paginationCache)
+	{
+		this.codeActionHost = codeActionHost;
+	}
 	
 	[McpServerTool(Name = "roslyn_info", Title = "Server Info", ReadOnly = true, OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns server metadata: version, build hash, process ID, uptime, and MSBuild discovery method. " +
+		"Returns server metadata: version, build hash, process ID, uptime, and MSBuild discovery method, plus the code-action " +
+		"provider sources loaded so far (built-in, bundled, the projects' analyzer references, configured entries) with what " +
+		"each yielded and any load problems — the place to look when a configured refactoring or fix provider does not show up. " +
 		"Use to confirm which server instance is running, verify the version, or diagnose server state. " +
 		"Optionally logs a marker entry — useful for marking test boundaries in the log viewer.")]
 	public ToolResult Info(
@@ -30,6 +37,14 @@ internal sealed class InfoTool : RoslynMcpTool
 		if(marker is not null)
 			scope.Record($"marker: {marker}");
 		
-		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker));
+		// Reporting never composes: a server that has loaded no workspace yet says so.
+		var codeActions = new CodeActionsInfo(
+			MefComposition.IsComposed,
+			MefComposition.IsComposed ? (long) MefComposition.Elapsed.TotalMilliseconds : null,
+			MefComposition.IsComposed ? [..MefComposition.Assemblies.Select(assembly => assembly.GetName().Name ?? "?")] : null,
+			UserConfig.FilePath,
+			[..codeActionHost.Reports.Select(ProviderSourceInfo.From)]);
+		
+		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker, codeActions));
 	}
 }

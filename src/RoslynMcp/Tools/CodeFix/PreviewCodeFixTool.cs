@@ -1,10 +1,8 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
-using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CodeActions;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
@@ -14,24 +12,26 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class PreviewCodeFixTool : RoslynMcpTool
 {
-	readonly ApprovalStore approvals;
-	readonly CodeFixHost   codeFixHost;
+	readonly ApprovalStore  approvals;
+	readonly CodeActionHost codeActionHost;
 	
-	public PreviewCodeFixTool(WorkspaceResolver workspace, ApprovalStore approvals, CodeFixHost codeFixHost, FileLogger logger, PaginationCache paginationCache)
+	public PreviewCodeFixTool(WorkspaceResolver workspace, ApprovalStore approvals, CodeActionHost codeActionHost, FileLogger logger, PaginationCache paginationCache)
 		: base(workspace, logger, paginationCache)
 	{
-		this.approvals   = approvals;
-		this.codeFixHost = codeFixHost;
+		this.approvals      = approvals;
+		this.codeActionHost = codeActionHost;
 	}
 	
 	[McpServerTool(Name = "roslyn_preview_code_fix", ReadOnly = true, Title = "Preview Code Fix", OpenWorld = false)]
 	[Description(
-		"Preview actions from code-fix providers bundled with RoslynMcp for a single diagnostic at a file location. " +
-		"Returns available action choices when multiple fixes exist, or returns a unified diff plus token " +
-		"for the selected fix. This is step 1 of a two-step workflow; no files are written until " +
-		"roslyn_apply_code_fix is called. Phase 1 supports targeted modifications to existing in-workspace text documents only — .cs source, " +
-		"declared AdditionalFiles items, and analyzer config (.editorconfig/.globalconfig); " +
-		"file creation, deletion, external linked files, project-system changes, and FixAll are rejected.")]
+		"Preview the code fixes offered for a single diagnostic at a file location: Roslyn's own fixers, the fixers of the " +
+		"project's analyzer packages, the server's bundled ones, and any providers the server is configured with. " +
+		"Returns the available action choices when more than one fix exists, or a unified diff plus a token for the selected fix. " +
+		"This is step 1 of a two-step workflow; no files are written until roslyn_apply_code_fix is called. " +
+		"A fix may modify existing in-workspace text documents (.cs source, declared AdditionalFiles items, analyzer config) " +
+		"and create or delete .cs source files inside the workspace; adding or removing other files, moving files, external " +
+		"or linked files, project-system changes, and FixAll are rejected. For a refactoring that is not tied to a diagnostic, " +
+		"use roslyn_list_refactorings.")]
 	public async Task<object> PreviewCodeFix(
 		[Description("Relative or absolute path to the C# file containing the diagnostic.")] string filePath,
 		[Description("1-based line number near or inside the diagnostic span.")] int line,
@@ -100,19 +100,39 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				matches.Length > 1 ? "diagnostic ambiguous" : "diagnostic not found"));
 		}
 		
-		ImmutableArray<AvailableCodeFix> fixes;
+		var query = await codeActionHost.GetFixesAsync(document, diagnostic, cancellationToken);
 		
-		try {
-			
-			fixes = await codeFixHost.GetFixesAsync(document, diagnostic, cancellationToken);
-		}
-		catch(CodeFixProviderException ex) {
-			
+		// Roslyn attaches some fixers to a companion of the diagnostic it shows: the unnecessary-using
+		// fixer answers to RemoveUnnecessaryImportsFixable, not to the IDE0005 beside it at the same
+		// span. When the diagnostic asked for has no fixer, its companions at the position are tried,
+		// smallest span first, and the one that has a fixer is the one fixed — the choices say which.
+		if(query.Fixes.IsEmpty && query.Failures.IsEmpty)
+			foreach(var companion in CompanionsAt(diagnostics, diagnostic, fullPath, position)) {
+				
+				var companionQuery = await codeActionHost.GetFixesAsync(document, companion, cancellationToken);
+				
+				if(companionQuery.Fixes.IsEmpty)
+					continue;
+				
+				scope.Record($"fixed through companion diagnostic {companion.Id}");
+				diagnostic = companion;
+				query      = companionQuery;
+				
+				break;
+			}
+		
+		var fixes = query.Fixes;
+		
+		// A provider that throws no longer sinks the preview: the fixes of the others are still offered,
+		// and the failure is only the answer when nothing is left.
+		if(fixes.IsEmpty && !query.Failures.IsEmpty)
 			return scope.Failed("code fix provider failed", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				ex.Message,
+				string.Join(" ", query.Failures.Select(failure => $"Code fix provider '{failure.Provider}' failed: {failure.Error}")),
 				"code fix provider failed"));
-		}
+		
+		if(!query.Failures.IsEmpty)
+			scope.Record($"{query.Failures.Length} provider failure(s): {string.Join("; ", query.Failures.Select(failure => failure.Provider))}");
 		
 		var choices = fixes
 			.Select((f, i) => new CodeFixActionChoice(i, diagnostic.Id, diagnostic.GetMessage(), f.Title, f.ProviderName, f.EquivalenceKey))
@@ -122,7 +142,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		if(fixes.Length == 0)
 			return scope.Failed("no fixes", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider bundled with RoslynMcp supports it.",
+				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.",
 				"no fixes"));
 		
 		if(fixes.Length > 1 && actionIndex is null)
@@ -144,7 +164,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		
 		try {
 			
-			newSolution = await GetChangedSolutionAsync(selected.Action, cancellationToken);
+			newSolution = await CodeActionOperations.GetChangedSolutionAsync(selected.Action, cancellationToken);
 		}
 		catch(UnsupportedCodeActionOperationException ex) {
 			
@@ -161,15 +181,18 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"code action calculation failed"));
 		}
 		
+		ValidatedChanges changes;
+		
 		try {
 			
-			await ValidateSupportedChangesAsync(
+			changes = await CodeActionChangeValidator.ValidateAsync(
 				document.Project.Solution,
 				newSolution,
 				rootPath,
+				boundary,
 				cancellationToken);
 		}
-		catch(UnsupportedCodeFixChangeException ex) {
+		catch(UnsupportedCodeActionChangeException ex) {
 			return scope.Failed("unsupported code-fix change", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [choices[selectedIndex]],
 				ex.Message,
@@ -201,7 +224,6 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				$"{ex.Message} No approval token was created.",
 				"unsupported file encoding"));
 		}
-
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
 			return scope.Failed("preview file state changed", new PreviewCodeFixResult(
@@ -232,282 +254,23 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			diff,
 			[selectedAction],
 			$"Review the diff, then call roslyn_apply_code_fix with token '{token}' and approval 'y' or 'n'.",
-			null));
+			null)
+		{
+			CreatedFiles = changes.CreatedFiles.IsEmpty ? null : [..changes.CreatedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
+			DeletedFiles = changes.DeletedFiles.IsEmpty ? null : [..changes.DeletedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
+		});
 	}
 	
-	private static async Task<Solution> GetChangedSolutionAsync(CodeAction action, CancellationToken cancellationToken)
-	{
-		var operations = await action.GetOperationsAsync(cancellationToken)
-			.ConfigureAwait(false)
-		;
-		
-		if(operations.Length != 1 || operations[0] is not ApplyChangesOperation applyChanges) {
-			
-			var returnedShape = operations.Length == 0
-				? "no operations"
-				: string.Join(", ", operations.Select(operation => operation.GetType().Name))
-			;
-			
-			throw new UnsupportedCodeActionOperationException(
-				$"Selected code fix returned an unsupported operation shape: {returnedShape}. " +
-				"Exactly one ApplyChangesOperation is required.");
-		}
-		
-		return applyChanges.ChangedSolution;
-	}
+	// The other diagnostics reported at the position: same file, span containing it, another id.
+	private static IEnumerable<Diagnostic> CompanionsAt(ImmutableArray<Diagnostic> diagnostics, Diagnostic requested, string fullPath, int position)
+		=> diagnostics
+			.Where(d => d.Location.IsInSource
+				&& d.Id != requested.Id
+				&& SecurityBoundary.PathComparer.Equals(d.Location.SourceTree?.FilePath, fullPath)
+				&& (d.Location.SourceSpan.Contains(position) || d.Location.SourceSpan.Start == position))
+			.OrderBy(d => d.Location.SourceSpan.Length);
 	
-	private static async Task ValidateSupportedChangesAsync(
-		Solution baseSolution,
-		Solution newSolution,
-		string workspaceRoot,
-		CancellationToken cancellationToken)
-	{
-		var changes = newSolution.GetChanges(baseSolution);
-		
-		if(changes.GetAddedProjects().Any() || changes.GetRemovedProjects().Any())
-			throw new UnsupportedCodeFixChangeException("Phase 1 code fixes cannot add or remove projects.");
-		
-		var canonicalRoot = ResolveCanonicalPath(workspaceRoot);
-		var changedDocumentCount = 0;
-		
-		foreach(var projectChange in changes.GetProjectChanges()) {
-			var oldProject = projectChange.OldProject;
-			var newProject = projectChange.NewProject;
-			
-			if(projectChange.GetAddedDocuments().Any() || projectChange.GetRemovedDocuments().Any())
-				throw new UnsupportedCodeFixChangeException(
-					"Phase 1 code fixes can modify existing text documents only; creating or deleting source files is not supported.");
-			
-			if(projectChange.GetAddedAdditionalDocuments().Any()
-				|| projectChange.GetRemovedAdditionalDocuments().Any()
-				|| projectChange.GetAddedAnalyzerConfigDocuments().Any()
-				|| projectChange.GetRemovedAnalyzerConfigDocuments().Any())
-				throw new UnsupportedCodeFixChangeException(
-					"Phase 1 code fixes can modify existing text documents only; creating or deleting additional or analyzer configuration files is not supported.");
-			
-			if(projectChange.GetAddedProjectReferences().Any()
-				|| projectChange.GetRemovedProjectReferences().Any()
-				|| projectChange.GetAddedMetadataReferences().Any()
-				|| projectChange.GetRemovedMetadataReferences().Any()
-				|| projectChange.GetAddedAnalyzerReferences().Any()
-				|| projectChange.GetRemovedAnalyzerReferences().Any())
-				throw new UnsupportedCodeFixChangeException(
-					"Phase 1 code fixes cannot change project, metadata, or analyzer references.");
-			
-			// An analyzer-config edit changes CompilationOptions only through the SyntaxTreeOptionsProvider
-			// derived from it; stripping the provider keeps every explicit option change rejectable. A code
-			// action cannot inject its own provider: ProjectState replaces it with a workspace-derived one on
-			// every CompilationOptions update, so a provider difference can only come from analyzer config.
-			if(!string.Equals(oldProject.Name, newProject.Name, StringComparison.Ordinal)
-				|| !string.Equals(oldProject.AssemblyName, newProject.AssemblyName, StringComparison.Ordinal)
-				|| !SecurityBoundary.PathComparer.Equals(oldProject.FilePath, newProject.FilePath)
-				|| !Equals(
-					oldProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null),
-					newProject.CompilationOptions?.WithSyntaxTreeOptionsProvider(null))
-				|| !Equals(oldProject.ParseOptions, newProject.ParseOptions))
-				throw new UnsupportedCodeFixChangeException(
-					"Phase 1 code fixes cannot change project identity, compilation options, or parse options.");
-			
-			foreach(var documentId in projectChange.GetChangedDocuments()) {
-				var oldDocument = baseSolution.GetDocument(documentId);
-				var newDocument = newSolution.GetDocument(documentId);
-				
-				if(oldDocument?.FilePath is null || newDocument?.FilePath is null)
-					throw new UnsupportedCodeFixChangeException(
-						"Phase 1 code fixes require every changed document to have a physical file path.");
-				
-				if(!SecurityBoundary.PathComparer.Equals(oldDocument.FilePath, newDocument.FilePath))
-					throw new UnsupportedCodeFixChangeException(
-						$"Phase 1 code fixes cannot move or rename source file '{oldDocument.FilePath}'.");
-				
-				if(!File.Exists(oldDocument.FilePath))
-					throw new UnsupportedCodeFixChangeException(
-						$"Phase 1 code fixes can modify existing text files only; '{oldDocument.FilePath}' does not exist.");
-				
-				if(baseSolution.GetDocumentIdsWithFilePath(oldDocument.FilePath).Skip(1).Any())
-					throw new UnsupportedCodeFixChangeException(
-						$"Phase 1 code fixes cannot modify linked source file '{oldDocument.FilePath}'.");
-				
 
-				var canonicalFile = ResolveCanonicalPath(oldDocument.FilePath);
-				var relativePath = Path.GetRelativePath(canonicalRoot, canonicalFile);
-				
-				// Containment by the server's own case rule: GetRelativePath ignores case on Windows and macOS, and
-				// would put a case-sensitive directory's ROOT/ sibling inside root/ (#391 review).
-				if(!SecurityBoundary.IsUnderDirectory(canonicalFile, canonicalRoot)
-					|| Path.IsPathRooted(relativePath)
-					|| relativePath == ".."
-					|| relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-					|| relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
-					throw new UnsupportedCodeFixChangeException(
-						$"Phase 1 code fixes cannot modify external or linked file '{oldDocument.FilePath}'.");
-				
-				var oldText = await oldDocument.GetTextAsync(cancellationToken);
-				
-				if(IsGeneratedFile(canonicalFile, relativePath, oldText))
-					throw new UnsupportedCodeFixChangeException(
-						$"Phase 1 code fixes cannot modify generated source file '{oldDocument.FilePath}'.");
-				
-				EnsureFileWritable(oldDocument.FilePath);
-				
-				changedDocumentCount++;
-			}
-			
-			foreach(var documentId in projectChange.GetChangedAdditionalDocuments()) {
-				var oldDocument = baseSolution.GetAdditionalDocument(documentId);
-				var newDocument = newSolution.GetAdditionalDocument(documentId);
-				
-				if(oldDocument?.FilePath is null || newDocument?.FilePath is null)
-					throw new UnsupportedCodeFixChangeException(
-						"Phase 1 code fixes require every changed additional document to have a physical file path.");
-				
-				ValidateChangedPhysicalTextDocument(
-					baseSolution,
-					oldDocument,
-					newDocument,
-					canonicalRoot,
-					"additional document");
-				
-				changedDocumentCount++;
-			}
-			
-			foreach(var documentId in projectChange.GetChangedAnalyzerConfigDocuments()) {
-				var oldDocument = baseSolution.GetAnalyzerConfigDocument(documentId);
-				var newDocument = newSolution.GetAnalyzerConfigDocument(documentId);
-				
-				if(oldDocument?.FilePath is null || newDocument?.FilePath is null)
-					throw new UnsupportedCodeFixChangeException(
-						"Phase 1 code fixes require every changed analyzer config document to have a physical file path.");
-				
-				ValidateChangedPhysicalTextDocument(
-					baseSolution,
-					oldDocument,
-					newDocument,
-					canonicalRoot,
-					"analyzer config document");
-				
-				changedDocumentCount++;
-			}
-		}
-		
-		if(changedDocumentCount == 0)
-			throw new UnsupportedCodeFixChangeException("The selected code fix contains no supported text document modifications.");
-	}
-	
-	private static void ValidateChangedPhysicalTextDocument(
-		Solution baseSolution,
-		TextDocument oldDocument,
-		TextDocument newDocument,
-		string canonicalRoot,
-		string documentKind)
-	{
-		if(!SecurityBoundary.PathComparer.Equals(oldDocument.FilePath, newDocument.FilePath))
-			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes cannot move or rename {documentKind} '{oldDocument.FilePath}'.");
-		
-		if(!File.Exists(oldDocument.FilePath))
-			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes can modify existing text files only; '{oldDocument.FilePath}' does not exist.");
-		
-		if(baseSolution.GetDocumentIdsWithFilePath(oldDocument.FilePath).Skip(1).Any())
-			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes cannot modify linked {documentKind} '{oldDocument.FilePath}'.");
-		
-		var canonicalFile = ResolveCanonicalPath(oldDocument.FilePath);
-		var relativePath = Path.GetRelativePath(canonicalRoot, canonicalFile);
-		
-		// Containment by the server's own case rule: GetRelativePath ignores case on Windows and macOS, and
-		// would put a case-sensitive directory's ROOT/ sibling inside root/ (#391 review).
-		if(!SecurityBoundary.IsUnderDirectory(canonicalFile, canonicalRoot)
-			|| Path.IsPathRooted(relativePath)
-			|| relativePath == ".."
-			|| relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-			|| relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
-			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes cannot modify external or linked file '{oldDocument.FilePath}'.");
-		
-		EnsureFileWritable(oldDocument.FilePath);
-	}
-
-	private static bool IsGeneratedFile(string canonicalPath, string relativePath, SourceText text)
-	{
-		var segments = relativePath.Split(
-			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-			StringSplitOptions.RemoveEmptyEntries);
-		
-		if(segments.Any(segment => segment.Equals("obj", StringComparison.OrdinalIgnoreCase)
-			|| segment.Equals("bin", StringComparison.OrdinalIgnoreCase)
-			|| segment.Equals("generated", StringComparison.OrdinalIgnoreCase)))
-			return true;
-		
-		var fileName = Path.GetFileName(canonicalPath);
-		
-		if(fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
-			|| fileName.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase)
-			|| fileName.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase))
-			return true;
-		
-		var headerLength = Math.Min(text.Length, 2048);
-		var header = text.ToString(TextSpan.FromBounds(0, headerLength));
-		
-		return header.Contains("<auto-generated", StringComparison.OrdinalIgnoreCase)
-			|| header.Contains("<autogenerated", StringComparison.OrdinalIgnoreCase)
-			|| header.Contains("auto-generated by", StringComparison.OrdinalIgnoreCase);
-	}
-	
-	// The read-only attribute only, checked without opening the file. Opening it for writing to
-	// see whether that works (as this did until #349) collides with whoever has it open at that
-	// moment — the server's own reads keep writers out (FileReader.ReadSharing), and so do an
-	// editor saving and an antivirus scan — and refuses the fix over a handle that is gone a
-	// moment later. What the attribute does not show (a lock, a denying ACL) the apply finds: it
-	// writes atomically and reports a file it could not write, with recovery guidance.
-	private static void EnsureFileWritable(string path)
-	{
-		try {
-			
-			// The file a link leads to: on Windows the attributes of a link are its own, and a
-			// link to a read-only file would pass.
-			if(File.GetAttributes(FileWriter.FollowLink(path)).HasFlag(FileAttributes.ReadOnly))
-				throw new UnauthorizedAccessException("The file has the read-only attribute.");
-		}
-		catch(Exception ex) when(ex is FileNotFoundException or DirectoryNotFoundException) {
-			
-			// Deleted between the caller's existence check and this one: the caller's message.
-			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes can modify existing text files only; '{path}' does not exist.");
-		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			
-			throw new UnsupportedCodeFixChangeException(
-				$"Phase 1 code fixes require writable source files; '{path}' cannot be written: {ex.Message}");
-		}
-	}
-	
-	private static string ResolveCanonicalPath(string path)
-	{
-		var fullPath = Path.GetFullPath(path);
-		var pathRoot = Path.GetPathRoot(fullPath)
-			?? throw new UnsupportedCodeFixChangeException($"Path '{path}' has no filesystem root.");
-		var current = pathRoot;
-		var segments = fullPath[pathRoot.Length..].Split(
-			[Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-			StringSplitOptions.RemoveEmptyEntries);
-		
-		foreach(var segment in segments) {
-			current = Path.Combine(current, segment);
-			FileSystemInfo info = Directory.Exists(current)
-				? new DirectoryInfo(current)
-				: new FileInfo(current)
-			;
-			var target = info.ResolveLinkTarget(returnFinalTarget: true);
-			
-			if(target is not null)
-				current = target.FullName;
-		}
-		
-		return Path.TrimEndingDirectorySeparator(Path.GetFullPath(current));
-	}
-	
 	private static Diagnostic? SelectDiagnostic(
 		ImmutableArray<Diagnostic> diagnostics,
 		string fullPath,
@@ -553,28 +316,27 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		if(tree is null)
 			return [];
 		
-		var builder = ImmutableArray.CreateBuilder<Diagnostic>();
-		builder.AddRange(compilation.GetSemanticModel(tree).GetDiagnostics(cancellationToken: cancellationToken));
+		var semanticModel = compilation.GetSemanticModel(tree);
+		var builder       = ImmutableArray.CreateBuilder<Diagnostic>();
+		
+		builder.AddRange(semanticModel.GetDiagnostics(cancellationToken: cancellationToken));
 		
 		// Analyzer failures must never sink the whole preview: the compiler diagnostics above (with
-		// their bundled fixes) are already collected. A broken or throwing project analyzer degrades
+		// their fixes) are already collected. A broken or throwing project analyzer degrades
 		// to compiler-only diagnostics instead of aborting; cancellation still propagates. Assemblies
 		// load through the shared shadow-copy loader so the analyzed project's outputs stay unlocked.
+		// The project's analyzers and Roslyn's IDE analyzers (#389) run over this document alone, as
+		// an editor's light bulb does: a whole-compilation analysis is not needed to fix one diagnostic.
 		try {
 			
-			var analyzers = project.AnalyzerReferences
-				.SelectMany(reference => AnalyzerLoading.GetShadowedAnalyzers(reference, project.Language))
-				.ToImmutableArray()
-			;
+			var set = codeActionHost.AnalyzersFor(project);
 			
-			if(!analyzers.IsEmpty) {
+			if(!set.Analyzers.IsEmpty) {
 				
-				var withAnalyzers = compilation.WithAnalyzers(analyzers, project.AnalyzerOptions);
-				var analyzerDiagnostics = await withAnalyzers.GetAnalyzerDiagnosticsAsync(cancellationToken)
-					.ConfigureAwait(false)
-				;
+				var withAnalyzers = compilation.WithAnalyzers(set.Analyzers, project.AnalyzerOptions);
 				
-				builder.AddRange(analyzerDiagnostics.Where(d => d.Location.SourceTree == tree));
+				builder.AddRange(await withAnalyzers.GetAnalyzerSyntaxDiagnosticsAsync(tree, cancellationToken).ConfigureAwait(false));
+				builder.AddRange(await withAnalyzers.GetAnalyzerSemanticDiagnosticsAsync(semanticModel, filterSpan: null, cancellationToken).ConfigureAwait(false));
 			}
 		}
 		catch(Exception ex) when(ex is not OperationCanceledException) {
@@ -584,14 +346,6 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		
 		return builder.ToImmutable();
 	}
-}
-
-
-internal sealed class UnsupportedCodeFixChangeException : Exception
-{
-	public UnsupportedCodeFixChangeException(string message)
-		: base(message)
-	{ }
 }
 
 
@@ -618,6 +372,12 @@ internal sealed record PreviewCodeFixResult : ToolResult, IToolError
 	public string?               Diff         { get; }
 	public CodeFixActionChoice[] Actions      { get; }
 	public string                Message      { get; }
+	
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? CreatedFiles { get; init; }
+	
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? DeletedFiles { get; init; }
 }
 
 internal sealed record CodeFixActionChoice(
@@ -628,10 +388,3 @@ internal sealed record CodeFixActionChoice(
 	string? Provider,
 	string? EquivalenceKey
 );
-
-internal sealed class UnsupportedCodeActionOperationException : Exception
-{
-	public UnsupportedCodeActionOperationException(string message)
-		: base(message)
-	{ }
-}

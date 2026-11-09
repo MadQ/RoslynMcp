@@ -20,8 +20,9 @@ namespace RoslynMcp;
 ///     <para>
 ///         Security: this is a committed, potentially untrusted repo file. Only the
 ///         commit-worthy keys <c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>, <c>solution</c>
-///         (a bare file name beside the config file), and <c>ignore</c> (bare directory names) are
-///         honored.
+///         (a bare file name beside the config file), <c>ignore</c> (bare directory names) and
+///         <c>codeActions</c> (#389; the assembly paths it may name load only behind a per-user trust
+///         opt-in) are honored.
 ///         Machine-specific settings (log, MSBuild, and backup paths) and <c>preload</c> are never
 ///         read from it, so a hostile repo cannot point the server at arbitrary local paths. A
 ///         Visual Studio <em>version</em> is the exception that proves the rule: it selects among
@@ -55,7 +56,7 @@ internal sealed class ProjectConfig
 #endif
 	
 	/// <summary>Sentinel for "no usable project file found" — all <c>*Specified</c> flags false.</summary>
-	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, null, null, [], "");
+	public static readonly ProjectConfig Empty = new(false, false, false, WorkspaceMode.Auto, null, null, [], CodeActionConfig.Empty, "");
 	
 	/// <summary>Whether the file supplied a valid boolean <c>elicit</c> value.</summary>
 	public bool ElicitSpecified { get; }
@@ -90,10 +91,18 @@ internal sealed class ProjectConfig
 	/// </summary>
 	public string[] Ignore { get; }
 	
+	/// <summary>
+	///     The file's <c>codeActions</c> section (#389): which providers the code refactoring and code
+	///     fix tools run, merged with the user's own file by <see cref="CodeActionSettings.Resolve"/>.
+	///     A committed file may name assembly paths, but they load only once the user trusts them.
+	///     <see cref="CodeActionConfig.Empty"/> when absent.
+	/// </summary>
+	public CodeActionConfig CodeActions { get; }
+	
 	/// <summary>Full path of the file this config was loaded from; empty for <see cref="Empty"/>.</summary>
 	public string SourcePath { get; }
 	
-	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string? vsVersion, string? solution, string[] ignore, string sourcePath)
+	ProjectConfig(bool elicitSpecified, bool elicit, bool workspaceSpecified, WorkspaceMode workspace, string? vsVersion, string? solution, string[] ignore, CodeActionConfig codeActions, string sourcePath)
 	{
 		Ignore             = ignore;
 		ElicitSpecified    = elicitSpecified;
@@ -102,6 +111,7 @@ internal sealed class ProjectConfig
 		Workspace          = workspace;
 		VsVersion          = vsVersion;
 		Solution           = solution;
+		CodeActions        = codeActions;
 		SourcePath         = sourcePath;
 	}
 	
@@ -296,6 +306,7 @@ internal sealed class ProjectConfig
 			var vsVersion          = (string?) null;
 			var solution           = (string?) null;
 			var ignore             = (string[]) [];
+			var codeActions        = CodeActionConfig.Empty;
 			
 			foreach(var property in doc.RootElement.EnumerateObject()) {
 				
@@ -398,6 +409,15 @@ internal sealed class ProjectConfig
 						
 						break;
 					
+					case CodeActionConfig.SectionName:
+						
+						// Providers, by package id or path, and switches. A path from a committed file is
+						// third-party code from a checkout: it loads only with a per-user trust opt-in,
+						// which this file cannot grant itself (CodeActionConfig.Parse ignores it here).
+						codeActions = CodeActionConfig.Parse(property.Value, filePath, committed: true, logger);
+						
+						break;
+					
 					case "version":
 						// Schema version — tolerated but not interpreted in v1.
 						break;
@@ -415,14 +435,15 @@ internal sealed class ProjectConfig
 				}
 			}
 			
-			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, solution, ignore, filePath);
+			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, solution, ignore, codeActions, filePath);
 			
 			logger.LogInfo("ProjectConfig",
 				$"loaded '{filePath}': elicit={(elicitSpecified ? elicit.ToString() : "unset")}, " +
 				$"workspace={(workspaceSpecified ? workspace.ToString() : "unset")}, " +
 				$"vsVersion={vsVersion ?? "unset"}, " +
 				$"solution={(solution is null ? "unset" : Path.GetFileName(solution))}, " +
-				$"ignore={(ignore.Length == 0 ? "unset" : string.Join(",", ignore))}");
+				$"ignore={(ignore.Length == 0 ? "unset" : string.Join(",", ignore))}, " +
+				$"codeActions={(ReferenceEquals(codeActions, CodeActionConfig.Empty) ? "unset" : $"enabled={codeActions.Enabled?.ToString() ?? "unset"}, {codeActions.Providers.Length} provider(s), {codeActions.Deny.Length} denied")}");
 			
 			return config;
 		}

@@ -211,6 +211,9 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		};
 		psi.Environment["ROSLYNMCP_TEST_CODE_FIXES"] = "1";
 		psi.Environment["ROSLYNMCP_LOG_PATH"]        = Path.Combine(serverLogDir, $"{serverLogStem}.log");
+		// A developer's own config.json must not reach a test server: its providers and deny list
+		// would change what the code-action tests see (#389). The file named here never exists.
+		psi.Environment["ROSLYNMCP_USER_CONFIG"]     = Path.Combine(TestFixtures.TempRoot, "no-user-config.json");
 		
 		server = Process.Start(psi)!;
 		

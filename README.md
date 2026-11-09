@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 46 MCP tools (44 public + 2 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 49 MCP tools (47 public + 2 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -140,7 +140,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-46 total MCP tools: 44 public tools organized by what you need to do below, plus 2 debug-only tools: `roslyn_respawn` and `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
+49 total MCP tools: 47 public tools organized by what you need to do below, plus 2 debug-only tools: `roslyn_respawn` and `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -201,8 +201,11 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_preview_rename` | Compute rename diff + confirmation token |
 | `roslyn_apply_rename` | Apply or reject a previewed rename |
-| `roslyn_preview_code_fix` | Preview a bundled Roslyn code fix and return a reviewed approval token |
+| `roslyn_preview_code_fix` | Preview a code fix for a diagnostic — Roslyn's own fixers, the project's analyzer packages, bundled and configured providers — and return a reviewed approval token |
 | `roslyn_apply_code_fix` | Apply or reject an approved code-fix preview using verified physical writes |
+| `roslyn_list_refactorings` | List the refactorings Roslyn offers at a caret or selection (Move type to file, Extract method, Introduce local, Invert if, …) |
+| `roslyn_preview_refactoring` | Compute one listed refactoring into a unified diff plus an approval token; names the files it creates or deletes |
+| `roslyn_apply_refactoring` | Apply or reject an approved refactoring preview using verified physical writes |
 | `roslyn_change_signature` | Add parameters with non-breaking forwarding overload |
 | `roslyn_apply_signature_change` | Apply or reject a previewed signature change |
 

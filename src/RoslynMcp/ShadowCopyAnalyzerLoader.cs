@@ -16,7 +16,8 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 {
-	internal static ShadowCopyAnalyzerLoader Instance { get; } = new();
+	/// <summary>The loader for a project's analyzer references: one load context for all of them, as Roslyn's own host has.</summary>
+	internal static ShadowCopyAnalyzerLoader Instance { get; } = new("RoslynMcp.AnalyzerShadow");
 	
 	internal static string ShadowRoot { get; } = Path.Combine(
 		Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -30,9 +31,15 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	
 	private readonly AssemblyLoadContext context;
 	
-	private ShadowCopyAnalyzerLoader()
+	/// <summary>
+	///     A loader of its own, for a configured provider source (#389): two configured packages may
+	///     ship different versions of the same dependency, which one load context could not hold.
+	///     Dependencies resolve from the registered locations first and fall back to the default
+	///     context, so Microsoft.CodeAnalysis and the framework are always the server's own.
+	/// </summary>
+	internal ShadowCopyAnalyzerLoader(string name)
 	{
-		context = new AssemblyLoadContext("RoslynMcp.AnalyzerShadow", isCollectible: false);
+		context = new AssemblyLoadContext(name, isCollectible: false);
 		context.Resolving += ResolveDependency;
 	}
 	

@@ -97,6 +97,15 @@ static int PrintHelp()
                                       interactively (MCP elicitation) instead of returning a
                                       structured candidate list. Opt-in; needs client
                                       elicitation support. Default: off.
+              --code-actions <on|off> Roslyn's code refactorings and code fixes (the
+                                      roslyn_list_refactorings / preview / apply tools and the
+                                      non-bundled fixers of roslyn_preview_code_fix). Default: on,
+                                      unless a config file turns them off.
+              --trust-project-providers
+                                      Let a committed .madq_roslynmcp.json load provider assemblies
+                                      by path — third-party code from a checkout, so off by default.
+                                      Package entries need no trust: they resolve from the local
+                                      NuGet cache only.
           -v, --version               Print version and exit
           -h, --help                  Show this help and exit
 
@@ -115,13 +124,25 @@ static int PrintHelp()
           ROSLYNMCP_MAX_CACHED_WORKSPACES LRU workspace cache size (default: 5)
           ROSLYNMCP_LOAD_TIMEOUT_SECONDS  MSBuild load timeout (default: 300; 0 = no timeout)
           ROSLYNMCP_DISABLE_PATH_CACHE    Set to true to disable the path resolution cache
+          ROSLYNMCP_CODE_ACTIONS          on|off (same as --code-actions)
+          ROSLYNMCP_TRUST_PROJECT_PROVIDERS  Set to true to enable --trust-project-providers
+          ROSLYNMCP_USER_CONFIG           The user config file (default: %LOCALAPPDATA%\RoslynMcp\config.json)
 
         Project config:
           A committed .madq_roslynmcp.json at the repo root (written by 'setup-project')
           can set elicit, workspace, vsVersion, solution (which of several solutions
-          beside it is the default workspace), and ignore (an array of extra directory
-          names to skip) per project. Explicit settings always win:
-          CLI arg > env var > project file > built-in default.
+          beside it is the default workspace), ignore (an array of extra directory
+          names to skip), and codeActions per project. Explicit settings always win:
+          CLI arg > env var > project file > user file > built-in default.
+
+        User config:
+          %LOCALAPPDATA%\RoslynMcp\config.json (or ROSLYNMCP_USER_CONFIG) holds settings for
+          every workspace. Today: a codeActions section like the project file's, with
+          enabled, builtIn, projectProviders, providers (entries naming a "path", or a
+          "package" with an optional "version", resolved from the local NuGet cache),
+          deny (provider names) and trustProjectProviders. The provider and deny lists of
+          the two files are merged; the switches follow the precedence above. A path in
+          the committed project file loads only once trusted.
 
         Documentation: https://github.com/MadQ/RoslynMcp
         """);
@@ -192,7 +213,7 @@ builder.Services
 	.AddSingleton<ApprovalStore>()
 	.AddSingleton<BackupStore>()
 	.AddSingleton<PaginationCache>()
-	.AddSingleton<CodeFixHost>()
+	.AddSingleton<CodeActionHost>()
 	.AddSingleton<FileLogger>()
 	.AddMcpServer()
 	.WithStdioServerTransport()

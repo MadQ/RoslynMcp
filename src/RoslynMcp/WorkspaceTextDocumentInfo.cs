@@ -35,7 +35,7 @@ internal sealed record WorkspaceTextDocumentInfo(
 	/// <summary>
 	///     True when <see cref="WithText"/> can update this document in place. Analyzer-config
 	///     documents are tracked but excluded: <c>MSBuildWorkspace.CanApplyChange(ChangeAnalyzerConfigDocument)</c>
-	///     is false as of Roslyn 5.3.0 (verified), so TryApplyChanges throws for them and callers
+	///     is false in Roslyn 5.3.0 and 5.9.0 (verified), so TryApplyChanges throws for them and callers
 	///     must route .editorconfig/.globalconfig edits to a full reload instead.
 	/// </summary>
 	public bool SupportsIncrementalTextChange =>

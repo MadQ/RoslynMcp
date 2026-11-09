@@ -32,7 +32,19 @@ internal static class CodeFixTests
 		static string Fixture(string marker) => $"class CodeFixFixture {{ {marker} value; }}\n";
 		
 		// Under TestFixtures.TempRoot, so a killed run's leftovers are swept by the next run (#274).
-		static string NewAdhocWorkspace() => TestFixtures.NewAdhocDir("CodeFix").Dir;
+		// These fixtures test the bundled harness provider alone: the project file turns Roslyn's own
+		// fixers off for the workspace (#389), which is also what checks that the opt-out works —
+		// CS0246 would otherwise bring Roslyn's "Generate type" actions along.
+		const string BuiltInOff = "{ \"codeActions\": { \"builtIn\": false } }\n";
+		
+		static string NewAdhocWorkspace()
+		{
+			var dir = TestFixtures.NewAdhocDir("CodeFix").Dir;
+			
+			File.WriteAllText(Path.Combine(dir, ".madq_roslynmcp.json"), BuiltInOff);
+			
+			return dir;
+		}
 		
 		static void DeleteWorkspace(string path) => TestFixtures.DeleteTree(path);
 		
@@ -669,6 +681,7 @@ internal static class CodeFixTests
 						""");
 
 				fixture.Write("Tracked.txt", "probe = before\n");
+				fixture.Write(".madq_roslynmcp.json", BuiltInOff);
 				fixture.Write(".editorconfig", "root = true\n# before\n");
 				fixture.Write("Probe.cs", $"class CodeFixFixture {{ {marker} value; }}\n");
 				await fixture.WarmAsync(ctx);
@@ -851,7 +864,7 @@ internal static class CodeFixTests
 			}
 		}
 		
-		async Task<(bool pass, string msg)> RunCreateDeleteRejectedAtPreview()
+		async Task<(bool pass, string msg)> RunCreateDeleteApplied()
 		{
 			var workspacePath = NewAdhocWorkspace();
 			var removedPath = Path.Combine(workspacePath, "_CodeFixRemoved_.cs");
@@ -863,11 +876,27 @@ internal static class CodeFixTests
 				const string removedContents = "class RemovedByCodeFix { }\n";
 				await File.WriteAllTextAsync(removedPath, removedContents);
 				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestMixed");
-				var currentRemovedContents = await File.ReadAllTextAsync(removedPath);
-				var pass = preview?["error"]?.GetValue<string>() == "unsupported code-fix change"
-					&& preview?["token"] is null
+				var token = preview?["token"]?.GetValue<string>();
+				var previewNamesFiles = preview?["createdFiles"]?.AsArray().Any(file => file?.GetValue<string>().EndsWith("_CodeFixCreated_.cs", StringComparison.Ordinal) == true) == true
+					&& preview?["deletedFiles"]?.AsArray().Any(file => file?.GetValue<string>().EndsWith("_CodeFixRemoved_.cs", StringComparison.Ordinal) == true) == true
 					&& !File.Exists(createdPath)
-					&& currentRemovedContents == removedContents;
+					&& await File.ReadAllTextAsync(removedPath) == removedContents;
+				
+				if(token is null || !previewNamesFiles)
+					return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+				
+				// The preview wrote nothing; the apply creates one file and deletes the other (#389).
+				var (apply, applyText) = await Apply(token, workspacePath);
+				var pass = apply?["error"] is null
+					&& HasFileState(apply, "_CodeFixCreated_.cs", "written")
+					&& HasFileState(apply, "_CodeFixRemoved_.cs", "deleted")
+					&& apply?["createdFiles"]?.AsArray().Count == 1
+					&& apply?["deletedFiles"]?.AsArray().Count == 1
+					&& File.Exists(createdPath)
+					&& (await File.ReadAllTextAsync(createdPath)).Contains("class CreatedByCodeFix", StringComparison.Ordinal)
+					&& !File.Exists(removedPath);
+				
+				previewText = $"apply: {applyText}";
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
@@ -1025,7 +1054,7 @@ internal static class CodeFixTests
 				var message = preview?["message"]?.GetValue<string>() ?? string.Empty;
 				var pass = preview?["error"]?.GetValue<string>() == "no fixes"
 					&& preview?["token"] is null
-					&& message.Contains("bundled with RoslynMcp", StringComparison.Ordinal);
+					&& message.Contains("available to the server", StringComparison.Ordinal);
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
@@ -1036,8 +1065,104 @@ internal static class CodeFixTests
 			}
 		}
 		
+		// Without the fixture's opt-out, Roslyn's own fixers are offered beside the bundled one (#389):
+		// CS0246 brings "Generate type" from the Features assemblies, through the server's composition.
+		// The bundled provider stays first, so the other tests' action indices would hold either way.
+		async Task<(bool pass, string msg)> RunBuiltInFixersOffered()
+		{
+			var workspacePath = TestFixtures.NewAdhocDir("CodeFixBuiltIn").Dir;
+			var sw = Stopwatch.StartNew();
+			
+			try {
+				
+				var (preview, previewText) = await PreviewAdhoc(workspacePath, "TestSingleWrite");
+				var actions = preview?["actions"]?.AsArray();
+				var providers = actions?.Select(action => action?["provider"]?.GetValue<string>() ?? string.Empty).ToArray() ?? [];
+				var pass = preview?["token"] is null
+					&& providers.Length > 1
+					&& providers[0] == "RoslynMcp.Tools.CodeFixTestProvider"
+					&& providers.Any(provider => provider.EndsWith(".GenerateTypeCodeFixProvider", StringComparison.Ordinal));
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				DeleteWorkspace(workspacePath);
+			}
+		}
+		
+
+		// Roslyn's IDE analyzers run with the code fixes (#389): an unnecessary using is IDE0005,
+		// reported hidden, so the diagnostics tool shows it only at severity 'hidden', and Roslyn's own
+		// fixer removes it. An MSBuild fixture: the using must resolve for it to be unnecessary rather
+		// than unknown.
+		async Task<(bool pass, string msg)> RunIdeAnalyzerFixOffered()
+		{
+			using var fixture = TestFixtures.NewMsBuildProject("CodeFixIde");
+			var sw = Stopwatch.StartNew();
+			
+			fixture.Write("Probe.cs", "using System.Text;\n\nclass UsingFixture { }\n");
+			await fixture.WarmAsync(ctx);
+			
+			var (diagnostics, diagnosticsText) = await Call("roslyn_get_diagnostics", new {
+				projectPath = fixture.Csproj,
+				filePath = "Probe.cs",
+				severity = "hidden",
+				includeAnalyzers = true
+			});
+			var listed = diagnostics?["items"]?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "IDE0005") == true;
+			
+			if(!listed)
+				return (false, $"FAIL  (diagnostics: {diagnosticsText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (choices, choicesText) = await Call("roslyn_preview_code_fix", new {
+				projectPath = fixture.Csproj,
+				filePath = "Probe.cs",
+				line = 1,
+				column = 1,
+				diagnosticId = "IDE0005"
+			});
+			var actions = choices?["actions"]?.AsArray();
+			var index = actions?.Select((action, i) => (Action: action, Index: i))
+				.Where(pair => pair.Action?["provider"]?.GetValue<string>().EndsWith("RemoveUnnecessaryImportsCodeFixProvider", StringComparison.Ordinal) == true)
+				.Select(pair => (int?) pair.Index)
+				.FirstOrDefault();
+			
+			if(index is null)
+				return (false, $"FAIL  (no remove-usings fixer: {choicesText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (preview, previewText) = choices?["token"] is not null
+				? (choices, choicesText)
+				: await Call("roslyn_preview_code_fix", new {
+					projectPath = fixture.Csproj,
+					filePath = "Probe.cs",
+					line = 1,
+					column = 1,
+					diagnosticId = "IDE0005",
+					actionIndex = index
+				});
+			var token = preview?["token"]?.GetValue<string>();
+			
+			if(token is null)
+				return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (apply, applyText) = await Apply(token, fixture.Csproj!);
+			var after = await File.ReadAllTextAsync(fixture.PathOf("Probe.cs"));
+			var pass = apply?["error"] is null
+				&& !after.Contains("using System.Text", StringComparison.Ordinal)
+				&& after.Contains("class UsingFixture", StringComparison.Ordinal);
+			
+			return (pass, pass
+				? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  (apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+
 		List<TestCase> tests = [
 			new("unbundled diagnostic is rejected without a token", RunUnbundledDiagnosticRejected),
+			new("Roslyn's own fixers are offered unless the project file turns them off", RunBuiltInFixersOffered),
+			new("Roslyn's IDE analyzers surface IDE0005 and its fixer removes the using", RunIdeAnalyzerFixOffered),
 			new("single write reports exact state and recovery", RunSingleWrite),
 			new("MSBuild workspace previews and applies an existing-file fix", RunMsBuildSingleWrite),
 			new("linked source file is rejected without changing physical bytes", RunLinkedFileRejectedAtPreview),
@@ -1060,7 +1185,7 @@ internal static class CodeFixTests
 			new("unsupported solution change shapes are rejected", RunUnsupportedSolutionShapesRejected),
 			new("existing file encoding and BOM are preserved", RunEncodingPreserved),
 			new("external file changes are rejected during preview", RunExternalPathRejectedAtPreview),
-			new("create and delete changes are rejected during preview", RunCreateDeleteRejectedAtPreview)
+			new("create and delete changes are previewed and applied", RunCreateDeleteApplied)
 		];
 		
 		return new TestGroup($"Code Fix Tools ({tests.Count} tests)", tests);

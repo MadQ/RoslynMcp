@@ -194,6 +194,32 @@ internal sealed class ServerArgs
     /// <summary>Disables the project-path inference cache. Env: <c>ROSLYNMCP_DISABLE_PATH_CACHE</c> = <c>true</c>.</summary>
     public bool DisablePathCache { get; }
 
+    /// <summary>
+    ///     Whether the code refactoring tools run and the code fix tools see more than the bundled
+    ///     fixers (#389). CLI: <c>--code-actions on|off</c>. Env: <c>ROSLYNMCP_CODE_ACTIONS</c>.
+    ///     Default: on. Meaningful only when <see cref="CodeActionsSpecified"/>; otherwise the project
+    ///     and user config files decide (see <see cref="CodeActionSettings.Resolve"/>).
+    /// </summary>
+    public bool CodeActions { get; }
+
+    /// <summary>Whether <see cref="CodeActions"/> came from a CLI arg or env var, blocking the config files' value.</summary>
+    public bool CodeActionsSpecified { get; }
+
+    /// <summary>
+    ///     Lets a committed <c>.madq_roslynmcp.json</c> load provider assemblies by path — third-party
+    ///     code from a checkout, so off unless this machine's user says otherwise. CLI:
+    ///     <c>--trust-project-providers</c>. Env: <c>ROSLYNMCP_TRUST_PROJECT_PROVIDERS</c> = <c>true</c>.
+    ///     The user's own config file can grant it too (<see cref="UserConfig"/>).
+    /// </summary>
+    public bool TrustProjectProviders { get; }
+
+    /// <summary>
+    ///     The user's config file instead of the default under the per-user data directory. Env:
+    ///     <c>ROSLYNMCP_USER_CONFIG</c>. The harness points its servers at a file of its own so a
+    ///     developer's settings never reach a test. <c>null</c> → default path.
+    /// </summary>
+    public string? UserConfigPath { get; }
+
     ServerArgs(string[] args)
     {
         // Single forward pass: collect all flag–value pairs.
@@ -208,6 +234,8 @@ internal sealed class ServerArgs
         string? rootFlag      = null;
         string? rootPositional = null;
         var     noBuildHostPin = false;
+        string? codeActionsFlag = null; // "on"/"off" from CLI; null = flag absent
+        var     trustProjectProviders = false;
         var     preload       = new List<string>();
         var     ignore        = new List<string>();
 		
@@ -271,6 +299,16 @@ internal sealed class ServerArgs
                 case "--no-buildhost-pin":
                     // Bare on/off flag; presence disables the BuildHost pin. Any value is ignored.
                     noBuildHostPin = true;
+                    break;
+
+                case "--code-actions":
+                    // Bare flag means on; an explicit on/off (or true/false) value is also accepted.
+                    codeActionsFlag = value ?? "on";
+                    break;
+
+                case "--trust-project-providers":
+                    // Bare on/off flag; presence grants the trust. Any value is ignored.
+                    trustProjectProviders = true;
                     break;
             }
         }
@@ -376,6 +414,24 @@ internal sealed class ServerArgs
         // CLI flag OR env var disables the pin. A plain on/off flag — no tri-state needed.
         NoBuildHostPin = noBuildHostPin || EnvTrue("ROSLYNMCP_NO_BUILDHOST_PIN");
 
+        // Tri-state like --elicit: a source binds only when it parses, so a typo cannot mask the env
+        // var, and a value from neither leaves the decision to the project and user config files.
+        if(ParseOnOff(codeActionsFlag) is { } cliCodeActions) {
+
+            CodeActionsSpecified = true;
+            CodeActions          = cliCodeActions;
+        }
+        else {
+
+            var envCodeActions   = ParseOnOff(Env("ROSLYNMCP_CODE_ACTIONS"));
+
+            CodeActionsSpecified = envCodeActions is not null;
+            CodeActions          = envCodeActions ?? true;
+        }
+
+        TrustProjectProviders = trustProjectProviders || EnvTrue("ROSLYNMCP_TRUST_PROJECT_PROVIDERS");
+        UserConfigPath        = NullIfEmpty(Env("ROSLYNMCP_USER_CONFIG"));
+
         MaxCachedWorkspaces = EnvInt("ROSLYNMCP_MAX_CACHED_WORKSPACES", 1, 5);
 
         // Not EnvInt: the clamp is two-sided — 0 or negative disables the timeout outright,
@@ -391,6 +447,14 @@ internal sealed class ServerArgs
         "vs"    => WorkspaceMode.Vs,
         "adhoc" => WorkspaceMode.Adhoc,
         _       => WorkspaceMode.Auto,
+    };
+
+    /// <summary>An on/off switch value; null when the value is absent or neither — the caller then asks the next source.</summary>
+    static bool? ParseOnOff(string? value) => value?.ToLowerInvariant() switch {
+
+        "on" or "true" or "1"   => true,
+        "off" or "false" or "0" => false,
+        _                       => null,
     };
 
     /// <summary>

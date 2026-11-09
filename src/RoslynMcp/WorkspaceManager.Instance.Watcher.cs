@@ -753,7 +753,7 @@ internal sealed partial class WorkspaceManager
 					// doesn't support AddDocument via TryApplyChanges: it modifies the .csproj, conflicting with
 					// SDK-style implicit includes), or it is an analyzer-config document, which
 					// MSBuildWorkspace.CanApplyChange(ChangeAnalyzerConfigDocument) reports false for as of
-					// Roslyn 5.3.0 (verified). Both route to a full reload — unless RequiresReload says the path
+					// Roslyn 5.3.0 and 5.9.0 (verified). Both route to a full reload — unless RequiresReload says the path
 					// is not a compilation input at all. Its first rule drops build output: a .cs under bin/ or
 					// obj/ that is not already a document is a compiler artifact, not source, and reloading the
 					// whole workspace for it is pure cost. Generated documents that ARE compilation inputs
