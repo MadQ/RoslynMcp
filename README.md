@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 49 MCP tools (47 public + 2 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 49 MCP tools (48 public + 1 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -144,7 +144,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-49 total MCP tools: 47 public tools organized by what you need to do below, plus 2 debug-only tools: `roslyn_respawn` and `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
+49 total MCP tools: 48 public tools organized by what you need to do below, plus 1 debug-only tool: `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -227,6 +227,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_check_drift` | Workspace health probe on three axes: source drift (files changed without the workspace noticing), load health (projects that loaded with no metadata references, or with an MSBuild failure on their project file), and pending reload (a change not yet applied — the only signal that can account for a brand-new file) |
 | `roslyn_info` | Server version, PID, uptime, MSBuild discovery, log markers |
+| `roslyn_respawn` | Ends the server gracefully (exit code 0) so the client starts a fresh one — the remedy for a workspace that loaded badly and no reload repaired, and the way to load a new server build. The restart is the client's: Claude Code, Copilot CLI and VS Code restart a stdio server that exits |
 
 ---
 

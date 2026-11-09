@@ -32,8 +32,9 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class HookHintTests
 {
-	// Never to be suggested by any hint: a build is not how compilation is checked (#306), and
-	// the last two exist only in DEBUG builds.
+	// Never to be suggested by any hint: a build is not how compilation is checked (#306), a respawn
+	// is a remedy for a broken workspace and never a way to edit a file (it ships in every build since
+	// #406), and the debugger attach exists only in DEBUG builds.
 	static readonly string[] neverSuggested = ["roslyn_build_project", "roslyn_respawn", "roslyn_debug_attach"];
 	
 	internal static TestGroup Build(TestContext ctx)

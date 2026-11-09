@@ -21,6 +21,8 @@ internal static class CodeActionConfigTests
 		var nuget       = fx.PathOf("nuget");
 		var userConfig  = fx.PathOf("user-config.json");
 		var pathEntry   = fx.PathOf(Path.Combine("providers", "RoslynMcp.Analyzers.dll"));
+		var rebuiltDll    = fx.PathOf(Path.Combine("providers-rebuilt", "RoslynMcp.Analyzers.dll"));
+		var rebuiltConfig = fx.PathOf("user-config-rebuilt.json");
 		
 		fx.Write("Probe.cs", "public static class Probe\n{\n\tpublic static string Describe(bool big)\n\t{\n\t\tif(big)\n\t\t\treturn \"big\";\n\t\telse\n\t\t\treturn \"small\";\n\t}\n}\n");
 		
@@ -30,6 +32,7 @@ internal static class CodeActionConfigTests
 			Copy(providerDll, Path.Combine(nuget, "fakeproviders", "1.2.0", "analyzers", "dotnet", "cs", "RoslynMcp.Analyzers.dll"));
 			Copy(providerDll, Path.Combine(nuget, "fakeproviders", "0.9.0", "analyzers", "dotnet", "cs", "RoslynMcp.Analyzers.dll"));
 			Copy(providerDll, pathEntry);
+			Copy(providerDll, rebuiltDll);
 		}
 		
 		// Not an assembly at all: the package loads nothing and says why, and the others still load.
@@ -40,6 +43,8 @@ internal static class CodeActionConfigTests
 		File.WriteAllText(userConfig,
 			"{ \"codeActions\": { \"providers\": [ { \"package\": \"fakeproviders\" }, { \"package\": \"badpkg\" }, { \"package\": \"missingpkg\", \"version\": \"2.0.0\" } ], \"deny\": [ \"InvertIf\" ] } }\n");
 		fx.Write(".madq_roslynmcp.json", "{ \"codeActions\": { \"providers\": [ { \"path\": \"providers/RoslynMcp.Analyzers.dll\" } ] } }\n");
+		File.WriteAllText(rebuiltConfig,
+			$"{{ \"codeActions\": {{ \"providers\": [ {{ \"path\": \"{rebuiltDll.Replace('\\', '/')}\" }} ] }} }}\n");
 		
 		var baseEnvironment = new Dictionary<string, string> {
 			["ROSLYNMCP_USER_CONFIG"] = userConfig,
@@ -144,10 +149,52 @@ internal static class CodeActionConfigTests
 				: $"FAIL  (list: {list?.ToJsonString()} | info: {info?["code_actions"]?.ToJsonString()}) [{sw.ElapsedMilliseconds}ms]");
 		});
 		
+		// A configured assembly rebuilt in place is loaded again at the next call (#406): the set is keyed
+		// by the assemblies' modification times, not loaded once per process. The "rebuild" writes bytes
+		// that are no assembly, so the second load fails visibly; copying the real assembly back is the
+		// third stamp, and the entry's one source in roslyn_info must follow each — never the old and
+		// the new side by side. A user-file path entry, so no trust gate is in the way.
+		Task<(bool pass, string msg)> RunRebuilt() => WithServer(With("ROSLYNMCP_USER_CONFIG", rebuiltConfig), async server =>
+		{
+			if(providerDll is null)
+				return Skip.SetupUnavailable("RoslynMcp.Analyzers.dll is not built");
+			
+			var sw = Stopwatch.StartNew();
+			
+			async Task<JsonNode?> EntrySource()
+			{
+				await server.CallToolJsonAsync("roslyn_list_refactorings", new { projectPath = fx.Dir, filePath = "Probe.cs", line = 5, column = 3 });
+				
+				var info    = await server.CallToolJsonAsync("roslyn_info", new { });
+				var sources = info?["code_actions"]?["sources"]?.AsArray().Where(source => source?["kind"]?.GetValue<string>() == "global-config").ToArray() ?? [];
+				
+				return sources.Length == 1 ? sources[0] : null;
+			}
+			
+			var loaded = await EntrySource();
+			
+			File.WriteAllBytes(rebuiltDll, [0x42, 0x41, 0x44, 0x21]);
+			
+			var broken = await EntrySource();
+			
+			Copy(providerDll, rebuiltDll);
+			
+			var restored = await EntrySource();
+			var pass     = Fixes(loaded) > 0
+				&& Fixes(broken) == 0
+				&& HasProblem(broken, "could not load")
+				&& Fixes(restored) > 0;
+			
+			return (pass, pass
+				? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  (loaded: {loaded?.ToJsonString() ?? "not one source"} | broken: {broken?.ToJsonString() ?? "not one source"} | restored: {restored?.ToJsonString() ?? "not one source"}) [{sw.ElapsedMilliseconds}ms]");
+		});
+		
 		List<TestCase> tests = [
 			new("package entries load from the cache, a bad one is reported, a committed path waits for trust, deny hides a provider", RunSources),
 			new("a committed path entry loads once project providers are trusted", RunTrusted),
 			new("ROSLYNMCP_CODE_ACTIONS=off turns the tools off and loads nothing", RunOff),
+			new("a configured assembly rebuilt in place is loaded again at the next call", RunRebuilt),
 		];
 		
 		return new TestGroup($"Code Action Config ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });

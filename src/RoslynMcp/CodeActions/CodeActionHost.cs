@@ -41,8 +41,13 @@ internal sealed class CodeActionHost
 	// Providers from a project's analyzer references, keyed by (path, mtime) as AnalyzerLoading keys its analyzers.
 	readonly ConcurrentDictionary<(string Path, long MtimeTicks), ProviderSet> fromReferences = new();
 	
-	// Providers the config files name, keyed by the declaring file and the entry; loaded once per process.
-	readonly ConcurrentDictionary<string, ProviderSet> configured = new(StringComparer.OrdinalIgnoreCase);
+	// Providers the config files name, keyed by the declaring file and the entry. The stamp beside each set
+	// is what the entry resolved to — the assemblies with their modification times, or the problem — so a
+	// provider assembly rebuilt in place, or a package restored after the server started, is loaded again
+	// at the next call without a watcher (#406). The load context of the set it replaces stays in memory,
+	// as a rebuilt project analyzer's does: the contexts are not collectible.
+	readonly ConcurrentDictionary<string, ConfiguredSet> configured      = new(StringComparer.OrdinalIgnoreCase);
+	readonly object                                      configuredLoads = new();
 	
 	public CodeActionHost(FileLogger logger)
 	{
@@ -68,8 +73,8 @@ internal sealed class CodeActionHost
 			foreach(var set in fromReferences.Values)
 				yield return set.Report;
 			
-			foreach(var set in configured.Values)
-				yield return set.Report;
+			foreach(var cached in configured.Values)
+				yield return cached.Set.Report;
 		}
 	}
 	
@@ -95,7 +100,7 @@ internal sealed class CodeActionHost
 				AddProjectSets(document.Project, sets);
 			
 			foreach(var entry in settings.Providers)
-				sets.Add(configured.GetOrAdd($"{entry.DeclaredIn}|{entry.Describe()}", _ => LoadConfigured(entry, settings.TrustProjectProviders)));
+				sets.Add(ConfiguredSetFor(entry, settings.TrustProjectProviders));
 		}
 		
 		var deny = builtInDeny.Union(settings.Deny);
@@ -400,39 +405,15 @@ internal sealed class CodeActionHost
 	}
 	
 	/// <summary>
-	///     One entry of a config file: an assembly on disk, or a package in the local NuGet cache. A
-	///     path from the committed project file is third-party code from a checkout and loads only
-	///     with the per-user trust opt-in; a package entry resolves from the cache the user filled,
-	///     so it needs none. Each entry gets a load context of its own, with the assemblies beside it
-	///     as dependency locations — all but Roslyn and the framework, which must stay the server's.
+	///     Loads the assemblies a configured entry resolved to (<see cref="ResolveConfigured"/>). Each
+	///     load gets a context of its own, with the assemblies beside it as dependency locations — all
+	///     but Roslyn and the framework, which must stay the server's.
 	/// </summary>
-	ProviderSet LoadConfigured(ConfiguredProvider entry, bool trusted)
+	ProviderSet LoadConfigured(ConfiguredProvider entry, string[] assemblies)
 	{
-		var kind   = entry.Committed ? ProviderSourceKind.ProjectConfig : ProviderSourceKind.GlobalConfig;
-		var source = $"config: {entry.Describe()}";
-		
-		if(entry.Committed && entry.Path is not null && !trusted) {
-			
-			logger.LogInfo("CodeActions", $"{source}: skipped, untrusted (declared in '{entry.DeclaredIn}')");
-			
-			return ProviderSet.Empty(source, kind, entry.DeclaredIn,
-				"skipped: untrusted — an assembly path in a committed .madq_roslynmcp.json runs only with --trust-project-providers, " +
-				"ROSLYNMCP_TRUST_PROJECT_PROVIDERS=true, or \"trustProjectProviders\": true in the user's config.json");
-		}
-		
-		string[] assemblies;
-		
-		if(entry.Path is not null) {
-			
-			if(!File.Exists(entry.Path))
-				return ProviderSet.Empty(source, kind, entry.DeclaredIn, $"not found: '{entry.Path}' (declared in '{entry.DeclaredIn}')");
-			
-			assemblies = [entry.Path];
-		}
-		else if(!NuGetPackageLocator.TryLocate(entry.Package!, entry.Version, out assemblies, out var problem))
-			return ProviderSet.Empty(source, kind, entry.DeclaredIn, $"{problem} (declared in '{entry.DeclaredIn}')");
-		
-		var loader = new ShadowCopyAnalyzerLoader($"RoslynMcp.Providers.{configured.Count + 1}");
+		var kind   = KindOf(entry);
+		var source = SourceOf(entry);
+		var loader = new ShadowCopyAnalyzerLoader($"RoslynMcp.Providers.{entry.Describe()}");
 		
 		foreach(var directory in assemblies.Select(Path.GetDirectoryName).Where(directory => directory is not null).Distinct(SecurityBoundary.PathComparer))
 			foreach(var dependency in Directory.EnumerateFiles(directory!, "*.dll"))
@@ -464,6 +445,84 @@ internal sealed class CodeActionHost
 			new ProviderSourceReport(source, kind, string.Join(Path.PathSeparator, assemblies), refactorings.Count, fixes.Count, problems.ToImmutable()),
 			refactorings.ToImmutable(),
 			fixes.ToImmutable());
+	}
+	
+	/// <summary>
+	///     The providers a configured entry yields now: the cached set while the entry still resolves to
+	///     the same assemblies at the same modification times, a fresh load when it does not (#406).
+	///     Resolving is a trust check, a <c>File.Exists</c> or a listing of the package's cache directory —
+	///     cheap enough for every call, which is what lets a rebuilt assembly be picked up without a watcher.
+	/// </summary>
+	ProviderSet ConfiguredSetFor(ConfiguredProvider entry, bool trusted)
+	{
+		var key      = $"{entry.DeclaredIn}|{entry.Describe()}";
+		var resolved = ResolveConfigured(entry, trusted);
+		
+		if(configured.TryGetValue(key, out var cached) && cached.Stamp == resolved.Stamp)
+			return cached.Set;
+		
+		// One load per entry at a time: two callers finding the same stale set must not each load it.
+		lock(configuredLoads) {
+			
+			if(configured.TryGetValue(key, out cached) && cached.Stamp == resolved.Stamp)
+				return cached.Set;
+			
+			if(resolved.Failure is not null)
+				logger.LogInfo("CodeActions", $"{SourceOf(entry)}: {resolved.Stamp}");
+			
+			var set = resolved.Failure ?? LoadConfigured(entry, resolved.Assemblies);
+			
+			configured[key] = new ConfiguredSet(resolved.Stamp, set);
+			
+			return set;
+		}
+	}
+	
+	/// <summary>
+	///     What an entry resolves to today: the assemblies to load, stamped with their modification
+	///     times, or a set that says why nothing loads, stamped with that reason. A path from the committed
+	///     project file is third-party code from a checkout and loads only with the per-user trust opt-in;
+	///     a package entry resolves from the cache the user filled, so it needs none.
+	/// </summary>
+	static ResolvedEntry ResolveConfigured(ConfiguredProvider entry, bool trusted)
+	{
+		var kind   = KindOf(entry);
+		var source = SourceOf(entry);
+		
+		if(entry.Committed && entry.Path is not null && !trusted)
+			return ResolvedEntry.Failed(ProviderSet.Empty(source, kind, entry.DeclaredIn,
+				"skipped: untrusted — an assembly path in a committed .madq_roslynmcp.json runs only with --trust-project-providers, " +
+				"ROSLYNMCP_TRUST_PROJECT_PROVIDERS=true, or \"trustProjectProviders\": true in the user's config.json"));
+		
+		string[] assemblies;
+		
+		if(entry.Path is not null) {
+			
+			if(!File.Exists(entry.Path))
+				return ResolvedEntry.Failed(ProviderSet.Empty(source, kind, entry.DeclaredIn, $"not found: '{entry.Path}' (declared in '{entry.DeclaredIn}')"));
+			
+			assemblies = [entry.Path];
+		}
+		else if(!NuGetPackageLocator.TryLocate(entry.Package!, entry.Version, out assemblies, out var problem))
+			return ResolvedEntry.Failed(ProviderSet.Empty(source, kind, entry.DeclaredIn, $"{problem} (declared in '{entry.DeclaredIn}')"));
+		
+		return new ResolvedEntry(string.Join('|', assemblies.Select(path => $"{path}@{File.GetLastWriteTimeUtc(path).Ticks}")), assemblies, null);
+	}
+	
+	static ProviderSourceKind KindOf(ConfiguredProvider entry)
+		=> entry.Committed ? ProviderSourceKind.ProjectConfig : ProviderSourceKind.GlobalConfig;
+	
+	static string SourceOf(ConfiguredProvider entry)
+		=> $"config: {entry.Describe()}";
+	
+	/// <summary>A configured entry's loaded set and the stamp it was loaded under (see <see cref="ConfiguredSetFor"/>).</summary>
+	sealed record ConfiguredSet(string Stamp, ProviderSet Set);
+	
+	/// <summary>A configured entry resolved: assemblies to load, or the set that says why there are none.</summary>
+	sealed record ResolvedEntry(string Stamp, string[] Assemblies, ProviderSet? Failure)
+	{
+		public static ResolvedEntry Failed(ProviderSet set)
+			=> new(set.Report.Problems[0], [], set);
 	}
 	
 	// A package that ships Roslyn or framework assemblies beside its providers must not have them
