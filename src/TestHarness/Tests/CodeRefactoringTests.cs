@@ -23,6 +23,7 @@ internal static class CodeRefactoringTests
 		fx.Write("Introduce.cs", "namespace Fixture;\n\npublic static class Introduce\n{\n\tpublic static double Volume(double side)\n\t{\n\t\treturn side * side * side + 1;\n\t}\n}\n");
 		fx.Write("Invert.cs", InvertSource);
 		fx.Write("Stale.cs", InvertSource.Replace("class Invert", "class Stale", StringComparison.Ordinal));
+		fx.Write("Wide.cs", WideSource);
 		
 		async Task<(JsonNode? Data, string Text)> Call(string tool, object args)
 		{
@@ -308,8 +309,47 @@ internal static class CodeRefactoringTests
 				: $"FAIL  (list: {listText} | preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
 		}
 		
+		// The preview's diff is the size of the change, not of the file (#411). Extract method adds a
+		// method, and Roslyn separates it with an empty line; Wide.cs has no empty line but the one
+		// after its last newline (its blank lines are indented), so the old greedy matcher paired that
+		// new line with the end of the file and reported the thirty methods in between — untouched —
+		// as removed and added again: a diff too large for a client to show. The bound is generous
+		// (the change itself is under twenty lines) and far below the file's 150; a removed line that
+		// is also added back unchanged is the same failure seen from the other side.
+		async Task<(bool pass, string msg)> RunDiffIsLocal()
+		{
+			var sw = Stopwatch.StartNew();
+			var (list, listText) = await List(fx.Csproj!, "Wide.cs", 7, 1, 7);
+			var index = IndexOf(list, ".ExtractMethodCodeRefactoringProvider", "method");
+			
+			if(index < 0)
+				return (false, $"FAIL  (no extract-method action: {listText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (preview, previewText) = await Preview(fx.Csproj!, "Wide.cs", 7, 1, index, 7);
+			var diff = preview?["diff"]?.GetValue<string>();
+			
+			if(diff is null)
+				return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var lines     = diff.Split('\n').Select(line => line.TrimEnd('\r')).Where(line => !line.StartsWith("---", StringComparison.Ordinal) && !line.StartsWith("+++", StringComparison.Ordinal)).ToArray();
+			var removed   = lines.Where(line => line.StartsWith('-')).Select(line => line[1..]).ToArray();
+			var added     = lines.Where(line => line.StartsWith('+')).Select(line => line[1..]).ToArray();
+			var untouched = removed.Count(line => line.Contains("return value +", StringComparison.Ordinal));
+			var pass      = added.Any(line => line.Contains("NewMethod", StringComparison.Ordinal))
+				&& removed.Length + added.Length <= 40
+				&& untouched == 0;
+			
+			if(preview?["token"]?.GetValue<string>() is { } token)
+				await Apply(fx.Csproj!, token, "n");
+			
+			return (pass, pass
+				? $"PASS  ({removed.Length} removed, {added.Length} added) [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  ({removed.Length} removed, {added.Length} added, {untouched} untouched methods reported as removed) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
 		List<TestCase> tests = [
 			new("list offers Roslyn's refactorings and keeps dialog actions out", RunNoDialogActions),
+			new("a preview's diff is the size of the change, not of the file", RunDiffIsLocal),
 			new("move type to file creates the file and empties the old declaration", RunMoveType),
 			new("extract method on a selected statement", RunExtractMethod),
 			new("introduce local for a selected expression", RunIntroduceLocal),
@@ -326,4 +366,11 @@ internal static class CodeRefactoringTests
 	}
 	
 	const string InvertSource = "namespace Fixture;\n\npublic static class Invert\n{\n\tpublic static string Describe(bool big)\n\t{\n\t\tif(big)\n\t\t\treturn \"big\";\n\t\telse\n\t\t\treturn \"small\";\n\t}\n}\n";
+	
+	// A statement to extract, then thirty methods the refactoring does not touch. Every blank line is
+	// indented, so the only empty line of the file is the one after its last newline.
+	static readonly string WideSource =
+		"namespace Fixture;\n\t\npublic static class Wide\n{\n\tpublic static double Area(double side)\n\t{\n\t\tvar squared = side * side;\n\t\t\n\t\treturn squared;\n\t}\n"
+		+ string.Concat(Enumerable.Range(1, 30).Select(i => $"\t\n\tpublic static int M{i}(int value)\n\t{{\n\t\treturn value + {i};\n\t}}\n"))
+		+ "}\n";
 }

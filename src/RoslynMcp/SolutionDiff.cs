@@ -155,9 +155,8 @@ internal static class SolutionDiff
 		var newLines = newText.Split(LineSeparators, StringSplitOptions.None);
 		var sb       = new System.Text.StringBuilder();
 		
-		// Simple greedy diff: pair up identical lines in order, then emit the gaps between
-		// pairs as hunks with 3-line context. Not a full Myers diff — sufficient for readable
-		// output on typical refactoring changes.
+		// Pair up the lines the two files have in common, in order, then emit the gaps between
+		// pairs as hunks with 3-line context.
 		var hunks = BuildHunkList(oldLines, newLines, MatchLines(oldLines, newLines), context: 3);
 		
 		foreach(var hunk in hunks) {
@@ -172,68 +171,146 @@ internal static class SolutionDiff
 	}
 	
 	/// <summary>
-	///     Greedy forward matching of identical lines: pairs each new line with the earliest
-	///     unused old position past the previous match. O(n+m) space vs O(n*m) for full LCS DP.
-	///     Produces identical results for the common case (few scattered changes).
-	///     Slightly noisier hunks when many identical lines exist in different positions.
+	///     The longest common subsequence of the two files' lines, as (old, new) index pairs in order
+	///     (#411). The lines both files start and end with are paired directly; what lies between goes
+	///     to Myers' O(ND) algorithm, whose cost grows with the size of the change, not of the file.
+	///     The matcher this replaces paired each new line with the earliest unused old line of the
+	///     same text: one line that is common but not unique — the empty line a refactoring inserts —
+	///     paired with an occurrence at the far end of the file, and nothing between could match any
+	///     more, so a ten-line change came out as a whole-file diff too large for a client to show.
 	/// </summary>
 	private static List<(int OldIdx, int NewIdx)> MatchLines(string[] oldLines, string[] newLines)
 	{
-		var pairs = new List<(int OldIdx, int NewIdx)>();
+		var pairs  = new List<(int OldIdx, int NewIdx)>();
+		var prefix = 0;
 		
-		// Map each line to its positions in the old file.
-		var oldPositions = new Dictionary<string, List<int>>()
-		;
+		while(prefix < oldLines.Length && prefix < newLines.Length && oldLines[prefix] == newLines[prefix])
+			prefix++;
 		
-		for(var i = 0; i < oldLines.Length; i++) {
-			
-			if(!oldPositions.TryGetValue(oldLines[i], out var list))
-				oldPositions[oldLines[i]] = list = [];
-			
-			list.Add(i);
-		}
+		var suffix = 0;
 		
-		// Walk the new file, greedily matching each line to the earliest
-		// unused position in the old file (preserving order).
-		var lastMatchedOld = -1
-		;
+		while(suffix < oldLines.Length - prefix && suffix < newLines.Length - prefix
+			&& oldLines[oldLines.Length - 1 - suffix] == newLines[newLines.Length - 1 - suffix])
+			suffix++;
 		
-		for(var ni = 0; ni < newLines.Length; ni++) {
-			
-			if(!oldPositions.TryGetValue(newLines[ni], out var positions))
-				continue;
-			
-			// Binary search for first position > lastMatchedOld.
-			var lo	 = 0
-			;
-			var hi	 = positions.Count - 1;
-			var best = -1;
-			
-			while(lo <= hi) {
-				
-				var mid = lo + (hi - lo) / 2;
-				
-				if(positions[mid] > lastMatchedOld) {
-					
-					best = mid;
-					hi   = mid - 1;
-				}
-				else
-					lo = mid + 1;
-			}
-			
-			if(best < 0)
-				continue;
-			
-			var oldPos = positions[best];
-			
-			pairs.Add((oldPos, ni));
-			lastMatchedOld = oldPos;
-		}
+		for(var i = 0; i < prefix; i++)
+			pairs.Add((i, i));
+		
+		// Lines as numbers, equal for equal text: the search compares lines far more often than there are lines.
+		var ids       = new Dictionary<string, int>(StringComparer.Ordinal);
+		var oldMiddle = Intern(oldLines.AsSpan(prefix, oldLines.Length - prefix - suffix), ids);
+		var newMiddle = Intern(newLines.AsSpan(prefix, newLines.Length - prefix - suffix), ids);
+		
+		// Past the edit bound the middle stays unmatched: reported as removed and added, which is
+		// true of a change that large and costs nothing to compute.
+		foreach(var (oldIndex, newIndex) in CommonSubsequence(oldMiddle, newMiddle) ?? [])
+			pairs.Add((prefix + oldIndex, prefix + newIndex));
+		
+		for(var i = suffix; i > 0; i--)
+			pairs.Add((oldLines.Length - i, newLines.Length - i));
 		
 		return pairs;
 	}
 	
+	static int[] Intern(ReadOnlySpan<string> lines, Dictionary<string, int> ids)
+	{
+		var result = new int[lines.Length];
+		
+		for(var i = 0; i < lines.Length; i++) {
+			
+			if(!ids.TryGetValue(lines[i], out var id))
+				ids[lines[i]] = id = ids.Count;
+			
+			result[i] = id;
+		}
+		
+		return result;
+	}
+	
+	// The most line insertions plus deletions the search follows for one file. The search keeps one
+	// row of furthest-reaching positions per edit, so memory grows with the square of this: about
+	// 9 MB at the bound. A diff with more edits than this is not one anyone reads line by line.
+	const int MaxEdits = 1500;
+	
+	/// <summary>
+	///     Myers' greedy shortest-edit-script search over two sequences, returning the matched index
+	///     pairs in order, or null when the sequences differ by more than <see cref="MaxEdits"/>
+	///     edits. For each edit count d and diagonal k (x − y), <c>furthest[k]</c> is the furthest x
+	///     reachable; a row is kept per d so the path can be walked back from the end.
+	/// </summary>
+	static List<(int OldIdx, int NewIdx)>? CommonSubsequence(int[] oldIds, int[] newIds)
+	{
+		var oldCount = oldIds.Length;
+		var newCount = newIds.Length;
+		
+		if(oldCount == 0 || newCount == 0)
+			return [];
+		
+		var limit    = Math.Min(oldCount + newCount, MaxEdits);
+		var offset   = limit + 1;
+		var furthest = new int[2 * limit + 3];
+		var rows     = new List<int[]>();
+		
+		for(var d = 0; d <= limit; d++) {
+			
+			// The row as it stood before this round, diagonals −d..d: what the walk back reads.
+			rows.Add(furthest.AsSpan(offset - d, 2 * d + 1).ToArray());
+			
+			for(var k = -d; k <= d; k += 2) {
+				
+				var down = k == -d || (k != d && furthest[offset + k - 1] < furthest[offset + k + 1]);
+				var x    = down ? furthest[offset + k + 1] : furthest[offset + k - 1] + 1;
+				var y    = x - k;
+				
+				while(x < oldCount && y < newCount && oldIds[x] == newIds[y]) {
+					
+					x++;
+					y++;
+				}
+				
+				furthest[offset + k] = x;
+				
+				if(x >= oldCount && y >= newCount)
+					return WalkBack(rows, d, oldCount, newCount);
+			}
+		}
+		
+		return null;
+	}
+	
+	// From the end of both sequences back to the start: each round's row says which diagonal the path
+	// came from, and the diagonal run between the two points is a run of matched lines.
+	static List<(int OldIdx, int NewIdx)> WalkBack(List<int[]> rows, int edits, int oldCount, int newCount)
+	{
+		var pairs = new List<(int OldIdx, int NewIdx)>();
+		var x     = oldCount;
+		var y     = newCount;
+		
+		for(var d = edits; d > 0; d--) {
+			
+			var row       = rows[d];
+			var k         = x - y;
+			var down      = k == -d || (k != d && row[d + k - 1] < row[d + k + 1]);
+			var previousK = down ? k + 1 : k - 1;
+			var previousX = row[d + previousK];
+			var previousY = previousX - previousK;
+			
+			while(x > previousX && y > previousY)
+				pairs.Add((--x, --y));
+			
+			x = previousX;
+			y = previousY;
+		}
+		
+		while(x > 0 && y > 0)
+			pairs.Add((--x, --y));
+		
+		pairs.Reverse();
+		
+		return pairs;
+	}
+	
+
 	private sealed record Hunk(int OldStart, int OldLines, int NewStart, int NewLines, List<string> Lines);
 	
 	/// <summary>
