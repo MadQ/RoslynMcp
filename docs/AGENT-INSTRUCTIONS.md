@@ -121,6 +121,26 @@ built-in tools only if a roslyn tool fails.
 
 ### Refactoring
 
+Before retyping code by hand, ask whether Roslyn has a refactoring for it. It
+usually does, and the refactoring keeps trivia, updates every reference and
+cannot mistype a line.
+
+- `roslyn_list_refactorings` — What Roslyn can refactor at a caret or selection:
+  Move type to file, Extract method, Introduce local, Inline temporary, Invert
+  if, Convert to interpolated string, Use expression body, and the rest of
+  Visual Studio's Ctrl+. menu. Use INSTEAD OF planning a hand edit for a
+  structural change. An empty list means nothing applies there.
+- `roslyn_preview_refactoring` — Turn one listed action into a unified diff and
+  an approval token; names the files it will create or delete. Always preview.
+- `roslyn_apply_refactoring` — Apply a previewed refactoring with crash-safe
+  writes. Use INSTEAD OF `roslyn_write_file` for moving a type to its own file,
+  extracting a method, or any other change the list offered.
+- `roslyn_preview_code_fix` — Roslyn's own fixers, the project's analyzer
+  packages and the server's for a diagnostic at a location (CS or IDE id): add
+  a missing using, remove an unnecessary one, generate a missing member, make a
+  method async, and many more. Use INSTEAD OF editing by hand to clear a
+  diagnostic. Returns the choices or a diff plus token.
+- `roslyn_apply_code_fix` — Apply a previewed code fix.
 - `roslyn_preview_rename` — Generate a diff showing what a semantic rename would
   change across the entire solution. Always preview before applying.
 - `roslyn_apply_rename` — Apply a previously previewed rename. Writes changes to
@@ -136,7 +156,11 @@ built-in tools only if a roslyn tool fails.
   invokes MSBuild if clean. Use INSTEAD OF running `dotnet build` in a terminal.
   NEVER run `dotnet build` directly.
 - `roslyn_get_diagnostics` — Get compiler errors and warnings without building.
-  Use `severity: "errors"` for fast error-only checks during editing.
+  Use `severity: "errors"` for fast error-only checks during editing. With
+  `includeAnalyzers: true` it also runs the project's analyzers and Roslyn's IDE
+  analyzers (IDE0xxx: unnecessary usings, unused values, code style); their
+  findings are mostly info or hidden, so pass `severity: "hidden"` to see them,
+  then clear one with `roslyn_preview_code_fix` by its id.
 - `roslyn_restore_packages` — Run `dotnet restore`. Use when NuGet packages need
   updating.
 - `roslyn_clean_solution` — Run `dotnet clean`. Use when build artifacts need
@@ -171,6 +195,9 @@ are more accurate than grep/Read/Edit.
 - Insert: `roslyn_insert_lines` (by line or anchor) > Edit with context patterns
 - Write/Undo: `roslyn_write_file` (create/rewrite) + `roslyn_local_history` (undo)
 - Rename: `roslyn_preview_rename` + `roslyn_apply_rename` > find-and-replace
+- Refactor: `roslyn_list_refactorings` → `roslyn_preview_refactoring` → `roslyn_apply_refactoring` (move type to file, extract method, introduce local, …) > retyping code
+- Fix a diagnostic: `roslyn_preview_code_fix` + `roslyn_apply_code_fix` (Roslyn's own fixers) > hand edits
+- Analyzers: `roslyn_get_diagnostics` with `includeAnalyzers: true` and `severity: "hidden"` for IDE0xxx findings
 - Build: `roslyn_build_project` > NEVER `dotnet build` in terminal
 - Diagnostics: `roslyn_get_diagnostics` for fast error checks
 - Info: `roslyn_info` for server version, PID, uptime, MSBuild discovery
@@ -203,6 +230,8 @@ Specific alternatives for common tasks:
 - Find usages:    roslyn_find_references (not Grep)
 - Edit C#:        roslyn_replace_in_code or roslyn_replace_in_file (not Edit)
 - Insert lines:   roslyn_insert_lines (not Edit)
+- Refactor:       roslyn_list_refactorings → roslyn_preview_refactoring → roslyn_apply_refactoring (not retyping code: move type to file, extract method, …)
+- Fix diagnostic: roslyn_preview_code_fix → roslyn_apply_code_fix (not hand edits)
 - Build:          roslyn_build_project (NEVER dotnet build in terminal)
 - Diagnostics:    roslyn_get_diagnostics
 - Server info:    roslyn_info (version, PID, uptime, MSBuild discovery)

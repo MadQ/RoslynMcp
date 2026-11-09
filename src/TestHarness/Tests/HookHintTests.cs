@@ -59,16 +59,18 @@ static class HookHintTests
 				expected: ["roslyn_list_files"],
 				absent:   ["roslyn_read_file", "roslyn_search_files", "roslyn_replace_in_code"]),
 			
-			Hint(ctx, "Claude Code Edit suggests the editing tools and the diagnostics check",
+			// An edit is also the moment to offer Roslyn's refactorings and fixers (#407): the hint
+			// names the three-step refactoring workflow and the code-fix preview beside the editing tools.
+			Hint(ctx, "Claude Code Edit suggests the editing tools, the diagnostics check, the refactorings and the code fixes",
 				new { hook_event_name = "PreToolUse", tool_name = "Edit", tool_input = new { file_path = "src/Foo.cs", old_string = "a", new_string = "b" } },
 				claudeFormat: true,
-				expected: ["roslyn_replace_in_code", "roslyn_replace_in_file", "roslyn_insert_lines", "roslyn_write_file", "roslyn_get_diagnostics"],
+				expected: ["roslyn_replace_in_code", "roslyn_replace_in_file", "roslyn_insert_lines", "roslyn_write_file", "roslyn_get_diagnostics", "roslyn_list_refactorings", "roslyn_preview_refactoring", "roslyn_apply_refactoring", "roslyn_preview_code_fix"],
 				absent:   ["roslyn_read_file", "roslyn_search_files", "roslyn_list_files"]),
 			
 			Hint(ctx, "Copilot create is recognised as an edit",
 				new { toolName = "create", toolArgs = new { path = "src/New.cs", file_text = "class New { }" } },
 				claudeFormat: false,
-				expected: ["roslyn_write_file", "roslyn_replace_in_code"],
+				expected: ["roslyn_write_file", "roslyn_replace_in_code", "roslyn_list_refactorings"],
 				absent:   ["roslyn_read_file", "roslyn_search_files"]),
 			
 			PassThrough(ctx, "a file tool on a non-C# file passes through",

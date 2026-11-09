@@ -197,6 +197,8 @@ When editing C# code, **actively prefer `roslyn_replace_in_code`** over `roslyn_
 - `roslyn_replace_in_code` is semantically aware, validates syntax, preserves formatting/trivia
 - `roslyn_replace_in_file` is for text/config files or when you need literal text replacement
 
+**Before retyping code by hand, ask whether Roslyn has a refactoring for it.** Moving a type to its own file, extracting a method, introducing a local, inverting an `if`, converting to an interpolated string: `roslyn_list_refactorings` says what applies at a caret or selection, `roslyn_preview_refactoring` turns one action into a diff and a token, `roslyn_apply_refactoring` commits it. The refactoring keeps trivia, updates every reference and cannot mistype a line — a `roslyn_write_file` of the same change can. For a diagnostic (a CS or IDE id), `roslyn_preview_code_fix` offers Roslyn's own fixers and the project's analyzer-package fixers, and `roslyn_get_diagnostics` with `includeAnalyzers: true` and `severity: "hidden"` shows the IDE0xxx findings they fix.
+
 For writing full file content (new files or wholesale rewrites), use `roslyn_write_file`:
 - Takes crash-safe pre- and post-write backup snapshots automatically; returns a token usable with `roslyn_local_history` to undo
 - Set `createNew: true` to create a new file or overwrite; default requires the file to already exist
@@ -218,6 +220,9 @@ When discovering files/content:
 - `roslyn_build_project` — checks Roslyn diagnostics first (fast, in-process). Only runs `dotnet build` if Roslyn is clean. To check that code compiles, use `roslyn_get_diagnostics` instead. When a build is needed, make **one** call with `projectPath` omitted (whole solution) — never one call per project, never several in parallel (they only queue), and no `forceBuild` unless diagnostics are untrustworthy. Skip it entirely before a TestHarness run, which builds everything itself.
 - `roslyn_preview_rename` / `roslyn_apply_rename` — always call preview first; renames can affect dozens of files. The token from preview is required by apply.
 - `roslyn_change_signature` / `roslyn_apply_signature_change` — same two-step pattern as rename: preview returns a diff + token, apply commits it.
+- `roslyn_list_refactorings` → `roslyn_preview_refactoring` → `roslyn_apply_refactoring` — the same pattern with a discovery step: list first (a caret for most actions, a selection with `endLine`/`endColumn` for Extract method and the like), preview the action's index for the **same** location, apply the token. Dialog-driven actions are under `unavailable` with the reason; an empty list means nothing applies there, not an error.
+- `roslyn_preview_code_fix` / `roslyn_apply_code_fix` — for a diagnostic at a location; pass `diagnosticId` when several sit on the line. Roslyn's fixers, the project's analyzer-package fixers and the bundled ones are all offered; a fix may create or delete `.cs` files.
+- `roslyn_get_diagnostics` with `includeAnalyzers: true` — also runs the project's analyzers and Roslyn's IDE analyzers; their IDE0xxx findings are mostly info or hidden, so add `severity: "hidden"` to list them.
 - Paginated tools return `page_token` + `has_more` — pass the token back **alone** (with the original arguments, no `skip`/`take`) to get the next page; it carries the position and page size. Each response has a new token, and none on the last page.
 
 ---
@@ -249,6 +254,8 @@ Specific alternatives for common tasks:
 - Find usages:    roslyn_find_references (not Grep)
 - Edit C#:        roslyn_replace_in_code or roslyn_replace_in_file (not Edit)
 - Insert lines:   roslyn_insert_lines (not Edit)
+- Refactor:       roslyn_list_refactorings → roslyn_preview_refactoring → roslyn_apply_refactoring (not retyping code: move type to file, extract method, …)
+- Fix diagnostic: roslyn_preview_code_fix → roslyn_apply_code_fix (not hand edits)
 - Build:          roslyn_build_project (NEVER dotnet build in terminal)
 - Diagnostics:    roslyn_get_diagnostics
 
