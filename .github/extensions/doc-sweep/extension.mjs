@@ -97,7 +97,7 @@ Before auditing any docs, run this search to get the real tool count from the so
 
 Count the distinct matches. That is the authoritative total. Cross-reference:
 - '[McpServerTool(... ReadOnly = false)]' → public tools
-- 'roslyn_respawn' and 'roslyn_debug_attach' → the 2 debug-only tools
+- 'roslyn_debug_attach' → the 1 debug-only tool (roslyn_respawn ships in every build since #406)
 
 Use only this computed count when fixing doc files. Do NOT trust any hardcoded number, including this prompt.
 

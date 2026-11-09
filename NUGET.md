@@ -35,7 +35,7 @@ Restart your client. Full per-client setup (Claude Desktop, Claude Code, GitHub 
 
 ## What you get
 
-Workspace-scoped `roslyn_*` tools take a `projectPath`, so one running server can serve multiple projects without a restart. Highlights from the 49 tools (47 public + 2 debug-only):
+Workspace-scoped `roslyn_*` tools take a `projectPath`, so one running server can serve multiple projects without a restart. Highlights from the 49 tools (48 public + 1 debug-only):
 
 - **Semantic analysis** — diagnostics (with the project's analyzers and Roslyn's IDE analyzers on request), symbol info, type members, hierarchies, dependencies, references, callers, and call graphs.
 - **Precise search** — regex file search, syntax-tree-aware semantic search, and string-literal search with glob and decoded-value matching.
