@@ -410,6 +410,11 @@ docs/ScratchPad2.md
 .mcp.json
 docs/github-issues/
 
+# Never committed: a contributor's own formatting preferences, for their IDE and for the Roslyn
+# refactorings and code fixes the server applies (Roslyn reads formatting options from it). A
+# committed one would impose one person's style on everyone — see AGENTS.md § Consistency is overrated.
+.editorconfig
+
 # Local utility scripts
 scripts/*
 !scripts/enforce-roslyn-tools.sh
