@@ -295,12 +295,62 @@ static class DevHostTests
 			});
 		}
 		
+		// Code 0 is also what the host returns when the client closes the session, so the respawn test
+		// alone would pass for a host that drops the server's code. Here the server is one that fails:
+		// dotnet, given a file that is no assembly, and no last good build to take its place.
+		async Task<(bool pass, string msg)> RunFailingServerExit()
+		{
+			var sw   = Stopwatch.StartNew();
+			var home = NewHome("failing-exit", broken);
+			
+			using var direct = Process.Start(new ProcessStartInfo("dotnet", [Path.Combine(broken, "RoslynMcp.dll")])
+			{
+				
+				RedirectStandardOutput = true,
+				RedirectStandardError  = true,
+				UseShellExecute        = false,
+			})!;
+			
+			direct.OutputDataReceived += (_, _) => { };
+			direct.ErrorDataReceived  += (_, _) => { };
+			direct.BeginOutputReadLine();
+			direct.BeginErrorReadLine();
+			
+			await direct.WaitForExitAsync();
+			
+			var (process, client) = await StartHostAsync(home);
+			
+			try {
+				
+				try {
+					await process.WaitForExitAsync(new CancellationTokenSource(30_000).Token);
+				}
+				catch(OperationCanceledException) {
+					return (false, $"FAIL  (the host still runs 30 s after its server failed to start; host log: {HostLog(home)}) [{sw.ElapsedMilliseconds}ms]");
+				}
+				
+				var pass = direct.ExitCode != 0 && process.ExitCode == direct.ExitCode && client is null;
+				
+				return pass
+					? (true,  $"PASS  [{sw.ElapsedMilliseconds}ms]")
+					: (false, $"FAIL  (dotnet exits with {direct.ExitCode} for the broken build, the host with {process.ExitCode}; initialize answered: {client is not null}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				
+				if(!process.HasExited)
+					process.Kill(entireProcessTree: true);
+				
+				process.Dispose();
+			}
+		}
+		
 		List<TestCase> tests = [
 			new("a session through the host is answered by a server of the host's own, with nothing added", RunPassThrough),
 			new("writing the pointer swaps the server: another pid, tools/list_changed, the old process gone, last-good recorded", RunSwap),
 			new("a call waiting when the pointer changes is answered, and the swap follows it", RunCallInFlight),
 			new("a pointer to no build, and to one that exits at start-up, is refused and the session keeps its server", RunRefusedBuilds),
 			new("the server's own exit (roslyn_respawn) ends the host with the same exit code", RunServerExit),
+			new("a server that exits with a failure code ends the host with that code", RunFailingServerExit),
 			new("a build that exits before answering initialize is replaced by the last good build", RunLastGood),
 		];
 		

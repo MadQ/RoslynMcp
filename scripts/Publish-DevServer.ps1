@@ -1,3 +1,4 @@
+#requires -Version 7.0
 <#
 .SYNOPSIS
     Publishes the server from the working tree as a new build for the development host and makes it
@@ -63,11 +64,34 @@ New-Item -ItemType Directory -Force -Path $builds | Out-Null
 function Set-Pointer([string] $Value) {
     $temp = "$pointer.$PID.tmp"
     Set-Content -LiteralPath $temp -Value $Value -Encoding utf8NoBOM
-    Move-Item -LiteralPath $temp -Destination $pointer -Force
+
+    # The hosts read the file sharing deletes, so they never block the rename. Anything else that has
+    # it open for a moment (a scanner, an editor) gets a few tries before the publish counts as failed.
+    for($attempt = 1; ; $attempt++) {
+        try {
+            Move-Item -LiteralPath $temp -Destination $pointer -Force
+            return
+        }
+        catch {
+            if($attempt -ge 5) {
+                Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+                throw "The pointer $pointer was not written: $($_.Exception.Message)"
+            }
+            Start-Sleep -Milliseconds 200
+        }
+    }
 }
 
+# Empty for a file that is missing or empty: Get-Content -Raw returns null for an empty file.
 function Get-PointerValue([string] $Path) {
-    if(Test-Path -LiteralPath $Path) { (Get-Content -LiteralPath $Path -Raw).Trim() } else { '' }
+    if(-not (Test-Path -LiteralPath $Path)) { return '' }
+
+    $raw = Get-Content -LiteralPath $Path -Raw
+    if($raw) { $raw.Trim() } else { '' }
+}
+
+if($Restart -and $InstallHost) {
+    throw "-Restart publishes nothing and cannot be combined with -InstallHost."
 }
 
 if($Restart) {
@@ -84,7 +108,7 @@ if($InstallHost) {
 
     dotnet publish (Join-Path $repoRoot 'src/RoslynMcp.DevHost/RoslynMcp.DevHost.csproj') -c Release -o $hostDir --nologo -v q
     if($LASTEXITCODE -ne 0) {
-        throw "The host was not installed. While a session runs the host its files are in use: end every session that runs it, then try again."
+        throw "The host was not installed (dotnet publish exited with code $LASTEXITCODE; its output is above). If sessions run the host, its files are in use: end every session that runs it, then try again."
     }
 
     $hostExe = Join-Path $hostDir ($IsWindows ? 'RoslynMcp.DevHost.exe' : 'RoslynMcp.DevHost')
@@ -119,7 +143,12 @@ Write-Host "Published build $name. Every running host swaps to it at its next id
 # A build a server still runs from is never removed, not even in part: a server loads assemblies as it
 # needs them, and one that lost a file it had not loaded yet fails later, far from the cause.
 $named   = @((Get-PointerValue $pointer), (Get-PointerValue $lastGood))
-$running = @(Get-Process | ForEach-Object { try { $_.Path } catch { $null } } | Where-Object { $_ })
+# A server is its own executable in the build directory, or dotnet with the build's RoslynMcp.dll as an
+# argument (a build without an executable), so both the path and the command line are looked at.
+$running = @(Get-Process | ForEach-Object {
+    try { $_.Path } catch { $null }
+    try { $_.CommandLine } catch { $null }
+} | Where-Object { $_ })
 
 Get-ChildItem -LiteralPath $builds -Directory |
     Sort-Object Name -Descending |
@@ -127,7 +156,7 @@ Get-ChildItem -LiteralPath $builds -Directory |
     Where-Object { $_.Name -notin $named } |
     ForEach-Object {
         $prefix = $_.FullName + [IO.Path]::DirectorySeparatorChar
-        if($running | Where-Object { $_.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) }) { return }
+        if($running | Where-Object { $_.Contains($prefix, [StringComparison]::OrdinalIgnoreCase) }) { return }
 
         try   { Remove-Item -LiteralPath $_.FullName -Recurse -Force }
         catch { Write-Warning "Old build $($_.Name) was not removed: $($_.Exception.Message)" }

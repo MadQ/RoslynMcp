@@ -18,6 +18,7 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 {
 	static readonly TimeSpan PollInterval     = TimeSpan.FromMilliseconds(500);
 	static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
+	static readonly TimeSpan OutputGrace      = TimeSpan.FromSeconds(2);
 	static readonly byte[]   ToolsChanged     = [.."""{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"""u8, (byte) '\n'];
 	
 	readonly Stream                    clientOutput  = Console.OpenStandardOutput();
@@ -66,7 +67,7 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 		server = first;
 		log.Write($"Host started: build {first.Build} (pid {first.Id}).");
 		
-		_ = Guard(PumpServerAsync(first));
+		_ = Guard(RunServerAsync(first));
 		_ = Guard(PumpClientAsync());
 		_ = Guard(WatchPointerAsync());
 		
@@ -195,6 +196,24 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 			else if(head.Method == MessageHead.Cancelled)
 				Settle(serverWaiting, MessageHead.CancelledId(line.Span));
 		}
+	}
+	
+	/// <summary>
+	///     Forwards a server's output until the server is gone. The end of its output is not enough to
+	///     know that: a process the server started (an MSBuild node, a compiler server) inherits its
+	///     stdout and can hold it open long after the server exited, and a read from that pipe cannot be
+	///     cancelled. So the process's exit counts as well, and what it left in the pipe gets a moment.
+	/// </summary>
+	async Task RunServerAsync(ServerProcess source)
+	{
+		var pump = PumpServerAsync(source);
+		
+		await Task.WhenAny(pump, source.WaitForExitAsync());
+		await Task.WhenAny(pump, Task.Delay(OutputGrace));
+		
+		// A failed pump is the host's failure; one still reading has nothing left that anyone waits for.
+		if(pump.IsCompleted)
+			await pump;
 		
 		await ServerEndedAsync(source);
 	}
@@ -258,7 +277,7 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 				if(replay is not null)
 					await WriteAsync(replacement.Input, replay);
 				
-				_ = Guard(PumpServerAsync(replacement));
+				_ = Guard(RunServerAsync(replacement));
 				
 				return;
 			}
@@ -391,23 +410,43 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 		if(timedOut)
 			next.Kill();
 		
-		if(await handshake is { } problem) {
+		var problem = await handshake;
+		
+		// A server that answered in the moment it was killed for being late is still a killed server.
+		if(timedOut || problem is not null) {
 			
 			next.Kill();
-			Refuse(wanted, timedOut ? $"it did not answer initialize within {HandshakeTimeout.TotalSeconds:0} s" : problem);
+			Refuse(wanted, timedOut ? $"it did not answer initialize within {HandshakeTimeout.TotalSeconds:0} s" : problem!);
 			
 			return;
 		}
 		
+		bool asked;
+		
 		lock(sync) {
 			
-			server   = next;
-			running  = wanted;
-			refused  = null;
-			fellBack = false;
+			// The old server may have asked the client something while the new one started. The answer
+			// must reach the server that asked, so this swap is given up and tried at the next idle moment.
+			asked = serverWaiting.Count > 0;
+			
+			if(!asked) {
+				
+				server   = next;
+				running  = wanted;
+				refused  = null;
+				fellBack = false;
+			}
 		}
 		
-		_ = Guard(PumpServerAsync(next));
+		if(asked) {
+			
+			next.Kill();
+			log.Write($"Build {wanted.Value} was ready, but build {old.Build} asked the client something meanwhile; the swap is tried again.");
+			
+			return;
+		}
+		
+		_ = Guard(RunServerAsync(next));
 		_ = Guard(old.StopAsync());
 		
 		home.WriteLastGood(wanted.Value);

@@ -33,27 +33,29 @@ sealed class DevHome
 	///     The pointer as it is now, or null while there is none to read: no file, an empty one, or one
 	///     that is being replaced this moment. The caller asks again later.
 	/// </summary>
-	public BuildPointer? ReadPointer()
+	public BuildPointer? ReadPointer() => ReadShared(PointerPath)
+	;
+	
+	public string? ReadLastGood() => ReadShared(LastGoodPath)?.Value
+	;
+	
+	/// <summary>
+	///     Content and write time of one file, both taken from the one open handle: read apart, a file
+	///     replaced in between gives the new content with the old time, which reads as a pointer of its
+	///     own and costs a second swap. The file is opened sharing deletes, so the rename that replaces
+	///     it never fails because a host happened to be reading.
+	/// </summary>
+	static BuildPointer? ReadShared(string path)
 	{
 		try {
 			
-			var written = File.GetLastWriteTimeUtc(PointerPath);
-			var value   = File.ReadAllText(PointerPath).Trim();
+			using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+			using var reader = new StreamReader(stream);
+			
+			var written = File.GetLastWriteTimeUtc(stream.SafeFileHandle);
+			var value   = reader.ReadToEnd().Trim();
 			
 			return value.Length == 0 ? null : new BuildPointer(value, written);
-		}
-		catch(Exception failure) when(failure is IOException or UnauthorizedAccessException) {
-			return null;
-		}
-	}
-	
-	public string? ReadLastGood()
-	{
-		try {
-			
-			var value = File.ReadAllText(LastGoodPath).Trim();
-			
-			return value.Length == 0 ? null : value;
 		}
 		catch(Exception failure) when(failure is IOException or UnauthorizedAccessException) {
 			return null;
