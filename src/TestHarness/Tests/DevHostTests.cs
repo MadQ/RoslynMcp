@@ -300,6 +300,10 @@ static class DevHostTests
 		// dotnet, given a file that is no assembly, and no last good build to take its place.
 		async Task<(bool pass, string msg)> RunFailingServerExit()
 		{
+			if(!File.Exists(hostDll))
+				
+				return (false, $"FAIL  (the host was not built: {hostDll})");
+			
 			var sw   = Stopwatch.StartNew();
 			var home = NewHome("failing-exit", broken);
 			

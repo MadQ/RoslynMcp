@@ -186,7 +186,9 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 					serverWaiting.Add(head.Id!);
 			}
 			
+			source.MarkForward();
 			await WriteClientAsync(line);
+			source.MarkForward();
 			
 			if(head.IsResponse) {
 				
@@ -202,14 +204,26 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 	///     Forwards a server's output until the server is gone. The end of its output is not enough to
 	///     know that: a process the server started (an MSBuild node, a compiler server) inherits its
 	///     stdout and can hold it open long after the server exited, and a read from that pipe cannot be
-	///     cancelled. So the process's exit counts as well, and what it left in the pipe gets a moment.
+	///     cancelled. So the process's exit counts as well, and what it left in the pipe is still passed
+	///     on: the forwarder is given up only once it has been quiet for a while, never in the middle of
+	///     a line or while lines keep coming, however slowly the client takes them.
 	/// </summary>
 	async Task RunServerAsync(ServerProcess source)
 	{
 		var pump = PumpServerAsync(source);
 		
 		await Task.WhenAny(pump, source.WaitForExitAsync());
-		await Task.WhenAny(pump, Task.Delay(OutputGrace));
+		
+		while(!pump.IsCompleted) {
+			
+			var seen = source.Forwards;
+			
+			await Task.WhenAny(pump, Task.Delay(OutputGrace));
+			
+			if(source.Forwards == seen && seen % 2 == 0)
+				
+				break;
+		}
 		
 		// A failed pump is the host's failure; one still reading has nothing left that anyone waits for.
 		if(pump.IsCompleted)

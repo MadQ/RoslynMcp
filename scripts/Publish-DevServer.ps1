@@ -144,10 +144,11 @@ Write-Host "Published build $name. Every running host swaps to it at its next id
 # needs them, and one that lost a file it had not loaded yet fails later, far from the cause.
 $named   = @((Get-PointerValue $pointer), (Get-PointerValue $lastGood))
 # A server is its own executable in the build directory, or dotnet with the build's RoslynMcp.dll as an
-# argument (a build without an executable), so both the path and the command line are looked at.
+# argument (a build without an executable). The command line is read for dotnet processes only: on
+# Windows it costs a query per process, over a minute for all of them.
 $running = @(Get-Process | ForEach-Object {
     try { $_.Path } catch { $null }
-    try { $_.CommandLine } catch { $null }
+    if($_.ProcessName -eq 'dotnet') { try { $_.CommandLine } catch { $null } }
 } | Where-Object { $_ })
 
 Get-ChildItem -LiteralPath $builds -Directory |

@@ -12,6 +12,17 @@ sealed class ServerProcess
 	static readonly TimeSpan ExitGrace = TimeSpan.FromSeconds(5);
 	
 	readonly Process process;
+	long             forwards;
+	
+	/// <summary>
+	///     Changes with every line of the server's that is passed on, and is odd while one is being
+	///     written: what tells a forwarder that is still at work from one that waits for a pipe nobody
+	///     will write to again.
+	/// </summary>
+	public long Forwards => Volatile.Read(ref forwards);
+	
+	public void MarkForward() => Interlocked.Increment(ref forwards)
+	;
 	
 	public string     Build  { get; }
 	public Stream     Input  { get; }
