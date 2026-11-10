@@ -49,10 +49,11 @@ internal sealed class CodeActionHost
 	readonly ConcurrentDictionary<string, ConfiguredSet> configured      = new(StringComparer.OrdinalIgnoreCase);
 	readonly object                                      configuredLoads = new();
 	
-	// How often an entry, as resolved, has failed to load on the file system; read and written under
-	// configuredLoads. Past the limit the failed set is kept like any other, until the stamp changes.
-	readonly Dictionary<string, int> transientLoads = new(StringComparer.OrdinalIgnoreCase);
-	const int                        MaxTransientLoads = 5;
+	// How often an entry has failed to load on the file system under the stamp it resolves to now; read
+	// and written under configuredLoads. Past the limit the failed set is kept like any other, until
+	// the stamp changes. One count per entry, so a rebuilt assembly leaves none behind.
+	readonly Dictionary<string, (string Stamp, int Count)> transientLoads    = new(StringComparer.OrdinalIgnoreCase);
+	const int                                              MaxTransientLoads = 5;
 	
 	public CodeActionHost(FileLogger logger)
 	{
@@ -488,10 +489,9 @@ internal sealed class CodeActionHost
 			if(configured.TryGetValue(key, out cached) && cached.Stamp == resolved.Stamp)
 				return cached.Set;
 			
-			if(resolved.Failure is not null)
-				logger.LogInfo("CodeActions", $"{SourceOf(entry)}: {resolved.Stamp}");
-			
 			if(resolved.Failure is not null) {
+				
+				logger.LogInfo("CodeActions", $"{SourceOf(entry)}: {resolved.Stamp}");
 				
 				configured[key] = new ConfiguredSet(resolved.Stamp, resolved.Failure);
 				
@@ -504,16 +504,16 @@ internal sealed class CodeActionHost
 			// assemblies load at the next call, once the server that held a shadow copy is done (#412).
 			// Only so many times, though. Each attempt is a load context of its own that never
 			// unloads, and a file that stays unreadable must not add one per call for good.
-			var attempt = $"{key}|{resolved.Stamp}";
+			var failed = transientLoads.TryGetValue(key, out var earlier) && earlier.Stamp == resolved.Stamp ? earlier.Count : 0;
 			
-			if(transient && transientLoads.GetValueOrDefault(attempt) < MaxTransientLoads - 1) {
+			if(transient && failed < MaxTransientLoads - 1) {
 				
-				transientLoads[attempt] = transientLoads.GetValueOrDefault(attempt) + 1;
+				transientLoads[key] = (resolved.Stamp, failed + 1);
 				
 				return set;
 			}
 			
-			transientLoads.Remove(attempt);
+			transientLoads.Remove(key);
 			configured[key] = new ConfiguredSet(resolved.Stamp, set);
 			
 			return set;

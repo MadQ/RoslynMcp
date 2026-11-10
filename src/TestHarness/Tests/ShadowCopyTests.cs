@@ -38,11 +38,15 @@ internal static partial class ShadowCopyTests
 		// A project whose one analyzer reference of its own is a private copy of the assembly.
 		(FixtureProject Fixture, string Dll) NewReferencingProject(string label, string? sharedDll)
 		{
-			var holder = TestFixtures.NewAdhocDir($"{label}Dll");
-			var dll    = sharedDll ?? holder.PathOf("RoslynMcp.Analyzers.dll");
+			var dll = sharedDll;
 			
-			if(sharedDll is null) {
+			if(dll is null) {
 				
+				var holder = TestFixtures.NewAdhocDir($"{label}Dll");
+				
+				dll = holder.PathOf("RoslynMcp.Analyzers.dll");
+				
+				fixtures.Add(holder);
 				File.Copy(providerDll!, dll);
 				shadows.Add(Path.GetDirectoryName(ShadowPathOf(dll))!);
 			}
@@ -50,7 +54,6 @@ internal static partial class ShadowCopyTests
 			var fixture = TestFixtures.NewMsBuildProject(label, "net10.0", $"<ItemGroup><Analyzer Include=\"{dll}\" /></ItemGroup>");
 			
 			fixture.Write("Probe.cs", Probe);
-			fixtures.Add(holder);
 			fixtures.Add(fixture);
 			
 			return (fixture, dll);
@@ -117,6 +120,43 @@ internal static partial class ShadowCopyTests
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
 					: $"FAIL  (source: {source?.ToJsonString() ?? "not reported"} | shadow file: {healed} of {whole} bytes at {shadow}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				await DefaultWorkspaceTests.StopServerAsync(process, server);
+			}
+		}
+		
+		// A shadow file of the right length that is no assembly passes the length check, so only the
+		// failed load shows it — a copy cut off under a writer that had sized the file first looks
+		// like this. Zeros of the assembly's length stand in for it. The server must copy again and
+		// load, and afterwards that same path must hold the assembly's own bytes.
+		async Task<(bool pass, string msg)> RunCorrupt()
+		{
+			if(providerDll is null)
+				return Skip.SetupUnavailable("RoslynMcp.Analyzers.dll is not built");
+			
+			var sw             = Stopwatch.StartNew();
+			var (fixture, dll) = NewReferencingProject("ShadowBad", null);
+			var shadow         = ShadowPathOf(dll);
+			var real           = File.ReadAllBytes(dll);
+			
+			Directory.CreateDirectory(Path.GetDirectoryName(shadow)!);
+			File.WriteAllBytes(shadow, new byte[real.Length]);
+			
+			var (process, server) = await Start(fixture, new Dictionary<string, string>());
+			
+			try {
+				
+				if(server is null)
+					return (false, "FAIL  (server did not answer initialize)");
+				
+				var source = await SourceAsync(server, fixture, "project");
+				var healed = File.ReadAllBytes(shadow).AsSpan().SequenceEqual(real);
+				var pass   = Loaded(source) && healed;
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (source: {source?.ToJsonString() ?? "not reported"} | shadow file at {shadow} {(healed ? "holds" : "does not hold")} the assembly) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				await DefaultWorkspaceTests.StopServerAsync(process, server);
@@ -246,6 +286,7 @@ internal static partial class ShadowCopyTests
 		
 		List<TestCase> tests = [
 			new("a shadow copy cut short is replaced, not loaded", RunTruncated),
+			new("a shadow copy of the right length that is no assembly is copied again", RunCorrupt),
 			new("a shadow copy held open by another process fails that call only, not the session", RunHeld),
 			new("servers shadow-copying the same assembly at once all load it", RunTogether),
 		];
