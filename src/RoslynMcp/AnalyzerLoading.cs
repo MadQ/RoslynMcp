@@ -24,8 +24,21 @@ internal static class AnalyzerLoading
 			
 			return reference.GetAnalyzers(language);
 		
-		return shadowedAnalyzers.GetOrAdd(
-			(path, File.GetLastWriteTimeUtc(path).Ticks, language),
-			key => new AnalyzerFileReference(key.Path, ShadowCopyAnalyzerLoader.Instance).GetAnalyzers(key.Language));
+		var key = (path, File.GetLastWriteTimeUtc(path).Ticks, language);
+		
+		if(shadowedAnalyzers.TryGetValue(key, out var cached))
+			return cached;
+		
+		// Roslyn swallows an assembly that does not load and answers with no analyzers. Cached, that
+		// answer would outlive a failure that was only another server holding the shadow copy for a
+		// moment, and the project's analyzers would be gone for the life of the process (#412).
+		var loader    = ShadowCopyAnalyzerLoader.Instance;
+		var failures  = loader.TransientFailures;
+		var analyzers = new AnalyzerFileReference(path, loader).GetAnalyzers(language);
+		
+		return loader.TransientFailures == failures
+			? shadowedAnalyzers.GetOrAdd(key, analyzers)
+			: analyzers
+		;
 	}
 }
