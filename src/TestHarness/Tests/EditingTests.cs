@@ -59,6 +59,49 @@ static class EditingTests
 		// Both member accesses in 'a.B.C' start at line 3, column 16, so a position cannot part them.
 		fx.Write("pick_nested.cs", "class Nested\n{\n\tint M(S a) => a.B.C;\n}\n");
 		
+		// Comment fixture (#416): a field with a comment at the end of its line, a documented method,
+		// an undocumented one holding a commented statement, two regions with a heading over them (one
+		// whose first member is documented, one whose is not), a method with code switched off by
+		// a false #if between its doc comment and itself, and a method whose doc comment is
+		// followed by a directive and a plain comment. The tool used to give a replacement the old node's trivia whole,
+		// so a comment in the replacement text was dropped and the old one stayed, with a success
+		// response either way. Each test edits a copy of its own and compares the whole file, so
+		// that a comment that lands in the wrong place, twice, or at the wrong indentation fails too.
+		// The section heading above M is in M's leading trivia as well, a blank line away from the
+		// doc comment: it is not M's comment, and no edit of M may take it. That blank line is
+		// indented, as this repo writes them, so it is whitespace before its line end. Two enums
+		// follow: one whose member has a comment after its comma, which belongs to the comma and
+		// not to the member, and one on a single line that is the last thing in the file, which
+		// does not end in a line break.
+		const string docSource = "class Doc\n{\n\tint count; // old count\n\n\t// ── Methods ──\n\t\n\t/// <summary>Old words.</summary>\n\tvoid M()\n\t{\n\t}\n\n\tvoid N(int a)\n\t{\n\t\t// old reason\n\t\tif(a == 1) { a = 10; }\n\t}\n\n\t// ── Region ──\n\t#region R\n\t/// <summary>In region.</summary>\n\tvoid Q()\n\t{\n\t}\n\t#endregion\n\n\t// ── Bare region ──\n\t#region B\n\tvoid S()\n\t{\n\t}\n\t#endregion\n\n\t/// <summary>Switched.</summary>\n#if NEVER\n\tint off;\n#endif\n\tvoid T()\n\t{\n\t}\n\n\t/// <summary>Guarded.</summary>\n#pragma warning disable CS0168\n\t// kept reason\n\tvoid P()\n\t{\n\t}\n#pragma warning restore CS0168\n}\n\nenum Level\n{\n\tLow, // old low\n\tHigh\n}\n\nenum Kind { A, B }";
+		
+		foreach(var name in new[] { "new", "keep", "add", "trailing", "trailing_keep", "guarded", "statement", "enum_comma", "enum_inline", "file_end", "below", "directive", "directive_between", "region", "region_bare", "disabled", "trailing_below" })
+			fx.Write($"doc_{name}.cs", docSource);
+		
+		// One replacement in the copy named, then the file must be the fixture with exactly that one
+		// change, and the response must carry a caution exactly when part of the text did not land.
+		Func<Task<(bool pass, string msg)>> DocEdit(string name, string nodeKind, string textPattern, string replacement, string before, string after, bool cautioned)
+			=> async () => {
+				
+				var (pass, msg) = await ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = $"doc_{name}.cs", nodeKind, textPattern, replacement, projectPath = fx.Csproj },
+					data => data?["applied"]?.GetValue<bool>() == true
+						&& data?["change_count"]?.GetValue<int>() == 1
+						&& (data?["_caution"]?.GetValue<string>() is { } caution
+							&& caution.Contains("not applied", StringComparison.Ordinal)
+							&& caution.Contains("Node at line ", StringComparison.Ordinal)) == cautioned);
+				
+				if(!pass)
+					return (false, msg);
+				
+				var content = File.ReadAllText(fx.PathOf($"doc_{name}.cs"));
+				
+				return content == docSource.Replace(before, after)
+					? (true,  "PASS  (the file holds exactly the expected change)")
+					: (false, $"FAIL  (unexpected content: '{content}')");
+			};
+		
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
@@ -208,6 +251,158 @@ static class EditingTests
 						? (true,  "PASS  (constructor body replaced)")
 						: (false, $"FAIL  (constructor not written: '{content.Trim()}')");
 				}),
+			
+			// ── #416: a comment in the replacement text lands; one that cannot is reported ────────────
+			// The replacement's doc comment takes the place of the old one, at the file's indentation.
+			new("roslyn_replace_in_code: a doc comment in the replacement replaces the old one",
+				DocEdit("new", "MethodDeclaration", "M",
+					"/// <summary>New words.</summary>\n\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					"\t/// <summary>Old words.</summary>\n\tvoid M()\n\t{\n\t}",
+					"\t/// <summary>New words.</summary>\n\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: false)),
+			
+			// The other half of the rule, and the reason trivia is carried over at all: an edit of
+			// the body alone must not cost the node its documentation.
+			new("roslyn_replace_in_code: a replacement without a comment keeps the old doc comment",
+				DocEdit("keep", "MethodDeclaration", "M",
+					"void M()\n\t{\n\t\tcount++;\n\t}",
+					"\tvoid M()\n\t{\n\t}",
+					"\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: false)),
+			
+			// No old comment to replace: the new one is added, indented like the node.
+			new("roslyn_replace_in_code: a doc comment is added to a node that had none",
+				DocEdit("add", "MethodDeclaration", "N",
+					"/// <summary>Added.</summary>\n\tvoid N(int a)\n\t{\n\t}",
+					"\tvoid N(int a)\n\t{\n\t\t// old reason\n\t\tif(a == 1) { a = 10; }\n\t}",
+					"\t/// <summary>Added.</summary>\n\tvoid N(int a)\n\t{\n\t}",
+					cautioned: false)),
+			
+			// The comment at the end of the node's line follows the same rule in both directions.
+			new("roslyn_replace_in_code: a comment at the end of the replacement's line replaces the old one",
+				DocEdit("trailing", "FieldDeclaration", "count",
+					"int count = 1; // new count",
+					"int count; // old count",
+					"int count = 1; // new count",
+					cautioned: false)),
+			
+			new("roslyn_replace_in_code: a replacement without an end-of-line comment keeps the old one",
+				DocEdit("trailing_keep", "FieldDeclaration", "count",
+					"int count = 1;",
+					"int count; // old count",
+					"int count = 1; // old count",
+					cautioned: false)),
+			
+			// Not only declarations, and not only doc comments: a statement's '//' comment.
+			new("roslyn_replace_in_code: a statement's comment is replaced by the replacement's",
+				DocEdit("statement", "IfStatement", "",
+					"// new reason\n\t\tif(a == 2) { a = 20; }",
+					"// old reason\n\t\tif(a == 1) { a = 10; }",
+					"// new reason\n\t\tif(a == 2) { a = 20; }",
+					cautioned: false)),
+			
+			// A directive between the old comment and the declaration would go with the comment, so
+			// both stay — and the response must say that the new comment did not land, since the
+			// rest of the edit did.
+			new("roslyn_replace_in_code: a comment that cannot replace the old one is reported, not dropped",
+				DocEdit("guarded", "MethodDeclaration", "P",
+					"/// <summary>Never lands.</summary>\n\tvoid P()\n\t{\n\t\tcount++;\n\t}",
+					"\tvoid P()\n\t{\n\t}",
+					"\tvoid P()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: true)),
+			
+			// The comment after an enum member's comma is trivia of the comma, a token of the list. It
+			// was the one end-of-line comment the rule above could not reach: dropped, the old one kept.
+			new("roslyn_replace_in_code: a comment after an enum member's comma replaces the old one",
+				DocEdit("enum_comma", "EnumMemberDeclaration", "Low",
+					"Low = 1, // new low",
+					"Low, // old low",
+					"Low = 1, // new low",
+					cautioned: false)),
+			
+			// More code follows on the member's line, and a comment to the end of the line would
+			// comment it out: the member is replaced, the comment is not written, and the response says so.
+			new("roslyn_replace_in_code: a comment that would swallow the rest of the line is reported, not written",
+				DocEdit("enum_inline", "EnumMemberDeclaration", "A",
+					"A = 1 // one",
+					"enum Kind { A, B }",
+					"enum Kind { A = 1, B }",
+					cautioned: true)),
+			
+			// The last line of a file without a final line break ends too: nothing follows the node,
+			// so its comment lands and nothing is cautioned.
+			new("roslyn_replace_in_code: a comment after the last node of a file without a final line break lands",
+				DocEdit("file_end", "EnumDeclaration", "Kind",
+					"enum Kind { A, B } // done",
+					"enum Kind { A, B }",
+					"enum Kind { A, B } // done",
+					cautioned: false)),
+			
+			// Only the node and its comments are written. What stands below the node in the text
+			// is not part of it; the node lands, and the rest must be named rather than vanish.
+			new("roslyn_replace_in_code: text below the node in the replacement is reported, not dropped unseen",
+				DocEdit("below", "MethodDeclaration", "M",
+					"void M()\n\t{\n\t\tcount++;\n\t}\n\t// below the node",
+					"\tvoid M()\n\t{\n\t}",
+					"\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: true)),
+			
+			// A directive before the node is half of a pair more often than not, with the other half
+			// below the node. Writing the half that is in reach left the file with a #region that
+			// never ends or a warning that stays disabled, so none of it is written. Nothing stands
+			// below the node here, so the caution can only be the one about the directive.
+			new("roslyn_replace_in_code: a directive in the replacement is reported, not written",
+				DocEdit("directive", "MethodDeclaration", "M",
+					"#pragma warning disable CS0168\n\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					"\tvoid M()\n\t{\n\t}",
+					"\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: true)),
+			
+			// A directive between the new comment and the node is left out with its own indentation:
+			// the node must come out indented once, under the comment, not twice.
+			new("roslyn_replace_in_code: a directive between the replacement's comment and its node leaves no indentation behind",
+				DocEdit("directive_between", "MethodDeclaration", "N",
+					"/// <summary>Added.</summary>\n\t#pragma warning disable CS0168\n\tvoid N(int a)\n\t{\n\t}",
+					"\tvoid N(int a)\n\t{\n\t\t// old reason\n\t\tif(a == 1) { a = 10; }\n\t}",
+					"\t/// <summary>Added.</summary>\n\tvoid N(int a)\n\t{\n\t}",
+					cautioned: true)),
+			
+			// The heading stands directly over the #region, which stands directly over Q's doc comment.
+			// It is the region's heading: Q's comment is replaced, and heading and directive stay.
+			new("roslyn_replace_in_code: a comment above a #region is not the comment of the member below it",
+				DocEdit("region", "MethodDeclaration", "Q",
+					"/// <summary>New in region.</summary>\n\tvoid Q()\n\t{\n\t}",
+					"/// <summary>In region.</summary>",
+					"/// <summary>New in region.</summary>",
+					cautioned: false)),
+			
+			// The same heading over a region whose first member has no doc comment: the heading is
+			// still the region's, so there is nothing of S's to replace and the comment is added.
+			new("roslyn_replace_in_code: a doc comment is added under a #region, below the region's heading",
+				DocEdit("region_bare", "MethodDeclaration", "S",
+					"/// <summary>Added in region.</summary>\n\tvoid S()\n\t{\n\t}",
+					"\tvoid S()\n\t{\n\t}",
+					"\t/// <summary>Added in region.</summary>\n\tvoid S()\n\t{\n\t}",
+					cautioned: false)),
+			
+			// Code a false #if switches off stands between T's doc comment and T. Replacing the
+			// comment would take the #if block with it, and adding the new one under the #endif
+			// would leave the old one stale above: both stay as they are, and the response says so.
+			new("roslyn_replace_in_code: a doc comment above switched-off code is left alone and reported",
+				DocEdit("disabled", "MethodDeclaration", "T",
+					"/// <summary>Never lands.</summary>\n\tvoid T()\n\t{\n\t\tcount++;\n\t}",
+					"\tvoid T()\n\t{\n\t}",
+					"\tvoid T()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: true)),
+			
+			// A comment below the node is not a comment at the end of its line. It is reported like
+			// any text below the node, and the comment the file has on that line must survive it.
+			new("roslyn_replace_in_code: a comment below the node does not cost the line its own comment",
+				DocEdit("trailing_below", "FieldDeclaration", "count",
+					"int count = 1;\n\t// below the node",
+					"int count; // old count",
+					"int count = 1; // old count",
+					cautioned: true)),
 			
 			// ── #356: line and column pick one of several similar nodes ─────────────────────────────
 			// Before these, the third if in a method needed a unique text fragment or force=true, which
