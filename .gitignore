@@ -419,6 +419,7 @@ docs/github-issues/
 scripts/*
 !scripts/enforce-roslyn-tools.sh
 !scripts/Test-FswFileRecreation.ps1
+!scripts/Publish-DevServer.ps1
 
 # Developer convenience scripts (local only, not part of the repo)
 pub.ps1

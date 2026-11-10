@@ -68,6 +68,7 @@ static class HarnessGroups
 		Group("Parallel Load",                             g => ParallelLoadTests.Build(g.Ctx)),
 		Group("Dotnet Runner",                             g => DotnetRunnerTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Respawn",                                   g => RespawnTests.Build(g.Ctx)),
+		Group("Dev Host",                                  g => DevHostTests.Build(g.Ctx)),
 		
 		// Last on purpose: it reads the server log written by everything above.
 		new("Workspace Hygiene", g => Task.FromResult(WorkspaceHygieneTests.Build(g.Ctx, g.LogDir, g.LogGlob, g.FullRun)), FullRunOnly: true),

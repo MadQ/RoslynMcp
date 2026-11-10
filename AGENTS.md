@@ -43,11 +43,12 @@ When in doubt: **ask, don't assume.** A thirty-second question beats reverting s
 | **ImplicitUsings** | `enable` — don't add redundant `using` directives |
 | **Resources** | [C# MCP SDK](https://csharp.sdk.modelcontextprotocol.io/) • [MCP Spec](https://modelcontextprotocol.io/) |
 
-Four projects:
+Five projects:
 - `src/RoslynMcp/RoslynMcp.csproj` — MCP server
 - `src/TestHarness/TestHarness.csproj` — local testing client
 - `src/RoslynMcp.Analyzers/RoslynMcp.Analyzers.csproj` — Roslyn analyzers applied to this codebase; the most direct expression of dogfooding — Roslyn-powered analysis running on the repo that wraps Roslyn
 - `src/RoslynMcp.LogViewer/RoslynMcp.LogViewer.csproj` — dev-only log viewer; not part of the MCP server
+- `src/RoslynMcp.DevHost/RoslynMcp.DevHost.csproj` — dev-only host an MCP client launches in place of the server, so a new server build can be swapped in under running sessions; never packed, not part of the tool package (see *Testing § Development host*)
 
 Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 
@@ -912,6 +913,8 @@ Example `.mcp.json`:
 > **Note:** Use the published executable (see README.md "Building the Executable" section). The `dotnet run` approach was abandoned due to multi-target confusion and recursive behavior when dogfooding.
 
 **Log Viewer:** `src/RoslynMcp.LogViewer/` — a .NET console app serving `viewer.html` to monitor live NDJSON logs. Not part of the MCP server; run independently for development visibility.
+
+**Development host (#426):** `src/RoslynMcp.DevHost/` — the process an MCP client launches in place of the server during development. It starts the server build that the pointer file `%LOCALAPPDATA%\RoslynMcp\dev\current` names and forwards stdio unchanged, reading only each message's `id` and `method`. `scripts/Publish-DevServer.ps1` publishes the working tree into a new directory under `dev\builds` and writes the pointer; every running host then swaps to that build at its next idle moment (no request waiting in either direction), replaying the client's `initialize` to the new server before the old one is stopped and sending the client `tools/list_changed`. A build that does not start or answer is refused and the session keeps its server. The server's state (preview tokens, session approvals, the loaded workspace) is gone after a swap. The server's own exit ends the host with the same exit code. Development only: the tool package installs the plain server, the host is never packed, and pointing a client at it is done by hand. The server knows nothing of the host — keep it that way, so what is dogfooded is what ships. Details: `docs/development/DEV_HOST.md`; harness group *Dev Host*.
 
 ---
 
