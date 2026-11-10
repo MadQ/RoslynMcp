@@ -31,9 +31,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"that filters by the declared name of the node — not body content. " +
 		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors. " +
 		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
-		"The node keeps its place: its blank lines and the indentation of its first line come from the file, further lines are written as given. " +
-		"A comment in the replacement text before the node (a doc comment, say) replaces the node's existing comment, and one at the end of its last line replaces the one there; a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
-		"A comment that could not be applied is named in _caution. " +
+		"The node keeps its place: the blank lines before it and the indentation of the first line of the replacement text come from the file, further lines are written as given. " +
+		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
+		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
 		"To pick one of several similar nodes, such as the third if statement in a method, pass line (and column for several on one line): where the node starts, as a read of the file or a dry run's changed_nodes shows it. A declaration starts at its first attribute or modifier, not at its name. These narrow nodeKind and textPattern. " +
 		"A position is only as good as the read it came from: after an edit moves lines it can land on a different node of the same kind, so re-read first, or add textPattern so that only a node with that text can match. " +
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern, pass line and column, or set force=true to proceed. " +
@@ -193,10 +193,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		// What the replacement text held around its node that could not be put into the file. It
 		// goes into the response: a part of an edit that is dropped must never be dropped unseen (#416).
-		var unapplied = new SortedSet<string>(StringComparer.Ordinal);
+		// By message, with the lines of the nodes it is true of: a forced replacement of several
+		// nodes can leave some of them with their old comment, and the agent has to know which.
+		var unapplied = new SortedDictionary<string, List<int>>(StringComparer.Ordinal);
 		
 		// Adopt the file's line-ending style before parsing, so the newlines inside the new node
-		// (WithTriviaFrom only swaps the leading/trailing trivia) match the rest of the file (#268).
+		// and its comments (only the blank lines and indentation around it come from the file)
+		// match the rest of the file (#268).
 		var effectiveReplacement = normalizeLineEndings
 			? NormalizeLineEndings(replacement, sourceText.ToString())
 			: replacement
@@ -210,30 +213,47 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			// Parse the replacement in the grammatical position of EACH node it replaces — a type
 			// member inside a type of the same name so constructors, destructors, and operators
 			// parse as themselves; a statement as a statement; anything else as an expression.
-			var replacementNodes = new Dictionary<SyntaxNode, SyntaxNode>(matchedNodes.Length);
+			var replacementNodes  = new Dictionary<SyntaxNode, SyntaxNode>(matchedNodes.Length);
+			var replacementTokens = new Dictionary<SyntaxToken, SyntaxToken>();
 			
 			foreach(var matchedNode in matchedNodes) {
 				
-				var (replacementNode, parseError) = ParseReplacement(matchedNode, effectiveReplacement);
-
-				if(replacementNode is null)
-
+				var (parsed, parseError) = ParseReplacement(matchedNode, effectiveReplacement);
+				
+				if(parsed is null)
+					
 					return scope.Error(new ReplaceInCodeSyntaxError(parseError ?? "Failed to parse replacement text — parser returned null", BuildNodeInfo(true))
 					{
 						Error = "Replacement text contains syntax errors"
 					});
-
-				replacementNodes[matchedNode] = replacementNode;
+				
+				var notes = new List<string>();
+				
+				replacementNodes[matchedNode] = WithTriviaOf(matchedNode, parsed, replacementTokens, notes);
+				
+				foreach(var note in notes) {
+					
+					if(!unapplied.TryGetValue(note, out var lines))
+						unapplied[note] = lines = [];
+					
+					lines.Add(StartOf(matchedNode).Line + 1);
+				}
 			}
 			
-			newRoot = root.ReplaceNodes(
-				matchedNodes,
-				(originalNode, _) => WithTriviaOf(originalNode, replacementNodes[originalNode], unapplied)
+			// Tokens too: the comment after an enum member's comma belongs to the comma.
+			newRoot = root.ReplaceSyntax(
+				matchedNodes,           (originalNode, _) => replacementNodes[originalNode],
+				replacementTokens.Keys, (originalToken, _) => replacementTokens[originalToken],
+				null,                   null
 			);
 		}
 		
-		// Validate the new tree has no new errors.
-		var newTree = CSharpSyntaxTree.Create((CSharpSyntaxNode) newRoot, path: fullPath);
+		// Validate the text that will be written, parsed as the file is parsed — not the tree it was
+		// put together from. The two can differ: a tree built from parts carries the diagnostics of
+		// its parts, and what the parts amount to once they are text again (a directive that now
+		// lacks its counterpart, a comment that swallows the rest of a line) only a parse shows.
+		var newText = newRoot.ToFullString();
+		var newTree = CSharpSyntaxTree.ParseText(newText, (CSharpParseOptions) syntaxTree.Options, fullPath);
 		var newDiagnostics = newTree.GetDiagnostics()
 			.Where(d => d.Severity == DiagnosticSeverity.Error)
 			.ToArray()
@@ -249,13 +269,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			});
 		
 		var verb    = isDeletion ? "deleted" : "replaced";
-		var caution = unapplied.Count > 0 ? string.Join(" ", unapplied) : null;
+		var caution = unapplied.Count > 0
+			? string.Join(" ", unapplied.Select(entry => $"{entry.Key} (Node at line {string.Join(", ", entry.Value)}.)"))
+			: null
+		;
 		
 		if(dryRun)
 			
 			return scope.Outcome("dry run", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Dry run: {matchedNodes.Length} node(s) would be {verb}.") { Caution = caution });
 		
-		var newText  = newRoot.ToFullString();
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newText);
 		
 		var (_, backupErr) = await SaveBackupsAsync(
@@ -301,7 +323,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	}
 	
 	/// <summary>
-	///     Gives <paramref name="replacement"/> the trivia it has in the file: the blank lines and
+	///     Gives the parsed replacement the trivia it has in the file: the blank lines and
 	///     indentation of <paramref name="original"/>, so the node sits where the old one sat, and the
 	///     comments of whichever of the two has them.
 	///     <para>
@@ -310,40 +332,74 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///         it no longer described (#416). So a comment in the replacement text takes the place
 	///         of the node's comments — text an agent sends is text it means to land — and a
 	///         replacement without one keeps them, which is what makes an edit of the body alone
-	///         cheap. The same holds for a comment at the end of the node's last line. A
-	///         preprocessor directive before the replacement's node is added after what is there.
+	///         cheap. The same holds for a comment at the end of the node's last line. After an
+	///         enum member that line ends behind the comma, which is a token of the list and not of
+	///         the member, so there the comment goes onto the file's comma, through
+	///         <paramref name="tokens"/>.
 	///     </para>
-	///     What cannot be done safely is left as it was and said in <paramref name="unapplied"/>.
+	///     What is not put into the file is said in <paramref name="notes"/>: a comment that cannot
+	///     be placed safely, a preprocessor directive, and anything written below the node.
 	/// </summary>
-	private static SyntaxNode WithTriviaOf(SyntaxNode original, SyntaxNode replacement, ISet<string> unapplied)
-		=> replacement
-			.WithLeadingTrivia(LeadingTrivia(original.GetLeadingTrivia(), replacement.GetLeadingTrivia(), unapplied))
-			.WithTrailingTrivia(TrailingTrivia(original.GetTrailingTrivia(), replacement.GetTrailingTrivia(), unapplied))
-	;
-	
-	private static SyntaxTriviaList LeadingTrivia(SyntaxTriviaList existing, SyntaxTriviaList incoming, ISet<string> unapplied)
+	private static SyntaxNode WithTriviaOf(SyntaxNode original, ParsedReplacement parsed, Dictionary<SyntaxToken, SyntaxToken> tokens, List<string> notes)
 	{
-		// From the first comment or directive on: the whitespace before it is where the text happened
-		// to start, and the file's own indentation stands in for it. What follows it is kept as
-		// written, like the lines of the node itself.
-		var incomingStart = IndexOf(incoming, trivia => IsComment(trivia) || trivia.IsDirective);
+		var node = parsed.Node.WithLeadingTrivia(LeadingTrivia(original.GetLeadingTrivia(), parsed.Node.GetLeadingTrivia(), notes));
+		
+		if(parsed.HasLeftover)
+			notes.Add("What the replacement text holds below its node (a comment or a directive on a line after it) was not applied: it is not part of the node.");
+		
+		var separator = SeparatorAfter(original);
+		
+		if(separator.RawKind == 0)
+			return node.WithTrailingTrivia(TrailingTrivia(original.GetTrailingTrivia(), parsed.Trailing, EndsFile(original.GetLastToken()), notes));
+		
+		tokens[separator] = separator.WithTrailingTrivia(TrailingTrivia(separator.TrailingTrivia, parsed.Trailing, EndsFile(separator), notes));
+		
+		return node.WithTrailingTrivia(original.GetTrailingTrivia());
+	}
+	
+	// The comma after an enum member, when the file has one there; otherwise no token.
+	private static SyntaxToken SeparatorAfter(SyntaxNode node)
+	{
+		if(node is not EnumMemberDeclarationSyntax { Parent: EnumDeclarationSyntax owner } member)
+			return default;
+		
+		var index = owner.Members.IndexOf(member);
+		
+		return index < owner.Members.SeparatorCount ? owner.Members.GetSeparator(index) : default;
+	}
+	
+	private static bool EndsFile(SyntaxToken token)
+		=> token.GetNextToken(includeZeroWidth: true).IsKind(SyntaxKind.EndOfFileToken);
+	
+	private static SyntaxTriviaList LeadingTrivia(SyntaxTriviaList existing, SyntaxTriviaList incoming, List<string> notes)
+	{
+		// A directive is one half of a pair more often than not — #region, #if, a #pragma that is
+		// restored — and the other half stands below the node, where it is not the node's. Half a
+		// pair written is worse than none, and the node's own directive sent along would be
+		// written twice.
+		if(incoming.Any(IsDirectiveText))
+			notes.Add("A preprocessor directive before the node in the replacement text was not applied: directives are not part of a node. Add or change them with roslyn_replace_in_file.");
+		
+		// From the first comment on: the whitespace before it is where the text happened to start,
+		// and the file's own indentation stands in for it. What follows it is kept as written,
+		// like the lines of the node itself.
+		var incomingStart = IndexOf(incoming, IsComment);
 		
 		if(incomingStart < 0)
 			return existing;
 		
-		var written       = incoming.Skip(incomingStart);
+		var written       = WithoutDirectives(incoming.Skip(incomingStart));
 		var existingStart = AttachedCommentStart(existing);
 		
-		// Nothing to take the place of: no comment came with the replacement, only a directive,
-		// or the node has no comment yet.
-		if(existingStart < 0 || !incoming.Any(IsComment))
+		// The node has no comment yet, so there is nothing to take the place of.
+		if(existingStart < 0)
 			return existing.AddRange(written);
 		
 		// A directive after the node's comment — the #if or #pragma between a doc comment and its
 		// declaration — would go with the comment, and the file's conditional structure with it.
-		if(existing.Skip(existingStart).Any(trivia => trivia.IsDirective)) {
+		if(existing.Skip(existingStart).Any(IsDirectiveText)) {
 			
-			unapplied.Add("The comment before the node in the replacement text was not applied: the existing comment is followed by a preprocessor directive, so it was left as it is. Edit the comment with roslyn_replace_in_file.");
+			notes.Add("The comment before the node in the replacement text was not applied: the existing comment is followed by a preprocessor directive, so it was left as it is. Edit the comment with roslyn_replace_in_file.");
 			
 			return existing;
 		}
@@ -351,33 +407,78 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		return SyntaxFactory.TriviaList(existing.Take(existingStart).Concat(written));
 	}
 	
-	private static SyntaxTriviaList TrailingTrivia(SyntaxTriviaList existing, SyntaxTriviaList incoming, ISet<string> unapplied)
+	private static SyntaxTriviaList TrailingTrivia(SyntaxTriviaList existing, SyntaxTriviaList incoming, bool endsFile, List<string> notes)
 	{
-		if(!incoming.Any(IsComment))
-			return existing;
+		// The comment as written, and the file's own end of line. Only what stands on the node's
+		// line: a parser may hang the lines below onto the node as well, and a comment down there
+		// is no reason to take the one the file has on this line.
+		var written = incoming.TakeWhile(trivia => !trivia.IsKind(SyntaxKind.EndOfLineTrivia)).ToArray();
 		
+		if(!written.Any(IsComment))
+			return existing;
 		var lineEnd = IndexOf(existing, trivia => trivia.IsKind(SyntaxKind.EndOfLineTrivia));
+		
+		if(lineEnd >= 0)
+			return SyntaxFactory.TriviaList(written.Concat(existing.Skip(lineEnd)));
+		
+		// The last line of a file that does not end in a line break ends all the same.
+		if(endsFile)
+			return SyntaxFactory.TriviaList(written);
 		
 		// The node is followed by more code on its line, which a comment to the end of the line
 		// would comment out.
-		if(lineEnd < 0) {
+		notes.Add("The comment after the node in the replacement text was not applied: the replaced node does not end its line.");
+		
+		return existing;
+	}
+	
+	private static bool IsRegionDirective(SyntaxTrivia trivia)
+		=> trivia.Kind() is SyntaxKind.RegionDirectiveTrivia or SyntaxKind.EndRegionDirectiveTrivia;
+	
+	// A directive, or the text a false #if switches off: what stands and falls with directives.
+	private static bool IsDirectiveText(SyntaxTrivia trivia)
+		=> trivia.IsDirective || trivia.IsKind(SyntaxKind.DisabledTextTrivia);
+	
+	// The trivia without its directives, and without the indentation of a directive's line: left
+	// behind, that would be added to the indentation of the line after it.
+	private static List<SyntaxTrivia> WithoutDirectives(IEnumerable<SyntaxTrivia> trivia)
+	{
+		var kept = new List<SyntaxTrivia>();
+		
+		foreach(var item in trivia) {
 			
-			unapplied.Add("The comment after the node in the replacement text was not applied: the replaced node does not end its line.");
+			if(!IsDirectiveText(item))
+				kept.Add(item);
 			
-			return existing;
+			else if(kept is [.., var before] && before.IsKind(SyntaxKind.WhitespaceTrivia))
+				kept.RemoveAt(kept.Count - 1);
 		}
 		
-		// The comment as written, and the file's own end of line.
-		return SyntaxFactory.TriviaList(incoming.TakeWhile(trivia => !trivia.IsKind(SyntaxKind.EndOfLineTrivia)).Concat(existing.Skip(lineEnd)));
+		return kept;
 	}
+	
+	// Whether the trivia holds anything but blank space.
+	private static bool HasText(IEnumerable<SyntaxTrivia> trivia)
+		=> trivia.Any(item => !item.IsKind(SyntaxKind.WhitespaceTrivia) && !item.IsKind(SyntaxKind.EndOfLineTrivia));
+	
+	// What a node's trailing trivia holds after the end of the node's own line.
+	private static IEnumerable<SyntaxTrivia> BelowTheLine(SyntaxTriviaList trailing)
+		=> trailing.SkipWhile(trivia => !trivia.IsKind(SyntaxKind.EndOfLineTrivia)).Skip(1);
+	
+	/// <summary>
+	///     A replacement parsed: the node, the trivia after it up to the end of its line — past the
+	///     comma, for an enum member — and whether the text went on below that line.
+	/// </summary>
+	private sealed record ParsedReplacement(SyntaxNode Node, SyntaxTriviaList Trailing, bool HasLeftover);
 	
 	/// <summary>
 	///     Where the comment that belongs to a node begins in its leading trivia: the first comment of
 	///     the lines directly above it, up to the nearest blank line. Everything before a node is its
 	///     leading trivia, also a section heading three lines up or the licence text at the top of
 	///     the file, and those are not the node's to lose when its doc comment is rewritten. A
-	///     directive among the lines does not end them — <see cref="LeadingTrivia"/> decides what a
-	///     directive below the comment means. Returns -1 when no comment is attached.
+	///     <c>#region</c> or <c>#endregion</c> ends them like a blank line; any other directive
+	///     among them does not — <see cref="LeadingTrivia"/> decides what a directive inside the
+	///     node's comment means. Returns -1 when no comment is attached.
 	/// </summary>
 	private static int AttachedCommentStart(SyntaxTriviaList leading)
 	{
@@ -408,7 +509,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			if(IsComment(trivia))
 				start = index;
 			
-			else if(!trivia.IsDirective)
+			// #region and #endregion end the lines wherever they stand: they are headings of the
+			// file's own, and what is written over one is the region's, not the comment of the
+			// first member in it. Every other directive, and the text a false #if switches off,
+			// is passed over, above the comment or below it, so that the caller sees it together
+			// with the comment and can leave both alone.
+			else if(IsRegionDirective(trivia) || !IsDirectiveText(trivia))
 				break;
 			
 			lineIsBare = false;
@@ -466,10 +572,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     refused.
 	///     Returns the node, or null plus the joined parser error messages.
 	/// </summary>
-	private static (SyntaxNode? Node, string? Error) ParseReplacement(SyntaxNode original, string replacement)
+	private static (ParsedReplacement? Parsed, string? Error) ParseReplacement(SyntaxNode original, string replacement)
 	{
 		SyntaxNode?             node;
 		IEnumerable<Diagnostic> diagnostics;
+		
+		// What follows the node in the text: the rest of its line, and whether anything stands
+		// below it. A wrapper puts both where the parser hangs them — after a comma, before the
+		// closing brace — so each case reads them where they are.
+		SyntaxTriviaList trailing;
+		bool             hasLeftover;
 		
 		switch(original) {
 			
@@ -493,6 +605,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				node        = members[0];
 				diagnostics = unit.GetDiagnostics();
+				
+				var wrapper   = (BaseTypeDeclarationSyntax) unit.Members[0];
+				var separator = wrapper is EnumDeclarationSyntax { Members.SeparatorCount: > 0 } wrapperEnum ? wrapperEnum.Members.GetSeparator(0) : default;
+				
+				trailing    = node.GetTrailingTrivia().AddRange(separator.TrailingTrivia);
+				hasLeftover = HasText(BelowTheLine(trailing)) || HasText(wrapper.CloseBraceToken.LeadingTrivia);
 				
 				// The parser accepts any Identifier(...) { } inside a type as a constructor; only the
 				// compiler objects later (CS1520) when the name differs from the type. Catch it here,
@@ -518,12 +636,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				// Top-level: a type, delegate, or namespace member with no enclosing type to borrow.
 				node        = SyntaxFactory.ParseMemberDeclaration(replacement);
 				diagnostics = node?.GetDiagnostics() ?? [];
+				trailing    = node?.GetTrailingTrivia() ?? default;
+				hasLeftover = node is not null && GoesOnBelow(node, replacement);
 				break;
 			
 			case StatementSyntax:
 				
 				node        = SyntaxFactory.ParseStatement(replacement);
 				diagnostics = node.GetDiagnostics();
+				trailing    = node.GetTrailingTrivia();
+				hasLeftover = GoesOnBelow(node, replacement);
 				break;
 			
 			case UsingDirectiveSyntax: {
@@ -536,6 +658,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				node        = unit.Usings[0];
 				diagnostics = unit.GetDiagnostics();
+				trailing    = node.GetTrailingTrivia();
+				hasLeftover = HasText(BelowTheLine(trailing)) || HasText(unit.EndOfFileToken.LeadingTrivia);
 				break;
 			}
 			
@@ -543,6 +667,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				node        = SyntaxFactory.ParseExpression(replacement);
 				diagnostics = node.GetDiagnostics();
+				trailing    = node.GetTrailingTrivia();
+				hasLeftover = GoesOnBelow(node, replacement);
 				break;
 		}
 		
@@ -558,9 +684,17 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		return errors.Length > 0
 			? (null, string.Join("; ", errors))
-			: (node, null)
+			: (new ParsedReplacement(node, trailing, hasLeftover), null)
 		;
 	}
+	
+	// For a node parsed from the replacement text itself: whether the text goes on after the
+	// node's line. The parser either hangs the rest onto the node as trivia or leaves it
+	// unread, so both are looked at.
+	private static bool GoesOnBelow(SyntaxNode node, string replacement)
+		=> HasText(BelowTheLine(node.GetTrailingTrivia()))
+			|| node.FullSpan.End < replacement.Length && !string.IsNullOrWhiteSpace(replacement[node.FullSpan.End..])
+	;
 	
 	private static bool TryParseSyntaxKind(string kindName, out SyntaxKind kind)
 	{
