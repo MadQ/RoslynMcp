@@ -142,15 +142,24 @@ internal static class CodeRefactoringTests
 		Task<(bool pass, string msg)> RunInvertIf()
 			=> RunRoundTrip(fx.Csproj!, "Invert.cs", 7, 3, null, null, "InvertIfCodeRefactoringProvider", null, "!big)", null, requireCleanDiagnostics: true);
 		
+		// A source the list names: one problem as text, no list of them and no origin path.
+		static bool IsNamedProblem(JsonNode? source)
+			=> source?["problem"]?.GetValue<string>() is { Length: > 0 }
+				&& source?["problems"] is null
+				&& source?["origin"] is null;
+		
 		// Every action a dialog would drive has a title ending in "..."; none may reach the list.
-		// The providers summary reports how many refactoring providers stood behind the list, which
-		// is how a composition that silently lost the Features assemblies would show.
+		// The built-in source reports its size in roslyn_info, which is how a composition that
+		// silently lost the Features assemblies would show; the list's own count is a sum over all
+		// sources, which another source's providers could make up for.
 		//
 		// The summary is also what keeps the answer small (#414). The list used to carry every
 		// source in full, some 1,300 tokens on a project with seventeen of them, on every call. Now
 		// a source appears by name only when it has a problem, and never with its origin path; the
 		// sources that loaded are counted. So the old field must be gone, more sources must be
-		// counted than are named, and each one named must say what is wrong with it.
+		// counted than are named, and each one named must say what is wrong with it. (The fixture's
+		// SDK analyzers happen to have a problem today; the AdhocWorkspace test checks the same shape
+		// on a source that always has one.)
 		async Task<(bool pass, string msg)> RunNoDialogActions()
 		{
 			var sw = Stopwatch.StartNew();
@@ -159,13 +168,16 @@ internal static class CodeRefactoringTests
 			var leaked  = actions?.Any(action => action?["title"]?.GetValue<string>().TrimEnd().EndsWith("...", StringComparison.Ordinal) == true) == true;
 			var providers = list?["providers"];
 			var named     = providers?["problems"]?.AsArray() ?? [];
+			var info      = await ctx.CallToolJsonAsync("roslyn_info", new { });
+			var builtIn   = info?["code_actions"]?["sources"]?.AsArray().FirstOrDefault(source => source?["kind"]?.GetValue<string>() == "built-in");
 			var pass = list?["error"] is null
 				&& actions is { Count: > 0 }
 				&& !leaked
-				&& providers?["refactorings"]?.GetValue<int>() > 50
+				&& builtIn?["refactorings"]?.GetValue<int>() > 50
+				&& providers?["refactorings"]?.GetValue<int>() >= builtIn?["refactorings"]?.GetValue<int>()
 				&& list?["providerSources"] is null
 				&& providers?["sources"]?.GetValue<int>() > named.Count
-				&& named.All(source => source?["problems"]?.AsArray() is { Count: > 0 } && source?["origin"] is null);
+				&& named.All(IsNamedProblem);
 			
 			return (pass, pass
 				? $"PASS  [{sw.ElapsedMilliseconds}ms]"
@@ -291,9 +303,15 @@ internal static class CodeRefactoringTests
 				return result;
 			
 			// No project file, so no analyzer references: the project source says so instead of pretending.
+			// It is the one source that has a problem on every machine, so the shape of a named source
+			// is pinned here (#414): its problem as one text, no origin path, and the sources that
+			// loaded — built-in and bundled — counted but not named.
 			var (list, listText) = await List(adhoc.Dir, "Invert.cs", 7, 3);
 			var projectSource = list?["providers"]?["problems"]?.AsArray().FirstOrDefault(source => source?["kind"]?.GetValue<string>() == "project");
-			var reported = projectSource?["problems"]?.AsArray().Any(problem => problem?.GetValue<string>().Contains("AdhocWorkspace", StringComparison.Ordinal) == true) == true;
+			var providers = list?["providers"];
+			var reported  = projectSource?["problem"]?.GetValue<string>().Contains("AdhocWorkspace", StringComparison.Ordinal) == true
+				&& IsNamedProblem(projectSource)
+				&& providers?["sources"]?.GetValue<int>() > providers?["problems"]?.AsArray().Count;
 			
 			return reported
 				? result

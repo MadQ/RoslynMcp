@@ -17,9 +17,13 @@ internal sealed class ListRefactoringsTool : RefactoringToolBase
 		"server is configured with. Each action has an index for roslyn_preview_refactoring, its title, provider and source. " +
 		"An empty list means nothing applies at that location, which is a normal answer, not an error. Actions a headless host " +
 		"cannot run (ones that need a dialog) are listed under unavailable with the reason; a provider that failed is listed " +
-		"under providerFailures and the others still answer. providers counts the sources asked and what they yielded, and names " +
-		"only the sources with a problem (one that failed to load, or one this workspace cannot have) — the place to look when an " +
-		"expected refactoring is missing; roslyn_info lists every source. Step 1 of the three-step workflow: list, roslyn_preview_refactoring, " +
+		"under providerFailures and the others still answer. providers is about the provider sources behind the list, not about " +
+		"the actions: how many sources there were and how many refactoring and fix providers they loaded (per source, before " +
+		"duplicates and denied providers are dropped), and under problems only the sources with a problem — one that failed to " +
+		"load, or one this workspace cannot have — each with its first problem and a count of further ones. Look there when an " +
+		"expected refactoring is missing; roslyn_info has every source the server has loaded and kept, for all projects, with all " +
+		"problems (a source whose load failed only for the moment is named here and nowhere else). " +
+		"Step 1 of the three-step workflow: list, roslyn_preview_refactoring, " +
 		"roslyn_apply_refactoring. For a fix to a specific diagnostic use roslyn_preview_code_fix instead.")]
 	public async Task<object> ListRefactorings(
 		[Description("Relative or absolute path to the C# file.")] string filePath,

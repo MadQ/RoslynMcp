@@ -92,12 +92,15 @@ internal static partial class ShadowCopyTests
 			return match.Success ? int.Parse(match.Groups[1].Value) : -1;
 		}
 		
-		// An empty problem list is left out of the response.
+		// A source without a problem comes from roslyn_info, which leaves an empty problem list out.
 		static bool Loaded(JsonNode? source)
-			=> (source?["fixes"]?.GetValue<int>() ?? 0) > 0 && (source?["problems"]?.AsArray().Count ?? 0) == 0;
+			=> (source?["fixes"]?.GetValue<int>() ?? 0) > 0
+				&& source?["problem"] is null
+				&& (source?["problems"]?.AsArray().Count ?? 0) == 0;
 		
+		// A source that failed comes from the list's answer, which names its first problem.
 		static bool Failed(JsonNode? source)
-			=> source?["problems"]?.AsArray().Any(problem => problem?.GetValue<string>().Contains("could not load", StringComparison.Ordinal) == true) == true;
+			=> source?["problem"]?.GetValue<string>().Contains("could not load", StringComparison.Ordinal) == true;
 		
 		// A shadow file cut short — by a server that died while copying, or one from before the copy
 		// was atomic — is not an assembly. It must be replaced, not loaded: a thousand bytes of the

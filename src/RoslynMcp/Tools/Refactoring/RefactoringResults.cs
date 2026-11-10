@@ -50,7 +50,9 @@ internal sealed record ProviderSourceInfo(
 ///     it was the same report call after call (#414). What must travel with the answer is why a
 ///     provider that was expected is not offered — a source that failed, or one this workspace mode
 ///     cannot have — so those keep their text; a source that loaded says nothing an agent acts on,
-///     and <c>roslyn_info</c> lists them all.
+///     and <c>roslyn_info</c> lists the ones the server has loaded and kept. The counts are what the
+///     sources yielded, each for itself: providers, before the ones two sources share are taken
+///     once and the deny-list is applied, and not the actions on offer.
 /// </summary>
 internal sealed record ProviderSummaryInfo(
 	int Sources,
@@ -62,7 +64,7 @@ internal sealed record ProviderSummaryInfo(
 	{
 		var problems = reports
 			.Where(report => !report.Problems.IsEmpty)
-			.Select(report => new ProviderProblemInfo(report.Source, ProviderSourceInfo.KindName(report.Kind), report.Refactorings, report.Fixes, [..report.Problems]))
+			.Select(ProviderProblemInfo.From)
 			.ToArray()
 		;
 		
@@ -70,8 +72,25 @@ internal sealed record ProviderSummaryInfo(
 	}
 }
 
-/// <summary>A provider source with a problem: what it still yielded, and what went wrong. No origin path — <c>roslyn_info</c> has it.</summary>
-internal sealed record ProviderProblemInfo(string Source, string Kind, int Refactorings, int Fixes, string[] Problems);
+/// <summary>
+///     A provider source with a problem: what it still yielded, and what went wrong. One problem, and
+///     how many more there are: a source reports one for every type and every export that failed, so
+///     a package of providers this host cannot construct would otherwise put dozens of lines into
+///     every list. The first says what kind of failure it is, and <c>roslyn_info</c> has the rest, as
+///     it has the origin path — for a source that is kept, which one whose load failed only for the
+///     moment is not. The text itself is not cut: a problem can end in its remedy.
+/// </summary>
+internal sealed record ProviderProblemInfo(
+	string Source,
+	string Kind,
+	int    Refactorings,
+	int    Fixes,
+	string Problem,
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MoreProblems)
+{
+	public static ProviderProblemInfo From(ProviderSourceReport report)
+		=> new(report.Source, ProviderSourceInfo.KindName(report.Kind), report.Refactorings, report.Fixes, report.Problems[0], report.Problems.Length > 1 ? report.Problems.Length - 1 : null);
+}
 
 internal sealed record ProviderFailureInfo(string Provider, string Error);
 
