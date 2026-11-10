@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -67,11 +70,22 @@ internal static partial class ShadowCopyTests
 		// problem is named in that call's own answer — and only there when its load failed for the
 		// moment, since such a set is not kept and roslyn_info lists what is kept. A source that
 		// loaded is only counted in the answer (#414), so it is read from roslyn_info.
-		static async Task<JsonNode?> SourceAsync(TestContext server, FixtureProject fixture, string kind)
+		static Task<JsonNode?> SourceAsync(TestContext server, FixtureProject fixture, string kind)
+			=> NamedSourceAsync(server, fixture, kind, "RoslynMcp.Analyzers.dll");
+		
+		// The same for an assembly of another name. A source ends in its file name, after a space
+		// ("project: <file>") or a path separator (a configured path), and the whole name is
+		// matched: Microsoft.CodeAnalysis.NetAnalyzers.dll is not the C# one.
+		static async Task<JsonNode?> NamedSourceAsync(TestContext server, FixtureProject fixture, string kind, string assemblyFile)
 		{
+			bool EndsInFile(string source)
+				=> source.EndsWith(assemblyFile, StringComparison.Ordinal)
+					&& (source.Length == assemblyFile.Length || source[^(assemblyFile.Length + 1)] is ' ' or '\\' or '/');
+			
 			bool IsFixtureSource(JsonNode? source)
 				=> source?["kind"]?.GetValue<string>() == kind
-					&& source?["source"]?.GetValue<string>().Contains("RoslynMcp.Analyzers.dll", StringComparison.Ordinal) == true;
+					&& source?["source"]?.GetValue<string>() is { } name
+					&& EndsInFile(name);
 			
 			var list = await server.CallToolJsonAsync("roslyn_list_refactorings", new { projectPath = fixture.Csproj, filePath = "Probe.cs", line = 5, column = 3 });
 			
@@ -296,11 +310,143 @@ internal static partial class ShadowCopyTests
 			}
 		}
 		
+		// Private copies of assemblies in a directory of their own, and a project whose analyzer
+		// references are those copies in the order given. The SDK's own analyzers are switched off,
+		// or the project would reference a second assembly of each name.
+		FixtureProject NewOrderedProject(string label, IReadOnlyList<string> dlls)
+		{
+			var items   = string.Concat(dlls.Select(dll => $"<Analyzer Include=\"{dll}\" />"));
+			var fixture = TestFixtures.NewMsBuildProject(label, "net10.0",
+				$"<PropertyGroup><EnableNETAnalyzers>false</EnableNETAnalyzers></PropertyGroup><ItemGroup>{items}</ItemGroup>");
+			
+			fixture.Write("Probe.cs", Probe);
+			fixtures.Add(fixture);
+			
+			return fixture;
+		}
+		
+		string[] CopyToHolder(string label, IReadOnlyList<string> originals)
+		{
+			var holder = TestFixtures.NewAdhocDir(label);
+			
+			fixtures.Add(holder);
+			
+			return [..originals.Select(original => {
+				
+				var copy = holder.PathOf(Path.GetFileName(original));
+				
+				File.Copy(original, copy);
+				shadows.Add(Path.GetDirectoryName(ShadowPathOf(copy))!);
+				
+				return copy;
+			})];
+		}
+		
+		// An analyzer assembly may need another analyzer reference of the same project, and the
+		// project may list that one later (#421): every SDK project lists the C# NetAnalyzers
+		// before Microsoft.CodeAnalysis.NetAnalyzers, which holds their base types. Loaded one
+		// reference at a time, the first found no dependency and lost 129 types — analyzers and
+		// fix providers — for the life of the process. The SDK's own pair is the fixture, in a
+		// directory of its own and in both orders, a server per run. The dependent assembly must
+		// report no problem, and neither the order of the references nor which side loads first
+		// may make a difference to its fix providers or to the number of analyzers the project runs.
+		async Task<(bool pass, string msg)> RunDependencyListedLater()
+		{
+			if(FindSdkAnalyzerPair() is not { } pair)
+				return Skip.SetupUnavailable("no SDK with Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll beside Microsoft.CodeAnalysis.NetAnalyzers.dll was found");
+			
+			var sw       = Stopwatch.StartNew();
+			var copies   = CopyToHolder("ShadowPairDll", [pair.Dependent, pair.Dependency]);
+			var dependentFirst  = NewOrderedProject("ShadowDependentFirst", copies);
+			var dependencyFirst = NewOrderedProject("ShadowDependencyFirst", [copies[1], copies[0]]);
+			
+			// Whichever side loads first registers every reference it creates, so each side is
+			// first once with the dependent assembly listed first.
+			(string Label, FixtureProject Project, bool AnalyzersFirst)[] runs = [
+				("dependent first, analyzers asked first", dependentFirst, true),
+				("dependent first, providers asked first", dependentFirst, false),
+				("dependency first", dependencyFirst, true),
+			];
+			
+			var sources   = new List<JsonNode?>();
+			var analyzers = new List<int>();
+			
+			foreach(var (_, project, analyzersFirst) in runs) {
+				
+				var (process, server) = await Start(project, new Dictionary<string, string>());
+				
+				try {
+					
+					if(server is null)
+						return (false, "FAIL  (server did not answer initialize)");
+					
+					if(analyzersFirst)
+						analyzers.Add(await ProjectAnalyzersAsync(server, project));
+					
+					sources.Add(await NamedSourceAsync(server, project, "project", Path.GetFileName(pair.Dependent)));
+					
+					if(!analyzersFirst)
+						analyzers.Add(await ProjectAnalyzersAsync(server, project));
+				}
+				finally {
+					await DefaultWorkspaceTests.StopServerAsync(process, server);
+				}
+			}
+			
+			var pass = sources.All(Loaded)
+				&& sources.All(source => source?["fixes"]?.GetValue<int>() == sources[^1]?["fixes"]?.GetValue<int>())
+				&& analyzers[^1] > 0
+				&& analyzers.All(count => count == analyzers[^1]);
+			
+			return (pass, pass
+				? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  ({string.Join(" | ", runs.Select((run, index) => $"{run.Label}: {sources[index]?.ToJsonString() ?? "not reported"}, {analyzers[index]} project analyzers"))}) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+		// Types that cannot load are a problem of a source only when a provider is among them (#421).
+		// Microsoft.CodeAnalysis.Analyzers has helper types that need Microsoft.Bcl.AsyncInterfaces,
+		// which is not shipped beside it and which no host on .NET has; the compiler never loads
+		// them. Reported as "27 type(s) could not be loaded", that was a problem on every call for
+		// every project using the package, about nothing an agent could act on. The package's own
+		// assembly is the fixture — one from the NuGet cache that does reference the missing
+		// assembly, so the test cannot pass on a version without the case. Its fix providers must
+		// be found and the source must have no problem.
+		async Task<(bool pass, string msg)> RunUnloadableHelpers()
+		{
+			if(FindAnalyzerWithMissingDependency() is not { } original)
+				return Skip.SetupUnavailable("no Microsoft.CodeAnalysis.Analyzers.dll referencing Microsoft.Bcl.AsyncInterfaces is in the NuGet cache");
+			
+			var sw      = Stopwatch.StartNew();
+			var copies  = CopyToHolder("ShadowHelperDll", [original]);
+			var project = NewOrderedProject("ShadowHelpers", copies);
+			
+			var (process, server) = await Start(project, new Dictionary<string, string>());
+			
+			try {
+				
+				if(server is null)
+					return (false, "FAIL  (server did not answer initialize)");
+				
+				var source = await NamedSourceAsync(server, project, "project", Path.GetFileName(original));
+				var pass   = Loaded(source);
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (source: {source?.ToJsonString() ?? "not reported"}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				await DefaultWorkspaceTests.StopServerAsync(process, server);
+			}
+		}
+		
+
 		List<TestCase> tests = [
 			new("a shadow copy cut short is replaced, not loaded", RunTruncated),
 			new("a shadow copy of the right length that is no assembly is copied again", RunCorrupt),
 			new("a shadow copy held open by another process fails that call only, not the session", RunHeld),
 			new("servers shadow-copying the same assembly at once all load it", RunTogether),
+			new("an analyzer reference listed before the reference it depends on loads all its types", RunDependencyListedLater),
+			new("helper types that cannot load are not a problem of the source", RunUnloadableHelpers),
 		];
 		
 		return new TestGroup($"Shadow Copies ({tests.Count} tests)", tests, Teardown: () => {
@@ -346,6 +492,61 @@ internal static partial class ShadowCopyTests
 			.FirstOrDefault();
 	}
 	
+	// The C# NetAnalyzers and the assembly they depend on, from the newest SDK beside the runtime
+	// the harness runs on that has both.
+	static (string Dependent, string Dependency)? FindSdkAnalyzerPair()
+	{
+		var dotnetRoot = Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
+		var sdks       = Path.Combine(dotnetRoot, "sdk");
+		
+		if(!Directory.Exists(sdks))
+			return null;
+		
+		foreach(var sdk in Directory.EnumerateDirectories(sdks).OrderByDescending(Directory.GetCreationTimeUtc)) {
+			
+			var analyzers  = Path.Combine(sdk, "Sdks", "Microsoft.NET.Sdk", "analyzers");
+			var dependent  = Path.Combine(analyzers, "Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll");
+			var dependency = Path.Combine(analyzers, "Microsoft.CodeAnalysis.NetAnalyzers.dll");
+			
+			if(File.Exists(dependent) && File.Exists(dependency))
+				return (dependent, dependency);
+		}
+		
+		return null;
+	}
+	
+	// A Microsoft.CodeAnalysis.Analyzers.dll in the NuGet cache whose metadata references
+	// Microsoft.Bcl.AsyncInterfaces. The package is a dependency of the Roslyn packages the server
+	// is built with, so a restore of the repository puts one there.
+	static string? FindAnalyzerWithMissingDependency()
+	{
+		var cache = Environment.GetEnvironmentVariable("NUGET_PACKAGES") is { Length: > 0 } configured
+			? configured
+			: Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+		
+		var package = Path.Combine(cache, "microsoft.codeanalysis.analyzers");
+		
+		if(!Directory.Exists(package))
+			return null;
+		
+		return Directory.EnumerateDirectories(package)
+			.Select(version => Path.Combine(version, "analyzers", "dotnet", "cs", "Microsoft.CodeAnalysis.Analyzers.dll"))
+			.Where(File.Exists)
+			.OrderByDescending(File.GetLastWriteTimeUtc)
+			.FirstOrDefault(References("Microsoft.Bcl.AsyncInterfaces"));
+	}
+	
+	static Func<string, bool> References(string assemblyName)
+		=> dll => {
+			
+			using var image = new PEReader(File.OpenRead(dll));
+			
+			var reader = image.GetMetadataReader();
+			
+			return reader.AssemblyReferences.Any(handle => reader.StringComparer.Equals(reader.GetAssemblyReference(handle).Name, assemblyName));
+		};
+	
+
 	[GeneratedRegex(@"beside (\d+) from the project's analyzer references")]
 	private static partial Regex ProjectAnalyzerCount();
 }

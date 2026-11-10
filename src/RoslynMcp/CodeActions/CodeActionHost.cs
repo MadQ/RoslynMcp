@@ -228,10 +228,7 @@ internal sealed class CodeActionHost
 	/// </summary>
 	public AnalyzerSet AnalyzersFor(Project project)
 	{
-		var fromProject = project.AnalyzerReferences
-			.SelectMany(reference => AnalyzerLoading.GetShadowedAnalyzers(reference, project.Language))
-			.ToImmutableArray()
-		;
+		var fromProject = AnalyzerLoading.GetShadowedAnalyzers(project);
 		
 		// An AdhocWorkspace project has no file; its directory is where a project config would be.
 		var settings = CodeActionSettings.Resolve(project.FilePath ?? project.Documents.FirstOrDefault()?.FilePath ?? string.Empty, logger);
@@ -376,6 +373,9 @@ internal sealed class CodeActionHost
 			
 			return;
 		}
+		
+		// A reference may depend on one listed after it (#421).
+		AnalyzerLoading.RegisterDependencies(project);
 		
 		foreach(var reference in project.AnalyzerReferences) {
 			
@@ -586,7 +586,7 @@ internal sealed class CodeActionHost
 		var fixes        = ImmutableArray.CreateBuilder<ProviderEntry<CodeFixProvider>>();
 		var problems     = ImmutableArray.CreateBuilder<string>();
 		
-		foreach(var type in SafeGetTypes(assembly, problems)) {
+		foreach(var type in ProviderCandidates(assembly, problems)) {
 			
 			if(type.IsAbstract || type.IsInterface)
 				continue;
@@ -610,6 +610,50 @@ internal sealed class CodeActionHost
 			fixes.ToImmutable());
 	}
 	
+	// The types of a provider assembly to look for exports on. When every type loads, all of
+	// them. When some do not, reflection gives the ones that did and a count of the rest, and the
+	// rest are a problem only where a provider is among them (#421): the exported types are read
+	// from the metadata and each missing one is loaded by name, so the answer names the provider
+	// that was lost and why, and says nothing of a helper type that no provider needed.
+	static IReadOnlyList<Type> ProviderCandidates(Assembly assembly, ImmutableArray<string>.Builder problems)
+	{
+		try {
+			return assembly.GetTypes();
+		}
+		catch(ReflectionTypeLoadException ex) {
+			
+			var loaded = new List<Type>(ex.Types.Where(type => type is not null)!);
+			
+			ImmutableArray<string> exported;
+			
+			try {
+				exported = ExportedProviderTypes.Read(assembly);
+			}
+			catch(Exception) {
+				
+				// Without the names there is no telling whether a provider is among the failed types.
+				problems.Add($"{assembly.GetName().Name}: {ex.LoaderExceptions.Length} type(s) could not be loaded: {ex.LoaderExceptions.FirstOrDefault()?.Message ?? "no detail"}");
+				
+				return loaded;
+			}
+			
+			var known = loaded.Select(type => type.FullName).ToHashSet(StringComparer.Ordinal);
+			
+			foreach(var name in exported.Where(name => !known.Contains(name))) {
+				
+				try {
+					loaded.Add(assembly.GetType(name, throwOnError: true)!);
+				}
+				catch(Exception failure) {
+					problems.Add($"{name}: could not be loaded: {Describe(failure)}");
+				}
+			}
+			
+			return loaded;
+		}
+	}
+	
+
 	static void Instantiate<TProvider>(
 		Type type,
 		string? exportName,

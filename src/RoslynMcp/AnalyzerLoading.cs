@@ -18,7 +18,34 @@ internal static class AnalyzerLoading
 	// ones are reused across calls without touching the original file again.
 	private static readonly ConcurrentDictionary<(string Path, long MtimeTicks, string Language), ImmutableArray<DiagnosticAnalyzer>> shadowedAnalyzers = new();
 	
-	public static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language)
+	/// <summary>
+	///     Every analyzer of the project's analyzer references, each reference loaded once per
+	///     (path, mtime, language).
+	/// </summary>
+	public static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(Project project)
+	{
+		RegisterDependencies(project);
+		
+		return [..project.AnalyzerReferences.SelectMany(reference => GetShadowedAnalyzers(reference, project.Language))];
+	}
+	
+	/// <summary>
+	///     Tells the loader where every analyzer reference of the project is, before the first of
+	///     them is loaded (#421). An analyzer assembly may depend on another reference of the same
+	///     project — the C# NetAnalyzers on Microsoft.CodeAnalysis.NetAnalyzers, the interop
+	///     generators on Microsoft.Interop.SourceGeneration — and the project may list it first. A
+	///     reference registers its own path only when it is created, so loaded one at a time the
+	///     dependent assembly found no dependency and lost every type that needed it. A compiler
+	///     host knows all its analyzer paths before it loads one; this gives the loader the same.
+	/// </summary>
+	public static void RegisterDependencies(Project project)
+	{
+		foreach(var reference in project.AnalyzerReferences)
+			if(reference.FullPath is { } path)
+				ShadowCopyAnalyzerLoader.Instance.AddDependencyLocation(path);
+	}
+	
+	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language)
 	{
 		if(reference.FullPath is not { } path || !File.Exists(path))
 			
