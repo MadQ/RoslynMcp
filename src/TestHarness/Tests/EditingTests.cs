@@ -59,6 +59,41 @@ static class EditingTests
 		// Both member accesses in 'a.B.C' start at line 3, column 16, so a position cannot part them.
 		fx.Write("pick_nested.cs", "class Nested\n{\n\tint M(S a) => a.B.C;\n}\n");
 		
+		// Comment fixture (#416): a field with a comment at the end of its line, a documented method,
+		// an undocumented one holding a commented statement, and a method whose doc comment is
+		// followed by a directive. The tool used to give a replacement the old node's trivia whole,
+		// so a comment in the replacement text was dropped and the old one stayed, with a success
+		// response either way. Each test edits a copy of its own and compares the whole file, so
+		// that a comment that lands in the wrong place, twice, or at the wrong indentation fails too.
+		// The section heading above M is in M's leading trivia as well, a blank line away from the
+		// doc comment: it is not M's comment, and no edit of M may take it.
+		const string docSource = "class Doc\n{\n\tint count; // old count\n\n\t// ── Methods ──\n\n\t/// <summary>Old words.</summary>\n\tvoid M()\n\t{\n\t}\n\n\tvoid N(int a)\n\t{\n\t\t// old reason\n\t\tif(a == 1) { a = 10; }\n\t}\n\n\t/// <summary>Guarded.</summary>\n#pragma warning disable CS0168\n\tvoid P()\n\t{\n\t}\n#pragma warning restore CS0168\n}\n";
+		
+		foreach(var name in new[] { "new", "keep", "add", "trailing", "trailing_keep", "guarded", "statement" })
+			fx.Write($"doc_{name}.cs", docSource);
+		
+		// One replacement in the copy named, then the file must be the fixture with exactly that one
+		// change, and the response must carry a caution exactly when part of the text did not land.
+		Func<Task<(bool pass, string msg)>> DocEdit(string name, string nodeKind, string textPattern, string replacement, string before, string after, bool cautioned)
+			=> async () => {
+				
+				var (pass, msg) = await ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = $"doc_{name}.cs", nodeKind, textPattern, replacement, projectPath = fx.Csproj },
+					data => data?["applied"]?.GetValue<bool>() == true
+						&& data?["change_count"]?.GetValue<int>() == 1
+						&& (data?["_caution"]?.GetValue<string>().Contains("not applied", StringComparison.Ordinal) == true) == cautioned);
+				
+				if(!pass)
+					return (false, msg);
+				
+				var content = File.ReadAllText(fx.PathOf($"doc_{name}.cs"));
+				
+				return content == docSource.Replace(before, after)
+					? (true,  "PASS  (the file holds exactly the expected change)")
+					: (false, $"FAIL  (unexpected content: '{content}')");
+			};
+		
 		var tests = new List<TestCase> {
 			
 			new("roslyn_replace_in_file: dry run literal replacement",
@@ -208,6 +243,65 @@ static class EditingTests
 						? (true,  "PASS  (constructor body replaced)")
 						: (false, $"FAIL  (constructor not written: '{content.Trim()}')");
 				}),
+			
+			// ── #416: a comment in the replacement text lands; one that cannot is reported ────────────
+			// The replacement's doc comment takes the place of the old one, at the file's indentation.
+			new("roslyn_replace_in_code: a doc comment in the replacement replaces the old one",
+				DocEdit("new", "MethodDeclaration", "M",
+					"/// <summary>New words.</summary>\n\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					"\t/// <summary>Old words.</summary>\n\tvoid M()\n\t{\n\t}",
+					"\t/// <summary>New words.</summary>\n\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: false)),
+			
+			// The other half of the rule, and the reason trivia is carried over at all: an edit of
+			// the body alone must not cost the node its documentation.
+			new("roslyn_replace_in_code: a replacement without a comment keeps the old doc comment",
+				DocEdit("keep", "MethodDeclaration", "M",
+					"void M()\n\t{\n\t\tcount++;\n\t}",
+					"\tvoid M()\n\t{\n\t}",
+					"\tvoid M()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: false)),
+			
+			// No old comment to replace: the new one is added, indented like the node.
+			new("roslyn_replace_in_code: a doc comment is added to a node that had none",
+				DocEdit("add", "MethodDeclaration", "N",
+					"/// <summary>Added.</summary>\n\tvoid N(int a)\n\t{\n\t}",
+					"\tvoid N(int a)\n\t{\n\t\t// old reason\n\t\tif(a == 1) { a = 10; }\n\t}",
+					"\t/// <summary>Added.</summary>\n\tvoid N(int a)\n\t{\n\t}",
+					cautioned: false)),
+			
+			// The comment at the end of the node's line follows the same rule in both directions.
+			new("roslyn_replace_in_code: a comment at the end of the replacement's line replaces the old one",
+				DocEdit("trailing", "FieldDeclaration", "count",
+					"int count = 1; // new count",
+					"int count; // old count",
+					"int count = 1; // new count",
+					cautioned: false)),
+			
+			new("roslyn_replace_in_code: a replacement without an end-of-line comment keeps the old one",
+				DocEdit("trailing_keep", "FieldDeclaration", "count",
+					"int count = 1;",
+					"int count; // old count",
+					"int count = 1; // old count",
+					cautioned: false)),
+			
+			// Not only declarations, and not only doc comments: a statement's '//' comment.
+			new("roslyn_replace_in_code: a statement's comment is replaced by the replacement's",
+				DocEdit("statement", "IfStatement", "",
+					"// new reason\n\t\tif(a == 2) { a = 20; }",
+					"// old reason\n\t\tif(a == 1) { a = 10; }",
+					"// new reason\n\t\tif(a == 2) { a = 20; }",
+					cautioned: false)),
+			
+			// A directive between the old comment and the declaration would go with the comment, so
+			// both stay — and the response must say that the new comment did not land, since the
+			// rest of the edit did.
+			new("roslyn_replace_in_code: a comment that cannot replace the old one is reported, not dropped",
+				DocEdit("guarded", "MethodDeclaration", "P",
+					"/// <summary>Never lands.</summary>\n\tvoid P()\n\t{\n\t\tcount++;\n\t}",
+					"\tvoid P()\n\t{\n\t}",
+					"\tvoid P()\n\t{\n\t\tcount++;\n\t}",
+					cautioned: true)),
 			
 			// ── #356: line and column pick one of several similar nodes ─────────────────────────────
 			// Before these, the third if in a method needed a unique text fragment or force=true, which
