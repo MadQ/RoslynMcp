@@ -41,6 +41,7 @@ static class HarnessGroups
 		Group("Code Fix Tools",                            g => CodeFixTests.Build(g.Ctx)),
 		Group("Code Refactorings",                         g => CodeRefactoringTests.Build(g.Ctx)),
 		Group("Code Action Config",                        g => CodeActionConfigTests.Build(g.Ctx)),
+		Group("Shadow Copies",                             g => ShadowCopyTests.Build(g.Ctx)),
 		Group("Validation Tools",                          g => ValidationTests.Build(g.Ctx)),
 		Group("Source Drift",                              g => DriftTests.Build(g.Ctx)),
 		Group("Refactoring Tools",                         g => RefactoringTests.Build(g.Ctx)),

@@ -46,8 +46,37 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	public void AddDependencyLocation(string fullPath)
 		=> dependencyLocations.TryAdd(fullPath, 0);
 	
+	/// <summary>
+	///     How many loads have failed on the file system so far — a sharing violation, a file that
+	///     went away, access denied — and not on the assembly itself. A caller that caches what a
+	///     load produced reads it before and after: a result from a load during which it moved may be
+	///     missing an assembly that the next attempt would get, so it is not cached (#412). Roslyn
+	///     swallows a failed analyzer load and a dependency fails inside the resolve handler, so the
+	///     count is the one place every such failure is seen. A count that another thread's failure
+	///     moved costs one more attempt, nothing else.
+	/// </summary>
+	internal int TransientFailures => Volatile.Read(ref transientFailures);
+	
+	private int transientFailures;
+	
 	public Assembly LoadFromPath(string fullPath)
-		=> loadedByPath.GetOrAdd(Path.GetFullPath(fullPath), p => context.LoadFromAssemblyPath(ShadowCopy(p)));
+	{
+		try {
+			return loadedByPath.GetOrAdd(Path.GetFullPath(fullPath), p => context.LoadFromAssemblyPath(ShadowCopy(p)));
+		}
+		catch(Exception ex) when(IsTransient(ex)) {
+			
+			Interlocked.Increment(ref transientFailures);
+			
+			throw;
+		}
+	}
+	
+	// FileLoadException and FileNotFoundException are IOExceptions. A file past the size limit is
+	// one too, but it will be as large the next time; a file that is no assembly is a
+	// BadImageFormatException, which is not.
+	private static bool IsTransient(Exception ex)
+		=> ex is (IOException or UnauthorizedAccessException) and not FileTooLargeException;
 	
 	// Analyzer dependencies (helper DLLs shipped next to the analyzer) resolve through the same
 	// shadow mechanism, matched by simple assembly name across registered dependency locations.
@@ -72,27 +101,48 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	///     copy's path. Rebuilt analyzers get a fresh key; unchanged ones reuse the existing copy.
 	///     Stale directories are swept by FilePruner; in-use copies survive (Windows keeps loaded
 	///     images locked, which is exactly the lock we are moving off the originals).
+	///     <para>
+	///         The shadow root is shared by every server on the machine, and several start together
+	///         when a client restarts them, so the copy must hold up against another process making
+	///         the same one (#412). It is written beside its final name and renamed into place
+	///         (<see cref="FileWriter.ReplaceAtomic"/>): the name never leads to a file still being
+	///         written. A file already there is used only at the source's length, so one cut short
+	///         by a process that died, or by a server from before this rule, is replaced. And the
+	///         copy carries the time it was made, not the source's as <c>File.Copy</c> would give it:
+	///         FilePruner deletes by age, and a copy of a year-old package assembly was old enough
+	///         for another server's startup sweep to delete between this copy and its load.
+	///     </para>
 	/// </summary>
 	private static string ShadowCopy(string fullPath)
 	{
-		var mtime  = File.GetLastWriteTimeUtc(fullPath);
-		var key    = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{fullPath}|{mtime.Ticks}")))[..16];
-		var dir    = Path.Combine(ShadowRoot, key);
-		var shadow = Path.Combine(dir, Path.GetFileName(fullPath));
+		var source = new FileInfo(fullPath);
+		var key    = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{fullPath}|{source.LastWriteTimeUtc.Ticks}")))[..16];
+		var shadow = Path.Combine(ShadowRoot, key, source.Name);
 		
-		if(File.Exists(shadow))
-			
+		if(IsComplete(shadow, source.Length))
 			return shadow;
 		
-		Directory.CreateDirectory(dir);
+		var bytes = FileReader.ReadAllBytes(fullPath, SizeLimit);
 		
 		try {
-			File.Copy(fullPath, shadow);
+			FileWriter.ReplaceAtomic(shadow, bytes, AtomicReplace.None);
 		}
-		catch(IOException) when(File.Exists(shadow)) {
-			// A concurrent copy of the same (path, mtime) won the race — the existing copy is identical.
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException && IsComplete(shadow, bytes.LongLength)) {
+			// Another server's copy of the same (path, mtime) got there first and is loaded by now,
+			// which on Windows refuses the rename over it. Its file is the same bytes.
 		}
 		
 		return shadow;
+	}
+	
+	// Far above any analyzer assembly; a limit at all so that a reference to something that is not
+	// one cannot be read into memory whole.
+	private const long SizeLimit = 512L * 1024 * 1024;
+	
+	private static bool IsComplete(string shadow, long length)
+	{
+		var copy = new FileInfo(shadow);
+		
+		return copy.Exists && copy.Length == length;
 	}
 }

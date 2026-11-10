@@ -46,6 +46,15 @@ internal static class ServerHeartbeat
                 , ServerArgs.Current.PruneMinRuns
                 , recursive: true
             );
+
+            // Temp files of shadow copies whose server died between the write and the rename (#412).
+            FilePruner.Prune(
+                  ShadowCopyAnalyzerLoader.ShadowRoot
+                , "*.tmp"
+                , TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays)
+                , ServerArgs.Current.PruneMinRuns
+                , recursive: true
+            );
         }
         catch { }
     }
