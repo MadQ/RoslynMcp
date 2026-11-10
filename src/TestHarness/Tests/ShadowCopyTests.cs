@@ -63,15 +63,24 @@ internal static partial class ShadowCopyTests
 			=> await DefaultWorkspaceTests.StartServerLoggingToAsync(
 				ctx, fixture.Dir, Path.Combine(TestFixtures.TempRoot, "logs", $"shadowcopy-{Guid.NewGuid():N}.log"), environment);
 		
-		// The fixture assembly as a provider source, from the response of the call that used it: a
-		// source whose load failed for the moment is not kept, so roslyn_info would not list it.
+		// The fixture assembly as a provider source, after a call that used it. A source with a
+		// problem is named in that call's own answer — and only there when its load failed for the
+		// moment, since such a set is not kept and roslyn_info lists what is kept. A source that
+		// loaded is only counted in the answer (#414), so it is read from roslyn_info.
 		static async Task<JsonNode?> SourceAsync(TestContext server, FixtureProject fixture, string kind)
 		{
+			bool IsFixtureSource(JsonNode? source)
+				=> source?["kind"]?.GetValue<string>() == kind
+					&& source?["source"]?.GetValue<string>().Contains("RoslynMcp.Analyzers.dll", StringComparison.Ordinal) == true;
+			
 			var list = await server.CallToolJsonAsync("roslyn_list_refactorings", new { projectPath = fixture.Csproj, filePath = "Probe.cs", line = 5, column = 3 });
 			
-			return list?["providerSources"]?.AsArray().FirstOrDefault(source =>
-				source?["kind"]?.GetValue<string>() == kind
-				&& source?["source"]?.GetValue<string>().Contains("RoslynMcp.Analyzers.dll", StringComparison.Ordinal) == true);
+			if(list?["providers"]?["problems"]?.AsArray().FirstOrDefault(IsFixtureSource) is { } failed)
+				return failed;
+			
+			var info = await server.CallToolJsonAsync("roslyn_info", new { });
+			
+			return info?["code_actions"]?["sources"]?.AsArray().FirstOrDefault(IsFixtureSource);
 		}
 		
 		// How many analyzers the project's references gave, which the diagnostics note states.

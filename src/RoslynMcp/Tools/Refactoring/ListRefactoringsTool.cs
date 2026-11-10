@@ -17,7 +17,9 @@ internal sealed class ListRefactoringsTool : RefactoringToolBase
 		"server is configured with. Each action has an index for roslyn_preview_refactoring, its title, provider and source. " +
 		"An empty list means nothing applies at that location, which is a normal answer, not an error. Actions a headless host " +
 		"cannot run (ones that need a dialog) are listed under unavailable with the reason; a provider that failed is listed " +
-		"under providerFailures and the others still answer. Step 1 of the three-step workflow: list, roslyn_preview_refactoring, " +
+		"under providerFailures and the others still answer. providers counts the sources asked and what they yielded, and names " +
+		"only the sources with a problem (one that failed to load, or one this workspace cannot have) — the place to look when an " +
+		"expected refactoring is missing; roslyn_info lists every source. Step 1 of the three-step workflow: list, roslyn_preview_refactoring, " +
 		"roslyn_apply_refactoring. For a fix to a specific diagnostic use roslyn_preview_code_fix instead.")]
 	public async Task<object> ListRefactorings(
 		[Description("Relative or absolute path to the C# file.")] string filePath,
@@ -52,7 +54,7 @@ internal sealed class ListRefactoringsTool : RefactoringToolBase
 			endColumn,
 			[..query.Actions.Select(Choice)],
 			query.Unavailable.IsEmpty ? null : [..query.Unavailable.Select(action => new UnavailableActionInfo(action.Title, action.Provider, action.Reason))],
-			[..query.Sources.Select(ProviderSourceInfo.From)],
+			ProviderSummaryInfo.From(query.Sources),
 			query.Failures.IsEmpty ? null : [..query.Failures.Select(failure => new ProviderFailureInfo(failure.Provider, failure.Error))])
 		{
 			Hint    = query.Actions.IsEmpty ? LocationHint : null,

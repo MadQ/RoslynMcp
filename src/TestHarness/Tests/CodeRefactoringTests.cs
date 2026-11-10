@@ -143,19 +143,29 @@ internal static class CodeRefactoringTests
 			=> RunRoundTrip(fx.Csproj!, "Invert.cs", 7, 3, null, null, "InvertIfCodeRefactoringProvider", null, "!big)", null, requireCleanDiagnostics: true);
 		
 		// Every action a dialog would drive has a title ending in "..."; none may reach the list.
-		// The built-in source reports its size, which is how a composition that silently lost the
-		// Features assemblies would show.
+		// The providers summary reports how many refactoring providers stood behind the list, which
+		// is how a composition that silently lost the Features assemblies would show.
+		//
+		// The summary is also what keeps the answer small (#414). The list used to carry every
+		// source in full, some 1,300 tokens on a project with seventeen of them, on every call. Now
+		// a source appears by name only when it has a problem, and never with its origin path; the
+		// sources that loaded are counted. So the old field must be gone, more sources must be
+		// counted than are named, and each one named must say what is wrong with it.
 		async Task<(bool pass, string msg)> RunNoDialogActions()
 		{
 			var sw = Stopwatch.StartNew();
 			var (list, listText) = await List(fx.Csproj!, "Shapes.cs", 8, 14);
 			var actions = list?["actions"]?.AsArray();
 			var leaked  = actions?.Any(action => action?["title"]?.GetValue<string>().TrimEnd().EndsWith("...", StringComparison.Ordinal) == true) == true;
-			var sources = list?["providerSources"]?.AsArray();
+			var providers = list?["providers"];
+			var named     = providers?["problems"]?.AsArray() ?? [];
 			var pass = list?["error"] is null
 				&& actions is { Count: > 0 }
 				&& !leaked
-				&& sources?.Any(source => source?["kind"]?.GetValue<string>() == "built-in" && source?["refactorings"]?.GetValue<int>() > 50) == true;
+				&& providers?["refactorings"]?.GetValue<int>() > 50
+				&& list?["providerSources"] is null
+				&& providers?["sources"]?.GetValue<int>() > named.Count
+				&& named.All(source => source?["problems"]?.AsArray() is { Count: > 0 } && source?["origin"] is null);
 			
 			return (pass, pass
 				? $"PASS  [{sw.ElapsedMilliseconds}ms]"
@@ -282,7 +292,7 @@ internal static class CodeRefactoringTests
 			
 			// No project file, so no analyzer references: the project source says so instead of pretending.
 			var (list, listText) = await List(adhoc.Dir, "Invert.cs", 7, 3);
-			var projectSource = list?["providerSources"]?.AsArray().FirstOrDefault(source => source?["kind"]?.GetValue<string>() == "project");
+			var projectSource = list?["providers"]?["problems"]?.AsArray().FirstOrDefault(source => source?["kind"]?.GetValue<string>() == "project");
 			var reported = projectSource?["problems"]?.AsArray().Any(problem => problem?.GetValue<string>().Contains("AdhocWorkspace", StringComparison.Ordinal) == true) == true;
 			
 			return reported
