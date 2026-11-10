@@ -63,15 +63,24 @@ internal static partial class ShadowCopyTests
 			=> await DefaultWorkspaceTests.StartServerLoggingToAsync(
 				ctx, fixture.Dir, Path.Combine(TestFixtures.TempRoot, "logs", $"shadowcopy-{Guid.NewGuid():N}.log"), environment);
 		
-		// The fixture assembly as a provider source, from the response of the call that used it: a
-		// source whose load failed for the moment is not kept, so roslyn_info would not list it.
+		// The fixture assembly as a provider source, after a call that used it. A source with a
+		// problem is named in that call's own answer — and only there when its load failed for the
+		// moment, since such a set is not kept and roslyn_info lists what is kept. A source that
+		// loaded is only counted in the answer (#414), so it is read from roslyn_info.
 		static async Task<JsonNode?> SourceAsync(TestContext server, FixtureProject fixture, string kind)
 		{
+			bool IsFixtureSource(JsonNode? source)
+				=> source?["kind"]?.GetValue<string>() == kind
+					&& source?["source"]?.GetValue<string>().Contains("RoslynMcp.Analyzers.dll", StringComparison.Ordinal) == true;
+			
 			var list = await server.CallToolJsonAsync("roslyn_list_refactorings", new { projectPath = fixture.Csproj, filePath = "Probe.cs", line = 5, column = 3 });
 			
-			return list?["providerSources"]?.AsArray().FirstOrDefault(source =>
-				source?["kind"]?.GetValue<string>() == kind
-				&& source?["source"]?.GetValue<string>().Contains("RoslynMcp.Analyzers.dll", StringComparison.Ordinal) == true);
+			if(list?["providers"]?["problems"]?.AsArray().FirstOrDefault(IsFixtureSource) is { } failed)
+				return failed;
+			
+			var info = await server.CallToolJsonAsync("roslyn_info", new { });
+			
+			return info?["code_actions"]?["sources"]?.AsArray().FirstOrDefault(IsFixtureSource);
 		}
 		
 		// How many analyzers the project's references gave, which the diagnostics note states.
@@ -83,12 +92,15 @@ internal static partial class ShadowCopyTests
 			return match.Success ? int.Parse(match.Groups[1].Value) : -1;
 		}
 		
-		// An empty problem list is left out of the response.
+		// A source without a problem comes from roslyn_info, which leaves an empty problem list out.
 		static bool Loaded(JsonNode? source)
-			=> (source?["fixes"]?.GetValue<int>() ?? 0) > 0 && (source?["problems"]?.AsArray().Count ?? 0) == 0;
+			=> (source?["fixes"]?.GetValue<int>() ?? 0) > 0
+				&& source?["problem"] is null
+				&& (source?["problems"]?.AsArray().Count ?? 0) == 0;
 		
+		// A source that failed comes from the list's answer, which names its first problem.
 		static bool Failed(JsonNode? source)
-			=> source?["problems"]?.AsArray().Any(problem => problem?.GetValue<string>().Contains("could not load", StringComparison.Ordinal) == true) == true;
+			=> source?["problem"]?.GetValue<string>().Contains("could not load", StringComparison.Ordinal) == true;
 		
 		// A shadow file cut short — by a server that died while copying, or one from before the copy
 		// was atomic — is not an assembly. It must be replaced, not loaded: a thousand bytes of the
