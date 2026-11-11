@@ -517,7 +517,12 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 			}
 		}
 		catch(Exception failure) when(failure is IOException or ObjectDisposedException) {
-			return $"the pipe to it broke: {failure.Message}";
+			
+			// The same thing as the empty read above, seen from the other side: a build that
+			// has exited is found out by the write to it when that comes before the read, which
+			// on Linux it does now and then. One wording for both, so that the log, and whoever
+			// looks for the reason in it, does not depend on which came first.
+			return $"it exited before answering initialize (the pipe to it broke: {failure.Message})";
 		}
 	}
 	
