@@ -1056,7 +1056,9 @@ internal static class CodeFixTests
 				// "No fix" names the sources that had a problem (#423): the fixer may be missing for that
 				// reason. An AdhocWorkspace cannot have the project's analyzer-package fixers, which is a
 				// problem of the project source on every machine. Each entry is the list's shape: one
-				// problem text, no origin path.
+				// problem text and no count of further ones for a source with a single problem, no
+				// origin path. The fixture also turns Roslyn's built-in fixers off, which is the real
+				// reason CS0103 has no fixer here, so the message must name that switch.
 				var named = preview?["providerProblems"]?.AsArray().FirstOrDefault(source => source?["kind"]?.GetValue<string>() == "project");
 				
 				// A preview that has a fix says nothing of the sources.
@@ -1071,6 +1073,8 @@ internal static class CodeFixTests
 						&& message.Contains("providerProblems", StringComparison.Ordinal)
 						&& named?["problem"]?.GetValue<string>().Contains("AdhocWorkspace", StringComparison.Ordinal) == true
 						&& named["origin"] is null
+						&& named["moreProblems"] is null
+						&& message.Contains("codeActions.builtIn", StringComparison.Ordinal)
 						&& withFix?["token"] is not null
 						&& withFix["providerProblems"] is null;
 					

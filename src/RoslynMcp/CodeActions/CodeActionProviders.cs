@@ -141,6 +141,7 @@ internal sealed record AvailableCodeFix(
 	CodeAction      Action);
 
 internal sealed record CodeFixQuery(
+	CodeActionSettings                   Settings,
 	ImmutableArray<AvailableCodeFix>     Fixes,
 	ImmutableArray<UnavailableAction>    Unavailable,
 	ImmutableArray<ProviderSourceReport> Sources,

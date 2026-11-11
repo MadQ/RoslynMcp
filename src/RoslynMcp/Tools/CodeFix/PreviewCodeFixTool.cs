@@ -30,9 +30,10 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		"This is step 1 of a two-step workflow; no files are written until roslyn_apply_code_fix is called. " +
 		"A fix may modify existing in-workspace text documents (.cs source, declared AdditionalFiles items, analyzer config) " +
 		"and create or delete .cs source files inside the workspace; adding or removing other files, moving files, external " +
-		"or linked files, project-system changes, and FixAll are rejected. When no fix is available, providerProblems names " +
-		"the provider sources that failed to load or that this workspace cannot have, since a fixer may be missing for that " +
-		"reason. For a refactoring that is not tied to a diagnostic, use roslyn_list_refactorings.")]
+		"or linked files, project-system changes, and FixAll are rejected. An answer without a fix says what may explain " +
+		"the missing fixer: the message names the switches that are off for the project, and providerProblems names the " +
+		"provider sources that failed to load or that this workspace cannot have. For a refactoring that is not tied to a " +
+		"diagnostic, use roslyn_list_refactorings.")]
 	public async Task<object> PreviewCodeFix(
 		[Description("Relative or absolute path to the C# file containing the diagnostic.")] string filePath,
 		[Description("1-based line number near or inside the diagnostic span.")] int line,
@@ -107,13 +108,21 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		// fixer answers to RemoveUnnecessaryImportsFixable, not to the IDE0005 beside it at the same
 		// span. When the diagnostic asked for has no fixer, its companions at the position are tried,
 		// smallest span first, and the one that has a fixer is the one fixed — the choices say which.
+		// A companion whose fixer throws has no fix to offer either, and its failure is the answer as
+		// much as a failure for the diagnostic asked for would be, so it is kept (#423 review).
+		var companionFailures = ImmutableArray.CreateBuilder<ProviderFailure>();
+		
 		if(query.Fixes.IsEmpty && query.Failures.IsEmpty)
 			foreach(var companion in CompanionsAt(diagnostics, diagnostic, fullPath, position)) {
 				
 				var companionQuery = await codeActionHost.GetFixesAsync(document, companion, cancellationToken);
 				
-				if(companionQuery.Fixes.IsEmpty)
+				if(companionQuery.Fixes.IsEmpty) {
+					
+					companionFailures.AddRange(companionQuery.Failures);
+					
 					continue;
+				}
 				
 				scope.Record($"fixed through companion diagnostic {companion.Id}");
 				diagnostic = companion;
@@ -122,48 +131,48 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				break;
 			}
 		
-		var fixes = query.Fixes;
+		var fixes    = query.Fixes;
+		var failures = query.Failures.AddRange(companionFailures);
+		
+		// What may explain a fixer that is not there (#423): a source that failed to load or that this
+		// workspace mode cannot have, and a switch that is off. An answer without a fix carries both;
+		// one with a fix carries neither, and leaves the count in the log.
+		var problems = query.Sources
+			.Where(source => !source.Problems.IsEmpty)
+			.Select(ProviderProblemInfo.From)
+			.ToArray()
+		;
 		
 		// A provider that throws no longer sinks the preview: the fixes of the others are still offered,
 		// and the failure is only the answer when nothing is left.
-		if(fixes.IsEmpty && !query.Failures.IsEmpty)
+		if(fixes.IsEmpty && !failures.IsEmpty)
 			return scope.Failed("code fix provider failed", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				string.Join(" ", query.Failures.Select(failure => $"Code fix provider '{failure.Provider}' failed: {failure.Error}")),
-				"code fix provider failed"));
+				string.Join(" ", failures.Select(failure => $"Code fix provider '{failure.Provider}' failed: {failure.Error}")) + MissingFixerNote(query.Settings, problems),
+				"code fix provider failed")
+			{
+				ProviderProblems = problems.Length > 0 ? problems : null,
+			});
 		
-		if(!query.Failures.IsEmpty)
-			scope.Record($"{query.Failures.Length} provider failure(s): {string.Join("; ", query.Failures.Select(failure => failure.Provider))}");
+		if(!failures.IsEmpty)
+			scope.Record($"{failures.Length} provider failure(s): {string.Join("; ", failures.Select(failure => failure.Provider))}");
+		
+		if(!fixes.IsEmpty && problems.Length > 0)
+			scope.Record($"{problems.Length} provider source(s) with a problem");
 		
 		var choices = fixes
 			.Select((f, i) => new CodeFixActionChoice(i, diagnostic.Id, diagnostic.GetMessage(), f.Title, f.ProviderName, f.EquivalenceKey))
 			.ToArray()
 		;
 		
-		if(fixes.Length == 0) {
-			
-			// "No fix" is the one answer that needs its reason (#423): the fixer may be missing because
-			// its source failed to load, or because this workspace mode cannot have it. Those sources
-			// are named, as the refactoring list names them; an answer with a fix says nothing of them.
-			var problems = query.Sources
-				.Where(source => !source.Problems.IsEmpty)
-				.Select(ProviderProblemInfo.From)
-				.ToArray()
-			;
-			
-			var reason = problems.Length > 0
-				? $" {problems.Length} provider source(s) had a problem (providerProblems), so a fixer may be missing for that reason; roslyn_info lists every source."
-				: ""
-			;
-			
+		if(fixes.Length == 0)
 			return scope.Failed("no fixes", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.{reason}",
+				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.{MissingFixerNote(query.Settings, problems)}",
 				"no fixes")
 			{
 				ProviderProblems = problems.Length > 0 ? problems : null,
 			});
-		}
 		
 		if(fixes.Length > 1 && actionIndex is null)
 			return scope.Outcome($"{fixes.Length} action(s)", new PreviewCodeFixResult(
@@ -279,6 +288,31 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			CreatedFiles = changes.CreatedFiles.IsEmpty ? null : [..changes.CreatedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
 			DeletedFiles = changes.DeletedFiles.IsEmpty ? null : [..changes.DeletedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
 		});
+	}
+	
+	// What to add to an answer that has no fix: the switches that are off, since a fixer that is
+	// switched off is the plainest reason for its absence, and a pointer to the sources that had a
+	// problem. Empty when neither applies. A source whose load failed only for the moment is not
+	// kept, so roslyn_info is named for what it has, not for everything.
+	private static string MissingFixerNote(CodeActionSettings settings, ProviderProblemInfo[] problems)
+	{
+		var note = new StringBuilder();
+		
+		if(!settings.Enabled)
+			note.Append(" Code actions are off for this project (codeActions.enabled, --code-actions), so only the server's bundled fixers ran.");
+		else {
+			
+			if(!settings.BuiltIn)
+				note.Append(" Roslyn's built-in fixers are off for this project (codeActions.builtIn).");
+			
+			if(!settings.ProjectProviders)
+				note.Append(" The fixers of the project's analyzer packages are off (codeActions.projectProviders).");
+		}
+		
+		if(problems.Length > 0)
+			note.Append($" {problems.Length} provider source(s) had a problem (providerProblems), so a fixer may be missing for that reason; roslyn_info lists the sources the server has loaded and kept.");
+		
+		return note.ToString();
 	}
 	
 	// The other diagnostics reported at the position: same file, span containing it, another id.
