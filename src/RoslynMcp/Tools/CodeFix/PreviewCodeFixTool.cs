@@ -108,9 +108,11 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		// fixer answers to RemoveUnnecessaryImportsFixable, not to the IDE0005 beside it at the same
 		// span. When the diagnostic asked for has no fixer, its companions at the position are tried,
 		// smallest span first, and the one that has a fixer is the one fixed — the choices say which.
-		// A companion whose fixer throws has no fix to offer either, and its failure is the answer as
-		// much as a failure for the diagnostic asked for would be, so it is kept (#423 review).
-		var companionFailures = ImmutableArray.CreateBuilder<ProviderFailure>();
+		// A companion whose fixer throws is kept with the companion's id (#423 review): it is not a
+		// failure for the diagnostic asked for — a companion is any diagnostic at the position, related
+		// or not — so it never changes what the answer is, but it is said, since a fixer that threw is
+		// one that was not offered.
+		var companionFailures = new List<(string Diagnostic, ProviderFailure Failure)>();
 		
 		if(query.Fixes.IsEmpty && query.Failures.IsEmpty)
 			foreach(var companion in CompanionsAt(diagnostics, diagnostic, fullPath, position)) {
@@ -119,7 +121,8 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				
 				if(companionQuery.Fixes.IsEmpty) {
 					
-					companionFailures.AddRange(companionQuery.Failures);
+					foreach(var failure in companionQuery.Failures)
+						companionFailures.Add((companion.Id, failure));
 					
 					continue;
 				}
@@ -131,8 +134,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				break;
 			}
 		
+		// One provider can fail the same way for several diagnostics; it is said once.
 		var fixes    = query.Fixes;
-		var failures = query.Failures.AddRange(companionFailures);
+		var failures = query.Failures.Distinct().ToArray();
 		
 		// What may explain a fixer that is not there (#423): a source that failed to load or that this
 		// workspace mode cannot have, and a switch that is off. An answer without a fix carries both;
@@ -145,17 +149,20 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		
 		// A provider that throws no longer sinks the preview: the fixes of the others are still offered,
 		// and the failure is only the answer when nothing is left.
-		if(fixes.IsEmpty && !failures.IsEmpty)
+		if(fixes.IsEmpty && failures.Length > 0)
 			return scope.Failed("code fix provider failed", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				string.Join(" ", failures.Select(failure => $"Code fix provider '{failure.Provider}' failed: {failure.Error}")) + MissingFixerNote(query.Settings, problems),
+				string.Join(" ", failures.Select(failure => Sentence($"Code fix provider '{failure.Provider}' failed: {failure.Error}"))) + MissingFixerNote(query.Settings, problems),
 				"code fix provider failed")
 			{
 				ProviderProblems = problems.Length > 0 ? problems : null,
 			});
 		
-		if(!failures.IsEmpty)
+		if(failures.Length > 0)
 			scope.Record($"{failures.Length} provider failure(s): {string.Join("; ", failures.Select(failure => failure.Provider))}");
+		
+		if(companionFailures.Count > 0)
+			scope.Record($"{companionFailures.Count} provider failure(s) for companion diagnostics: {string.Join("; ", companionFailures.Select(entry => $"{entry.Failure.Provider} ({entry.Diagnostic})").Distinct())}");
 		
 		if(!fixes.IsEmpty && problems.Length > 0)
 			scope.Record($"{problems.Length} provider source(s) with a problem");
@@ -168,7 +175,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		if(fixes.Length == 0)
 			return scope.Failed("no fixes", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.{MissingFixerNote(query.Settings, problems)}",
+				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.{CompanionFailureNote(companionFailures)}{MissingFixerNote(query.Settings, problems)}",
 				"no fixes")
 			{
 				ProviderProblems = problems.Length > 0 ? problems : null,
@@ -288,6 +295,31 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			CreatedFiles = changes.CreatedFiles.IsEmpty ? null : [..changes.CreatedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
 			DeletedFiles = changes.DeletedFiles.IsEmpty ? null : [..changes.DeletedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
 		});
+	}
+	
+	// A fixer that threw for a companion of the diagnostic asked for, named as that: the answer is
+	// still that the diagnostic asked for has no fixer. A provider failing the same way for several
+	// companions is one sentence naming them all.
+	private static string CompanionFailureNote(List<(string Diagnostic, ProviderFailure Failure)> companionFailures)
+	{
+		var note = new StringBuilder();
+		
+		foreach(var group in companionFailures.GroupBy(entry => entry.Failure)) {
+			
+			var companions = string.Join(", ", group.Select(entry => $"'{entry.Diagnostic}'").Distinct());
+			
+			note.Append(' ').Append(Sentence($"A fixer tried for the diagnostic(s) {companions}, reported at the same position, failed: code fix provider '{group.Key.Provider}': {group.Key.Error}"));
+		}
+		
+		return note.ToString();
+	}
+	
+	// An exception's text ends as its author left it; what is appended after it must not run on.
+	private static string Sentence(string text)
+	{
+		text = text.TrimEnd();
+		
+		return text.EndsWith('.') || text.EndsWith('!') || text.EndsWith('?') ? text : text + ".";
 	}
 	
 	// What to add to an answer that has no fix: the switches that are off, since a fixer that is
