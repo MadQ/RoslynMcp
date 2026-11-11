@@ -221,7 +221,7 @@ internal sealed class CodeActionHost
 					(leaf, title) => fixes.Add(new AvailableCodeFix(diagnostic.Id, entry.Name, title, leaf.EquivalenceKey, entry.Provider, leaf)));
 		}
 		
-		return new CodeFixQuery(fixes.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable());
+		return new CodeFixQuery(providers.Settings, fixes.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable());
 	}
 	
 	/// <summary>
