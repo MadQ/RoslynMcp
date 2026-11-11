@@ -23,74 +23,16 @@ internal static class PreviewFileStateBuilder
 		
 		foreach(var projectChange in newSolution.GetChanges(baseSolution).GetProjectChanges()) {
 			
-			foreach(var docId in projectChange.GetChangedDocuments()) {
-				
-				var oldDocument = baseSolution.GetDocument(docId);
-				var newDocument = newSolution.GetDocument(docId);
-				
-				if(oldDocument?.FilePath is null || newDocument is null)
-					continue;
-				
-				if(!File.Exists(oldDocument.FilePath))
-					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
-				
-				var originalBytes = await FileReader.ReadAllBytesAsync(oldDocument.FilePath, FileReader.DocumentLimit, cancellationToken);
-				var intendedBytes = await EncodeChangedDocumentAsync(
-					oldDocument,
-					newDocument,
-					originalBytes,
-					cancellationToken);
-				states[oldDocument.FilePath] = new PreviewFileState(
-					ExpectedFileState.Exists,
-					ComputeHash(originalBytes),
-					intendedBytes);
-			}
+			// The three kinds of text document a change can touch. They differ only in how a
+			// solution hands them out.
+			foreach(var docId in projectChange.GetChangedDocuments())
+				await AddChangedAsync(states, baseSolution.GetDocument(docId), newSolution.GetDocument(docId), cancellationToken);
 			
-			foreach(var docId in projectChange.GetChangedAdditionalDocuments()) {
-				
-				var oldDocument = baseSolution.GetAdditionalDocument(docId);
-				var newDocument = newSolution.GetAdditionalDocument(docId);
-				
-				if(oldDocument?.FilePath is null || newDocument is null)
-					continue;
-				
-				if(!File.Exists(oldDocument.FilePath))
-					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
-				
-				var originalBytes = await FileReader.ReadAllBytesAsync(oldDocument.FilePath, FileReader.DocumentLimit, cancellationToken);
-				var intendedBytes = await EncodeChangedDocumentAsync(
-					oldDocument,
-					newDocument,
-					originalBytes,
-					cancellationToken);
-				states[oldDocument.FilePath] = new PreviewFileState(
-					ExpectedFileState.Exists,
-					ComputeHash(originalBytes),
-					intendedBytes);
-			}
+			foreach(var docId in projectChange.GetChangedAdditionalDocuments())
+				await AddChangedAsync(states, baseSolution.GetAdditionalDocument(docId), newSolution.GetAdditionalDocument(docId), cancellationToken);
 			
-			foreach(var docId in projectChange.GetChangedAnalyzerConfigDocuments()) {
-				
-				var oldDocument = baseSolution.GetAnalyzerConfigDocument(docId);
-				var newDocument = newSolution.GetAnalyzerConfigDocument(docId);
-				
-				if(oldDocument?.FilePath is null || newDocument is null)
-					continue;
-				
-				if(!File.Exists(oldDocument.FilePath))
-					throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
-				
-				var originalBytes = await FileReader.ReadAllBytesAsync(oldDocument.FilePath, FileReader.DocumentLimit, cancellationToken);
-				var intendedBytes = await EncodeChangedDocumentAsync(
-					oldDocument,
-					newDocument,
-					originalBytes,
-					cancellationToken);
-				states[oldDocument.FilePath] = new PreviewFileState(
-					ExpectedFileState.Exists,
-					ComputeHash(originalBytes),
-					intendedBytes);
-			}
+			foreach(var docId in projectChange.GetChangedAnalyzerConfigDocuments())
+				await AddChangedAsync(states, baseSolution.GetAnalyzerConfigDocument(docId), newSolution.GetAnalyzerConfigDocument(docId), cancellationToken);
 			
 			foreach(var docId in projectChange.GetAddedDocuments()) {
 				
@@ -141,6 +83,39 @@ internal static class PreviewFileStateBuilder
 		}
 		
 		return states;
+	}
+	
+	/// <summary>
+	///     Records the state of one changed text document: the hash of the file as it is now, and the
+	///     bytes the change intends for it. One method for source, additional and analyzer-config
+	///     documents, which all are a <see cref="TextDocument"/>, so that the three cannot come to
+	///     differ in how they are checked, read, encoded or hashed (#324). A document without a
+	///     file path, or one the new solution no longer has, is no file to write and is passed over.
+	/// </summary>
+	static async Task AddChangedAsync(
+		Dictionary<string, PreviewFileState> states,
+		TextDocument? oldDocument,
+		TextDocument? newDocument,
+		CancellationToken cancellationToken)
+	{
+		if(oldDocument?.FilePath is null || newDocument is null)
+			
+			return;
+		
+		if(!File.Exists(oldDocument.FilePath))
+			throw new IOException($"Affected file '{oldDocument.FilePath}' no longer exists while creating the preview.");
+		
+		var originalBytes = await FileReader.ReadAllBytesAsync(oldDocument.FilePath, FileReader.DocumentLimit, cancellationToken);
+		var intendedBytes = await EncodeChangedDocumentAsync(
+			oldDocument,
+			newDocument,
+			originalBytes,
+			cancellationToken);
+		
+		states[oldDocument.FilePath] = new PreviewFileState(
+			ExpectedFileState.Exists,
+			ComputeHash(originalBytes),
+			intendedBytes);
 	}
 	
 	static async Task<byte[]> EncodeChangedDocumentAsync(
