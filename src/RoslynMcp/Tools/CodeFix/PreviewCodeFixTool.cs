@@ -161,8 +161,13 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		if(failures.Length > 0)
 			scope.Record($"{failures.Length} provider failure(s): {string.Join("; ", failures.Select(failure => failure.Provider))}");
 		
-		if(companionFailures.Count > 0)
-			scope.Record($"{companionFailures.Count} provider failure(s) for companion diagnostics: {string.Join("; ", companionFailures.Select(entry => $"{entry.Failure.Provider} ({entry.Diagnostic})").Distinct())}");
+		if(companionFailures.Count > 0) {
+			
+			// Counted as listed: a provider that failed twice for one companion id is one entry.
+			var failed = companionFailures.Select(entry => $"{entry.Failure.Provider} ({entry.Diagnostic})").Distinct().ToArray();
+			
+			scope.Record($"{failed.Length} provider failure(s) for companion diagnostics: {string.Join("; ", failed)}");
+		}
 		
 		if(!fixes.IsEmpty && problems.Length > 0)
 			scope.Record($"{problems.Length} provider source(s) with a problem");
@@ -306,9 +311,10 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		
 		foreach(var group in companionFailures.GroupBy(entry => entry.Failure)) {
 			
-			var companions = string.Join(", ", group.Select(entry => $"'{entry.Diagnostic}'").Distinct());
+			var companions = group.Select(entry => $"'{entry.Diagnostic}'").Distinct().ToArray();
+			var named      = companions.Length == 1 ? $"the diagnostic {companions[0]}" : $"the diagnostics {string.Join(", ", companions)}";
 			
-			note.Append(' ').Append(Sentence($"A fixer tried for the diagnostic(s) {companions}, reported at the same position, failed: code fix provider '{group.Key.Provider}': {group.Key.Error}"));
+			note.Append(' ').Append(Sentence($"A fixer tried for {named}, reported at the same position, failed: code fix provider '{group.Key.Provider}': {group.Key.Error}"));
 		}
 		
 		return note.ToString();
