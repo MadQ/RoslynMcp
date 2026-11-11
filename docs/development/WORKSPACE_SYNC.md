@@ -424,15 +424,19 @@ of debounce periods, and logs the first failure and the giving up
 flush reports the workspace as behind disk, so the sync clock does not advance and
 `roslyn_check_drift` sees the file. Once it has given up, the next clean flush moves the clock
 on and the file is no longer reported: the log entry is then the only word of it, until the
-file changes again. A name the index added to the batch is not put back on its own; it is found
-again from the reported path. `InvalidateFile` hands a read it was refused to the same retry. A
+file changes again. A name the index added to the batch is put back too — the file it leads to
+was read and is not reported again — and noted in `retriedNames`, so the next flush still treats
+it as a name from the index and never as news of a file. `InvalidateFile` hands a read it was refused to the same retry. A
 file that is gone is not retried; its delete has a report of its own.
 
 **The non-writing apply leaves link targets alone.** An apply that writes brings the file
 behind a written link up to date, and for that drops the target's watcher reports and may
 stamp it as the server's own write. An apply that does not write has written nothing there, so
 it does neither: the server's real writes do it in `WriteAndInvalidate`, and a file changed
-from outside is reported under its own path.
+from outside is reported under its own path. `WriteAndInvalidate` therefore always syncs the
+file behind a written link itself, once; the `syncedByApply` marker that let it skip the sync
+when its `InvalidateFile` had written through the link is gone with that write. Where the
+fallback to `TryApplyChanges` is in use, the apply does write, and gets the bookkeeping of one.
 
 ---
 

@@ -285,7 +285,12 @@ internal sealed partial class WorkspaceManager
 			// stamped as the server's own write, so a save someone made at that moment would
 			// go unseen (#403). The server's real writes do this themselves in
 			// WriteAndInvalidate, and a file changed from outside is reported under its own path.
-			LinkedWrite[] linkedWrites = persist
+			// By whether a write will happen, not by what was asked for: where this Roslyn
+			// cannot set a text without writing, the apply below writes after all. Only the one
+			// call that finds that out goes without, once in the life of the process.
+			var writes = persist || !WorkspaceTextSetter.Available;
+			
+			LinkedWrite[] linkedWrites = writes
 				? [..ownedPaths.Select(LinkedWriteFor).OfType<LinkedWrite>()]
 				: []
 			;
@@ -313,7 +318,7 @@ internal sealed partial class WorkspaceManager
 						// Without a write when the caller read these texts from the files
 						// themselves. An AdhocWorkspace never writes, and a Roslyn that cannot
 						// set a text otherwise gets the apply that does.
-						applied = (persist || !isMSBuild ? null : SetTexts(ws, newSolution, baseSolution, projectChanges))
+						applied = (writes || !isMSBuild ? null : SetTexts(ws, newSolution, baseSolution, projectChanges))
 							?? ws.TryApplyChanges(newSolution);
 					}
 				}
@@ -340,11 +345,8 @@ internal sealed partial class WorkspaceManager
 				try {
 					
 					if(applied)
-						foreach(var linked in linkedWrites) {
-							
+						foreach(var linked in linkedWrites)
 							SyncLinkTarget(linked);
-							syncedByApply = linked.Path;
-						}
 				}
 				finally {
 					
@@ -458,18 +460,13 @@ internal sealed partial class WorkspaceManager
 				// Bug #3 fix: InvalidateFile must run while ignoredPaths is still incremented.
 				// Moving it after the finally decrement opened a race window where a late FSW
 				// event fired unsuppressed between the decrement and the workspace invalidation.
-				syncedByApply = null;
-				
 				InvalidateFile(fullPath)
 				;
 				
-				// Inside the same window, for the same reason as above. Not a second time when
-				// InvalidateFile applied the text through TryApplyChanges: that path has done
-				// the sync, alias scan included. A target the write created is the exception —
-				// by then it exists, the nested sync took it for a file that was there all
-				// along, and only this call knows that it is new.
-				if(linked is { } afterWrite
-					&& !(afterWrite.TargetExisted && SecurityBoundary.PathComparer.Equals(syncedByApply, fullPath)))
+				// Inside the same window, for the same reason as above. InvalidateFile takes the
+				// text into the workspace without writing, so it has synced nothing behind a
+				// link (#403), and this is the one sync of the file the write went into.
+				if(linked is { } afterWrite)
 					SyncLinkTarget(afterWrite);
 				
 				// A write straight to a file that has links to it: the documents at the links
