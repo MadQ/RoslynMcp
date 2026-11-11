@@ -47,6 +47,13 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 		=> dependencyLocations.TryAdd(fullPath, 0);
 	
 	/// <summary>
+	///     How many dependency locations are registered; locations are never removed, so it only grows.
+	///     A cache of a load's result compares it: a load that lost types for want of a dependency may
+	///     find it once a later project has named more locations (#421).
+	/// </summary>
+	public int DependencyLocationCount => dependencyLocations.Count;
+	
+	/// <summary>
 	///     How many loads have failed on the file system so far — a sharing violation, a file that
 	///     went away, access denied — and not on the assembly itself. A caller that caches what a
 	///     load produced reads it before and after: a result from a load during which it moved may be

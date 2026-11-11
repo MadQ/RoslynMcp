@@ -352,7 +352,7 @@ internal static partial class ShadowCopyTests
 		// may make a difference to its fix providers or to the number of analyzers the project runs.
 		async Task<(bool pass, string msg)> RunDependencyListedLater()
 		{
-			if(FindSdkAnalyzerPair() is not { } pair)
+			if(FindSdkAnalyzerPair(ctx.RepoRoot) is not { } pair)
 				return Skip.SetupUnavailable("no SDK with Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll beside Microsoft.CodeAnalysis.NetAnalyzers.dll was found");
 			
 			var sw       = Stopwatch.StartNew();
@@ -439,7 +439,51 @@ internal static partial class ShadowCopyTests
 			}
 		}
 		
-
+		// The other half of that rule (#421 review): a type that is lost and that a host does load by
+		// name is named, analyzers included. Roslyn drops an analyzer that does not load without a
+		// word, so when a dependency is really missing this report is the only sign that a project's
+		// analyzers run short. The fixture is the dependent half of the SDK's pair alone, in a
+		// directory without the assembly its base types are in: its problems must name types, not
+		// count them, and both an analyzer and a fix provider must be among the names.
+		async Task<(bool pass, string msg)> RunLostTypesAreNamed()
+		{
+			if(FindSdkAnalyzerPair(ctx.RepoRoot) is not { } pair)
+				return Skip.SetupUnavailable("no SDK with Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll beside Microsoft.CodeAnalysis.NetAnalyzers.dll was found");
+			
+			var sw      = Stopwatch.StartNew();
+			var copies  = CopyToHolder("ShadowAloneDll", [pair.Dependent]);
+			var project = NewOrderedProject("ShadowAlone", copies);
+			
+			var (process, server) = await Start(project, new Dictionary<string, string>());
+			
+			try {
+				
+				if(server is null)
+					return (false, "FAIL  (server did not answer initialize)");
+				
+				const string lost = ": could not be loaded: ";
+				
+				// The list loads the source and names its first problem only; roslyn_info has them all.
+				await NamedSourceAsync(server, project, "project", Path.GetFileName(pair.Dependent));
+				
+				var info     = await server.CallToolJsonAsync("roslyn_info", new { });
+				var source   = info?["code_actions"]?["sources"]?.AsArray().FirstOrDefault(entry => entry?["source"]?.GetValue<string>().EndsWith($" {Path.GetFileName(pair.Dependent)}", StringComparison.Ordinal) == true);
+				var problems = source?["problems"]?.AsArray().Select(problem => problem?.GetValue<string>() ?? "").ToArray() ?? [];
+				var names    = problems.Where(problem => problem.Contains(lost, StringComparison.Ordinal)).Select(problem => problem[..problem.IndexOf(lost, StringComparison.Ordinal)]).ToArray();
+				var pass     = problems.Length > 0
+					&& names.Length == problems.Length
+					&& names.Any(name => name.EndsWith("Analyzer", StringComparison.Ordinal))
+					&& names.Any(name => name.EndsWith("Fixer", StringComparison.Ordinal));
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  ({problems.Length} problem(s), {names.Length} naming a type; first: {problems.FirstOrDefault() ?? "none"}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				await DefaultWorkspaceTests.StopServerAsync(process, server);
+			}
+		}
+		
 		List<TestCase> tests = [
 			new("a shadow copy cut short is replaced, not loaded", RunTruncated),
 			new("a shadow copy of the right length that is no assembly is copied again", RunCorrupt),
@@ -447,6 +491,7 @@ internal static partial class ShadowCopyTests
 			new("servers shadow-copying the same assembly at once all load it", RunTogether),
 			new("an analyzer reference listed before the reference it depends on loads all its types", RunDependencyListedLater),
 			new("helper types that cannot load are not a problem of the source", RunUnloadableHelpers),
+			new("an analyzer or fix provider lost to a missing dependency is named in the source's problems", RunLostTypesAreNamed),
 		];
 		
 		return new TestGroup($"Shadow Copies ({tests.Count} tests)", tests, Teardown: () => {
@@ -492,17 +537,20 @@ internal static partial class ShadowCopyTests
 			.FirstOrDefault();
 	}
 	
-	// The C# NetAnalyzers and the assembly they depend on, from the newest SDK beside the runtime
-	// the harness runs on that has both.
-	static (string Dependent, string Dependency)? FindSdkAnalyzerPair()
+	// The C# NetAnalyzers and the assembly they depend on, from an SDK beside the runtime the
+	// harness runs on: the one the repository pins when it is installed, as the fixtures resolve
+	// it, else the newest that has both. A newer SDK's analyzers may need a newer Roslyn than the
+	// server has, which would fail the test for a reason that is not its subject.
+	static (string Dependent, string Dependency)? FindSdkAnalyzerPair(string repoRoot)
 	{
+		var pinned = PinnedSdkVersion(repoRoot);
 		var dotnetRoot = Path.GetFullPath(Path.Combine(RuntimeEnvironment.GetRuntimeDirectory(), "..", "..", ".."));
 		var sdks       = Path.Combine(dotnetRoot, "sdk");
 		
 		if(!Directory.Exists(sdks))
 			return null;
 		
-		foreach(var sdk in Directory.EnumerateDirectories(sdks).OrderByDescending(Directory.GetCreationTimeUtc)) {
+		foreach(var sdk in Directory.EnumerateDirectories(sdks).OrderByDescending(sdk => Path.GetFileName(sdk) == pinned).ThenByDescending(Directory.GetCreationTimeUtc)) {
 			
 			var analyzers  = Path.Combine(sdk, "Sdks", "Microsoft.NET.Sdk", "analyzers");
 			var dependent  = Path.Combine(analyzers, "Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll");
@@ -513,6 +561,17 @@ internal static partial class ShadowCopyTests
 		}
 		
 		return null;
+	}
+	
+	// The SDK version the repository's global.json pins; null when there is none to read.
+	static string? PinnedSdkVersion(string repoRoot)
+	{
+		try {
+			return System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(repoRoot, "global.json")))?["sdk"]?["version"]?.GetValue<string>();
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException or InvalidOperationException) {
+			return null;
+		}
 	}
 	
 	// A Microsoft.CodeAnalysis.Analyzers.dll in the NuGet cache whose metadata references
@@ -536,17 +595,24 @@ internal static partial class ShadowCopyTests
 			.FirstOrDefault(References("Microsoft.Bcl.AsyncInterfaces"));
 	}
 	
+	// A file in the cache that cannot be read as an assembly is one that does not qualify, not a
+	// reason to abort the run.
 	static Func<string, bool> References(string assemblyName)
 		=> dll => {
 			
-			using var image = new PEReader(File.OpenRead(dll));
-			
-			var reader = image.GetMetadataReader();
-			
-			return reader.AssemblyReferences.Any(handle => reader.StringComparer.Equals(reader.GetAssemblyReference(handle).Name, assemblyName));
+			try {
+				
+				using var image = new PEReader(File.OpenRead(dll));
+				
+				var reader = image.GetMetadataReader();
+				
+				return reader.AssemblyReferences.Any(handle => reader.StringComparer.Equals(reader.GetAssemblyReference(handle).Name, assemblyName));
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or BadImageFormatException or InvalidOperationException) {
+				return false;
+			}
 		};
 	
-
 	[GeneratedRegex(@"beside (\d+) from the project's analyzer references")]
 	private static partial Regex ProjectAnalyzerCount();
 }

@@ -15,8 +15,11 @@ namespace RoslynMcp;
 internal static class AnalyzerLoading
 {
 	// Analyzer sets keyed by (path, mtime, language): rebuilt analyzers reload fresh, unchanged
-	// ones are reused across calls without touching the original file again.
-	private static readonly ConcurrentDictionary<(string Path, long MtimeTicks, string Language), ImmutableArray<DiagnosticAnalyzer>> shadowedAnalyzers = new();
+	// ones are reused across calls without touching the original file again. Each is kept with the
+	// number of dependency locations the loader knew when it was loaded: Roslyn does not say when an
+	// assembly lost analyzers for want of a dependency, so a set is loaded again once the loader
+	// knows more — a later project may list the sibling an earlier one did not (#421).
+	private static readonly ConcurrentDictionary<(string Path, long MtimeTicks, string Language), (ImmutableArray<DiagnosticAnalyzer> Analyzers, int Locations)> shadowedAnalyzers = new();
 	
 	/// <summary>
 	///     Every analyzer of the project's analyzer references, each reference loaded once per
@@ -26,7 +29,9 @@ internal static class AnalyzerLoading
 	{
 		RegisterDependencies(project);
 		
-		return [..project.AnalyzerReferences.SelectMany(reference => GetShadowedAnalyzers(reference, project.Language))];
+		var locations = ShadowCopyAnalyzerLoader.Instance.DependencyLocationCount;
+		
+		return [..project.AnalyzerReferences.SelectMany(reference => GetShadowedAnalyzers(reference, project.Language, locations))];
 	}
 	
 	/// <summary>
@@ -45,7 +50,7 @@ internal static class AnalyzerLoading
 				ShadowCopyAnalyzerLoader.Instance.AddDependencyLocation(path);
 	}
 	
-	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language)
+	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language, int locations)
 	{
 		if(reference.FullPath is not { } path || !File.Exists(path))
 			
@@ -53,8 +58,8 @@ internal static class AnalyzerLoading
 		
 		var key = (path, File.GetLastWriteTimeUtc(path).Ticks, language);
 		
-		if(shadowedAnalyzers.TryGetValue(key, out var cached))
-			return cached;
+		if(shadowedAnalyzers.TryGetValue(key, out var cached) && cached.Locations == locations)
+			return cached.Analyzers;
 		
 		// Roslyn swallows an assembly that does not load and answers with no analyzers. Cached, that
 		// answer would outlive a failure that was only another server holding the shadow copy for a
@@ -63,9 +68,9 @@ internal static class AnalyzerLoading
 		var failures  = loader.TransientFailures;
 		var analyzers = new AnalyzerFileReference(path, loader).GetAnalyzers(language);
 		
-		return loader.TransientFailures == failures
-			? shadowedAnalyzers.GetOrAdd(key, analyzers)
-			: analyzers
-		;
+		if(loader.TransientFailures == failures)
+			shadowedAnalyzers[key] = (analyzers, locations);
+		
+		return analyzers;
 	}
 }
