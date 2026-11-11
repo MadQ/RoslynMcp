@@ -453,14 +453,27 @@ internal sealed class CodeActionHost
 			sets.Add(set);
 		}
 		
-		// What this target is missing now, in place of what it was missing at the last call.
+		// What this target is missing now, in place of what it was missing at the last call. A target
+		// the project file no longer has (a framework taken out of it) is never asked again, so its
+		// list is let go here, by the targets the solution has for this file now.
 		var found  = missing.ToImmutable();
 		var target = project.Name;
+		
+		var current = project.Solution.Projects
+			.Where(other => SecurityBoundary.PathComparer.Equals(other.FilePath, project.FilePath))
+			.Select(other => other.Name)
+			.ToImmutableHashSet(StringComparer.Ordinal)
+		;
 		
 		missingByProject.AddOrUpdate(
 			project.FilePath,
 			_ => found.IsEmpty ? ImmutableDictionary<string, ImmutableArray<string>>.Empty : ImmutableDictionary<string, ImmutableArray<string>>.Empty.SetItem(target, found),
-			(_, targets) => found.IsEmpty ? targets.Remove(target) : targets.SetItem(target, found));
+			(_, targets) => {
+				
+				var kept = targets.RemoveRange(targets.Keys.Where(name => !current.Contains(name)));
+				
+				return found.IsEmpty ? kept.Remove(target) : kept.SetItem(target, found);
+			});
 	}
 	
 	// A source that yields nothing because its file is not there, with the remedy that fits where

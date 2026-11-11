@@ -102,7 +102,8 @@ internal static class AnalyzerLoading
 			return false;
 		}
 		
-		return SecurityBoundary.StartsWithPath(path, Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar);
+		// A root that is a drive or the file system root keeps its separator; any other gets one.
+		return SecurityBoundary.StartsWithPath(path, Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar);
 	}
 	
 	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language, int locations)
