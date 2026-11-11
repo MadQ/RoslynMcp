@@ -35,7 +35,10 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class PaginationTests
 {
-	internal static TestGroup Build(TestContext ctx)
+	/// <param name="ctx">The harness's connection to the server.</param>
+	/// <param name="serverLogDir">Directory the harness pointed ROSLYNMCP_LOG_PATH at.</param>
+	/// <param name="serverLogGlob">File pattern of the server's log in that directory.</param>
+	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
 		
 		var fx     = TestFixtures.NewMsBuildProject("Pagination");
@@ -49,6 +52,11 @@ static class PaginationTests
 			otherProject.Write($"Alternate{i}.cs", $"// PAGEMARK {i}\nclass Alternate{i} {{ }}\n");
 		
 		fx.Write("Other.cs", "class Other { }\n");
+		
+		// A project of its own for the diagnostics test: seven locals nobody uses, seven warnings.
+		var diagnosed = TestFixtures.NewMsBuildProject("PaginationDiag");
+		
+		diagnosed.Write("Warned.cs", "class Warned\n{\n\tvoid Run()\n\t{\n" + string.Concat(Enumerable.Range(1, 7).Select(n => $"\t\tint unused{n};\n")) + "\t}\n}\n");
 		
 		// Captured by the earlier tests, consumed by the later ones — the tests run in order.
 		string?   token1 = null;
@@ -267,8 +275,61 @@ static class PaginationTests
 			
 			new("pagination: evicted token with changed pattern, filter or project matches the cached-mismatch behavior",
 				CheckQueryBinding),
+			
+			// roslyn_get_diagnostics pages like every other tool (#435). Its token was a bare
+			// position of its own: every page computed the whole result again, and with analyzers
+			// that is every analyzer again, twenty seconds a page on a solution with analyzer
+			// packages. The token did not carry the page size either, so a token passed alone fell
+			// back to pages of fifty. The fixture has seven warnings (seven locals never used) and
+			// is paged in threes with analyzers on: 3 + 3 + 1. Every page after the first is asked
+			// for with the token alone, must keep the size of three, and must be served from the
+			// cache, which the server's log says for each call; together the pages must hold every
+			// warning once.
+			new("pagination: roslyn_get_diagnostics pages from one analyzer run, and its token keeps the page size",
+				async () => {
+					
+					static int CacheHits(string[] log)
+						=> log.Count(line => line.Contains("\"get_diagnostics\"", StringComparison.Ordinal) && line.Contains("\"HIT\"", StringComparison.Ordinal));
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var before, out var logFailure))
+						
+						return (false, logFailure);
+					
+					var query = new { projectPath = diagnosed.Csproj, includeAnalyzers = true, severity = "warnings" };
+					var first = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, take = 3 });
+					var total = first?["total"]?.GetValue<int>() ?? -1;
+					var seen  = new List<string>();
+					var sizes = new List<int>();
+					var pages = 0;
+					
+					for(var page = first; page is not null && pages < 10; pages++) {
+						
+						var items = page["items"]?.AsArray() ?? [];
+						
+						sizes.Add(items.Count);
+						seen.AddRange(items.Select(item => $"{item?["code"]}@{item?["line"]}"));
+						
+						if(Token(page) is not { } token)
+							break;
+						
+						page = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, page_token = token });
+					}
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var after, out logFailure))
+						
+						return (false, logFailure);
+					
+					var hits = CacheHits(after) - CacheHits(before);
+					
+					return Verdict(
+						total == 7
+							&& sizes.SequenceEqual([3, 3, 1])
+							&& seen.Distinct().Count() == 7
+							&& hits == 2,
+						$"total {total}, expected 7; page sizes [{string.Join(", ", sizes)}], expected [3, 3, 1]; distinct findings {seen.Distinct().Count()} of {seen.Count}; pages served from the cache: {hits}, expected 2");
+				}),
 		};
 		
-		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); return Task.CompletedTask; });
+		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); diagnosed.Dispose(); return Task.CompletedTask; });
 	}
 }
