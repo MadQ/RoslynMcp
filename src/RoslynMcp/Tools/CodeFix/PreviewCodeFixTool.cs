@@ -30,8 +30,9 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		"This is step 1 of a two-step workflow; no files are written until roslyn_apply_code_fix is called. " +
 		"A fix may modify existing in-workspace text documents (.cs source, declared AdditionalFiles items, analyzer config) " +
 		"and create or delete .cs source files inside the workspace; adding or removing other files, moving files, external " +
-		"or linked files, project-system changes, and FixAll are rejected. For a refactoring that is not tied to a diagnostic, " +
-		"use roslyn_list_refactorings.")]
+		"or linked files, project-system changes, and FixAll are rejected. When no fix is available, providerProblems names " +
+		"the provider sources that failed to load or that this workspace cannot have, since a fixer may be missing for that " +
+		"reason. For a refactoring that is not tied to a diagnostic, use roslyn_list_refactorings.")]
 	public async Task<object> PreviewCodeFix(
 		[Description("Relative or absolute path to the C# file containing the diagnostic.")] string filePath,
 		[Description("1-based line number near or inside the diagnostic span.")] int line,
@@ -139,11 +140,30 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		if(fixes.Length == 0)
+		if(fixes.Length == 0) {
+			
+			// "No fix" is the one answer that needs its reason (#423): the fixer may be missing because
+			// its source failed to load, or because this workspace mode cannot have it. Those sources
+			// are named, as the refactoring list names them; an answer with a fix says nothing of them.
+			var problems = query.Sources
+				.Where(source => !source.Problems.IsEmpty)
+				.Select(ProviderProblemInfo.From)
+				.ToArray()
+			;
+			
+			var reason = problems.Length > 0
+				? $" {problems.Length} provider source(s) had a problem (providerProblems), so a fixer may be missing for that reason; roslyn_info lists every source."
+				: ""
+			;
+			
 			return scope.Failed("no fixes", new PreviewCodeFixResult(
 				null, diagnostic.Id, null, [],
-				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.",
-				"no fixes"));
+				$"Diagnostic '{diagnostic.Id}' was found, but no code-fix provider available to the server supports it.{reason}",
+				"no fixes")
+			{
+				ProviderProblems = problems.Length > 0 ? problems : null,
+			});
+		}
 		
 		if(fixes.Length > 1 && actionIndex is null)
 			return scope.Outcome($"{fixes.Length} action(s)", new PreviewCodeFixResult(
@@ -378,6 +398,13 @@ internal sealed record PreviewCodeFixResult : ToolResult, IToolError
 	
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public string[]? DeletedFiles { get; init; }
+	
+	/// <summary>
+	///     With a "no fixes" answer only: the provider sources that had a problem, each with its first
+	///     problem, in the shape <c>roslyn_list_refactorings</c> gives them (#423).
+	/// </summary>
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public ProviderProblemInfo[]? ProviderProblems { get; init; }
 }
 
 internal sealed record CodeFixActionChoice(

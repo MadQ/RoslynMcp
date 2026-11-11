@@ -1052,13 +1052,35 @@ internal static class CodeFixTests
 					diagnosticId = "CS0103"
 				});
 				var message = preview?["message"]?.GetValue<string>() ?? string.Empty;
-				var pass = preview?["error"]?.GetValue<string>() == "no fixes"
-					&& preview?["token"] is null
-					&& message.Contains("available to the server", StringComparison.Ordinal);
 				
-				return (pass, pass
-					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+				// "No fix" names the sources that had a problem (#423): the fixer may be missing for that
+				// reason. An AdhocWorkspace cannot have the project's analyzer-package fixers, which is a
+				// problem of the project source on every machine. Each entry is the list's shape: one
+				// problem text, no origin path.
+				var named = preview?["providerProblems"]?.AsArray().FirstOrDefault(source => source?["kind"]?.GetValue<string>() == "project");
+				
+				// A preview that has a fix says nothing of the sources.
+				var otherWorkspace = NewAdhocWorkspace();
+				
+				try {
+					
+					var (withFix, withFixText) = await PreviewAdhoc(otherWorkspace, "TestSingleWrite");
+					var pass = preview?["error"]?.GetValue<string>() == "no fixes"
+						&& preview?["token"] is null
+						&& message.Contains("available to the server", StringComparison.Ordinal)
+						&& message.Contains("providerProblems", StringComparison.Ordinal)
+						&& named?["problem"]?.GetValue<string>().Contains("AdhocWorkspace", StringComparison.Ordinal) == true
+						&& named["origin"] is null
+						&& withFix?["token"] is not null
+						&& withFix["providerProblems"] is null;
+					
+					return (pass, pass
+						? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+						: $"FAIL  (preview: {previewText}; with a fix: {withFixText}) [{sw.ElapsedMilliseconds}ms]");
+				}
+				finally {
+					DeleteWorkspace(otherWorkspace);
+				}
 			}
 			finally {
 				DeleteWorkspace(workspacePath);
@@ -1160,7 +1182,7 @@ internal static class CodeFixTests
 		
 
 		List<TestCase> tests = [
-			new("unbundled diagnostic is rejected without a token", RunUnbundledDiagnosticRejected),
+			new("a diagnostic without a fixer is rejected without a token, naming the provider sources that had a problem", RunUnbundledDiagnosticRejected),
 			new("Roslyn's own fixers are offered unless the project file turns them off", RunBuiltInFixersOffered),
 			new("Roslyn's IDE analyzers surface IDE0005 and its fixer removes the using", RunIdeAnalyzerFixOffered),
 			new("single write reports exact state and recovery", RunSingleWrite),
