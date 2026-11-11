@@ -313,14 +313,24 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 			SourceText.From("probe = after\n"));
 	}
 	
+	// The .editorconfig beside the document. A project also tracks the ones in the directories
+	// above it, which lie outside the workspace; by name alone the first of them could be picked.
+	static TextDocument OwnConfig(Document document)
+	{
+		var directory = Path.GetDirectoryName(document.FilePath);
+		
+		return document.Project.AnalyzerConfigDocuments
+			.First(candidate => candidate.Name == ".editorconfig" && SecurityBoundary.PathComparer.Equals(Path.GetDirectoryName(candidate.FilePath), directory))
+		;
+	}
+	
 	static async Task<Solution> ModifyAnalyzerConfigAsync(
 		Document document,
 		string marker,
 		bool changeCompilationOptions,
 		CancellationToken cancellationToken)
 	{
-		var config = document.Project.AnalyzerConfigDocuments
-			.First(candidate => candidate.Name == ".editorconfig");
+		var config = OwnConfig(document);
 		var source = await document.GetTextAsync(cancellationToken);
 		var solution = document.Project.Solution.WithDocumentText(
 			document.Id,
@@ -356,8 +366,7 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 		Document document,
 		CancellationToken cancellationToken)
 	{
-		var config = document.Project.AnalyzerConfigDocuments
-			.First(candidate => candidate.Name == ".editorconfig");
+		var config = OwnConfig(document);
 		return Task.FromResult(document.Project.Solution.RemoveAnalyzerConfigDocument(config.Id));
 	}
 	

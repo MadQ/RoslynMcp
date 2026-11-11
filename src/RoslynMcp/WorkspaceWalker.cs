@@ -33,13 +33,31 @@ internal static class WorkspaceWalker
 	///     <paramref name="prune"/> rejects. Never follows a directory symlink or junction — a link
 	///     can point back up the tree — and skips unreadable directories instead of throwing.
 	/// </summary>
-	public static IEnumerable<string> EnumerateFiles(string root, string namePattern, bool recursive, PrunePredicate prune) =>
+	public static IEnumerable<string> EnumerateFiles(string root, string namePattern, bool recursive, PrunePredicate prune)
+		=> EnumerateFiles(root, [namePattern], recursive, prune)
+	;
+	
+	/// <summary>
+	///     <see cref="EnumerateFiles(string, string, bool, PrunePredicate)"/> for files whose name
+	///     matches any of several patterns, in one walk: a tree is walked once however many kinds
+	///     of file are looked for in it.
+	/// </summary>
+	public static IEnumerable<string> EnumerateFiles(string root, string[] namePatterns, bool recursive, PrunePredicate prune) =>
 		new FileSystemEnumerable<string>(root, (ref FileSystemEntry entry) => entry.ToFullPath(), Options(recursive)) {
 			
-			ShouldIncludePredicate = (ref FileSystemEntry entry) => !entry.IsDirectory && FileSystemName.MatchesSimpleExpression(namePattern, entry.FileName, ignoreCase),
+			ShouldIncludePredicate = (ref FileSystemEntry entry) => !entry.IsDirectory && MatchesAny(namePatterns, entry.FileName),
 			ShouldRecursePredicate = (ref FileSystemEntry entry) => !IsLink(ref entry) && !prune(ref entry),
 		}
 	;
+	
+	static bool MatchesAny(string[] namePatterns, ReadOnlySpan<char> name)
+	{
+		foreach(var pattern in namePatterns)
+			if(FileSystemName.MatchesSimpleExpression(pattern, name, ignoreCase))
+				return true;
+		
+		return false;
+	}
 	
 	/// <summary>
 	///     Lazily enumerates the directories under <paramref name="root"/> — not the root itself —

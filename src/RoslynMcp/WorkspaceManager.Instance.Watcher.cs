@@ -277,7 +277,7 @@ internal sealed partial class WorkspaceManager
 							// was written. So an AdhocWorkspace searches below a written directory.
 							var files = isMSBuild
 								? Directory.EnumerateFiles(directory)
-								: WorkspaceWalker.EnumerateFiles(directory, "*.cs", recursive: true, PruneFromWalk)
+								: WorkspaceWalker.EnumerateFiles(directory, AdhocFilePatterns, recursive: true, PruneFromWalk)
 							;
 							
 							foreach(var file in files) {

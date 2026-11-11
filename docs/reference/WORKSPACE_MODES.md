@@ -137,7 +137,8 @@ Activated when RoslynMcp resolves your `projectPath` to a directory with no `.cs
 - ✅ **Source-defined type resolution** — all types in loaded `.cs` files resolve
 - ✅ **Syntax analysis** — full syntax tree parsing
 - ✅ **Semantic analysis** — symbol resolution for source-defined types
-- ✅ **File watching** — detects `.cs` file changes via `FileSystemWatcher`
+- ✅ **File watching** — detects `.cs` and `.editorconfig` changes via `FileSystemWatcher`
+- ✅ **`.editorconfig`** — every `.editorconfig` under the root, and those in the directories above it, are loaded as in a project (see *Code style of refactorings and fixes* below)
 
 ### Limitations
 
@@ -305,6 +306,15 @@ File-based tools (`roslyn_read_file`, `roslyn_get_file_outline`, the editing too
 | **Multi-project** | ✅ Yes | ✅ Yes | ❌ No |
 | **.NET Framework** | ⚠️ Limited | ✅ Yes | ❌ No |
 | **Code refactorings and fixes (#389)** | ✅ Built-in, project (analyzer references) and configured providers | ✅ Same | ⚠️ Built-in and configured providers only — no project file, so no analyzer references; the source report says so |
+| **`.editorconfig` (#413)** | ✅ The files the build hands the compiler | ✅ Same | ✅ Every one under the root and in the directories above it |
+
+### Code style of refactorings and fixes
+
+The code a refactoring or a code fix writes (`roslyn_apply_refactoring`, `roslyn_apply_code_fix`) is formatted by Roslyn, and Roslyn takes the style from your `.editorconfig`: `indent_style`, `csharp_new_line_before_open_brace`, `csharp_space_after_keywords_in_control_flow_statements` and the rest of the formatting options. Without one it uses its own defaults (four spaces, every brace on its own line, `foreach (`), whatever the file around the change looks like. This holds in all three modes. The file does not have to be committed: one that `.gitignore` lists is read like any other, so a private `.editorconfig` at the repository root is enough.
+
+As in a project, an `.editorconfig` also sets diagnostic severities (`dotnet_diagnostic.<id>.severity`) in an AdhocWorkspace.
+
+An AdhocWorkspace keeps the files under its root current as they change. One in a directory above the root is read when the workspace loads; a change to it is picked up by the next server start. An MSBuild workspace reloads when an `.editorconfig` it tracks changes.
 
 ---
 
