@@ -16,7 +16,7 @@ namespace RoslynMcp;
 /// </summary>
 internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 {
-	/// <summary>The loader for a project's analyzer references: one load context for all of them, as Roslyn's own host has.</summary>
+	/// <summary>The loader for every project's analyzer references.</summary>
 	internal static ShadowCopyAnalyzerLoader Instance { get; } = new("RoslynMcp.AnalyzerShadow");
 	
 	internal static string ShadowRoot { get; } = Path.Combine(
@@ -26,25 +26,79 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	// Dependency locations registered by AnalyzerFileReference before LoadFromPath runs.
 	private readonly ConcurrentDictionary<string, byte> dependencyLocations = new(SecurityBoundary.PathComparer);
 	
-	// Original path → loaded assembly, so repeated loads reuse the same shadow copy.
-	private readonly ConcurrentDictionary<string, Assembly> loadedByPath = new(SecurityBoundary.PathComparer);
+	private readonly string name;
 	
-	private readonly AssemblyLoadContext context;
+	// The load context each directory's assemblies are in now; read and replaced under the lock.
+	private readonly Dictionary<string, DirectoryContext> contexts = new(SecurityBoundary.PathComparer);
+	private readonly Lock                                 contextsLock = new();
+	private int                                           generations;
 	
 	/// <summary>
-	///     A loader of its own, for a configured provider source (#389): two configured packages may
-	///     ship different versions of the same dependency, which one load context could not hold.
-	///     Dependencies resolve from the registered locations first and fall back to the default
-	///     context, so Microsoft.CodeAnalysis and the framework are always the server's own.
+	///     One load context for the assemblies of one directory, as Roslyn's own hosts have. A
+	///     context holds one assembly of a simple name, so with a single context for everything two
+	///     versions of an analyzer package — two projects of a solution, two workspaces of the
+	///     process — could not both load: the second failed as already loaded (#419). A package's
+	///     assemblies sit in one directory, so they still share their types.
+	///     <para>
+	///         For the same reason an assembly rebuilt in place cannot be loaded a second time into
+	///         the context that has it. The context remembers the modification time each of its
+	///         files had when it was loaded, and a load that finds another one gets the directory a
+	///         new context (<see cref="ContextFor"/>, #418). The old one stays in memory, with the
+	///         sets built from it: the contexts are not collectible.
+	///     </para>
+	/// </summary>
+	private sealed class DirectoryContext(AssemblyLoadContext context, string directory)
+	{
+		public AssemblyLoadContext Context   { get; } = context;
+		public string              Directory { get; } = directory;
+		
+		// Original path → loaded assembly, so repeated loads reuse the same shadow copy.
+		public ConcurrentDictionary<string, Assembly> Loaded { get; } = new(SecurityBoundary.PathComparer);
+		
+		// Original path → the modification time it had when this context first loaded it; under contextsLock.
+		public Dictionary<string, long> Stamps { get; } = new(SecurityBoundary.PathComparer);
+	}
+	
+	/// <summary>
+	///     A loader of its own, for a configured provider source (#389): its assemblies never share
+	///     a context with a project's. Dependencies resolve from the registered locations first and
+	///     fall back to the default context, so Microsoft.CodeAnalysis and the framework are always
+	///     the server's own.
 	/// </summary>
 	internal ShadowCopyAnalyzerLoader(string name)
-	{
-		context = new AssemblyLoadContext(name, isCollectible: false);
-		context.Resolving += ResolveDependency;
-	}
+		=> this.name = name;
 	
 	public void AddDependencyLocation(string fullPath)
 		=> dependencyLocations.TryAdd(fullPath, 0);
+	
+	// The context a path is loaded into: its directory's current one, unless that one loaded the
+	// path at another modification time. Then the file was rebuilt, and the directory gets a new
+	// context; whatever else of the directory is asked for from now on is loaded into that one too.
+	private DirectoryContext ContextFor(string fullPath)
+	{
+		var directory = Path.GetDirectoryName(fullPath) ?? string.Empty;
+		var stamp     = File.GetLastWriteTimeUtc(fullPath).Ticks;
+		
+		lock(contextsLock) {
+			
+			if(contexts.TryGetValue(directory, out var current)
+				&& (!current.Stamps.TryGetValue(fullPath, out var loadedAt) || loadedAt == stamp)) {
+				
+				current.Stamps[fullPath] = stamp;
+				
+				return current;
+			}
+			
+			var context = new AssemblyLoadContext($"{name}#{++generations}: {directory}", isCollectible: false);
+			var created = new DirectoryContext(context, directory);
+			
+			context.Resolving += (_, dependency) => ResolveDependency(created, dependency);
+			created.Stamps[fullPath] = stamp;
+			contexts[directory]      = created;
+			
+			return created;
+		}
+	}
 	
 	/// <summary>
 	///     How many dependency locations are registered; locations are never removed, so it only grows.
@@ -78,11 +132,16 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	
 	public Assembly LoadFromPath(string fullPath)
 	{
-		// One spelling of the path for both dictionaries, or each spelling would have a limit of its own.
+		// One spelling of the path for every dictionary, or each spelling would have a limit of its own.
 		fullPath = Path.GetFullPath(fullPath);
 		
+		return LoadInto(ContextFor(fullPath), fullPath);
+	}
+	
+	private Assembly LoadInto(DirectoryContext target, string fullPath)
+	{
 		try {
-			return loadedByPath.GetOrAdd(fullPath, Load);
+			return target.Loaded.GetOrAdd(fullPath, path => Load(target.Context, path));
 		}
 		catch(Exception ex) when(IsTransient(ex)) {
 			
@@ -103,7 +162,7 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	// A shadow copy of the right length that is no assembly — cut off under a writer that had
 	// sized the file first, or by a power loss — would be reused by every server until the source
 	// changes. It is copied again, once: a source that is itself no assembly fails a second time.
-	private Assembly Load(string fullPath)
+	private static Assembly Load(AssemblyLoadContext context, string fullPath)
 	{
 		try {
 			return context.LoadFromAssemblyPath(ShadowCopy(fullPath, replace: false));
@@ -135,10 +194,21 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	/// <summary>The shadow copy could not be put in place because another process holds the file that is there.</summary>
 	private sealed class ContendedCopyException(string message, Exception inner) : IOException(message, inner);
 	
-	// Analyzer dependencies (helper DLLs shipped next to the analyzer) resolve through the same
-	// shadow mechanism, matched by simple assembly name across registered dependency locations.
-	private Assembly? ResolveDependency(AssemblyLoadContext _, AssemblyName name)
+	/// <summary>
+	///     Analyzer dependencies (helper DLLs shipped next to the analyzer) resolve through the same
+	///     shadow mechanism, by simple assembly name among the registered dependency locations.
+	///     Several locations may carry the name — two projects on different versions of a package —
+	///     and which one is taken must not depend on the order they were registered in (#419). The
+	///     one in the asking assembly's own directory wins, and is loaded into the asking context:
+	///     it is the one the assembly was built and shipped with. Failing that, the highest version
+	///     anywhere, from the context of its own directory, so that it is one assembly for all who
+	///     ask; of two equal versions, the first by path.
+	/// </summary>
+	private Assembly? ResolveDependency(DirectoryContext asking, AssemblyName name)
 	{
+		string?  best        = null;
+		Version? bestVersion = null;
+		
 		foreach(var candidate in dependencyLocations.Keys) {
 			
 			if(!string.Equals(Path.GetFileNameWithoutExtension(candidate), name.Name, StringComparison.OrdinalIgnoreCase))
@@ -147,8 +217,23 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 			if(!File.Exists(candidate))
 				continue;
 			
-			return LoadFromPath(candidate);
+			if(SecurityBoundary.PathComparer.Equals(Path.GetDirectoryName(candidate), asking.Directory)) {
+				
+				// Remembered like any other file of the context, so that a rebuild of it is seen.
+				lock(contextsLock)
+					asking.Stamps.TryAdd(candidate, File.GetLastWriteTimeUtc(candidate).Ticks);
+				
+				return LoadInto(asking, candidate);
+			}
+			
+			var version = VersionOf(candidate);
+			
+			if(best is null || version > bestVersion || (version == bestVersion && string.CompareOrdinal(candidate, best) < 0))
+				(best, bestVersion) = (candidate, version);
 		}
+		
+		if(best is not null)
+			return LoadFromPath(best);
 		
 		// A satellite resource assembly is asked for with every culture and is missing as a rule;
 		// no type is lost with it.
@@ -156,6 +241,18 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 			Interlocked.Increment(ref unresolvedDependencies);
 		
 		return null;
+	}
+	
+	// The assembly version a file declares; the lowest there is for a file that is no assembly or
+	// cannot be read, which then loses to any that can.
+	private static Version VersionOf(string path)
+	{
+		try {
+			return AssemblyName.GetAssemblyName(path).Version ?? new Version(0, 0);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or BadImageFormatException or ArgumentException) {
+			return new Version(0, 0);
+		}
 	}
 	
 	/// <summary>

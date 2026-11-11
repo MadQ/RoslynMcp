@@ -125,8 +125,15 @@ internal static class AnalyzerLoading
 		var unresolved = loader.UnresolvedDependencies;
 		var analyzers  = new AnalyzerFileReference(path, loader).GetAnalyzers(language);
 		
-		if(loader.TransientFailures == failures)
+		if(loader.TransientFailures == failures) {
+			
 			shadowedAnalyzers[key] = (analyzers, loader.UnresolvedDependencies == unresolved ? null : locations);
+			
+			// One set per file and language: nothing asks for an earlier build's again (#425).
+			foreach(var earlier in shadowedAnalyzers.Keys)
+				if(earlier.MtimeTicks != key.Ticks && earlier.Language == language && SecurityBoundary.PathComparer.Equals(earlier.Path, path))
+					shadowedAnalyzers.TryRemove(earlier, out _);
+		}
 		
 		return analyzers;
 	}

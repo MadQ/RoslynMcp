@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The compiler, to build small analyzer assemblies in several versions as fixtures (#418, #419):
+         the same Roslyn the server has, so what is compiled here loads there. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\RoslynMcp.Analyzers\RoslynMcp.Analyzers.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <!-- Built with the harness so the Dev Host group can start it; never referenced (#426). -->
     <ProjectReference Include="..\RoslynMcp.DevHost\RoslynMcp.DevHost.csproj" ReferenceOutputAssembly="false" />

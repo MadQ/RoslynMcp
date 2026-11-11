@@ -447,8 +447,16 @@ internal sealed class CodeActionHost
 			var unresolved = loader.UnresolvedDependencies;
 			var set        = LoadFromReference(path);
 			
-			if(loader.TransientFailures == failures)
+			if(loader.TransientFailures == failures) {
+				
 				fromReferences[key] = (set, loader.UnresolvedDependencies == unresolved ? null : locations);
+				
+				// One set per file: the one loaded from an earlier build of it is what no call gets
+				// any more, and roslyn_info would list it beside this one under the same name (#425).
+				foreach(var earlier in fromReferences.Keys)
+					if(earlier.MtimeTicks != key.Ticks && SecurityBoundary.PathComparer.Equals(earlier.Path, path))
+						fromReferences.TryRemove(earlier, out _);
+			}
 			
 			sets.Add(set);
 		}
