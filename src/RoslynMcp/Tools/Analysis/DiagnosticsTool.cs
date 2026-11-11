@@ -329,11 +329,12 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 	{
 		try {
 			
-			var set = codeActionHost.AnalyzersFor(project);
+			var set     = codeActionHost.AnalyzersFor(project);
+			var missing = MissingReferencesNote(set.MissingReferences);
 			
 			if(set.Analyzers.IsEmpty)
 				
-				return ([], "includeAnalyzers was requested, but the project has no analyzer references, and Roslyn's IDE analyzers are turned off for it (codeActions).");
+				return ([], missing ?? "includeAnalyzers was requested, but the project has no analyzer references, and Roslyn's IDE analyzers are turned off for it (codeActions).");
 			
 			var options = new CompilationWithAnalyzersOptions(
 				project.AnalyzerOptions,
@@ -351,7 +352,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				: null
 			;
 			
-			return ([..result.GetAllDiagnostics()], note);
+			// An analyzer that did not run is the first thing to know about a clean result.
+			return ([..result.GetAllDiagnostics()], missing is null ? note : note is null ? missing : $"{missing} {note}");
 		}
 		catch(Exception ex) when(ex is not OperationCanceledException) {
 			
@@ -359,6 +361,23 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 			
 			return ([], $"Analyzer execution failed ({ex.GetType().Name}) — showing compiler diagnostics only.");
 		}
+	}
+	
+	// Roslyn answers an analyzer reference whose file is missing with no analyzers and no word, so a
+	// clean analyzer run would say nothing of the ones that were never there (#424). By file name,
+	// the first few: a project that was never restored can miss a dozen.
+	private static string? MissingReferencesNote(ImmutableArray<string> missing)
+	{
+		const int named = 5;
+		
+		if(missing.IsEmpty)
+			
+			return null;
+		
+		var names = string.Join(", ", missing.Take(named).Select(Path.GetFileName));
+		var more  = missing.Length > named ? $" and {missing.Length - named} more" : "";
+		
+		return $"{missing.Length} analyzer reference(s) of the project were not found, so their analyzers did not run: {names}{more}. Run roslyn_restore_packages for the project, then ask again.";
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.

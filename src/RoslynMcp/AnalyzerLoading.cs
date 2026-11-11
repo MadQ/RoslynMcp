@@ -51,6 +51,19 @@ internal static class AnalyzerLoading
 				ShadowCopyAnalyzerLoader.Instance.AddDependencyLocation(path);
 	}
 	
+	/// <summary>
+	///     The analyzer references of the project that name a file which is not there (#424): an
+	///     analyzer package that was never restored, or one removed from the NuGet cache since. Roslyn
+	///     answers such a reference with no analyzers and no word, so whoever runs a project's analyzers
+	///     or lists its providers asks here to be able to say which ones are absent.
+	/// </summary>
+	public static ImmutableArray<string> MissingReferences(Project project)
+		=> [..project.AnalyzerReferences
+			.Select(reference => reference.FullPath)
+			.OfType<string>()
+			.Where(path => !File.Exists(path))]
+	;
+	
 	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language, int locations)
 	{
 		if(reference.FullPath is not { } path || !File.Exists(path))

@@ -530,6 +530,70 @@ internal static partial class ShadowCopyTests
 			}
 		}
 		
+		// An analyzer reference whose file is not there is a source with a problem, never a silent
+		// skip (#424): an analyzer package that was never restored, or has left the NuGet cache,
+		// took its fixers, refactorings and analyzers with it, and nothing said so. The project names
+		// a file that does not exist. The refactoring list must name the source with a "not found"
+		// problem and its remedy, roslyn_info must list it, and an analyzer run must say that the
+		// reference did not run. Then the file appears — the bundled analyzers under that name — and
+		// the same server must load it at the next call: a missing file is looked for again every time.
+		async Task<(bool pass, string msg)> RunMissingReference()
+		{
+			if(providerDll is null)
+				return Skip.SetupUnavailable("RoslynMcp.Analyzers.dll is not built");
+			
+			const string file = "Missing.Analyzers.dll";
+			
+			var sw     = Stopwatch.StartNew();
+			var holder = TestFixtures.NewAdhocDir("ShadowMissingDll");
+			
+			fixtures.Add(holder);
+			
+			var missing = holder.PathOf(file);
+			var project = NewOrderedProject("ShadowMissing", [missing]);
+			
+			var (process, server) = await Start(project, new Dictionary<string, string>());
+			
+			try {
+				
+				if(server is null)
+					return (false, "FAIL  (server did not answer initialize)");
+				
+				bool IsTheSource(JsonNode? entry) => entry?["source"]?.GetValue<string>() == $"project: {file}";
+				
+				var named       = await NamedSourceAsync(server, project, "project", file);
+				var problem     = named?["problem"]?.GetValue<string>() ?? "";
+				var info        = await server.CallToolJsonAsync("roslyn_info", new { });
+				var listed      = info?["code_actions"]?["sources"]?.AsArray().Count(IsTheSource) ?? 0;
+				var diagnostics = await server.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = project.Csproj, includeAnalyzers = true, take = 0 });
+				var hint        = diagnostics?["hint"]?.GetValue<string>() ?? "";
+				
+				var reported = problem.Contains("not found", StringComparison.Ordinal)
+					&& problem.Contains("roslyn_restore_packages", StringComparison.Ordinal)
+					&& listed == 1
+					&& hint.Contains(file, StringComparison.Ordinal)
+					&& hint.Contains("did not run", StringComparison.Ordinal);
+				
+				if(!reported)
+					return (false, $"FAIL  (list: {named?.ToJsonString() ?? "source not named"}; roslyn_info lists it {listed} time(s); diagnostics hint: '{hint}') [{sw.ElapsedMilliseconds}ms]");
+				
+				File.Copy(providerDll, missing);
+				shadows.Add(Path.GetDirectoryName(ShadowPathOf(missing))!);
+				
+				var found      = await NamedSourceAsync(server, project, "project", file);
+				var after      = await server.CallToolJsonAsync("roslyn_info", new { });
+				var listedOnce = after?["code_actions"]?["sources"]?.AsArray().Count(IsTheSource) == 1;
+				var pass       = Loaded(found) && listedOnce;
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (once the file was there: {found?.ToJsonString() ?? "not reported"}; listed once: {listedOnce}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				await DefaultWorkspaceTests.StopServerAsync(process, server);
+			}
+		}
+		
 		List<TestCase> tests = [
 			new("a shadow copy cut short is replaced, not loaded", RunTruncated),
 			new("a shadow copy of the right length that is no assembly is copied again", RunCorrupt),
@@ -539,6 +603,7 @@ internal static partial class ShadowCopyTests
 			new("helper types that cannot load are not a problem of the source", RunUnloadableHelpers),
 			new("an analyzer or fix provider lost to a missing dependency is named in the source's problems", RunLostTypesAreNamed),
 			new("a result cached while a dependency was missing does not outlive a later project that names it", RunSiblingNamedLater),
+			new("an analyzer reference whose file is missing is a source with a problem, and loads once the file is there", RunMissingReference),
 		];
 		
 		return new TestGroup($"Shadow Copies ({tests.Count} tests)", tests, Teardown: () => {

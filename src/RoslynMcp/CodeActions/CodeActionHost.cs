@@ -46,6 +46,10 @@ internal sealed class CodeActionHost
 	// never finds a set beside another load's count.
 	readonly ConcurrentDictionary<(string Path, long MtimeTicks), (ProviderSet Set, int? ShortAt)> fromReferences = new();
 	
+	// The analyzer references whose file was not there when a project listing them was last asked
+	// for (#424), by path, so that roslyn_info can name them. An entry goes when the file is found.
+	readonly ConcurrentDictionary<string, ProviderSet> missingReferences = new(SecurityBoundary.PathComparer);
+	
 	// Providers the config files name, keyed by the declaring file and the entry. The stamp beside each set
 	// is what the entry resolved to — the assemblies with their modification times, or the problem — so a
 	// provider assembly rebuilt in place, or a package restored after the server started, is loaded again
@@ -83,6 +87,11 @@ internal sealed class CodeActionHost
 			
 			foreach(var cached in fromReferences.Values)
 				yield return cached.Set.Report;
+			
+			// A reference that was missing when it was last asked for, and still is.
+			foreach(var (path, missing) in missingReferences)
+				if(!File.Exists(path))
+					yield return missing.Report;
 			
 			foreach(var cached in configured.Values)
 				yield return cached.Set.Report;
@@ -234,16 +243,17 @@ internal sealed class CodeActionHost
 	public AnalyzerSet AnalyzersFor(Project project)
 	{
 		var fromProject = AnalyzerLoading.GetShadowedAnalyzers(project);
+		var missing     = AnalyzerLoading.MissingReferences(project);
 		
 		// An AdhocWorkspace project has no file; its directory is where a project config would be.
 		var settings = CodeActionSettings.Resolve(project.FilePath ?? project.Documents.FirstOrDefault()?.FilePath ?? string.Empty, logger);
 		
 		if(!settings.Enabled || !settings.BuiltIn || project.Language != LanguageNames.CSharp)
-			return new AnalyzerSet(fromProject, fromProject.Length, 0);
+			return new AnalyzerSet(fromProject, fromProject.Length, 0) { MissingReferences = missing };
 		
 		var ide = builtIn.Value.Analyzers;
 		
-		return new AnalyzerSet([..fromProject, ..ide], fromProject.Length, ide.Length);
+		return new AnalyzerSet([..fromProject, ..ide], fromProject.Length, ide.Length) { MissingReferences = missing };
 	}
 	
 	// ── Sources ──────────────────────────────────────────────────────────────
@@ -386,8 +396,23 @@ internal sealed class CodeActionHost
 		
 		foreach(var reference in project.AnalyzerReferences) {
 			
-			if(reference.FullPath is not { } path || !File.Exists(path))
+			// A reference without a path is an analyzer handed over in memory. There is no file to read
+			// provider exports from, so it is no provider source; its analyzers still run.
+			if(reference.FullPath is not { } path)
 				continue;
+			
+			// A file that is not there is a source with a problem, never a silent skip (#424): its
+			// fixers and refactorings are missing, and the usual cause, a package that was never
+			// restored or has left the NuGet cache, has a remedy to name. Not cached under the
+			// file's key, since there is no file: it is looked for again at every call.
+			if(!File.Exists(path)) {
+				
+				sets.Add(missingReferences.GetOrAdd(path, MissingReference));
+				
+				continue;
+			}
+			
+			missingReferences.TryRemove(path, out _);
 			
 			var key = (path, File.GetLastWriteTimeUtc(path).Ticks);
 			
@@ -414,6 +439,11 @@ internal sealed class CodeActionHost
 	
 	// The same shadow-copied assembly the project's analyzers come from (AnalyzerLoading), so the
 	// original stays unlocked and a provider and its analyzer are one load.
+	static ProviderSet MissingReference(string path)
+		=> ProviderSet.Empty($"project: {Path.GetFileName(path)}", ProviderSourceKind.Project, path,
+			$"analyzer reference not found: '{path}'. An analyzer package's files get there by a restore: run roslyn_restore_packages for the project, then ask again.")
+	;
+	
 	ProviderSet LoadFromReference(string path)
 	{
 		var source = $"project: {Path.GetFileName(path)}";
