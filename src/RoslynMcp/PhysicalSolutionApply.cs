@@ -76,50 +76,16 @@ internal sealed class PhysicalSolutionApplyPlan
 		
 		foreach(var projectChange in newSolution.GetChanges(baseSolution).GetProjectChanges()) {
 			
-			foreach(var documentId in projectChange.GetChangedDocuments().Concat(projectChange.GetAddedDocuments())) {
-				
-				var document = newSolution.GetDocument(documentId);
-				
-				if(document?.FilePath is null)
-					continue;
-				
-				if(!previewFileStates.TryGetValue(document.FilePath, out var previewState)
-					|| previewState.IntendedBytes is null)
-					throw new PhysicalApplyPlanException(
-						$"The preview does not contain intended bytes for '{document.FilePath}'.");
-				
-				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
-			}
+			// The three kinds of text document a change can write. They differ only in how a
+			// solution hands them out; added documents are source documents only.
+			foreach(var documentId in projectChange.GetChangedDocuments().Concat(projectChange.GetAddedDocuments()))
+				AddWritten(candidates, previewFileStates, newSolution.GetDocument(documentId));
 			
-			foreach(var documentId in projectChange.GetChangedAdditionalDocuments()) {
-				
-				var document = newSolution.GetAdditionalDocument(documentId);
-				
-				if(document?.FilePath is null)
-					continue;
-				
-				if(!previewFileStates.TryGetValue(document.FilePath, out var previewState)
-					|| previewState.IntendedBytes is null)
-					throw new PhysicalApplyPlanException(
-						$"The preview does not contain intended bytes for '{document.FilePath}'.");
-				
-				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
-			}
+			foreach(var documentId in projectChange.GetChangedAdditionalDocuments())
+				AddWritten(candidates, previewFileStates, newSolution.GetAdditionalDocument(documentId));
 			
-			foreach(var documentId in projectChange.GetChangedAnalyzerConfigDocuments()) {
-				
-				var document = newSolution.GetAnalyzerConfigDocument(documentId);
-				
-				if(document?.FilePath is null)
-					continue;
-				
-				if(!previewFileStates.TryGetValue(document.FilePath, out var previewState)
-					|| previewState.IntendedBytes is null)
-					throw new PhysicalApplyPlanException(
-						$"The preview does not contain intended bytes for '{document.FilePath}'.");
-				
-				AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
-			}
+			foreach(var documentId in projectChange.GetChangedAnalyzerConfigDocuments())
+				AddWritten(candidates, previewFileStates, newSolution.GetAnalyzerConfigDocument(documentId));
 			
 			foreach(var documentId in projectChange.GetRemovedDocuments()) {
 				
@@ -300,6 +266,29 @@ internal sealed class PhysicalSolutionApplyPlan
 				PhysicalApplyState.Uncertain,
 				$"Physical file state could not be verified: {ex.Message}");
 		}
+	}
+	
+	/// <summary>
+	///     Enters the file of one text document the change writes, with the bytes the preview intends
+	///     for it. One method for source, additional and analyzer-config documents, which all are a
+	///     <see cref="TextDocument"/>, so that the three cannot come to differ in what they require
+	///     of the preview (#324). A document without a file path is no file to write and is passed over.
+	/// </summary>
+	static void AddWritten(
+		IDictionary<string, List<PhysicalFileCandidate>> candidates,
+		IReadOnlyDictionary<string, PreviewFileState> previewFileStates,
+		TextDocument? document)
+	{
+		if(document?.FilePath is null)
+			
+			return;
+		
+		if(!previewFileStates.TryGetValue(document.FilePath, out var previewState)
+			|| previewState.IntendedBytes is null)
+			throw new PhysicalApplyPlanException(
+				$"The preview does not contain intended bytes for '{document.FilePath}'.");
+		
+		AddCandidate(candidates, document.FilePath, new PhysicalFileCandidate(previewState.IntendedBytes));
 	}
 	
 	static void AddCandidate(
