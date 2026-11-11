@@ -484,6 +484,51 @@ internal static partial class ShadowCopyTests
 			}
 		}
 		
+		// One server, two projects (#421 review): the first lists the dependent assembly without the
+		// one it depends on, so its types are lost and both caches hold the short result, keyed by
+		// the assembly alone. The second project lists the pair. The server now knows where the
+		// dependency is, and what it cached before must not stand: the dependent's source must be
+		// without a problem, and the first project must run more analyzers than it did.
+		async Task<(bool pass, string msg)> RunSiblingNamedLater()
+		{
+			if(FindSdkAnalyzerPair(ctx.RepoRoot) is not { } pair)
+				return Skip.SetupUnavailable("no SDK with Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll beside Microsoft.CodeAnalysis.NetAnalyzers.dll was found");
+			
+			var sw     = Stopwatch.StartNew();
+			var copies = CopyToHolder("ShadowLaterDll", [pair.Dependent, pair.Dependency]);
+			var alone  = NewOrderedProject("ShadowLaterAlone", [copies[0]]);
+			var both   = NewOrderedProject("ShadowLaterBoth", copies);
+			
+			var (process, server) = await Start(alone, new Dictionary<string, string>());
+			
+			try {
+				
+				if(server is null)
+					return (false, "FAIL  (server did not answer initialize)");
+				
+				var file        = Path.GetFileName(pair.Dependent);
+				var shortSource = await NamedSourceAsync(server, alone, "project", file);
+				var shortCount  = await ProjectAnalyzersAsync(server, alone);
+				
+				if(Loaded(shortSource))
+					return (false, $"FAIL  (the dependent assembly loaded whole without its dependency, so nothing was cached short: {shortSource?.ToJsonString() ?? "not reported"}) [{sw.ElapsedMilliseconds}ms]");
+				
+				var fullSource = await NamedSourceAsync(server, both, "project", file);
+				
+				await ProjectAnalyzersAsync(server, both);
+				
+				var fullCount = await ProjectAnalyzersAsync(server, alone);
+				var pass      = Loaded(fullSource) && fullCount > shortCount;
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (after the pair was named: {fullSource?.ToJsonString() ?? "not reported"}; the first project ran {shortCount} analyzers before and {fullCount} after) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				await DefaultWorkspaceTests.StopServerAsync(process, server);
+			}
+		}
+		
 		List<TestCase> tests = [
 			new("a shadow copy cut short is replaced, not loaded", RunTruncated),
 			new("a shadow copy of the right length that is no assembly is copied again", RunCorrupt),
@@ -492,6 +537,7 @@ internal static partial class ShadowCopyTests
 			new("an analyzer reference listed before the reference it depends on loads all its types", RunDependencyListedLater),
 			new("helper types that cannot load are not a problem of the source", RunUnloadableHelpers),
 			new("an analyzer or fix provider lost to a missing dependency is named in the source's problems", RunLostTypesAreNamed),
+			new("a result cached while a dependency was missing does not outlive a later project that names it", RunSiblingNamedLater),
 		];
 		
 		return new TestGroup($"Shadow Copies ({tests.Count} tests)", tests, Teardown: () => {

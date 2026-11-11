@@ -39,12 +39,11 @@ internal sealed class CodeActionHost
 	readonly ProviderSet       bundled;
 	
 	// Providers from a project's analyzer references, keyed by (path, mtime) as AnalyzerLoading keys its analyzers.
-	readonly ConcurrentDictionary<(string Path, long MtimeTicks), ProviderSet> fromReferences = new();
-	
-	// For a set of fromReferences that has a problem: how many dependency locations the loader knew
-	// when it was loaded. A problem may be a type lost for want of a dependency that a later project
-	// names, so such a set is loaded again once the loader knows more (#421).
-	readonly ConcurrentDictionary<(string Path, long MtimeTicks), int> problemSetLocations = new();
+	// A set with a problem is kept with the number of dependency locations the loader knew when it was
+	// loaded: the problem may be a type lost for want of a dependency that a later project names, so
+	// such a set is loaded again once the loader knows more (#421). One value, so that a reader never
+	// finds a set beside another load's count.
+	readonly ConcurrentDictionary<(string Path, long MtimeTicks), (ProviderSet Set, int Locations)> fromReferences = new();
 	
 	// Providers the config files name, keyed by the declaring file and the entry. The stamp beside each set
 	// is what the entry resolved to — the assemblies with their modification times, or the problem — so a
@@ -81,8 +80,8 @@ internal sealed class CodeActionHost
 			if(builtIn.IsValueCreated)
 				yield return builtIn.Value.Report;
 			
-			foreach(var set in fromReferences.Values)
-				yield return set.Report;
+			foreach(var cached in fromReferences.Values)
+				yield return cached.Set.Report;
 			
 			foreach(var cached in configured.Values)
 				yield return cached.Set.Report;
@@ -391,9 +390,9 @@ internal sealed class CodeActionHost
 			
 			var key = (path, File.GetLastWriteTimeUtc(path).Ticks);
 			
-			if(fromReferences.TryGetValue(key, out var cached) && (!problemSetLocations.TryGetValue(key, out var known) || known == locations)) {
+			if(fromReferences.TryGetValue(key, out var cached) && (cached.Set.Report.Problems.IsEmpty || cached.Locations == locations)) {
 				
-				sets.Add(cached);
+				sets.Add(cached.Set);
 				
 				continue;
 			}
@@ -403,16 +402,8 @@ internal sealed class CodeActionHost
 			var failures = ShadowCopyAnalyzerLoader.Instance.TransientFailures;
 			var set      = LoadFromReference(path);
 			
-			if(ShadowCopyAnalyzerLoader.Instance.TransientFailures == failures) {
-				
-				// The count first: a reader that finds the set must find what it was loaded with.
-				if(set.Report.Problems.IsEmpty)
-					problemSetLocations.TryRemove(key, out _);
-				else
-					problemSetLocations[key] = locations;
-				
-				fromReferences[key] = set;
-			}
+			if(ShadowCopyAnalyzerLoader.Instance.TransientFailures == failures)
+				fromReferences[key] = (set, locations);
 			
 			sets.Add(set);
 		}
@@ -634,7 +625,9 @@ internal sealed class CodeActionHost
 	// read from the metadata and each missing one is loaded by name, so the answer names the provider
 	// or analyzer that was lost and why, and says nothing of a helper type that neither needed. An
 	// analyzer is no candidate for an export, but Roslyn drops one that does not load without a word,
-	// and this report is where a project's analyzers running short can be seen.
+	// and this report is where a project's analyzers running short can be seen. The language an
+	// analyzer is for is not looked at: an assembly that also holds Visual Basic analyzers, whose
+	// base types need an assembly the server does not have, names each of them on a C# project too.
 	static IReadOnlyList<Type> ProviderCandidates(Assembly assembly, ImmutableArray<string>.Builder problems)
 	{
 		try {

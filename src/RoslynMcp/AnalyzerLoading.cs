@@ -15,11 +15,12 @@ namespace RoslynMcp;
 internal static class AnalyzerLoading
 {
 	// Analyzer sets keyed by (path, mtime, language): rebuilt analyzers reload fresh, unchanged
-	// ones are reused across calls without touching the original file again. Each is kept with the
-	// number of dependency locations the loader knew when it was loaded: Roslyn does not say when an
-	// assembly lost analyzers for want of a dependency, so a set is loaded again once the loader
-	// knows more — a later project may list the sibling an earlier one did not (#421).
-	private static readonly ConcurrentDictionary<(string Path, long MtimeTicks, string Language), (ImmutableArray<DiagnosticAnalyzer> Analyzers, int Locations)> shadowedAnalyzers = new();
+	// ones are reused across calls without touching the original file again. A set during whose
+	// load a dependency was found nowhere may have come up short — Roslyn does not say — and is
+	// kept with the number of dependency locations the loader knew then: it is loaded again once
+	// the loader knows more, since a later project may list the sibling an earlier one did not
+	// (#421). ShortAt is null for a set that had every dependency it asked for.
+	private static readonly ConcurrentDictionary<(string Path, long MtimeTicks, string Language), (ImmutableArray<DiagnosticAnalyzer> Analyzers, int? ShortAt)> shadowedAnalyzers = new();
 	
 	/// <summary>
 	///     Every analyzer of the project's analyzer references, each reference loaded once per
@@ -58,18 +59,19 @@ internal static class AnalyzerLoading
 		
 		var key = (path, File.GetLastWriteTimeUtc(path).Ticks, language);
 		
-		if(shadowedAnalyzers.TryGetValue(key, out var cached) && cached.Locations == locations)
+		if(shadowedAnalyzers.TryGetValue(key, out var cached) && (cached.ShortAt is null || cached.ShortAt == locations))
 			return cached.Analyzers;
 		
 		// Roslyn swallows an assembly that does not load and answers with no analyzers. Cached, that
 		// answer would outlive a failure that was only another server holding the shadow copy for a
 		// moment, and the project's analyzers would be gone for the life of the process (#412).
 		var loader    = ShadowCopyAnalyzerLoader.Instance;
-		var failures  = loader.TransientFailures;
-		var analyzers = new AnalyzerFileReference(path, loader).GetAnalyzers(language);
+		var failures   = loader.TransientFailures;
+		var unresolved = loader.UnresolvedDependencies;
+		var analyzers  = new AnalyzerFileReference(path, loader).GetAnalyzers(language);
 		
 		if(loader.TransientFailures == failures)
-			shadowedAnalyzers[key] = (analyzers, locations);
+			shadowedAnalyzers[key] = (analyzers, loader.UnresolvedDependencies == unresolved ? null : locations);
 		
 		return analyzers;
 	}
