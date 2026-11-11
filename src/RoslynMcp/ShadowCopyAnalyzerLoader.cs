@@ -57,6 +57,13 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 		// a time noted for one that failed, on a file caught while it was being written, would
 		// make the retry look like a rebuild.
 		public ConcurrentDictionary<string, (Assembly Assembly, long Stamp)> Loaded { get; } = new(SecurityBoundary.PathComparer);
+		
+		// One load into the context at a time. Two calls on either side of a rebuild would
+		// otherwise both find no entry and load one path twice, an old and a new build of one
+		// name, and the second would fail as already loaded, for good. The call that waits finds
+		// the first one's entry instead. Held across the copy and the load only, which run no
+		// code of the assembly and ask for no dependency, so nothing is waited for under it.
+		public Lock Loading { get; } = new();
 	}
 	
 	/// <summary>
@@ -154,8 +161,13 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	
 	private (Assembly Assembly, long Stamp) LoadInto(DirectoryContext target, string fullPath, long stamp)
 	{
+		if(target.Loaded.TryGetValue(fullPath, out var existing))
+			return existing;
+		
 		try {
-			return target.Loaded.GetOrAdd(fullPath, path => (Load(target.Context, path), stamp));
+			
+			lock(target.Loading)
+				return target.Loaded.GetOrAdd(fullPath, path => (Load(target.Context, path), stamp));
 		}
 		catch(Exception ex) when(IsTransient(ex)) {
 			
