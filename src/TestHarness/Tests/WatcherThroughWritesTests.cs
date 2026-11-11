@@ -56,6 +56,11 @@ static class WatcherThroughWritesTests
 		var edited  = fx.Write("Edited.cs", $"class Edited\n{{\n\tint kept;\n{filler}}}\n");
 		var beacon  = fx.Write("Beacon.cs", "class Beacon { }\n");
 		var small   = fx.Write("Small.cs",  "class Small\n{\n\tint a;\n}\n");
+		var marked  = fx.Write("Marked.cs", "class Marked { }\n");
+		var twoStep = fx.Write("TwoStep.cs", "class TwoStep { }\n");
+		var held    = fx.Write("Held.cs", "class Held { }\n");
+		
+		fx.Write("Written.cs", "class Written { }\n");
 		var outside = Enumerable.Range(1, OutsideFiles)
 			.Select(n => fx.Write($"Outside{n:00}.cs", $"class Outside{n:00} {{ }}\n"))
 			.ToArray()
@@ -299,6 +304,187 @@ static class WatcherThroughWritesTests
 					return seen
 						? (true,  "PASS")
 						: (false, "FAIL  (Small.cs was changed on disk to a text of the same length ten seconds ago, and the workspace still serves the server's own edit)");
+				}),
+			
+			// A change someone else made is read, never written (#403). To bring a changed file's
+			// text into a project's workspace the flush used TryApplyChanges, and an
+			// MSBuildWorkspace writes what it applies: every outside save was followed by a write
+			// of the same text by the server. Whatever was saved between the flush's read and
+			// that write was replaced by the older text. The loss itself is a matter of
+			// milliseconds and cannot be staged, but the write that caused it can be seen: it
+			// gives the file a new modification time. So the file is saved once from outside,
+			// the workspace must come to serve it, and well after the flush the file must still
+			// carry the time and the bytes of that one save.
+			new("watcher through writes: a change made on disk is read into the workspace and the file is not written again",
+				async () => {
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers)");
+					
+					var marker = $"// saved once {Guid.NewGuid():N}";
+					var bytes  = System.Text.Encoding.UTF8.GetBytes($"class Marked {{ }}\n{marker}\n");
+					
+					File.WriteAllBytes(marked, bytes);
+					
+					var savedAt  = File.GetLastWriteTimeUtc(marked);
+					var deadline = DateTime.UtcNow.AddSeconds(10);
+					var seen     = false;
+					
+					while(DateTime.UtcNow < deadline && !seen) {
+						
+						await Task.Delay(250);
+						
+						seen = (await WorkspaceTextAsync(marked))?.Contains(marker) == true;
+					}
+					
+					if(!seen)
+						
+						return (false, "FAIL  (Marked.cs was changed on disk ten seconds ago and the workspace does not serve the change)");
+					
+					// Past the debounce, so a write that followed the flush has happened by now.
+					await Task.Delay(1500);
+					
+					var touchedAt = File.GetLastWriteTimeUtc(marked);
+					var same      = File.ReadAllBytes(marked).AsSpan().SequenceEqual(bytes);
+					
+					return touchedAt == savedAt && same
+						? (true,  "PASS")
+						: (false, $"FAIL  (the file was written again after the outside save: saved {savedAt:HH:mm:ss.fffffff}, now {touchedAt:HH:mm:ss.fffffff}; bytes as saved: {same})");
+				}),
+			
+			// The acceptance case of #403: a file written in place in two steps, with a pause
+			// longer than the debounce in between. The flush runs in the pause and meets the
+			// file half written. It must not put that half back, and when the writer is done the
+			// file and the workspace must both hold the complete text.
+			new("watcher through writes: a file written in place in two steps ends complete on disk and in the workspace",
+				async () => {
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers)");
+					
+					var marker   = $"// second half {Guid.NewGuid():N}";
+					var first    = "class TwoStep\n{\n\tint first;\n";
+					var second   = $"\tint second;\n}}\n{marker}\n";
+					
+					using(var stream = new FileStream(twoStep, FileMode.Open, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete)) {
+						
+						stream.SetLength(0);
+						stream.Write(System.Text.Encoding.UTF8.GetBytes(first));
+						stream.Flush(flushToDisk: true);
+						
+						await Task.Delay(1200);
+						
+						stream.Write(System.Text.Encoding.UTF8.GetBytes(second));
+					}
+					
+					var deadline = DateTime.UtcNow.AddSeconds(10);
+					var seen     = false;
+					
+					while(DateTime.UtcNow < deadline && !seen) {
+						
+						await Task.Delay(250);
+						
+						seen = (await WorkspaceTextAsync(twoStep))?.Contains(marker) == true;
+					}
+					
+					await Task.Delay(1500);
+					
+					var onDisk = File.ReadAllText(twoStep);
+					
+					return seen && onDisk == first + second
+						? (true,  "PASS")
+						: (false, $"FAIL  (the workspace serves the complete text: {seen}; the file holds the complete text: {onDisk == first + second}, {onDisk.Length} of {(first + second).Length} characters)");
+				}),
+			
+			// A changed file that cannot be read yet is read again (#403). The server's reads keep
+			// writers out, so while a program still has the file open for writing the flush is
+			// refused. It used to drop the report there, without a word, and when the program
+			// then closed the file without writing again, nothing ever told the workspace. The
+			// harness is that program: it writes the new text, keeps the file open across several
+			// debounce periods, and closes it. The workspace must come to serve the text, and the
+			// log must say that the file could not be read at first. Windows only: elsewhere an
+			// open file does not stop a read.
+			new("watcher through writes: a changed file still open for writing is read once it can be",
+				async () => {
+					
+					if(!OperatingSystem.IsWindows())
+						
+						return Skip.NotApplicable("an open file refuses another process's read only on Windows");
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers)");
+					
+					var marker = $"// held {Guid.NewGuid():N}";
+					
+					using(var stream = new FileStream(held, FileMode.Open, FileAccess.Write, FileShare.None)) {
+						
+						stream.SetLength(0);
+						stream.Write(System.Text.Encoding.UTF8.GetBytes($"class Held {{ }}\n{marker}\n"));
+						stream.Flush(flushToDisk: true);
+						
+						await Task.Delay(1500);
+					}
+					
+					var deadline = DateTime.UtcNow.AddSeconds(10);
+					var seen     = false;
+					
+					while(DateTime.UtcNow < deadline && !seen) {
+						
+						await Task.Delay(250);
+						
+						seen = (await WorkspaceTextAsync(held))?.Contains(marker) == true;
+					}
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var log, out var logFailure))
+						
+						return (false, logFailure);
+					
+					var logged = log.Any(line => line.Contains("could not be read, will be read again") && line.Contains("Held.cs"));
+					
+					return seen && logged
+						? (true,  "PASS")
+						: (false, $"FAIL  (the workspace serves the text written while the file was held: {seen}; the log says the read was put off: {logged})");
+				}),
+			
+			// The server's own write of a tracked file is one write (#433). After writing the
+			// file, the server had the workspace take the new text through TryApplyChanges, which
+			// wrote the file a second time. That second write was refused whenever the file was
+			// still open somewhere, and the workspace reported it as a failure of its own: a
+			// steady stream of "being used by another process" in the log, about 35 in a full
+			// run of this harness, for calls that had succeeded. Ten whole-file writes of one
+			// tracked file must leave no workspace failure in the log for this fixture.
+			new("watcher through writes: the server's own write of a tracked file logs no workspace failure",
+				async () => {
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: the workspace never settled with live watchers)");
+					
+					for(var n = 1; n <= 10; n++) {
+						
+						var written = await Call("roslyn_write_file", new { filePath = "Written.cs", content = $"class Written\n{{\n\tint field{n};\n}}\n", projectPath = fx.Csproj });
+						
+						if(written is null || written["error"] is not null)
+							
+							return (false, $"FAIL  (roslyn_write_file failed on write {n}: {written?.ToJsonString() ?? "no response"})");
+					}
+					
+					await Task.Delay(1500);
+					
+					var served = await WorkspaceTextAsync(fx.PathOf("Written.cs"));
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var log, out var logFailure))
+						
+						return (false, logFailure);
+					
+					var failures = log.Count(line => line.Contains("WorkspaceFailed") && line.Contains("WatcherThroughWrites"));
+					
+					return failures == 0 && served?.Contains("field10") == true
+						? (true,  "PASS")
+						: (false, $"FAIL  (workspace failures logged for this fixture: {failures}; the workspace serves the last write: {served?.Contains("field10") == true})");
 				}),
 		};
 		
