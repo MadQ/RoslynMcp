@@ -368,13 +368,28 @@ static class DevHostTests
 		});
 	}
 	
-	// Replaced whole, as the publish script does: the host must never read half a path.
+	// Replaced whole, as the publish script does: the host must never read half a path. And tried
+	// again, as the script does: on Windows a rename over a file that a host has open for its poll
+	// at that moment is refused, even though the host shares deletes, until the host lets go a
+	// moment later. Seen on a CI runner as "Access to the path is denied", which aborted the run.
 	static void Point(string home, string build)
 	{
 		var temp = Path.Combine(home, $"current.{Guid.NewGuid():N}.tmp");
 		
 		File.WriteAllText(temp, build + "\n");
-		File.Move(temp, Path.Combine(home, "current"), overwrite: true);
+		
+		for(var attempt = 1; ; attempt++) {
+			
+			try {
+				
+				File.Move(temp, Path.Combine(home, "current"), overwrite: true);
+				
+				return;
+			}
+			catch(Exception refused) when(refused is IOException or UnauthorizedAccessException && attempt < 20) {
+				Thread.Sleep(50);
+			}
+		}
 	}
 	
 	static Task<JsonNode?> CallAsync(TestContext client, string tool, object arguments, List<string> notifications)

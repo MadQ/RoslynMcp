@@ -104,7 +104,11 @@ internal sealed record ProviderSet(
 ///     The analyzers that run for a project when analyzers are asked for: the project's own analyzer
 ///     references, and Roslyn's IDE analyzers while built-in code actions are on for it.
 /// </summary>
-internal sealed record AnalyzerSet(ImmutableArray<DiagnosticAnalyzer> Analyzers, int FromProject, int BuiltIn);
+internal sealed record AnalyzerSet(ImmutableArray<DiagnosticAnalyzer> Analyzers, int FromProject, int BuiltIn)
+{
+	/// <summary>The project's analyzer references whose file is not there, by path; their analyzers did not run (#424).</summary>
+	public ImmutableArray<string> MissingReferences { get; init; } = [];
+}
 
 /// <summary>The providers that apply to one document, after the settings and the deny-list.</summary>
 internal sealed record ResolvedProviders(

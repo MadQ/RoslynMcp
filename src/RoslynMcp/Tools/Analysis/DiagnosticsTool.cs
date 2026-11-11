@@ -113,6 +113,9 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		
 		var diagnostics = new List<Diagnostic>();
 		var notes       = new List<string>();
+		
+		// The analyzer references not found, over every target analyzed (#424).
+		var missingReferences = new HashSet<string>(SecurityBoundary.PathComparer);
 		var fileFound   = false;
 		
 		foreach(var (compilation, project) in targets) {
@@ -149,7 +152,9 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 			
 			if(includeAnalyzers && project is not null) {
 				
-				var (analyzerDiags, note) = await RunAnalyzersAsync(project, compilation, severity, cancellationToken);
+				var (analyzerDiags, note, missing) = await RunAnalyzersAsync(project, compilation, severity, cancellationToken);
+				
+				missingReferences.UnionWith(missing);
 				
 				// Across several compilations a note is about one of them: "no analyzer references"
 				// for one project is not that no analyzer ran.
@@ -169,6 +174,10 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		if(filePath is not null && !fileFound)
 			
 			return scope.Error(new ErrorResult($"File '{filePath}' not found in the compilation."));
+		
+		// An analyzer that did not run is the first thing to know about a clean result.
+		if(MissingReferencesNote(missingReferences) is { } missingNote)
+			notes.Insert(0, missingNote);
 		
 		string? analyzerNote = notes.Count > 0 ? string.Join(" ", notes.Distinct()) : null;
 		
@@ -325,15 +334,23 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 	///     the analyzed project's outputs are never locked. The IDE analyzers report mostly at info and
 	///     hidden, so a default severity filter hides their output; the note says how to see it.
 	/// </summary>
-	private async Task<(Diagnostic[] Diagnostics, string? Note)> RunAnalyzersAsync(Project project, Compilation compilation, string? severity, CancellationToken cancellationToken)
+	private async Task<(Diagnostic[] Diagnostics, string? Note, ImmutableArray<string> Missing)> RunAnalyzersAsync(Project project, Compilation compilation, string? severity, CancellationToken cancellationToken)
 	{
+		// The references that were not found are the caller's to report, once for all the targets it
+		// runs, and whatever becomes of the run itself: a failed run must not hide them.
+		ImmutableArray<string> missing = [];
+		
 		try {
 			
 			var set = codeActionHost.AnalyzersFor(project);
 			
+			missing = set.MissingReferences;
+			
 			if(set.Analyzers.IsEmpty)
 				
-				return ([], "includeAnalyzers was requested, but the project has no analyzer references, and Roslyn's IDE analyzers are turned off for it (codeActions).");
+				return ([], missing.IsEmpty
+					? "includeAnalyzers was requested, but the project has no analyzer references, and Roslyn's IDE analyzers are turned off for it (codeActions)."
+					: "No analyzer ran: the project's analyzer references were not found, and Roslyn's IDE analyzers are turned off for it (codeActions).", missing);
 			
 			var options = new CompilationWithAnalyzersOptions(
 				project.AnalyzerOptions,
@@ -351,14 +368,32 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				: null
 			;
 			
-			return ([..result.GetAllDiagnostics()], note);
+			return ([..result.GetAllDiagnostics()], note, missing);
 		}
 		catch(Exception ex) when(ex is not OperationCanceledException) {
 			
 			logger.LogError("Diagnostics", $"Analyzer run failed: {ex.GetType().Name}: {ex.Message}");
 			
-			return ([], $"Analyzer execution failed ({ex.GetType().Name}) — showing compiler diagnostics only.");
+			return ([], $"Analyzer execution failed ({ex.GetType().Name}) — showing compiler diagnostics only.", missing);
 		}
+	}
+	
+	// Roslyn answers an analyzer reference whose file is missing with no analyzers and no word, so a
+	// clean analyzer run would say nothing of the ones that were never there (#424). By file name,
+	// the first few: a project can miss a dozen. Said once for every target the call ran, since the
+	// targets of one project, and the projects of one solution, mostly miss the same files.
+	private static string? MissingReferencesNote(IReadOnlyCollection<string> missing)
+	{
+		const int named = 5;
+		
+		if(missing.Count == 0)
+			
+			return null;
+		
+		var names = string.Join(", ", missing.Take(named).Select(Path.GetFileName));
+		var more  = missing.Count > named ? $" and {missing.Count - named} more" : "";
+		
+		return $"{missing.Count} analyzer reference(s) were not found, so their analyzers did not run: {names}{more}. {AnalyzerLoading.MissingReferenceRemedy(missing)}";
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.

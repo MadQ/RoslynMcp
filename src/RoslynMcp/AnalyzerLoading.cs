@@ -51,6 +51,61 @@ internal static class AnalyzerLoading
 				ShadowCopyAnalyzerLoader.Instance.AddDependencyLocation(path);
 	}
 	
+	/// <summary>
+	///     The analyzer references of the project that name a file which is not there (#424): an
+	///     analyzer package that was never restored, or one removed from the NuGet cache since. Roslyn
+	///     answers such a reference with no analyzers and no word, so whoever runs a project's analyzers
+	///     or lists its providers asks here to be able to say which ones are absent.
+	/// </summary>
+	public static ImmutableArray<string> MissingReferences(Project project)
+		=> [..project.AnalyzerReferences
+			.Select(reference => reference.FullPath)
+			.OfType<string>()
+			.Where(path => !File.Exists(path))]
+	;
+	
+	/// <summary>
+	///     What to do about analyzer references that were not found, by where they should be. A file
+	///     under the NuGet package cache gets there by a restore. Anything else is most likely the
+	///     output of a project referenced as an analyzer, which is missing before the first build and
+	///     after a clean, and which no restore brings back.
+	/// </summary>
+	public static string MissingReferenceRemedy(IReadOnlyCollection<string> paths)
+	{
+		var packaged = paths.Count(IsUnderPackageCache);
+		
+		// Worded for one path and for several alike: the caller has named them.
+		if(packaged == paths.Count)
+			
+			return "Under the NuGet package cache the server knows: restore the project's packages with roslyn_restore_packages, then ask again.";
+		
+		if(packaged == 0)
+			
+			return "Not under the NuGet package cache the server knows, so most likely the output of a project referenced as an analyzer: build it with roslyn_build_project, then ask again.";
+		
+		return "Those under the NuGet package cache the server knows come back with roslyn_restore_packages; the others are most likely the output of a project referenced as an analyzer, which roslyn_build_project builds. Then ask again.";
+	}
+	
+	// Under the cache directory itself, not beside it: a sibling whose name begins the same way
+	// ("packages-old") is not the cache. The root is whatever the environment names, so it is made a
+	// full path first, and one that cannot be is no cache anything is under. A cache the server does
+	// not know of (a folder nuget.config names) is taken for a build output; the remedy named for
+	// that, a build, restores as well.
+	private static bool IsUnderPackageCache(string path)
+	{
+		string root;
+		
+		try {
+			root = Path.GetFullPath(NuGetPackageLocator.Root);
+		}
+		catch(Exception failure) when(failure is ArgumentException or NotSupportedException or PathTooLongException) {
+			return false;
+		}
+		
+		// A root that is a drive or the file system root keeps its separator; any other gets one.
+		return SecurityBoundary.StartsWithPath(path, Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar);
+	}
+	
 	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language, int locations)
 	{
 		if(reference.FullPath is not { } path || !File.Exists(path))
