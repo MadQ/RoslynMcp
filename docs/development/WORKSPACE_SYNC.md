@@ -428,7 +428,13 @@ file changes again. For a name the index added to the batch, the file it leads t
 the name: that file is a path like any the watcher reports, and the next flush adds its names
 from the index again. (Putting the name itself back was tried, with a note of which names were
 retried; a name that is no document any more looks like a new source file, and the note had to
-be kept right across every way a path can leave a batch.) `InvalidateFile` hands a read it was refused to the same retry. A
+be kept right across every way a path can leave a batch.) The failed reads are counted under
+the path that is put back, once per flush, so a file and all its names share one count and one
+giving up: with a count each, one's giving up was undone by the other, and a file held for good
+was read again without end. A path that is in that count and has names in the index is back in
+a batch only to have them read; when it is itself a `.cs` no project compiles, it looked like a
+new document at its first report and had its reload then, and is not flagged again at every
+retry. `InvalidateFile` hands a read it was refused to the same retry. A
 file that is gone is not retried; its delete has a report of its own.
 
 **The non-writing apply leaves link targets alone.** An apply that writes brings the file

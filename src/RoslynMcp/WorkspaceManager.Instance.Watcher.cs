@@ -744,7 +744,21 @@ internal sealed partial class WorkspaceManager
 				break;
 			}
 			
+			// The paths put back by this flush for another read, so that the names of one file
+			// count as one failed attempt of it.
+			var putBack = new HashSet<string>(SecurityBoundary.PathComparer);
+			
 			foreach(var path in changed) {
+				
+				// The path to put back so that this one is read again, and under which its
+				// failed reads are counted: the path itself, or for a name the index added,
+				// the file it leads to. Null when the index no longer knows one. A name is not
+				// put back itself: on its own, a name that is no document any more would look
+				// like a new source file. The file it leads to is a path like any the watcher
+				// reports, and the next flush adds its names from the index again. One count
+				// for the file and all its names: with one each, the giving up of one was
+				// undone by the other, and a file held for good was read again without end.
+				var readAgainAs = unreported.Contains(path) ? physicalIndex.PhysicalOf(path) : path;
 				
 				try {
 					
@@ -764,7 +778,22 @@ internal sealed partial class WorkspaceManager
 						// A path that came from the index and is no document of this solution is
 						// not a new source file: a reload dropped it between the lookup and
 						// here. It is skipped, not taken for a file that has just appeared.
-						if(impact is WorkspaceEditImpact.Reload && !(reason == EditClassifier.ReasonNewDocument && unreported.Contains(path)))
+						// Neither is a path this flush is here for only because a read failed
+						// (see RetryUnreadable): a file that documents are links to, and that
+						// no project compiles itself, looked new when it was first reported,
+						// and has had its reload. Flagged again at every retry, a reload that
+						// finishes while the file is still held would be followed by another.
+						// Such a path is in the count of failed reads and has names in the index
+						// that are read below. One that is in the count and has none was a
+						// document when its read failed and is none now: there is nothing left
+						// to read it for, and it is let go, or it would be passed over here
+						// for good.
+						var backForRead = unreadable.ContainsKey(path) && physicalIndex.NamesOf(path).Length > 0;
+						
+						if(!backForRead)
+							unreadable.TryRemove(path, out _);
+						
+						if(impact is WorkspaceEditImpact.Reload && !(reason == EditClassifier.ReasonNewDocument && (unreported.Contains(path) || backForRead)))
 							FlagReload(reason, path);
 
 						continue;
@@ -782,7 +811,8 @@ internal sealed partial class WorkspaceManager
 					
 					// Read: whatever kept the file from being read before is over, whether or
 					// not the text turns out to be new.
-					unreadable.TryRemove(path, out _);
+					if(readAgainAs is not null)
+						unreadable.TryRemove(readAgainAs, out _);
 
 					// Already current. Applying identical text is not free: it moves the solution
 					// on, which drops the compilations, and flags a full reload if it fails.
@@ -809,15 +839,18 @@ internal sealed partial class WorkspaceManager
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
 					// The change is known and its text is not: the workspace is behind disk
-					// until a later flush has read the file. A name the index added is not put
-					// back itself: on its own, a name that is no document any more would look
-					// like a new source file. The file it leads to is put back, a path like any
-					// the watcher reports, and the next flush adds its names from the index
-					// again, this one among them.
-					var again = unreported.Contains(path) ? physicalIndex.PhysicalOf(path) : path;
-					
-					if(RetryUnreadable(path, again, ex))
+					// until a later flush has read the file. A second name of a file this
+					// flush has put back already is covered by that.
+					if(readAgainAs is not null && putBack.Contains(readAgainAs))
 						behindDisk = true;
+					
+					else if(RetryUnreadable(path, readAgainAs, ex)) {
+						
+						behindDisk = true;
+						
+						if(readAgainAs is not null)
+							putBack.Add(readAgainAs);
+					}
 				}
 				catch(InvalidOperationException) {
 					
@@ -872,9 +905,10 @@ internal sealed partial class WorkspaceManager
 			return reloadFlagged || behindDisk;
 		}
 		
-		// How often in a row each changed file could not be read by a flush.
+		// How often in a row each changed file could not be read by a flush, by the path that is
+		// put back for it. A path is in here from its first failed read until it is read or
+		// given up, which is also how a flush knows a path that is only back for another read.
 		readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> unreadable = new(SecurityBoundary.PathComparer);
-
 		
 		// About half a minute of debounce periods, each costing one refused open. A save holds a
 		// file far shorter, a slow copy or a download may not; a file held for good must not be
@@ -899,23 +933,26 @@ internal sealed partial class WorkspaceManager
 		{
 			if(failure is FileNotFoundException or DirectoryNotFoundException) {
 				
-				unreadable.TryRemove(path, out _);
+				// Only for the path itself. A name that leads nowhere says nothing about the
+				// file that is put back for the other names of it, and clearing that file's
+				// count here would start it over at every flush.
+				if(again is not null && SecurityBoundary.PathComparer.Equals(again, path))
+					unreadable.TryRemove(path, out _);
 				
 				return false;
 			}
 			
-			var failed = unreadable.AddOrUpdate(path, 1, (_, count) => count + 1);
-			
-			// again: the path to put back so that 'path' is read again. The path itself, or for
-			// a name the index added, the file it leads to; null when the index no longer
-			// knows one.
+			// again: the path to put back so that 'path' is read again, and the one the failed
+			// reads are counted under. The path itself, or for a name the index added, the
+			// file it leads to; null when the index no longer knows one.
 			if(again is null) {
 				
-				unreadable.TryRemove(path, out _);
 				logger.LogInfo("Watch", $"Changed file could not be read, and nothing is left to read it again by; the workspace keeps its earlier text until the file changes again ({failure.GetType().Name}: {failure.Message}): {path}");
 				
 				return true;
 			}
+			
+			var failed = unreadable.AddOrUpdate(again, 1, (_, count) => count + 1);
 			
 			if(failed == 1)
 				logger.LogInfo("Watch", $"Changed file could not be read, will be read again ({failure.GetType().Name}: {failure.Message}): {path}");
@@ -925,7 +962,7 @@ internal sealed partial class WorkspaceManager
 			
 			else {
 				
-				unreadable.TryRemove(path, out _);
+				unreadable.TryRemove(again, out _);
 				logger.LogInfo("Watch", $"Changed file still cannot be read after {MaxUnreadableRetries} attempts; the workspace keeps its earlier text until the file changes again: {path}");
 			}
 			
