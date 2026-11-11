@@ -424,9 +424,11 @@ of debounce periods, and logs the first failure and the giving up
 flush reports the workspace as behind disk, so the sync clock does not advance and
 `roslyn_check_drift` sees the file. Once it has given up, the next clean flush moves the clock
 on and the file is no longer reported: the log entry is then the only word of it, until the
-file changes again. A name the index added to the batch is put back too — the file it leads to
-was read and is not reported again — and noted in `retriedNames`, so the next flush still treats
-it as a name from the index and never as news of a file. `InvalidateFile` hands a read it was refused to the same retry. A
+file changes again. For a name the index added to the batch, the file it leads to is put back, not
+the name: that file is a path like any the watcher reports, and the next flush adds its names
+from the index again. (Putting the name itself back was tried, with a note of which names were
+retried; a name that is no document any more looks like a new source file, and the note had to
+be kept right across every way a path can leave a batch.) `InvalidateFile` hands a read it was refused to the same retry. A
 file that is gone is not retried; its delete has a report of its own.
 
 **The non-writing apply leaves link targets alone.** An apply that writes brings the file

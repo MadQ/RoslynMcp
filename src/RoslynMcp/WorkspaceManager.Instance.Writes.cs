@@ -329,8 +329,10 @@ internal sealed partial class WorkspaceManager
 					// was disposed has no documents, and a document that is not in it is refused.
 					// NotSupportedException: TryApplyChanges throws for unsupported change kinds
 					// (e.g. AddDocument/RemoveDocument on MSBuildWorkspace). Both treated as false return.
-					_ = ex
-					;
+					// Said in the log: the caller only learns that the apply failed, and for an
+					// edit that was to be written, why is worth knowing.
+					logger.LogInfo("Workspace", $"Apply refused ({ex.GetType().Name}: {ex.Message})");
+					
 					applied = false;
 				}
 				
@@ -465,7 +467,10 @@ internal sealed partial class WorkspaceManager
 				
 				// Inside the same window, for the same reason as above. InvalidateFile takes the
 				// text into the workspace without writing, so it has synced nothing behind a
-				// link (#403), and this is the one sync of the file the write went into.
+				// link (#403), and this is the one sync of the file the write went into. Where
+				// this Roslyn cannot set a text without writing, InvalidateFile's apply has
+				// written and synced the file already; it is then synced here a second time,
+				// which costs a read and changes nothing.
 				if(linked is { } afterWrite)
 					SyncLinkTarget(afterWrite);
 				

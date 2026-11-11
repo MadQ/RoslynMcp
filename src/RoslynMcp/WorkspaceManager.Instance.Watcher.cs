@@ -635,13 +635,6 @@ internal sealed partial class WorkspaceManager
 				if(unreported.Count > 0)
 					changed = [.. changed, .. unreported];
 				
-				// A name the index added to an earlier batch that could not be read then was
-				// put back for this one (see FlushMSBuild). It is in the batch like a report,
-				// and is still what it was: a name from the index, never news of a file.
-				foreach(var path in changed)
-					if(retriedNames.TryRemove(path, out var noted))
-						unreported.Add(path);
-				
 				// True when the flush could only flag a reload. The workspace is then behind disk
 				// until that reload completes, so the sync clock must not advance — otherwise
 				// roslyn_check_drift reports "in sync" for changes it has not applied, and a
@@ -816,18 +809,15 @@ internal sealed partial class WorkspaceManager
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
 					// The change is known and its text is not: the workspace is behind disk
-					// until a later flush has read the file. A name the index added is read
-					// again like a reported path — nothing else would: the file it leads to
-					// was read, and is not reported a second time — and is noted, so that the
-					// next flush still knows it for a name from the index. On its own, a name
-					// that is no document any more would look like a new source file.
-					if(RetryUnreadable(path, ex)) {
-						
+					// until a later flush has read the file. A name the index added is not put
+					// back itself: on its own, a name that is no document any more would look
+					// like a new source file. The file it leads to is put back, a path like any
+					// the watcher reports, and the next flush adds its names from the index
+					// again, this one among them.
+					var again = unreported.Contains(path) ? physicalIndex.PhysicalOf(path) : path;
+					
+					if(RetryUnreadable(path, again, ex))
 						behindDisk = true;
-						
-						if(unreported.Contains(path) && unreadable.ContainsKey(path))
-							retriedNames.TryAdd(path, 0);
-					}
 				}
 				catch(InvalidOperationException) {
 					
@@ -884,9 +874,7 @@ internal sealed partial class WorkspaceManager
 		
 		// How often in a row each changed file could not be read by a flush.
 		readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> unreadable = new(SecurityBoundary.PathComparer);
-		
-		// The paths put back for another read that no watcher reported: names the index added.
-		readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> retriedNames = new(SecurityBoundary.PathComparer);
+
 		
 		// About half a minute of debounce periods, each costing one refused open. A save holds a
 		// file far shorter, a slow copy or a download may not; a file held for good must not be
@@ -904,6 +892,10 @@ internal sealed partial class WorkspaceManager
 		///     behind the file.
 		/// </summary>
 		bool RetryUnreadable(string path, Exception failure)
+			=> RetryUnreadable(path, path, failure)
+		;
+		
+		bool RetryUnreadable(string path, string? again, Exception failure)
 		{
 			if(failure is FileNotFoundException or DirectoryNotFoundException) {
 				
@@ -914,11 +906,22 @@ internal sealed partial class WorkspaceManager
 			
 			var failed = unreadable.AddOrUpdate(path, 1, (_, count) => count + 1);
 			
+			// again: the path to put back so that 'path' is read again. The path itself, or for
+			// a name the index added, the file it leads to; null when the index no longer
+			// knows one.
+			if(again is null) {
+				
+				unreadable.TryRemove(path, out _);
+				logger.LogInfo("Watch", $"Changed file could not be read, and nothing is left to read it again by; the workspace keeps its earlier text until the file changes again ({failure.GetType().Name}: {failure.Message}): {path}");
+				
+				return true;
+			}
+			
 			if(failed == 1)
 				logger.LogInfo("Watch", $"Changed file could not be read, will be read again ({failure.GetType().Name}: {failure.Message}): {path}");
 			
 			if(failed <= MaxUnreadableRetries)
-				Enqueue(path, deleted: false);
+				Enqueue(again, deleted: false);
 			
 			else {
 				
