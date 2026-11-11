@@ -58,16 +58,22 @@ internal sealed partial class WorkspaceManager
 						var newText     = SourceText.From(stream, FileWriter.Utf8NoBom);
 						var newSolution = info.WithText(currentSolution, newText);
 						
-						// If TryApplyChanges fails (rare — workspace conflict or unsupported kind),
-						// flag for full reload so the next GetCompilation picks up the new content.
-						if(!ApplyChangesToDisk(newSolution, currentSolution, ws)) {
+						// The file has the text already, so the workspace takes it without
+						// writing it there a second time (#403). If the apply fails (rare — the
+						// solution moved on, or an unsupported kind), flag for full reload so the
+						// next GetCompilation picks up the new content.
+						if(!ApplyTextsInMemory(newSolution, currentSolution, ws)) {
 							
 							logger.LogInfo("Reload", $"Flagged (incremental apply failed): {fullPath}");
 							Interlocked.Increment(ref reloadVersion);
 						}
 					}
-					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
-					{ }
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						
+						// Left to the watcher flush, which reads the file again (#403): dropped here, the
+						// workspace would keep the text from before the write.
+						RetryUnreadable(fullPath, ex);
+					}
 					catch(InvalidOperationException ex) {
 						
 						// Defensive only — see WorkspaceTextDocumentInfo.WithText for the mixed-kind case.
@@ -101,8 +107,12 @@ internal sealed partial class WorkspaceManager
 				try {
 					SyncAdhocDocument(adhoc, adhocProjectId, fullPath);
 				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException)
-				{ }
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					
+					// Left to the watcher flush, which reads the file again (#403): dropped here, the
+					// workspace would keep the text from before the write.
+					RetryUnreadable(fullPath, ex);
+				}
 		}
 		
 		// ── FileSystemWatcher ────────────────────────────────────────────────
@@ -148,6 +158,76 @@ internal sealed partial class WorkspaceManager
 		// A very narrow race between the staleness check and TryApplyChanges still exists, but
 		// TryApplyChanges returns false gracefully on a disposed workspace — so this is safe.
 		internal bool ApplyChangesToDisk(Solution newSolution, Solution baseSolution, Workspace expectedWs)
+			=> Apply(newSolution, baseSolution, expectedWs, persist: true)
+		;
+		
+		/// <summary>
+		///     Brings texts that were read from disk into the workspace, and writes nothing (#403).
+		///     For the watcher flush and <see cref="InvalidateFile"/>: the file already holds the
+		///     text, and <see cref="ApplyChangesToDisk(Solution, Solution, Workspace)"/> would have
+		///     the workspace write it there again. That second write put an older text back over
+		///     whatever someone had saved since the read, and was reported as a workspace failure
+		///     when the file was still open elsewhere (#433). Everything else is
+		///     as for an apply that writes: it fails when the solution has moved on since
+		///     <paramref name="baseSolution"/>, and the documents at other names of a changed file
+		///     are refreshed.
+		/// </summary>
+		internal bool ApplyTextsInMemory(Solution newSolution, Solution baseSolution, Workspace expectedWs)
+			=> Apply(newSolution, baseSolution, expectedWs, persist: false)
+		;
+		
+		// One change to the workspace's solution at a time, whether it writes or not. An apply
+		// that does not write checks for itself that the solution has not moved on, which
+		// TryApplyChanges does inside; under this gate nothing can get between its check and its
+		// change. Never taken under the workspace lock.
+		readonly Lock applyGate = new();
+		
+		// The texts of newSolution that differ from baseSolution, set on the workspace one
+		// document at a time. False when the solution has moved on, as TryApplyChanges answers;
+		// null when this Roslyn has no way to set a text without writing it.
+		bool? SetTexts(Workspace ws, Solution newSolution, Solution baseSolution, ProjectChanges[] projectChanges)
+		{
+			if(!WorkspaceTextSetter.Available)
+				
+				return null;
+			
+			if(!ReferenceEquals(ws.CurrentSolution, baseSolution))
+				
+				return false;
+			
+			var set = 0;
+			
+			foreach(var project in projectChanges) {
+				
+				var changed = project.GetChangedDocuments().Select(id => (Id: id, Additional: false))
+					.Concat(project.GetChangedAdditionalDocuments().Select(id => (Id: id, Additional: true)))
+				;
+				
+				foreach(var (id, additional) in changed) {
+					
+					TextDocument? document = additional ? newSolution.GetAdditionalDocument(id) : newSolution.GetDocument(id);
+					
+					// A changed document without a text at hand cannot be set. Passing it over
+					// would report an apply that left it as it was.
+					if(document is null || !document.TryGetText(out var text))
+						
+						return false;
+					
+					// Not there to be called: before anything was set, the apply that writes
+					// takes over. After, the solution has moved on under it, so the apply has
+					// failed, and the caller reloads.
+					if(!WorkspaceTextSetter.TrySet(ws, id, text, additional))
+						
+						return set == 0 ? null : false;
+					
+					set++;
+				}
+			}
+			
+			return true;
+		}
+		
+		bool Apply(Solution newSolution, Solution baseSolution, Workspace expectedWs, bool persist)
 		{
 			// Best-effort staleness guard: if another thread completed a reload and replaced
 			// the workspace since the caller snapshotted it, discard rather than apply stale edits.
@@ -173,12 +253,13 @@ internal sealed partial class WorkspaceManager
 			// so the diff reflects exactly what changed relative to the caller's view.
 			string[] ownedPaths = []
 			;
+			ProjectChanges[] projectChanges = [];
 			
 			if(isMSBuild) {
 				
 				// Source documents and AdditionalFiles items: TryApplyChanges writes both kinds to
 				// disk, and either can be a link whose target has to be brought up to date.
-				var projectChanges = newSolution.GetChanges(baseSolution)
+				projectChanges = newSolution.GetChanges(baseSolution)
 					.GetProjectChanges()
 					.ToArray()
 				;
@@ -198,10 +279,20 @@ internal sealed partial class WorkspaceManager
 			// reached through a link is thereby written into another file, and that file gets
 			// the same treatment as in WriteAndInvalidate: captured before the write and
 			// brought up to date afterwards (#338).
-			var linkedWrites = ownedPaths
-				.Select(LinkedWriteFor)
-				.OfType<LinkedWrite>()
-				.ToArray()
+			// Only an apply that writes. One that does not has written nothing through a link,
+			// and treating the file behind it as just written would be wrong twice over: its
+			// watcher reports are dropped while it is synced, and a file no project compiles is
+			// stamped as the server's own write, so a save someone made at that moment would
+			// go unseen (#403). The server's real writes do this themselves in
+			// WriteAndInvalidate, and a file changed from outside is reported under its own path.
+			// By whether a write will happen, not by what was asked for: where this Roslyn
+			// cannot set a text without writing, the apply below writes after all. Only the one
+			// call that finds that out goes without, once in the life of the process.
+			var writes = persist || !WorkspaceTextSetter.Available;
+			
+			LinkedWrite[] linkedWrites = writes
+				? [..ownedPaths.Select(LinkedWriteFor).OfType<LinkedWrite>()]
+				: []
 			;
 			
 			// The watchers stay live through the write (#358), so it is reported, at each path
@@ -221,15 +312,27 @@ internal sealed partial class WorkspaceManager
 			try {
 				
 				try {
-					applied = ws.TryApplyChanges(newSolution);
+					
+					lock(applyGate) {
+						
+						// Without a write when the caller read these texts from the files
+						// themselves. An AdhocWorkspace never writes, and a Roslyn that cannot
+						// set a text otherwise gets the apply that does.
+						applied = (writes || !isMSBuild ? null : SetTexts(ws, newSolution, baseSolution, projectChanges))
+							?? ws.TryApplyChanges(newSolution);
+					}
 				}
-				catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException or NotSupportedException) {
+				catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException or NotSupportedException or ArgumentException) {
 					// ObjectDisposedException/InvalidOperationException: workspace disposed by a concurrent
 					// ReloadIfNeeded between the staleness check and TryApplyChanges.
+					// ArgumentException: the same for an apply that sets texts — a workspace that
+					// was disposed has no documents, and a document that is not in it is refused.
 					// NotSupportedException: TryApplyChanges throws for unsupported change kinds
 					// (e.g. AddDocument/RemoveDocument on MSBuildWorkspace). Both treated as false return.
-					_ = ex
-					;
+					// Said in the log: the caller only learns that the apply failed, and for an
+					// edit that was to be written, why is worth knowing.
+					logger.LogInfo("Workspace", $"Apply refused ({ex.GetType().Name}: {ex.Message})");
+					
 					applied = false;
 				}
 				
@@ -244,11 +347,8 @@ internal sealed partial class WorkspaceManager
 				try {
 					
 					if(applied)
-						foreach(var linked in linkedWrites) {
-							
+						foreach(var linked in linkedWrites)
 							SyncLinkTarget(linked);
-							syncedByApply = linked.Path;
-						}
 				}
 				finally {
 					
@@ -362,18 +462,16 @@ internal sealed partial class WorkspaceManager
 				// Bug #3 fix: InvalidateFile must run while ignoredPaths is still incremented.
 				// Moving it after the finally decrement opened a race window where a late FSW
 				// event fired unsuppressed between the decrement and the workspace invalidation.
-				syncedByApply = null;
-				
 				InvalidateFile(fullPath)
 				;
 				
-				// Inside the same window, for the same reason as above. Not a second time when
-				// InvalidateFile applied the text through TryApplyChanges: that path has done
-				// the sync, alias scan included. A target the write created is the exception —
-				// by then it exists, the nested sync took it for a file that was there all
-				// along, and only this call knows that it is new.
-				if(linked is { } afterWrite
-					&& !(afterWrite.TargetExisted && SecurityBoundary.PathComparer.Equals(syncedByApply, fullPath)))
+				// Inside the same window, for the same reason as above. InvalidateFile takes the
+				// text into the workspace without writing, so it has synced nothing behind a
+				// link (#403), and this is the one sync of the file the write went into. Where
+				// this Roslyn cannot set a text without writing, InvalidateFile's apply has
+				// written and synced the file already; it is then synced here a second time,
+				// which costs a read and changes nothing.
+				if(linked is { } afterWrite)
 					SyncLinkTarget(afterWrite);
 				
 				// A write straight to a file that has links to it: the documents at the links

@@ -487,6 +487,9 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 	// Null when the server answered as the first one did and is ready for requests; else what went wrong.
 	async Task<string?> HandshakeAsync(ServerProcess next)
 	{
+		// Whether the build's answer to initialize was read, for the wording of a failure after it.
+		var answered = false;
+		
 		try {
 			
 			await WriteAsync(next.Input, initialize!);
@@ -511,13 +514,21 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 					
 					return $"it answered initialize with protocol version {version ?? "none"}, and the session runs on {protocolVersion}";
 				
+				answered = true;
+				
 				await WriteAsync(next.Input, initialized!);
 				
 				return null;
 			}
 		}
 		catch(Exception failure) when(failure is IOException or ObjectDisposedException) {
-			return $"the pipe to it broke: {failure.Message}";
+			
+			// The same thing as the empty read above, seen from the other side: a build that
+			// has exited is found out by the write to it when that comes before the read, which
+			// on Linux it does now and then. One wording for both, so that the log, and whoever
+			// looks for the reason in it, does not depend on which came first. A build that
+			// answered and was gone before it could be told so is said to be just that.
+			return $"it exited {(answered ? "after" : "before")} answering initialize (the pipe to it broke: {failure.Message})";
 		}
 	}
 	

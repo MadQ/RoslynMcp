@@ -14,10 +14,6 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		readonly record struct LinkedWrite(string Path, string Target, bool TargetExisted);
 		
-		// The linked path ApplyChangesToDisk last synced on this thread. Lets
-		// WriteAndInvalidate see that its InvalidateFile call has already done the sync.
-		[ThreadStatic] static string? syncedByApply;
-		
 		// Null for the ordinary case: the path leads nowhere else.
 		LinkedWrite? LinkedWriteFor(string fullPath)
 			=> links.TargetOf(fullPath) is { } target

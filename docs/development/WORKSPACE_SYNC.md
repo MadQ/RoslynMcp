@@ -301,7 +301,7 @@ workspace without links has an empty index and every lookup in it returns at onc
     solution the flush works on is skipped, never taken for a new source file. The whole pass
     is fenced off, so a failure in it costs the added names and not the batch.
 - **The index is never used to decide which file a text belongs to.** Every document is read
-  through its own path and written back through its own path, also when a batch holds
+  through its own path and gets the text read through that path, also when a batch holds
   several names of one file. An index that is behind can therefore only cost a refresh.
   Sharing one read between the names of a file was tried: it has to know which file a path
   leads to, and when that answer is out of date, one file's text is written into another.
@@ -326,11 +326,11 @@ workspace without links has an empty index and every lookup in it returns at onc
   is removed and does not come back when the file does — the new file is reported under its
   own path, and the link is no longer in the index — until the server restarts.
 - **Considered and rejected: one apply for all names of a file** (#343). After a write to a
-  file with links, each linked document is refreshed by an apply of its own, and
-  `MSBuildWorkspace` writes the same content to the same file once per name. Putting the
-  texts of all names into one apply would save the extra applies, not the writes — and it
-  would hand a text to documents on the word of the index, to be written back through their
-  paths. That is the rule above, broken. The cost is paid only by a file that has links.
+  file with links, each linked document is refreshed by an apply of its own. (Until #403
+  `MSBuildWorkspace` also wrote the same content to the same file once per name; a refresh
+  no longer writes.) Putting the texts of all names into one apply would save the extra
+  applies — and it would hand a text to documents on the word of the index. That is the rule
+  above, broken. The cost is paid only by a file that has links.
 - **Considered and rejected: an index that changes without copying** (#343).
   `PhysicalFileIndex.With` copies the name table on every change. Only an AdhocWorkspace
   changes its index in place, and its index holds only links to files that are not documents
@@ -372,6 +372,82 @@ window, release in `finally`.
 
 ---
 
+## Read from disk, never written back (#403)
+
+The workspace takes a new text in two situations, and they must not be confused:
+
+- **An edit.** A tool hands the workspace a text that is not on disk yet
+  (`roslyn_replace_in_file`, `roslyn_insert_lines`, `roslyn_replace_in_code` on a tracked
+  document, the rename apply). `ApplyChangesToDisk` → `TryApplyChanges`, and the
+  `MSBuildWorkspace` writes the file. That write is the edit.
+- **A text that was read from the file.** The watcher flush read a file someone changed, or
+  `InvalidateFile` reads one the server has just written. The file already holds the text.
+  `ApplyTextsInMemory` moves the workspace's solution on and writes nothing.
+
+Until #403 both went through `TryApplyChanges`, so every outside save, and every write of the
+server's own, was followed by a second write of the same text by the workspace. That write
+
+- put the text the flush had read back over whatever was saved between the read and the write
+  (the loss the issue describes; the window is the read, the apply and the write);
+- was refused whenever the file was still open somewhere, which the workspace reports as a
+  failure of its own: `WorkspaceFailed — [ERROR] The process cannot access the file … because it
+  is being used by another process`, once per write of a tracked file (#433).
+
+How it works:
+
+- `WorkspaceTextSetter` calls `Workspace.OnDocumentTextChanged` /
+  `OnAdditionalDocumentTextChanged`. These are what a workspace host calls for a file that
+  changed outside; they are `protected internal` and `MSBuildWorkspace` is sealed, so they are
+  bound with an `UnsafeAccessor`. Should a Roslyn version not have them under that name and
+  signature, the first call says so, it is remembered, and `Apply` goes back to
+  `TryApplyChanges`: the behaviour before #403, not a broken sync.
+- `Apply(…, persist)` is the one method behind both entry points. Everything around the core
+  call is the same for both: the staleness check, the link target sync, `applyingPaths`, the
+  refresh of the documents at other names of a changed file.
+- **The solution must not have moved on.** `TryApplyChanges` refuses a solution that is not
+  based on the current one, and the flush relies on that to put its batch back
+  (see *The watchers are never switched off*). The non-writing apply checks the same thing
+  itself (`ReferenceEquals(ws.CurrentSolution, baseSolution)`), and `applyGate` makes the check
+  and the change one step: every change to the solution, writing or not, holds it. It is never
+  taken under the workspace lock.
+- An `AdhocWorkspace` is not affected: its `TryApplyChanges` never wrote.
+- Analyzer-config documents have the same non-writing method in Roslyn and still reload. Making
+  `.editorconfig` edits incremental is a change of its own.
+
+**A changed file that cannot be read is read again.** Reads keep writers out
+(`FileReader.ReadSharing`), so a file another program still has open for writing is refused. The
+flush used to drop the report there, and when the writer closed the file without a further
+event the workspace kept the old text for good. `RetryUnreadable` puts the path back for the
+next flush, at most `MaxUnreadableRetries` (100) times in a row, which is about half a minute
+of debounce periods, and logs the first failure and the giving up
+(`Watch — Changed file could not be read, will be read again …`). While the retries last the
+flush reports the workspace as behind disk, so the sync clock does not advance and
+`roslyn_check_drift` sees the file. Once it has given up, the next clean flush moves the clock
+on and the file is no longer reported: the log entry is then the only word of it, until the
+file changes again. For a name the index added to the batch, the file it leads to is put back, not
+the name: that file is a path like any the watcher reports, and the next flush adds its names
+from the index again. (Putting the name itself back was tried, with a note of which names were
+retried; a name that is no document any more looks like a new source file, and the note had to
+be kept right across every way a path can leave a batch.) The failed reads are counted under
+the path that is put back, once per flush, so a file and all its names share one count and one
+giving up: with a count each, one's giving up was undone by the other, and a file held for good
+was read again without end. A path that is in that count and has names in the index is back in
+a batch only to have them read; when it is itself a `.cs` no project compiles, it looked like a
+new document at its first report and had its reload then, and is not flagged again at every
+retry. `InvalidateFile` hands a read it was refused to the same retry. A
+file that is gone is not retried; its delete has a report of its own.
+
+**The non-writing apply leaves link targets alone.** An apply that writes brings the file
+behind a written link up to date, and for that drops the target's watcher reports and may
+stamp it as the server's own write. An apply that does not write has written nothing there, so
+it does neither: the server's real writes do it in `WriteAndInvalidate`, and a file changed
+from outside is reported under its own path. `WriteAndInvalidate` therefore always syncs the
+file behind a written link itself, once; the `syncedByApply` marker that let it skip the sync
+when its `InvalidateFile` had written through the link is gone with that write. Where the
+fallback to `TryApplyChanges` is in use, the apply does write, and gets the bookkeeping of one.
+
+---
+
 ## `InvalidateFile` Contract
 
 `InvalidateFile(projectPath, fullPath)` syncs the workspace with a file RoslynMcp has just
@@ -380,7 +456,8 @@ written. It classifies the path (issue #273):
 1. **Tracked source or additional document** (`GetDocumentIdsWithFilePath` non-empty, and
    `ClassifyTrackedDocument` says `Source` or `Additional`) → the new text is applied incrementally
    via `WithDocumentText` (source) or `WithAdditionalDocumentText` (additional, #276) +
-   `ApplyChangesToDisk`. No reload. If the apply fails, a reload is flagged (logged
+   `ApplyTextsInMemory`, which does not write the file again (#403, see
+   [Read from disk, never written back](#read-from-disk-never-written-back-403)). No reload. If the apply fails, a reload is flagged (logged
    `Reload — Flagged (incremental apply failed): <path>`). A defensive `catch(InvalidOperationException)`
    also flags a reload instead of propagating, for the theoretical case where a path's ids span
    mixed kinds across projects.

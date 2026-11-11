@@ -661,7 +661,7 @@ internal sealed partial class WorkspaceManager
 					}
 					
 					if(ws is AdhocWorkspace adhoc)
-						FlushAdhoc(adhoc, defId, changed, deleted);
+						reloadFlagged = FlushAdhoc(adhoc, defId, changed, deleted);
 				}
 
 				if(!reloadFlagged)
@@ -724,6 +724,7 @@ internal sealed partial class WorkspaceManager
 			
 			var newSolution     = currentSolution;
 			var modified        = false;
+			var behindDisk      = false;
 			string? applyFailed = null;
 			
 			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument, and clearing
@@ -743,7 +744,21 @@ internal sealed partial class WorkspaceManager
 				break;
 			}
 			
+			// The paths put back by this flush for another read, so that the names of one file
+			// count as one failed attempt of it.
+			var putBack = new HashSet<string>(SecurityBoundary.PathComparer);
+			
 			foreach(var path in changed) {
+				
+				// The path to put back so that this one is read again, and under which its
+				// failed reads are counted: the path itself, or for a name the index added,
+				// the file it leads to. Null when the index no longer knows one. A name is not
+				// put back itself: on its own, a name that is no document any more would look
+				// like a new source file. The file it leads to is a path like any the watcher
+				// reports, and the next flush adds its names from the index again. One count
+				// for the file and all its names: with one each, the giving up of one was
+				// undone by the other, and a file held for good was read again without end.
+				var readAgainAs = unreported.Contains(path) ? physicalIndex.PhysicalOf(path) : path;
 				
 				try {
 					
@@ -763,24 +778,44 @@ internal sealed partial class WorkspaceManager
 						// A path that came from the index and is no document of this solution is
 						// not a new source file: a reload dropped it between the lookup and
 						// here. It is skipped, not taken for a file that has just appeared.
-						if(impact is WorkspaceEditImpact.Reload && !(reason == EditClassifier.ReasonNewDocument && unreported.Contains(path)))
+						// Neither is a path this flush is here for only because a read failed
+						// (see RetryUnreadable): a file that documents are links to, and that
+						// no project compiles itself, looked new when it was first reported,
+						// and has had its reload. Flagged again at every retry, a reload that
+						// finishes while the file is still held would be followed by another.
+						// Such a path is in the count of failed reads and has names in the index
+						// that are read below. One that is in the count and has none was a
+						// document when its read failed and is none now: there is nothing left
+						// to read it for, and it is let go, or it would be passed over here
+						// for good.
+						var backForRead = unreadable.ContainsKey(path) && physicalIndex.NamesOf(path).Length > 0;
+						
+						if(!backForRead)
+							unreadable.TryRemove(path, out _);
+						
+						if(impact is WorkspaceEditImpact.Reload && !(reason == EditClassifier.ReasonNewDocument && (unreported.Contains(path) || backForRead)))
 							FlagReload(reason, path);
 
 						continue;
 					}
 
 					// Read through the document's own path, every time — also when the batch
-					// holds several names of one file (see FlushPendingChanges). The text is
-					// written back through that same path, so what is read through a path and
-					// what is written through it are always the same file. Sharing one read
+					// holds several names of one file (see FlushPendingChanges). The text goes
+					// to the document at that same path, so what is read through a path and
+					// what a document holds are always the same file. Sharing one read
 					// between the names of a file was tried and removed: it needs to know
 					// which file a path leads to, and when that answer is out of date one
 					// file's text is written into another (#341).
 					using var stream = FileReader.OpenUnbounded(path);
 					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
+					
+					// Read: whatever kept the file from being read before is over, whether or
+					// not the text turns out to be new.
+					if(readAgainAs is not null)
+						unreadable.TryRemove(readAgainAs, out _);
 
-					// Already current. Applying identical text is not free: it still runs a
-					// TryApplyChanges, which writes to disk and flags a full reload if it fails.
+					// Already current. Applying identical text is not free: it moves the solution
+					// on, which drops the compilations, and flags a full reload if it fails.
 					// This is how a report of RM's own write is recognised: the document already
 					// holds what it wrote. It used to be recognised by the size the write left,
 					// without the text, and that record outlived the write whenever its report
@@ -801,7 +836,22 @@ internal sealed partial class WorkspaceManager
 					applyFailed ??= path;
 					modified = true;
 				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					
+					// The change is known and its text is not: the workspace is behind disk
+					// until a later flush has read the file. A second name of a file this
+					// flush has put back already is covered by that.
+					if(readAgainAs is not null && putBack.Contains(readAgainAs))
+						behindDisk = true;
+					
+					else if(RetryUnreadable(path, readAgainAs, ex)) {
+						
+						behindDisk = true;
+						
+						if(readAgainAs is not null)
+							putBack.Add(readAgainAs);
+					}
+				}
 				catch(InvalidOperationException) {
 					
 					// Defensive only — reachable if the same physical path is tracked with mixed
@@ -814,7 +864,9 @@ internal sealed partial class WorkspaceManager
 				}
 			}
 			
-			if(modified && !ApplyChangesToDisk(newSolution, currentSolution, ws)) {
+			// Into the workspace only. The texts were read from the files a moment ago, and
+			// written back there they would replace whatever someone has saved since (#403).
+			if(modified && !ApplyTextsInMemory(newSolution, currentSolution, ws)) {
 				
 				// The apply fails when the solution has moved on since the snapshot above — an
 				// ApplyChangesToDisk that finished after the snapshot was taken, possibly before
@@ -850,24 +902,100 @@ internal sealed partial class WorkspaceManager
 					FlagReload("incremental apply failed", applyFailed);
 			}
 
-			return reloadFlagged;
+			return reloadFlagged || behindDisk;
 		}
 		
-		void FlushAdhoc(AdhocWorkspace adhoc, ProjectId projectId, string[] changed, string[] deleted)
+		// How often in a row each changed file could not be read by a flush, by the path that is
+		// put back for it. A path is in here from its first failed read until it is read or
+		// given up, which is also how a flush knows a path that is only back for another read.
+		readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> unreadable = new(SecurityBoundary.PathComparer);
+		
+		// About half a minute of debounce periods, each costing one refused open. A save holds a
+		// file far shorter, a slow copy or a download may not; a file held for good must not be
+		// read again forever.
+		const int MaxUnreadableRetries = 100;
+		
+		/// <summary>
+		///     A changed file the flush could not read is read again by the next flush, a limited
+		///     number of times, and both the first failure and the giving up are logged (#403).
+		///     Reads keep writers out (<see cref="FileReader.ReadSharing"/>), so a file that
+		///     another program still has open for writing is refused, and the report of the
+		///     change used to be dropped there without a word: when the writer raised no further
+		///     event, the workspace kept the old text. A file that is gone is not retried; its
+		///     delete has a report of its own. Returns whether the workspace is now known to be
+		///     behind the file.
+		/// </summary>
+		bool RetryUnreadable(string path, Exception failure)
+			=> RetryUnreadable(path, path, failure)
+		;
+		
+		bool RetryUnreadable(string path, string? again, Exception failure)
 		{
+			if(failure is FileNotFoundException or DirectoryNotFoundException) {
+				
+				// Only for the path itself. A name that leads nowhere says nothing about the
+				// file that is put back for the other names of it, and clearing that file's
+				// count here would start it over at every flush.
+				if(again is not null && SecurityBoundary.PathComparer.Equals(again, path))
+					unreadable.TryRemove(path, out _);
+				
+				return false;
+			}
+			
+			// again: the path to put back so that 'path' is read again, and the one the failed
+			// reads are counted under. The path itself, or for a name the index added, the
+			// file it leads to; null when the index no longer knows one.
+			if(again is null) {
+				
+				logger.LogInfo("Watch", $"Changed file could not be read, and nothing is left to read it again by; the workspace keeps its earlier text until the file changes again ({failure.GetType().Name}: {failure.Message}): {path}");
+				
+				return true;
+			}
+			
+			var failed = unreadable.AddOrUpdate(again, 1, (_, count) => count + 1);
+			
+			if(failed == 1)
+				logger.LogInfo("Watch", $"Changed file could not be read, will be read again ({failure.GetType().Name}: {failure.Message}): {path}");
+			
+			if(failed <= MaxUnreadableRetries)
+				Enqueue(again, deleted: false);
+			
+			else {
+				
+				unreadable.TryRemove(again, out _);
+				logger.LogInfo("Watch", $"Changed file still cannot be read after {MaxUnreadableRetries} attempts; the workspace keeps its earlier text until the file changes again: {path}");
+			}
+			
+			return true;
+		}
+		
+		// Returns true when a changed file could not be read, so the workspace is behind disk
+		// and the caller must not advance the sync clock.
+		bool FlushAdhoc(AdhocWorkspace adhoc, ProjectId projectId, string[] changed, string[] deleted)
+		{
+			var behindDisk = false;
+			
 			foreach(var path in deleted)
 				RemoveDocument(adhoc, projectId, path);
 			
 			foreach(var path in changed)
 				try {
+					
 					SyncAdhocDocument(adhoc, projectId, path);
+					unreadable.TryRemove(path, out _);
 				}
 				catch(FileNotFoundException) {
 					
 					RemoveDocument(adhoc, projectId, path);
+					unreadable.TryRemove(path, out _);
 				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
-		
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					
+					if(RetryUnreadable(path, ex))
+						behindDisk = true;
+				}
+			
+			return behindDisk;
 		}
 	}
 }
