@@ -68,8 +68,11 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	internal ShadowCopyAnalyzerLoader(string name)
 		=> this.name = name;
 	
+	// In the one spelling LoadFromPath uses: a location is compared with the directories of the
+	// contexts and loaded under the path it is registered by, and another spelling of a file a
+	// context has would be loaded into it a second time.
 	public void AddDependencyLocation(string fullPath)
-		=> dependencyLocations.TryAdd(fullPath, 0);
+		=> dependencyLocations.TryAdd(Path.GetFullPath(fullPath), 0);
 	
 	// The context a path is loaded into: its directory's current one, unless that one loaded the
 	// path at another modification time. Then the file was rebuilt, and the directory gets a new
