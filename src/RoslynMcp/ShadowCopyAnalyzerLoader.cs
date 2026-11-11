@@ -77,9 +77,12 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	private DirectoryContext ContextFor(string fullPath)
 	{
 		var directory = Path.GetDirectoryName(fullPath) ?? string.Empty;
-		var stamp     = File.GetLastWriteTimeUtc(fullPath).Ticks;
 		
 		lock(contextsLock) {
+			
+			// Read under the lock: two calls on either side of a rebuild, entering in the other
+			// order, would each find the other's time in the context and replace it in turn.
+			var stamp = File.GetLastWriteTimeUtc(fullPath).Ticks;
 			
 			if(contexts.TryGetValue(directory, out var current)
 				&& (!current.Stamps.TryGetValue(fullPath, out var loadedAt) || loadedAt == stamp)) {
@@ -220,6 +223,10 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 			if(SecurityBoundary.PathComparer.Equals(Path.GetDirectoryName(candidate), asking.Directory)) {
 				
 				// Remembered like any other file of the context, so that a rebuild of it is seen.
+				// The file is taken as it is now, also by a context the directory has since
+				// replaced: an assembly still in use from the old one that first needs this
+				// dependency after it was rebuilt gets the new build of it. The old build is
+				// gone from the directory, and no dependency at all would lose the types.
 				lock(contextsLock)
 					asking.Stamps.TryAdd(candidate, File.GetLastWriteTimeUtc(candidate).Ticks);
 				

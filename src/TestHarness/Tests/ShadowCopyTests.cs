@@ -744,24 +744,27 @@ internal static partial class ShadowCopyTests
 		// failed as already loaded: two projects on different versions of an analyzer package, in one
 		// solution or in two workspaces of one server, and one of them lost its analyzers and fix
 		// providers. And a dependency was taken from whichever registered location came first, across
-		// all projects. One server, four projects:
-		//   - build 2 with its helper, asked first, so that its helper is the one already loaded;
-		//   - build 1 with its helper: it must run as build 1 and find helper 1, the one beside it;
-		//   - a copy of build 1 in a third directory: the same bytes from another path load as well;
+		// all projects. One server, four projects, asked in this order:
+		//   - build 1 with its helper, so that helper 1 is the first of its name the server knows
+		//     and has loaded;
+		//   - a copy of build 1 in another directory: the same bytes from another path load as well;
+		//   - build 2 with its helper: it must run as build 2 and find helper 2, the one beside it,
+		//     not the helper 1 that is already loaded;
 		//   - a copy of build 1's analyzer alone: no helper is beside it, so it gets the highest
-		//     version the server knows of, helper 2, whatever order the others were named in.
+		//     version the server knows of, helper 2, although two locations of helper 1 were
+		//     registered before it. Taking the first one registered would give helper 1.
 		async Task<(bool pass, string msg)> RunSameNameSideBySide()
 		{
 			var sw           = Stopwatch.StartNew();
-			var (_, second)  = NewFixtureBuild("ShadowSideTwoDll", 2);
 			var (_, first)   = NewFixtureBuild("ShadowSideOneDll", 1);
+			var (_, second)  = NewFixtureBuild("ShadowSideTwoDll", 2);
 			var copied       = CopyToHolder("ShadowSideCopyDll", first);
 			var alone        = CopyToHolder("ShadowSideAloneDll", [first[0]]);
 			
 			(string Label, FixtureProject Project, string Dll, string Expected, int Fixes)[] cases = [
-				("build 2",                 NewOrderedProject("ShadowSideTwo", second),  second[0], FixtureAnalyzers.Message(2, 2), 2),
 				("build 1",                 NewOrderedProject("ShadowSideOne", first),   first[0],  FixtureAnalyzers.Message(1, 1), 1),
 				("a copy of build 1",       NewOrderedProject("ShadowSideCopy", copied), copied[0], FixtureAnalyzers.Message(1, 1), 1),
+				("build 2",                 NewOrderedProject("ShadowSideTwo", second),  second[0], FixtureAnalyzers.Message(2, 2), 2),
 				("build 1 without helper",  NewOrderedProject("ShadowSideAlone", alone), alone[0],  FixtureAnalyzers.Message(1, 2), 1),
 			];
 			
