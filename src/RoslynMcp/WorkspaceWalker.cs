@@ -42,6 +42,29 @@ internal static class WorkspaceWalker
 	;
 	
 	/// <summary>
+	///     <see cref="EnumerateFiles(string, string, bool, PrunePredicate)"/> for files whose name
+	///     matches any of several patterns, in one walk: a tree is walked once however many kinds
+	///     of file are looked for in it.
+	/// </summary>
+	public static IEnumerable<string> EnumerateFiles(string root, string[] namePatterns, bool recursive, PrunePredicate prune) =>
+		new FileSystemEnumerable<string>(root, (ref FileSystemEntry entry) => entry.ToFullPath(), Options(recursive)) {
+			
+			ShouldIncludePredicate = (ref FileSystemEntry entry) => !entry.IsDirectory && MatchesAny(namePatterns, entry.FileName),
+			ShouldRecursePredicate = (ref FileSystemEntry entry) => !IsLink(ref entry) && !prune(ref entry),
+		}
+	;
+	
+	static bool MatchesAny(string[] namePatterns, ReadOnlySpan<char> name)
+	{
+		foreach(var pattern in namePatterns)
+			if(FileSystemName.MatchesSimpleExpression(pattern, name, ignoreCase))
+				return true;
+		
+		return false;
+	}
+	
+
+	/// <summary>
 	///     Lazily enumerates the directories under <paramref name="root"/> — not the root itself —
 	///     that <paramref name="prune"/> does not reject, each with the time it was last written.
 	///     A directory is written when an entry is added to it or removed from it, which is what

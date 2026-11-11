@@ -94,8 +94,9 @@ internal sealed partial class WorkspaceManager
 				// the pagination cache.
 			}
 			
-			// Adhoc needs no classification: AddOrUpdateDocument returns for non-.cs paths, and
-			// ReloadIfNeeded clears any flag without loading in adhoc mode.
+			// Adhoc needs no classification: SyncAdhocDocument takes a source or an .editorconfig
+			// and returns for any other path, and ReloadIfNeeded clears any flag without loading
+			// in adhoc mode.
 			else if(ws is AdhocWorkspace adhoc)
 				try {
 					SyncAdhocDocument(adhoc, adhocProjectId, fullPath);

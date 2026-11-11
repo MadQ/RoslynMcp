@@ -175,7 +175,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 
 **Workspace modes:**
 - **MSBuildWorkspace** (if `.csproj` found) — full NuGet resolution, multi-project support, .NET Framework 4.6.1+ compatibility
-- **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms)
+- **AdhocWorkspace** (fallback) — source-only, fast startup (<100 ms); takes every `.editorconfig` under its root and in the directories above it as analyzer-config documents, kept current like the sources (`AddOrUpdateAnalyzerConfig`, #413), so code actions format as they do in a project
 - **VS workspace** — uses Visual Studio's MSBuild instance when available
 - See [docs/reference/WORKSPACE_MODES.md](docs/reference/WORKSPACE_MODES.md) for detailed comparison and FAQ
 - **CLI flag:** `--workspace sdk|vs|adhoc|auto` (default: `auto`) — or set `ROSLYNMCP_WORKSPACE` env var to override; a committed `.madq_roslynmcp.json` at the repo root (written by `setup-project`) can pin a per-project mode when neither is given
@@ -400,7 +400,7 @@ When you deviate from convention because you've *thought it through*, that's not
 > - The guidelines exist because someone already walked that mile—but if your mile leads somewhere new, the map gets updated
 > - Just don't go completely feral on us 🏴‍☠️
 >
-> **Your style is yours, so `.editorconfig` is gitignored.** A committed one would impose one person's preferences on everyone, which is exactly what this section refuses to do. Keep a private `.editorconfig` at the repo root if you like: your IDE honours it, and so do Roslyn's refactorings and code fixes when `roslyn_apply_refactoring` / `roslyn_apply_code_fix` run them — Roslyn reads its formatting options (`indent_style`, `csharp_new_line_before_open_brace`, `csharp_space_after_keywords_in_control_flow_statements`, …) from that file, and without one it formats the changed region in its own defaults (four spaces, Allman braces, `foreach (`). Agents: never create or commit an `.editorconfig`; if the owner's private one is present, the refactoring output already matches it.
+> **Your style is yours, so `.editorconfig` is gitignored.** A committed one would impose one person's preferences on everyone, which is exactly what this section refuses to do. Keep a private `.editorconfig` at the repo root if you like: your IDE honours it, and so do Roslyn's refactorings and code fixes when `roslyn_apply_refactoring` / `roslyn_apply_code_fix` run them — Roslyn reads its formatting options (`indent_style`, `csharp_new_line_before_open_brace`, `csharp_space_after_keywords_in_control_flow_statements`, …) from that file, and without one it formats the changed region in its own defaults (four spaces, Allman braces, `foreach (`). The harness pins this for both workspace kinds, with a gitignored file (*Code Refactorings*, #413). Agents: never create or commit an `.editorconfig`; if the owner's private one is present, the refactoring output already matches it.
 >
 > **Bottom line:** Code should *look* ~~consistent~~ [habitual routine](https://share.google/aimode/88Q5P4mDuICTTmPEo) (formatting). Code should *think* rebelliously (design). When you deviate from ~~convention~~ [wonted](https://www.merriam-webster.com/dictionary/wonted#:~:text=usual%20or%20ordinary%20especially%20by%20reason%20of%20established%20habit) because you've *thought it through*, that's not being contrarian—that's being intentional. Document your reasoning (a comment is fine), and move on. That comment might even be the Treasure (Arrrr!). 💎
 

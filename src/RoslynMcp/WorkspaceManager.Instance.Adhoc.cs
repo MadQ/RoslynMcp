@@ -26,7 +26,8 @@ internal sealed partial class WorkspaceManager
 		/// </summary>
 		void LoadAllFiles(AdhocWorkspace adhocWorkspace, ProjectId projectId)
 		{
-			var files   = EnumerateFilesWithErrorHandling(rootPath, "*.cs").ToArray();
+			var walked  = EnumerateFilesWithErrorHandling(rootPath, AdhocFilePatterns).ToArray();
+			var files   = walked.Where(path => !IsAnalyzerConfig(path)).ToArray();
 			var watch   = Stopwatch.StartNew();
 			var index   = links.BuildIndex(files);
 			var elapsed = watch.ElapsedMilliseconds;
@@ -61,6 +62,80 @@ internal sealed partial class WorkspaceManager
 			physicalIndex = index;
 			
 			logger.LogInfo("Links", $"{index.Count} of {files.Length} document path(s) lead to another file ({elapsed}ms)");
+			
+			// The configs of the tree, and those of the directories above it: a config applies
+			// to everything below its directory, and the root is often a folder of a repository
+			// whose config sits further up. One that cannot be read is left out, like a config
+			// that is not there; the sources do not depend on it.
+			var configs = 0;
+			
+			foreach(var path in walked.Where(IsAnalyzerConfig).Concat(AnalyzerConfigsAbove(rootPath)))
+				try {
+					
+					AddOrUpdateAnalyzerConfig(adhocWorkspace, projectId, path);
+					configs++;
+				}
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+					
+					logger.LogInfo("Workspace", $"Analyzer config not loaded ({ex.GetType().Name}: {ex.Message}): {path}");
+				}
+			
+			if(configs > 0)
+				logger.LogInfo("Workspace", $"{configs} {AnalyzerConfigName} file(s) loaded for {rootPath}");
+		}
+		
+		// The one analyzer config an AdhocWorkspace reads (#413). A project also takes
+		// .globalconfig files, but only those its build names; without a build nothing names one.
+		const string AnalyzerConfigName = ".editorconfig";
+		
+		// What an AdhocWorkspace tracks under its root: the sources and the configs that style them.
+		static readonly string[] AdhocFilePatterns = ["*.cs", AnalyzerConfigName];
+		
+		// By name alone, compared as the platform's file APIs compare names.
+		static bool IsAnalyzerConfig(string path)
+			=> Path.GetFileName(path.AsSpan()).Equals(AnalyzerConfigName, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase)
+		;
+		
+		// The configs in the directories above the root, nearest first, all the way up: the same
+		// files a project's build hands the compiler. Roslyn itself stops at one that says
+		// "root = true", so none is left out here, and a config that gains or loses that line
+		// needs no second look at the directories above. They lie outside the root, where nothing
+		// is watched: a change to one of them is seen when the workspace is next loaded.
+		static IEnumerable<string> AnalyzerConfigsAbove(string directory)
+		{
+			for(var parent = new DirectoryInfo(directory).Parent; parent is not null; parent = parent.Parent) {
+				
+				var candidate = Path.Combine(parent.FullName, AnalyzerConfigName);
+				
+				if(File.Exists(candidate))
+					yield return candidate;
+			}
+		}
+		
+		/// <summary>
+		///     Makes an <c>.editorconfig</c> an analyzer-config document of the project, or gives
+		///     the document it already is the file's text (#413). Roslyn's formatter reads the
+		///     style of the code a refactoring or a code fix writes from these documents, and the
+		///     compiler reads diagnostic severities from them, as in a project. Without them an
+		///     AdhocWorkspace formats in Roslyn's defaults whatever the directory's own config says.
+		/// </summary>
+		void AddOrUpdateAnalyzerConfig(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
+		{
+			using var stream = FileReader.OpenUnbounded(path);
+			
+			var text     = SourceText.From(stream, FileWriter.Utf8NoBom);
+			var solution = adhocWorkspace.CurrentSolution;
+			var existing = solution.GetDocumentIdsWithFilePath(path).FirstOrDefault(id => solution.GetAnalyzerConfigDocument(id) is not null);
+			
+			var newSolution = existing is not null
+				? solution.WithAnalyzerConfigDocumentText(existing, text)
+				: solution.AddAnalyzerConfigDocument(DocumentId.CreateNewId(projectId), AnalyzerConfigName, text, filePath: path)
+			;
+			
+			if(!adhocWorkspace.TryApplyChanges(newSolution))
+				logger.LogInfo("Workspace", $"Analyzer config not applied, the workspace moved on: {path}");
+			
+			InvalidateCompilation();
 		}
 		
 		// A drive root or a directory marked as the system's own is never searched for sources.
@@ -71,7 +146,7 @@ internal sealed partial class WorkspaceManager
 			return !pathInfo.Attributes.HasFlag(FileAttributes.System) && pathInfo.Parent is not null;
 		}
 		
-		IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string searchPattern)
+		IEnumerable<string> EnumerateFilesWithErrorHandling(string path, string[] searchPatterns)
 		{
 			if(!IsLoadableRoot(path))
 				
@@ -79,7 +154,7 @@ internal sealed partial class WorkspaceManager
 			
 			return WorkspaceWalker.EnumerateFiles(
 				path,
-				searchPattern,
+				searchPatterns,
 				recursive: true,
 				(ref FileSystemEntry directory) =>
 					(directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0
@@ -127,6 +202,14 @@ internal sealed partial class WorkspaceManager
 		void SyncAdhocDocument(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
 		{
 			lock(adhocSyncLock) {
+				
+				// A config is a document of its own kind, and never one of the sources below.
+				if(IsAnalyzerConfig(path)) {
+					
+					AddOrUpdateAnalyzerConfig(adhocWorkspace, projectId, path);
+					
+					return;
+				}
 				
 				// The file itself, when the documents it has are links to it: it lies outside the
 				// tree the load walks (under obj, say) but inside what the watcher covers, so
@@ -179,6 +262,21 @@ internal sealed partial class WorkspaceManager
 			// Under the same lock as SyncAdhocDocument: both take the current solution, change
 			// it and apply it, and the index is changed along with it.
 			lock(adhocSyncLock) {
+				
+				if(IsAnalyzerConfig(path)) {
+					
+					var solution = adhocWorkspace.CurrentSolution;
+					var config   = solution.GetDocumentIdsWithFilePath(path).FirstOrDefault(id => solution.GetAnalyzerConfigDocument(id) is not null);
+					
+					if(config is null)
+						
+						return;
+					
+					adhocWorkspace.TryApplyChanges(solution.RemoveAnalyzerConfigDocument(config));
+					InvalidateCompilation();
+					
+					return;
+				}
 				
 				if(physicalIndex.IsName(path))
 					ForgetNames([path]);

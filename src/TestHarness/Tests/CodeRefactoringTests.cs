@@ -25,6 +25,19 @@ internal static class CodeRefactoringTests
 		fx.Write("Stale.cs", InvertSource.Replace("class Invert", "class Stale", StringComparison.Ordinal));
 		fx.Write("Wide.cs", WideSource);
 		
+		// Two fixtures with a private .editorconfig (#413), one per workspace kind, written like
+		// every other fixture before the first tool call.
+		var styled      = TestFixtures.NewMsBuildProject("Styled");
+		var styledAdhoc = TestFixtures.NewAdhocDir("StyledAdhoc");
+		
+		foreach(var fixture in (FixtureProject[]) [styled, styledAdhoc]) {
+			
+			fixture.Write(".editorconfig", StyleConfig);
+			fixture.Write(".gitignore", ".editorconfig\n");
+			fixture.Write("Styled.cs", StyledSource);
+			fixture.Write("Caller.cs", CallerSource);
+		}
+		
 		async Task<(JsonNode? Data, string Text)> Call(string tool, object args)
 		{
 			await ctx.SendAsync(new {
@@ -375,6 +388,137 @@ internal static class CodeRefactoringTests
 				: $"FAIL  ({removed.Length} removed, {added.Length} added, {untouched} untouched methods reported as removed) [{sw.ElapsedMilliseconds}ms]");
 		}
 		
+		// What a styled file must look like after a code action: every expected piece is there, and
+		// no line is indented with spaces. Line ends are normalized, since Roslyn writes the
+		// platform's for the lines it adds. Null when the text is as expected.
+		static string? StyleProblem(string text, params string[] expected)
+		{
+			var normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal);
+			var missing    = expected.FirstOrDefault(piece => !normalized.Contains(piece, StringComparison.Ordinal));
+			
+			if(missing is not null)
+				return $"missing {JsonValue.Create(missing).ToJsonString()}";
+			
+			return normalized.Split('\n').Any(line => line.StartsWith(' '))
+				? "a line is indented with spaces"
+				: null;
+		}
+		
+		// A private .editorconfig shapes what a refactoring writes (#413). Without one Roslyn formats
+		// the code it adds in its own defaults: four spaces, every brace on a line of its own, and
+		// "foreach (". The fixture's file asks for tabs, braces on a new line for methods and types
+		// only, and no space after a control-flow keyword, and Extract method must write all three:
+		// the new method and the call to it are tab-indented, the method's brace is on its own line,
+		// and the loop and the condition it moved keep their brace and have no space. The fixture's
+		// .gitignore names .editorconfig, as this repository's does: an ignored file is still read.
+		// No type name is expected: an AdhocWorkspace has no references, so there "int" is written
+		// as an unresolved "global::System.Int32".
+		async Task<(bool pass, string msg)> RunStyledExtract(FixtureProject fixture)
+		{
+			var result = await RunRoundTrip(fixture.ProjectPath, "Styled.cs", 9, 1, 14, null, ".ExtractMethodCodeRefactoringProvider", "method", "NewMethod", null, requireCleanDiagnostics: false);
+			
+			if(!result.pass)
+				return result;
+			
+			var after   = await File.ReadAllTextAsync(fixture.PathOf("Styled.cs"));
+			var problem = StyleProblem(after,
+				"\t\ttotal = NewMethod(",
+				"\tprivate static ",
+				" total)\n\t{\n\t\tforeach(var item in items) {\n",
+				"\t\t\tif(item > 0) {\n"
+			);
+			
+			return problem is null
+				? result
+				: (false, $"FAIL  ({problem}: {JsonValue.Create(after).ToJsonString()})");
+		}
+		
+		// The same for a code fix that adds code (#413): Roslyn's fixer for CS0117 writes the method
+		// the call is missing, tab-indented and with its brace on its own line. That diagnostic and
+		// its one fix exist in both workspace kinds; most others need framework references, which an
+		// AdhocWorkspace does not have.
+		async Task<(bool pass, string msg)> RunStyledFix(FixtureProject fixture)
+		{
+			var sw = Stopwatch.StartNew();
+			var projectPath = fixture.ProjectPath;
+			var (preview, previewText) = await Call("roslyn_preview_code_fix", new { projectPath, filePath = "Caller.cs", line = 7, column = 10, diagnosticId = "CS0117" });
+			var token = preview?["token"]?.GetValue<string>();
+			
+			if(token is null)
+				return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (apply, applyText) = await Call("roslyn_apply_code_fix", new { projectPath, token, approval = "y" });
+			
+			if(apply?["error"] is not null)
+				return (false, $"FAIL  (apply: {applyText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var after   = await File.ReadAllTextAsync(fixture.PathOf("Caller.cs"));
+			var problem = StyleProblem(after, "\tinternal static void Missing()\n\t{\n");
+			
+			return problem is null
+				? (true, $"PASS  [{sw.ElapsedMilliseconds}ms]")
+				: (false, $"FAIL  ({problem}: {JsonValue.Create(after).ToJsonString()}) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+
+		// An AdhocWorkspace has no build to hand it its configs, so it keeps them current itself
+		// (#413): an .editorconfig that appears after the load is used by the next code action. The
+		// file is written through the server, which syncs the workspace before it answers, so the
+		// first half does not wait on the watcher. Two-space indentation is neither Roslyn's default
+		// nor what the file's own tabs suggest; only the new config explains it. The second half is
+		// the watcher's: nothing else reports a file deleted from outside, so it polls.
+		async Task<(bool pass, string msg)> RunConfigAfterLoad()
+		{
+			var sw = Stopwatch.StartNew();
+			using var late = TestFixtures.NewAdhocDir("StyledLate");
+			
+			late.Write("Caller.cs", CallerSource);
+			
+			// The first call loads the workspace, without a config of its own.
+			var (before, beforeText) = await Call("roslyn_preview_code_fix", new { projectPath = late.Dir, filePath = "Caller.cs", line = 7, column = 10, diagnosticId = "CS0117" });
+			
+			if(before?["token"]?.GetValue<string>() is not { } early)
+				return (false, $"FAIL  (preview before the config: {beforeText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			await Call("roslyn_apply_code_fix", new { projectPath = late.Dir, token = early, approval = "n" });
+			
+			var (written, writtenText) = await Call("roslyn_write_file", new {
+				projectPath = late.Dir,
+				filePath    = ".editorconfig",
+				content     = "root = true\n\n[*.cs]\nindent_style = space\nindent_size = 2\n",
+				createNew   = true
+			});
+			
+			if(written?["error"] is not null)
+				return (false, $"FAIL  (write: {writtenText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (preview, previewText) = await Call("roslyn_preview_code_fix", new { projectPath = late.Dir, filePath = "Caller.cs", line = 7, column = 10, diagnosticId = "CS0117" });
+			var diff = preview?["diff"]?.GetValue<string>().Replace("\r\n", "\n", StringComparison.Ordinal) ?? string.Empty;
+			
+			if(!diff.Contains("+  internal static void Missing()\n+  {\n", StringComparison.Ordinal))
+				return (false, $"FAIL  (preview after the config: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			// Deleted behind the server's back, the config is reported by the watcher, and the
+			// style goes with it. What replaces it is not asserted: a config further up the
+			// machine's directories may apply, or Roslyn's defaults.
+			File.Delete(late.PathOf(".editorconfig"));
+			
+			var goneText = previewText;
+			
+			for(var attempt = 0; attempt < 50; attempt++) {
+				
+				await Task.Delay(200);
+				
+				(var gone, goneText) = await Call("roslyn_preview_code_fix", new { projectPath = late.Dir, filePath = "Caller.cs", line = 7, column = 10, diagnosticId = "CS0117" });
+				
+				if(gone?["diff"]?.GetValue<string>() is { } unstyled && !unstyled.Contains("+  internal static", StringComparison.Ordinal))
+					return (true, $"PASS  [{sw.ElapsedMilliseconds}ms]");
+			}
+			
+			return (false, $"FAIL  (the deleted config still applies: {goneText}) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+
 		List<TestCase> tests = [
 			new("list offers Roslyn's refactorings and keeps dialog actions out", RunNoDialogActions),
 			new("a preview's diff is the size of the change, not of the file", RunDiffIsLocal),
@@ -388,13 +532,35 @@ internal static class CodeRefactoringTests
 			new("invert if round-trips", RunInvertIf),
 			new("the same workflow on an AdhocWorkspace", RunAdhoc),
 			new("codeActions.enabled false turns the tools off", RunDisabled),
+			new("a private .editorconfig shapes extract method (MSBuild)", () => RunStyledExtract(styled)),
+			new("a private .editorconfig shapes a code fix (MSBuild)", () => RunStyledFix(styled)),
+			new("a private .editorconfig shapes extract method (AdhocWorkspace)", () => RunStyledExtract(styledAdhoc)),
+			new("a private .editorconfig shapes a code fix (AdhocWorkspace)", () => RunStyledFix(styledAdhoc)),
+			new("an .editorconfig written after an AdhocWorkspace loaded is used", RunConfigAfterLoad),
 		];
 		
-		return new TestGroup($"Code Refactorings ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });
+		return new TestGroup($"Code Refactorings ({tests.Count} tests)", tests, Teardown: () => {
+			
+			fx.Dispose();
+			styled.Dispose();
+			styledAdhoc.Dispose();
+			
+			return Task.CompletedTask;
+		});
 	}
 	
 	const string InvertSource = "namespace Fixture;\n\npublic static class Invert\n{\n\tpublic static string Describe(bool big)\n\t{\n\t\tif(big)\n\t\t\treturn \"big\";\n\t\telse\n\t\t\treturn \"small\";\n\t}\n}\n";
 	
+	// The style of this repository, which is none of Roslyn's defaults (#413).
+	const string StyleConfig = "root = true\n\n[*.cs]\nindent_style = tab\ncsharp_new_line_before_open_brace = methods, types\ncsharp_space_after_keywords_in_control_flow_statements = false\n";
+	
+	// Lines 9 to 14 are the loop Extract method moves.
+	const string StyledSource = "namespace Fixture;\n\npublic static class Styled\n{\n\tpublic static int Sum(int[] items)\n\t{\n\t\tvar total = 0;\n\n\t\tforeach(var item in items) {\n\t\t\tif(item > 0) {\n\t\t\t\ttotal += item;\n\t\t\t\ttotal += 1;\n\t\t\t}\n\t\t}\n\n\t\treturn total;\n\t}\n}\n";
+	
+	// CS0117 on line 7: Target has no method named Missing.
+	const string CallerSource = "namespace Fixture;\n\npublic static class Caller\n{\n\tpublic static void Run()\n\t{\n\t\tTarget.Missing();\n\t}\n}\n\npublic static class Target\n{\n}\n";
+	
+
 	// A statement to extract, then thirty methods the refactoring does not touch. Every blank line is
 	// indented, so the only empty line of the file is the one after its last newline.
 	static readonly string WideSource =
