@@ -41,10 +41,10 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	///     assemblies sit in one directory, so they still share their types.
 	///     <para>
 	///         For the same reason an assembly rebuilt in place cannot be loaded a second time into
-	///         the context that has it. The context remembers the modification time each of its
-	///         files had when it was loaded, and a load that finds another one gets the directory a
-	///         new context (<see cref="ContextFor"/>, #418). The old one stays in memory, with the
-	///         sets built from it: the contexts are not collectible.
+	///         the context that has it. The context keeps, with each assembly, the modification time
+	///         the file had when the load was asked for, and a load that finds another one gets the
+	///         directory a new context (<see cref="ContextFor"/>, #418). The old one stays in
+	///         memory, with the sets built from it: the contexts are not collectible.
 	///     </para>
 	/// </summary>
 	private sealed class DirectoryContext(AssemblyLoadContext context, string directory)
@@ -52,11 +52,11 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 		public AssemblyLoadContext Context   { get; } = context;
 		public string              Directory { get; } = directory;
 		
-		// Original path → loaded assembly, so repeated loads reuse the same shadow copy.
-		public ConcurrentDictionary<string, Assembly> Loaded { get; } = new(SecurityBoundary.PathComparer);
-		
-		// Original path → the modification time it had when this context first loaded it; under contextsLock.
-		public Dictionary<string, long> Stamps { get; } = new(SecurityBoundary.PathComparer);
+		// Original path → the loaded assembly and the modification time it was asked for at, so
+		// repeated loads reuse the same shadow copy. Only a load that succeeded leaves an entry:
+		// a time noted for one that failed, on a file caught while it was being written, would
+		// make the retry look like a rebuild.
+		public ConcurrentDictionary<string, (Assembly Assembly, long Stamp)> Loaded { get; } = new(SecurityBoundary.PathComparer);
 	}
 	
 	/// <summary>
@@ -74,10 +74,11 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 	public void AddDependencyLocation(string fullPath)
 		=> dependencyLocations.TryAdd(Path.GetFullPath(fullPath), 0);
 	
-	// The context a path is loaded into: its directory's current one, unless that one loaded the
-	// path at another modification time. Then the file was rebuilt, and the directory gets a new
-	// context; whatever else of the directory is asked for from now on is loaded into that one too.
-	private DirectoryContext ContextFor(string fullPath)
+	// The context a path is loaded into, and the modification time the path has now: its
+	// directory's current context, unless that one has the path from another time. Then the file
+	// was rebuilt, and the directory gets a new context; whatever else of the directory is asked
+	// for from now on is loaded into that one too.
+	private DirectoryContext ContextFor(string fullPath, out long stamp)
 	{
 		var directory = Path.GetDirectoryName(fullPath) ?? string.Empty;
 		
@@ -85,22 +86,18 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 			
 			// Read under the lock: two calls on either side of a rebuild, entering in the other
 			// order, would each find the other's time in the context and replace it in turn.
-			var stamp = File.GetLastWriteTimeUtc(fullPath).Ticks;
+			stamp = File.GetLastWriteTimeUtc(fullPath).Ticks;
 			
 			if(contexts.TryGetValue(directory, out var current)
-				&& (!current.Stamps.TryGetValue(fullPath, out var loadedAt) || loadedAt == stamp)) {
-				
-				current.Stamps[fullPath] = stamp;
+				&& (!current.Loaded.TryGetValue(fullPath, out var loaded) || loaded.Stamp == stamp))
 				
 				return current;
-			}
 			
 			var context = new AssemblyLoadContext($"{name}#{++generations}: {directory}", isCollectible: false);
 			var created = new DirectoryContext(context, directory);
 			
 			context.Resolving += (_, dependency) => ResolveDependency(created, dependency);
-			created.Stamps[fullPath] = stamp;
-			contexts[directory]      = created;
+			contexts[directory] = created;
 			
 			return created;
 		}
@@ -141,13 +138,24 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 		// One spelling of the path for every dictionary, or each spelling would have a limit of its own.
 		fullPath = Path.GetFullPath(fullPath);
 		
-		return LoadInto(ContextFor(fullPath), fullPath);
+		// A call that sees the file rebuilt can find the context already holding it from before:
+		// another call, started earlier, put it there in the meantime. Asked again, the directory
+		// gets its new context. Only so often, for a file that keeps changing under the calls.
+		for(var attempt = 1; ; attempt++) {
+			
+			var loaded = LoadInto(ContextFor(fullPath, out var stamp), fullPath, stamp);
+			
+			if(loaded.Stamp == stamp || attempt == MaxRebuildRetries)
+				return loaded.Assembly;
+		}
 	}
 	
-	private Assembly LoadInto(DirectoryContext target, string fullPath)
+	private const int MaxRebuildRetries = 3;
+	
+	private (Assembly Assembly, long Stamp) LoadInto(DirectoryContext target, string fullPath, long stamp)
 	{
 		try {
-			return target.Loaded.GetOrAdd(fullPath, path => Load(target.Context, path));
+			return target.Loaded.GetOrAdd(fullPath, path => (Load(target.Context, path), stamp));
 		}
 		catch(Exception ex) when(IsTransient(ex)) {
 			
@@ -225,15 +233,12 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 			
 			if(SecurityBoundary.PathComparer.Equals(Path.GetDirectoryName(candidate), asking.Directory)) {
 				
-				// Remembered like any other file of the context, so that a rebuild of it is seen.
+				// Kept with its time like any other file of the context, so that a rebuild of it is seen.
 				// The file is taken as it is now, also by a context the directory has since
 				// replaced: an assembly still in use from the old one that first needs this
 				// dependency after it was rebuilt gets the new build of it. The old build is
 				// gone from the directory, and no dependency at all would lose the types.
-				lock(contextsLock)
-					asking.Stamps.TryAdd(candidate, File.GetLastWriteTimeUtc(candidate).Ticks);
-				
-				return LoadInto(asking, candidate);
+				return LoadInto(asking, candidate, File.GetLastWriteTimeUtc(candidate).Ticks).Assembly;
 			}
 			
 			var version = VersionOf(candidate);
