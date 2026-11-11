@@ -126,10 +126,16 @@ internal sealed partial class WorkspaceManager
 			
 			try {
 				
-				for(var directory = Path.GetDirectoryName(path); directory is not null && directory.Length > rootLength; directory = Path.GetDirectoryName(directory))
-					if((File.GetAttributes(directory) & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint)) != 0)
+				for(var directory = Path.GetDirectoryName(path); directory is not null && directory.Length > rootLength; directory = Path.GetDirectoryName(directory)) {
+					
+					// The walk's own test for a link: a reparse point alone is not one, a
+					// cloud-synced folder carries the attribute and is walked.
+					var info = new DirectoryInfo(directory);
+					
+					if(!info.Exists || (info.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0 || WorkspaceWalker.IsLink(info))
 						
 						return false;
+				}
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 				
