@@ -531,26 +531,32 @@ internal static partial class ShadowCopyTests
 		}
 		
 		// An analyzer reference whose file is not there is a source with a problem, never a silent
-		// skip (#424): an analyzer package that was never restored, or has left the NuGet cache,
-		// took its fixers, refactorings and analyzers with it, and nothing said so. The project names
-		// a file that does not exist. The refactoring list must name the source with a "not found"
-		// problem and its remedy, roslyn_info must list it, and an analyzer run must say that the
-		// reference did not run. Then the file appears — the bundled analyzers under that name — and
-		// the same server must load it at the next call: a missing file is looked for again every time.
+		// skip (#424): its fixers, refactorings and analyzers were missing and nothing said so. The
+		// project names two files that do not exist. One is where a project's build output would be,
+		// the other under the NuGet package cache, and each must be named with the remedy that fits:
+		// a build for the first, a restore for the second. roslyn_info must list each once, and an
+		// analyzer run must say that they did not run. Then the first file appears — the bundled
+		// analyzers under that name — and the same server must load it at the next call, with the
+		// diagnostics note no longer naming it: a missing file is looked for again every time. Last,
+		// the file goes away again, and roslyn_info must list it once, as not found, not also as the
+		// set that was loaded from it.
 		async Task<(bool pass, string msg)> RunMissingReference()
 		{
 			if(providerDll is null)
 				return Skip.SetupUnavailable("RoslynMcp.Analyzers.dll is not built");
 			
-			const string file = "Missing.Analyzers.dll";
+			const string file     = "Missing.Analyzers.dll";
+			const string packaged = "Missing.Packaged.dll";
 			
 			var sw     = Stopwatch.StartNew();
 			var holder = TestFixtures.NewAdhocDir("ShadowMissingDll");
 			
 			fixtures.Add(holder);
 			
+			// Never created: only the path matters, and that it is under the package cache.
 			var missing = holder.PathOf(file);
-			var project = NewOrderedProject("ShadowMissing", [missing]);
+			var inCache = Path.Combine(NuGetCache(), "roslynmcp.testharness.missing", "1.0.0", "analyzers", "dotnet", "cs", packaged);
+			var project = NewOrderedProject("ShadowMissing", [missing, inCache]);
 			
 			var (process, server) = await Start(project, new Dictionary<string, string>());
 			
@@ -559,35 +565,78 @@ internal static partial class ShadowCopyTests
 				if(server is null)
 					return (false, "FAIL  (server did not answer initialize)");
 				
-				bool IsTheSource(JsonNode? entry) => entry?["source"]?.GetValue<string>() == $"project: {file}";
+				async Task<JsonNode[]> ListedAsync(string name)
+				{
+					var info = await server.CallToolJsonAsync("roslyn_info", new { });
+					
+					return [..(info?["code_actions"]?["sources"]?.AsArray() ?? []).Where(entry => entry?["source"]?.GetValue<string>() == $"project: {name}").Select(entry => entry!)];
+				}
 				
-				var named       = await NamedSourceAsync(server, project, "project", file);
-				var problem     = named?["problem"]?.GetValue<string>() ?? "";
-				var info        = await server.CallToolJsonAsync("roslyn_info", new { });
-				var listed      = info?["code_actions"]?["sources"]?.AsArray().Count(IsTheSource) ?? 0;
-				var diagnostics = await server.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = project.Csproj, includeAnalyzers = true, take = 0 });
-				var hint        = diagnostics?["hint"]?.GetValue<string>() ?? "";
+				async Task<string> HintAsync()
+				{
+					var diagnostics = await server.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = project.Csproj, includeAnalyzers = true, take = 0 });
+					
+					return diagnostics?["hint"]?.GetValue<string>() ?? "";
+				}
 				
-				var reported = problem.Contains("not found", StringComparison.Ordinal)
-					&& problem.Contains("roslyn_restore_packages", StringComparison.Ordinal)
-					&& listed == 1
+				static bool NotFound(JsonNode? source, string remedy)
+					=> (source?["problem"] ?? source?["problems"]?[0])?.GetValue<string>() is { } problem
+						&& problem.Contains("not found", StringComparison.Ordinal)
+						&& problem.Contains(remedy, StringComparison.Ordinal);
+				
+				var built    = await NamedSourceAsync(server, project, "project", file);
+				var restored = await NamedSourceAsync(server, project, "project", packaged);
+				var hint     = await HintAsync();
+				var reported = NotFound(built, "roslyn_build_project")
+					&& NotFound(restored, "roslyn_restore_packages")
+					&& (await ListedAsync(file)).Length == 1
+					&& (await ListedAsync(packaged)).Length == 1
 					&& hint.Contains(file, StringComparison.Ordinal)
+					&& hint.Contains(packaged, StringComparison.Ordinal)
 					&& hint.Contains("did not run", StringComparison.Ordinal);
 				
 				if(!reported)
-					return (false, $"FAIL  (list: {named?.ToJsonString() ?? "source not named"}; roslyn_info lists it {listed} time(s); diagnostics hint: '{hint}') [{sw.ElapsedMilliseconds}ms]");
+					return (false, $"FAIL  (while missing: {built?.ToJsonString() ?? "first source not named"} | {restored?.ToJsonString() ?? "second source not named"}; diagnostics hint: '{hint}') [{sw.ElapsedMilliseconds}ms]");
 				
 				File.Copy(providerDll, missing);
 				shadows.Add(Path.GetDirectoryName(ShadowPathOf(missing))!);
 				
-				var found      = await NamedSourceAsync(server, project, "project", file);
-				var after      = await server.CallToolJsonAsync("roslyn_info", new { });
-				var listedOnce = after?["code_actions"]?["sources"]?.AsArray().Count(IsTheSource) == 1;
-				var pass       = Loaded(found) && listedOnce;
+				var found     = await NamedSourceAsync(server, project, "project", file);
+				var foundHint = await HintAsync();
+				var loaded    = Loaded(found)
+					&& (await ListedAsync(file)).Length == 1
+					&& !foundHint.Contains(file, StringComparison.Ordinal)
+					&& foundHint.Contains(packaged, StringComparison.Ordinal);
+				
+				if(!loaded)
+					return (false, $"FAIL  (once the file was there: {found?.ToJsonString() ?? "not reported"}; diagnostics hint: '{foundHint}') [{sw.ElapsedMilliseconds}ms]");
+				
+				File.Delete(missing);
+				
+				await NamedSourceAsync(server, project, "project", file);
+				
+				var gone = await ListedAsync(file);
+				
+				if(gone.Length != 1 || !NotFound(gone[0], "roslyn_build_project"))
+					return (false, $"FAIL  (once the file was gone again, roslyn_info lists: {string.Join(" | ", gone.Select(entry => entry.ToJsonString()))}) [{sw.ElapsedMilliseconds}ms]");
+				
+				// A reference the project no longer lists is forgotten: the other one is taken out of the
+				// project file through the server, which reloads the project at the next call.
+				var edit = await server.CallToolJsonAsync("roslyn_replace_in_file", new {
+					projectPath = project.Csproj,
+					filePath    = Path.GetFileName(project.Csproj),
+					pattern     = $"<Analyzer Include=\"{inCache}\" />",
+					replacement = "",
+				});
+				
+				await NamedSourceAsync(server, project, "project", file);
+				
+				var dropped = await ListedAsync(packaged);
+				var pass    = edit?["match_count"]?.GetValue<int>() == 1 && dropped.Length == 0 && (await ListedAsync(file)).Length == 1;
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (once the file was there: {found?.ToJsonString() ?? "not reported"}; listed once: {listedOnce}) [{sw.ElapsedMilliseconds}ms]");
+					: $"FAIL  (after the reference was taken out of the project (edit: {edit?.ToJsonString() ?? "no answer"}), roslyn_info still lists it {dropped.Length} time(s)) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				await DefaultWorkspaceTests.StopServerAsync(process, server);
@@ -603,7 +652,7 @@ internal static partial class ShadowCopyTests
 			new("helper types that cannot load are not a problem of the source", RunUnloadableHelpers),
 			new("an analyzer or fix provider lost to a missing dependency is named in the source's problems", RunLostTypesAreNamed),
 			new("a result cached while a dependency was missing does not outlive a later project that names it", RunSiblingNamedLater),
-			new("an analyzer reference whose file is missing is a source with a problem, and loads once the file is there", RunMissingReference),
+			new("an analyzer reference whose file is missing is a source with the remedy that fits, listed once, and loads once the file is there", RunMissingReference),
 		];
 		
 		return new TestGroup($"Shadow Copies ({tests.Count} tests)", tests, Teardown: () => {
@@ -686,16 +735,18 @@ internal static partial class ShadowCopyTests
 		}
 	}
 	
+	// The NuGet package cache, as the server finds it (NuGetPackageLocator.Root).
+	static string NuGetCache()
+		=> Environment.GetEnvironmentVariable("NUGET_PACKAGES") is { Length: > 0 } configured
+			? configured
+			: Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+	
 	// A Microsoft.CodeAnalysis.Analyzers.dll in the NuGet cache whose metadata references
 	// Microsoft.Bcl.AsyncInterfaces. The package is a dependency of the Roslyn packages the server
 	// is built with, so a restore of the repository puts one there.
 	static string? FindAnalyzerWithMissingDependency()
 	{
-		var cache = Environment.GetEnvironmentVariable("NUGET_PACKAGES") is { Length: > 0 } configured
-			? configured
-			: Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
-		
-		var package = Path.Combine(cache, "microsoft.codeanalysis.analyzers");
+		var package = Path.Combine(NuGetCache(), "microsoft.codeanalysis.analyzers");
 		
 		if(!Directory.Exists(package))
 			return null;

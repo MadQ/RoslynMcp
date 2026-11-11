@@ -46,9 +46,11 @@ internal sealed class CodeActionHost
 	// never finds a set beside another load's count.
 	readonly ConcurrentDictionary<(string Path, long MtimeTicks), (ProviderSet Set, int? ShortAt)> fromReferences = new();
 	
-	// The analyzer references whose file was not there when a project listing them was last asked
-	// for (#424), by path, so that roslyn_info can name them. An entry goes when the file is found.
-	readonly ConcurrentDictionary<string, ProviderSet> missingReferences = new(SecurityBoundary.PathComparer);
+	// For each project file, the analyzer references whose file was not there when the project's
+	// providers were last asked for (#424), so that roslyn_info can name them. Replaced whole at every
+	// such call, so a reference the project no longer lists is forgotten with it, and one whose file
+	// has been found is gone.
+	readonly ConcurrentDictionary<string, ImmutableArray<string>> missingByProject = new(SecurityBoundary.PathComparer);
 	
 	// Providers the config files name, keyed by the declaring file and the entry. The stamp beside each set
 	// is what the entry resolved to — the assemblies with their modification times, or the problem — so a
@@ -85,13 +87,17 @@ internal sealed class CodeActionHost
 			if(builtIn.IsValueCreated)
 				yield return builtIn.Value.Report;
 			
-			foreach(var cached in fromReferences.Values)
-				yield return cached.Set.Report;
+			// A set whose file has since gone is not what a project gets any more: the file is reported
+			// below as missing, and listing both would say it is loaded and not found at once.
+			foreach(var (key, cached) in fromReferences)
+				if(File.Exists(key.Path))
+					yield return cached.Set.Report;
 			
-			// A reference that was missing when it was last asked for, and still is.
-			foreach(var (path, missing) in missingReferences)
+			// A reference that was missing when its project was last asked for, and still is; once,
+			// however many projects list it.
+			foreach(var path in missingByProject.Values.SelectMany(paths => paths).Distinct(SecurityBoundary.PathComparer))
 				if(!File.Exists(path))
-					yield return missing.Report;
+					yield return MissingReference(path).Report;
 			
 			foreach(var cached in configured.Values)
 				yield return cached.Set.Report;
@@ -393,6 +399,7 @@ internal sealed class CodeActionHost
 		AnalyzerLoading.RegisterDependencies(project);
 		
 		var locations = ShadowCopyAnalyzerLoader.Instance.DependencyLocationCount;
+		var missing   = ImmutableArray.CreateBuilder<string>();
 		
 		foreach(var reference in project.AnalyzerReferences) {
 			
@@ -402,17 +409,15 @@ internal sealed class CodeActionHost
 				continue;
 			
 			// A file that is not there is a source with a problem, never a silent skip (#424): its
-			// fixers and refactorings are missing, and the usual cause, a package that was never
-			// restored or has left the NuGet cache, has a remedy to name. Not cached under the
-			// file's key, since there is no file: it is looked for again at every call.
+			// fixers and refactorings are missing, and there is a remedy to name. Nothing is cached
+			// for it, since there is no file: it is looked for again at every call.
 			if(!File.Exists(path)) {
 				
-				sets.Add(missingReferences.GetOrAdd(path, MissingReference));
+				sets.Add(MissingReference(path));
+				missing.Add(path);
 				
 				continue;
 			}
-			
-			missingReferences.TryRemove(path, out _);
 			
 			var key = (path, File.GetLastWriteTimeUtc(path).Ticks);
 			
@@ -435,15 +440,23 @@ internal sealed class CodeActionHost
 			
 			sets.Add(set);
 		}
+		
+		// What this project is missing now, in place of what it was missing at the last call.
+		if(missing.Count > 0)
+			missingByProject[project.FilePath] = missing.ToImmutable();
+		else
+			missingByProject.TryRemove(project.FilePath, out _);
 	}
+	
+	// A source that yields nothing because its file is not there, with the remedy that fits where
+	// the file should be.
+	static ProviderSet MissingReference(string path)
+		=> ProviderSet.Empty($"project: {Path.GetFileName(path)}", ProviderSourceKind.Project, path,
+			$"analyzer reference not found: '{path}'. {AnalyzerLoading.MissingReferenceRemedy([path])}")
+	;
 	
 	// The same shadow-copied assembly the project's analyzers come from (AnalyzerLoading), so the
 	// original stays unlocked and a provider and its analyzer are one load.
-	static ProviderSet MissingReference(string path)
-		=> ProviderSet.Empty($"project: {Path.GetFileName(path)}", ProviderSourceKind.Project, path,
-			$"analyzer reference not found: '{path}'. An analyzer package's files get there by a restore: run roslyn_restore_packages for the project, then ask again.")
-	;
-	
 	ProviderSet LoadFromReference(string path)
 	{
 		var source = $"project: {Path.GetFileName(path)}";

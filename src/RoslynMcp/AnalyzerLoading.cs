@@ -64,6 +64,27 @@ internal static class AnalyzerLoading
 			.Where(path => !File.Exists(path))]
 	;
 	
+	/// <summary>
+	///     What to do about analyzer references that were not found, by where they should be. A file
+	///     under the NuGet package cache gets there by a restore. Anything else is most likely the
+	///     output of a project referenced as an analyzer, which is missing before the first build and
+	///     after a clean, and which no restore brings back.
+	/// </summary>
+	public static string MissingReferenceRemedy(IReadOnlyCollection<string> paths)
+	{
+		var packaged = paths.Count(path => SecurityBoundary.StartsWithPath(path, NuGetPackageLocator.Root));
+		
+		if(packaged == paths.Count)
+			
+			return "The NuGet package cache is where it belongs: restore the project's packages with roslyn_restore_packages, then ask again.";
+		
+		if(packaged == 0)
+			
+			return "It is not in the NuGet package cache, so it is most likely the output of a project referenced as an analyzer: build it with roslyn_build_project, then ask again.";
+		
+		return "Those in the NuGet package cache come back with roslyn_restore_packages; the others are most likely the output of a project referenced as an analyzer, which roslyn_build_project builds. Then ask again.";
+	}
+	
 	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language, int locations)
 	{
 		if(reference.FullPath is not { } path || !File.Exists(path))
