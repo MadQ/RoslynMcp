@@ -354,9 +354,13 @@ static class WatcherThroughWritesTests
 				}),
 			
 			// The acceptance case of #403: a file written in place in two steps, with a pause
-			// longer than the debounce in between. The flush runs in the pause and meets the
-			// file half written. It must not put that half back, and when the writer is done the
-			// file and the workspace must both hold the complete text.
+			// longer than the debounce in between. The flush runs in the pause. On Linux and
+			// macOS it reads the file half written, and must not put that half back; on Windows
+			// its read is refused while the writer has the file open, and must be made again.
+			// Either way, when the writer is done the file and the workspace must both hold the
+			// complete text. This passed before the fix as well: the half that was written back
+			// went into the same file the writer still had open, in place. It is here as the
+			// case the issue names, and the test above is the one that catches the write.
 			new("watcher through writes: a file written in place in two steps ends complete on disk and in the workspace",
 				async () => {
 					
@@ -455,7 +459,9 @@ static class WatcherThroughWritesTests
 			// still open somewhere, and the workspace reported it as a failure of its own: a
 			// steady stream of "being used by another process" in the log, about 35 in a full
 			// run of this harness, for calls that had succeeded. Ten whole-file writes of one
-			// tracked file must leave no workspace failure in the log for this fixture.
+			// tracked file must leave no workspace failure in the log for that file. Only that
+			// file: other tests of the group have the workspace write a file while someone else
+			// saves it, on purpose, and a refusal there is theirs.
 			new("watcher through writes: the server's own write of a tracked file logs no workspace failure",
 				async () => {
 					
@@ -480,11 +486,11 @@ static class WatcherThroughWritesTests
 						
 						return (false, logFailure);
 					
-					var failures = log.Count(line => line.Contains("WorkspaceFailed") && line.Contains("WatcherThroughWrites"));
+					var failures = log.Count(line => line.Contains("WorkspaceFailed") && line.Contains("WatcherThroughWrites") && line.Contains("Written.cs"));
 					
 					return failures == 0 && served?.Contains("field10") == true
 						? (true,  "PASS")
-						: (false, $"FAIL  (workspace failures logged for this fixture: {failures}; the workspace serves the last write: {served?.Contains("field10") == true})");
+						: (false, $"FAIL  (workspace failures logged for Written.cs: {failures}; the workspace serves the last write: {served?.Contains("field10") == true})");
 				}),
 		};
 		

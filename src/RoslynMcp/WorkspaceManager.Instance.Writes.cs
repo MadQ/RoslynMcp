@@ -195,17 +195,33 @@ internal sealed partial class WorkspaceManager
 				
 				return false;
 			
+			var set = 0;
+			
 			foreach(var project in projectChanges) {
 				
-				foreach(var id in project.GetChangedDocuments())
-					if(newSolution.GetDocument(id) is { } document && document.TryGetText(out var text) && !WorkspaceTextSetter.TrySet(ws, id, text, additional: false))
-						
-						return null;
+				var changed = project.GetChangedDocuments().Select(id => (Id: id, Additional: false))
+					.Concat(project.GetChangedAdditionalDocuments().Select(id => (Id: id, Additional: true)))
+				;
 				
-				foreach(var id in project.GetChangedAdditionalDocuments())
-					if(newSolution.GetAdditionalDocument(id) is { } document && document.TryGetText(out var text) && !WorkspaceTextSetter.TrySet(ws, id, text, additional: true))
+				foreach(var (id, additional) in changed) {
+					
+					TextDocument? document = additional ? newSolution.GetAdditionalDocument(id) : newSolution.GetDocument(id);
+					
+					// A changed document without a text at hand cannot be set. Passing it over
+					// would report an apply that left it as it was.
+					if(document is null || !document.TryGetText(out var text))
 						
-						return null;
+						return false;
+					
+					// Not there to be called: before anything was set, the apply that writes
+					// takes over. After, the solution has moved on under it, so the apply has
+					// failed, and the caller reloads.
+					if(!WorkspaceTextSetter.TrySet(ws, id, text, additional))
+						
+						return set == 0 ? null : false;
+					
+					set++;
+				}
 			}
 			
 			return true;
@@ -263,10 +279,15 @@ internal sealed partial class WorkspaceManager
 			// reached through a link is thereby written into another file, and that file gets
 			// the same treatment as in WriteAndInvalidate: captured before the write and
 			// brought up to date afterwards (#338).
-			var linkedWrites = ownedPaths
-				.Select(LinkedWriteFor)
-				.OfType<LinkedWrite>()
-				.ToArray()
+			// Only an apply that writes. One that does not has written nothing through a link,
+			// and treating the file behind it as just written would be wrong twice over: its
+			// watcher reports are dropped while it is synced, and a file no project compiles is
+			// stamped as the server's own write, so a save someone made at that moment would
+			// go unseen (#403). The server's real writes do this themselves in
+			// WriteAndInvalidate, and a file changed from outside is reported under its own path.
+			LinkedWrite[] linkedWrites = persist
+				? [..ownedPaths.Select(LinkedWriteFor).OfType<LinkedWrite>()]
+				: []
 			;
 			
 			// The watchers stay live through the write (#358), so it is reported, at each path
@@ -296,9 +317,11 @@ internal sealed partial class WorkspaceManager
 							?? ws.TryApplyChanges(newSolution);
 					}
 				}
-				catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException or NotSupportedException) {
+				catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException or NotSupportedException or ArgumentException) {
 					// ObjectDisposedException/InvalidOperationException: workspace disposed by a concurrent
 					// ReloadIfNeeded between the staleness check and TryApplyChanges.
+					// ArgumentException: the same for an apply that sets texts — a workspace that
+					// was disposed has no documents, and a document that is not in it is refused.
 					// NotSupportedException: TryApplyChanges throws for unsupported change kinds
 					// (e.g. AddDocument/RemoveDocument on MSBuildWorkspace). Both treated as false return.
 					_ = ex

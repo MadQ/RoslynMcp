@@ -779,6 +779,10 @@ internal sealed partial class WorkspaceManager
 					// file's text is written into another (#341).
 					using var stream = FileReader.OpenUnbounded(path);
 					var text = SourceText.From(stream, FileWriter.Utf8NoBom);
+					
+					// Read: whatever kept the file from being read before is over, whether or
+					// not the text turns out to be new.
+					unreadable.TryRemove(path, out _);
 
 					// Already current. Applying identical text is not free: it moves the solution
 					// on, which drops the compilations, and flags a full reload if it fails.
@@ -801,13 +805,14 @@ internal sealed partial class WorkspaceManager
 
 					applyFailed ??= path;
 					modified = true;
-					unreadable.TryRemove(path, out _);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
 					// The change is known and its text is not: the workspace is behind disk
-					// until a later flush has read the file.
-					if(RetryUnreadable(path, ex))
+					// until a later flush has read the file. A name the index added is not put
+					// back, as below: it is found again from the reported path, and on its own
+					// a name that is no document any more would look like a new source file.
+					if(unreported.Contains(path) || RetryUnreadable(path, ex))
 						behindDisk = true;
 				}
 				catch(InvalidOperationException) {
@@ -866,9 +871,10 @@ internal sealed partial class WorkspaceManager
 		// How often in a row each changed file could not be read by a flush.
 		readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> unreadable = new(SecurityBoundary.PathComparer);
 		
-		// A file is held for the length of a save, so a few debounce periods cover it; a file
-		// held for good must not be read again forever.
-		const int MaxUnreadableRetries = 10;
+		// About half a minute of debounce periods, each costing one refused open. A save holds a
+		// file far shorter, a slow copy or a download may not; a file held for good must not be
+		// read again forever.
+		const int MaxUnreadableRetries = 100;
 		
 		/// <summary>
 		///     A changed file the flush could not read is read again by the next flush, a limited

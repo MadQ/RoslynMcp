@@ -418,11 +418,21 @@ How it works:
 (`FileReader.ReadSharing`), so a file another program still has open for writing is refused. The
 flush used to drop the report there, and when the writer closed the file without a further
 event the workspace kept the old text for good. `RetryUnreadable` puts the path back for the
-next flush, at most `MaxUnreadableRetries` (10) times in a row, logs the first failure and the
-giving up (`Watch — Changed file could not be read, will be read again …`), and the flush
-reports the workspace as behind disk meanwhile, so the sync clock does not advance and
-`roslyn_check_drift` sees the file. `InvalidateFile` hands a read it was refused to the same
-retry. A file that is gone is not retried; its delete has a report of its own.
+next flush, at most `MaxUnreadableRetries` (100) times in a row, which is about half a minute
+of debounce periods, and logs the first failure and the giving up
+(`Watch — Changed file could not be read, will be read again …`). While the retries last the
+flush reports the workspace as behind disk, so the sync clock does not advance and
+`roslyn_check_drift` sees the file. Once it has given up, the next clean flush moves the clock
+on and the file is no longer reported: the log entry is then the only word of it, until the
+file changes again. A name the index added to the batch is not put back on its own; it is found
+again from the reported path. `InvalidateFile` hands a read it was refused to the same retry. A
+file that is gone is not retried; its delete has a report of its own.
+
+**The non-writing apply leaves link targets alone.** An apply that writes brings the file
+behind a written link up to date, and for that drops the target's watcher reports and may
+stamp it as the server's own write. An apply that does not write has written nothing there, so
+it does neither: the server's real writes do it in `WriteAndInvalidate`, and a file changed
+from outside is reported under its own path.
 
 ---
 
