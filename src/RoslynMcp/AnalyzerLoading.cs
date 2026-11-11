@@ -65,7 +65,7 @@ internal static class AnalyzerLoading
 		// Roslyn swallows an assembly that does not load and answers with no analyzers. Cached, that
 		// answer would outlive a failure that was only another server holding the shadow copy for a
 		// moment, and the project's analyzers would be gone for the life of the process (#412).
-		var loader    = ShadowCopyAnalyzerLoader.Instance;
+		var loader     = ShadowCopyAnalyzerLoader.Instance;
 		var failures   = loader.TransientFailures;
 		var unresolved = loader.UnresolvedDependencies;
 		var analyzers  = new AnalyzerFileReference(path, loader).GetAnalyzers(language);

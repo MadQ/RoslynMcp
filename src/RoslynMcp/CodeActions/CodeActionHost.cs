@@ -39,11 +39,12 @@ internal sealed class CodeActionHost
 	readonly ProviderSet       bundled;
 	
 	// Providers from a project's analyzer references, keyed by (path, mtime) as AnalyzerLoading keys its analyzers.
-	// A set with a problem is kept with the number of dependency locations the loader knew when it was
-	// loaded: the problem may be a type lost for want of a dependency that a later project names, so
-	// such a set is loaded again once the loader knows more (#421). One value, so that a reader never
-	// finds a set beside another load's count.
-	readonly ConcurrentDictionary<(string Path, long MtimeTicks), (ProviderSet Set, int Locations)> fromReferences = new();
+	// A set during whose load a dependency was found nowhere is kept with the number of dependency
+	// locations the loader knew then: it may have lost a type that a later project's sibling reference
+	// supplies, so it is loaded again once the loader knows more (#421). ShortAt is null for a set that
+	// had every dependency it asked for, whatever other problem it has. One value, so that a reader
+	// never finds a set beside another load's count.
+	readonly ConcurrentDictionary<(string Path, long MtimeTicks), (ProviderSet Set, int? ShortAt)> fromReferences = new();
 	
 	// Providers the config files name, keyed by the declaring file and the entry. The stamp beside each set
 	// is what the entry resolved to — the assemblies with their modification times, or the problem — so a
@@ -390,7 +391,7 @@ internal sealed class CodeActionHost
 			
 			var key = (path, File.GetLastWriteTimeUtc(path).Ticks);
 			
-			if(fromReferences.TryGetValue(key, out var cached) && (cached.Set.Report.Problems.IsEmpty || cached.Locations == locations)) {
+			if(fromReferences.TryGetValue(key, out var cached) && (cached.ShortAt is null || cached.ShortAt == locations)) {
 				
 				sets.Add(cached.Set);
 				
@@ -399,11 +400,13 @@ internal sealed class CodeActionHost
 			
 			// A set from a load that failed on the file system — another server holding the shadow
 			// copy, say — is used for this call and loaded again at the next, not kept (#412).
-			var failures = ShadowCopyAnalyzerLoader.Instance.TransientFailures;
-			var set      = LoadFromReference(path);
+			var loader     = ShadowCopyAnalyzerLoader.Instance;
+			var failures   = loader.TransientFailures;
+			var unresolved = loader.UnresolvedDependencies;
+			var set        = LoadFromReference(path);
 			
-			if(ShadowCopyAnalyzerLoader.Instance.TransientFailures == failures)
-				fromReferences[key] = (set, locations);
+			if(loader.TransientFailures == failures)
+				fromReferences[key] = (set, loader.UnresolvedDependencies == unresolved ? null : locations);
 			
 			sets.Add(set);
 		}

@@ -518,7 +518,8 @@ internal static partial class ShadowCopyTests
 				await ProjectAnalyzersAsync(server, both);
 				
 				var fullCount = await ProjectAnalyzersAsync(server, alone);
-				var pass      = Loaded(fullSource) && fullCount > shortCount;
+				// A count that the diagnostics note did not state is negative, and proves nothing.
+				var pass      = Loaded(fullSource) && shortCount >= 0 && fullCount > shortCount;
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
