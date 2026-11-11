@@ -47,6 +47,23 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 		=> dependencyLocations.TryAdd(fullPath, 0);
 	
 	/// <summary>
+	///     How many dependency locations are registered; locations are never removed, so it only grows.
+	///     A cache of a load's result compares it: a load that lost types for want of a dependency may
+	///     find it once a later project has named more locations (#421).
+	/// </summary>
+	public int DependencyLocationCount => dependencyLocations.Count;
+	
+	/// <summary>
+	///     How many dependencies were asked for and found at no registered location. Roslyn does not
+	///     say when an assembly lost analyzers for want of a dependency, so a caller that caches a
+	///     load's result reads this before and after to know whether it may have come up short. A
+	///     count that another thread's load moved costs one more load later, nothing else.
+	/// </summary>
+	internal int UnresolvedDependencies => Volatile.Read(ref unresolvedDependencies);
+	
+	private int unresolvedDependencies;
+	
+	/// <summary>
 	///     How many loads have failed on the file system so far — a sharing violation, a file that
 	///     went away, access denied — and not on the assembly itself. A caller that caches what a
 	///     load produced reads it before and after: a result from a load during which it moved may be
@@ -132,6 +149,11 @@ internal sealed class ShadowCopyAnalyzerLoader : IAnalyzerAssemblyLoader
 			
 			return LoadFromPath(candidate);
 		}
+		
+		// A satellite resource assembly is asked for with every culture and is missing as a rule;
+		// no type is lost with it.
+		if(name.Name?.EndsWith(".resources", StringComparison.OrdinalIgnoreCase) != true)
+			Interlocked.Increment(ref unresolvedDependencies);
 		
 		return null;
 	}

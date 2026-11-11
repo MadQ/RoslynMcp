@@ -39,7 +39,12 @@ internal sealed class CodeActionHost
 	readonly ProviderSet       bundled;
 	
 	// Providers from a project's analyzer references, keyed by (path, mtime) as AnalyzerLoading keys its analyzers.
-	readonly ConcurrentDictionary<(string Path, long MtimeTicks), ProviderSet> fromReferences = new();
+	// A set during whose load a dependency was found nowhere is kept with the number of dependency
+	// locations the loader knew then: it may have lost a type that a later project's sibling reference
+	// supplies, so it is loaded again once the loader knows more (#421). ShortAt is null for a set that
+	// had every dependency it asked for, whatever other problem it has. One value, so that a reader
+	// never finds a set beside another load's count.
+	readonly ConcurrentDictionary<(string Path, long MtimeTicks), (ProviderSet Set, int? ShortAt)> fromReferences = new();
 	
 	// Providers the config files name, keyed by the declaring file and the entry. The stamp beside each set
 	// is what the entry resolved to — the assemblies with their modification times, or the problem — so a
@@ -76,8 +81,8 @@ internal sealed class CodeActionHost
 			if(builtIn.IsValueCreated)
 				yield return builtIn.Value.Report;
 			
-			foreach(var set in fromReferences.Values)
-				yield return set.Report;
+			foreach(var cached in fromReferences.Values)
+				yield return cached.Set.Report;
 			
 			foreach(var cached in configured.Values)
 				yield return cached.Set.Report;
@@ -228,10 +233,7 @@ internal sealed class CodeActionHost
 	/// </summary>
 	public AnalyzerSet AnalyzersFor(Project project)
 	{
-		var fromProject = project.AnalyzerReferences
-			.SelectMany(reference => AnalyzerLoading.GetShadowedAnalyzers(reference, project.Language))
-			.ToImmutableArray()
-		;
+		var fromProject = AnalyzerLoading.GetShadowedAnalyzers(project);
 		
 		// An AdhocWorkspace project has no file; its directory is where a project config would be.
 		var settings = CodeActionSettings.Resolve(project.FilePath ?? project.Documents.FirstOrDefault()?.FilePath ?? string.Empty, logger);
@@ -377,6 +379,11 @@ internal sealed class CodeActionHost
 			return;
 		}
 		
+		// A reference may depend on one listed after it (#421).
+		AnalyzerLoading.RegisterDependencies(project);
+		
+		var locations = ShadowCopyAnalyzerLoader.Instance.DependencyLocationCount;
+		
 		foreach(var reference in project.AnalyzerReferences) {
 			
 			if(reference.FullPath is not { } path || !File.Exists(path))
@@ -384,19 +391,24 @@ internal sealed class CodeActionHost
 			
 			var key = (path, File.GetLastWriteTimeUtc(path).Ticks);
 			
-			if(fromReferences.TryGetValue(key, out var cached)) {
+			if(fromReferences.TryGetValue(key, out var cached) && (cached.ShortAt is null || cached.ShortAt == locations)) {
 				
-				sets.Add(cached);
+				sets.Add(cached.Set);
 				
 				continue;
 			}
 			
 			// A set from a load that failed on the file system — another server holding the shadow
 			// copy, say — is used for this call and loaded again at the next, not kept (#412).
-			var failures = ShadowCopyAnalyzerLoader.Instance.TransientFailures;
-			var set      = LoadFromReference(path);
+			var loader     = ShadowCopyAnalyzerLoader.Instance;
+			var failures   = loader.TransientFailures;
+			var unresolved = loader.UnresolvedDependencies;
+			var set        = LoadFromReference(path);
 			
-			sets.Add(ShadowCopyAnalyzerLoader.Instance.TransientFailures == failures ? fromReferences.GetOrAdd(key, set) : set);
+			if(loader.TransientFailures == failures)
+				fromReferences[key] = (set, loader.UnresolvedDependencies == unresolved ? null : locations);
+			
+			sets.Add(set);
 		}
 	}
 	
@@ -586,7 +598,7 @@ internal sealed class CodeActionHost
 		var fixes        = ImmutableArray.CreateBuilder<ProviderEntry<CodeFixProvider>>();
 		var problems     = ImmutableArray.CreateBuilder<string>();
 		
-		foreach(var type in SafeGetTypes(assembly, problems)) {
+		foreach(var type in ProviderCandidates(assembly, problems)) {
 			
 			if(type.IsAbstract || type.IsInterface)
 				continue;
@@ -608,6 +620,53 @@ internal sealed class CodeActionHost
 			new ProviderSourceReport(source, kind, origin, refactorings.Count, fixes.Count, problems.ToImmutable()),
 			refactorings.ToImmutable(),
 			fixes.ToImmutable());
+	}
+	
+	// The types of a provider assembly to look for exports on. When every type loads, all of
+	// them. When some do not, reflection gives the ones that did and a count of the rest, and the
+	// rest are a problem only where a provider or an analyzer is among them (#421): those types are
+	// read from the metadata and each missing one is loaded by name, so the answer names the provider
+	// or analyzer that was lost and why, and says nothing of a helper type that neither needed. An
+	// analyzer is no candidate for an export, but Roslyn drops one that does not load without a word,
+	// and this report is where a project's analyzers running short can be seen. The language an
+	// analyzer is for is not looked at: an assembly that also holds Visual Basic analyzers, whose
+	// base types need an assembly the server does not have, names each of them on a C# project too.
+	static IReadOnlyList<Type> ProviderCandidates(Assembly assembly, ImmutableArray<string>.Builder problems)
+	{
+		try {
+			return assembly.GetTypes();
+		}
+		catch(ReflectionTypeLoadException ex) {
+			
+			var loaded = new List<Type>(ex.Types.Where(type => type is not null)!);
+			
+			ImmutableArray<string> exported;
+			
+			try {
+				exported = ExportedProviderTypes.Read(assembly);
+			}
+			catch(Exception) {
+				
+				// Without the names there is no telling whether a provider is among the failed types.
+				problems.Add($"{assembly.GetName().Name}: {ex.LoaderExceptions.Length} type(s) could not be loaded: {ex.LoaderExceptions.FirstOrDefault()?.Message ?? "no detail"}");
+				
+				return loaded;
+			}
+			
+			var known = loaded.Select(type => type.FullName).ToHashSet(StringComparer.Ordinal);
+			
+			foreach(var name in exported.Where(name => !known.Contains(name))) {
+				
+				try {
+					loaded.Add(assembly.GetType(name, throwOnError: true)!);
+				}
+				catch(Exception failure) {
+					problems.Add($"{name}: could not be loaded: {Describe(failure)}");
+				}
+			}
+			
+			return loaded;
+		}
 	}
 	
 	static void Instantiate<TProvider>(
