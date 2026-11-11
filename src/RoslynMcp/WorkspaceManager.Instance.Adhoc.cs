@@ -72,8 +72,8 @@ internal sealed partial class WorkspaceManager
 			foreach(var path in walked.Where(IsAnalyzerConfig).Concat(AnalyzerConfigsAbove(rootPath)))
 				try {
 					
-					AddOrUpdateAnalyzerConfig(adhocWorkspace, projectId, path);
-					configs++;
+					if(AddOrUpdateAnalyzerConfig(adhocWorkspace, projectId, path))
+						configs++;
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
@@ -112,14 +112,48 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		// Whether the loading walk reaches a path: it lies under the root, and no directory
+		// between the two is one the walk stays out of (an excluded name, or a hidden or system
+		// directory). A directory that cannot be asked counts as one it stays out of.
+		bool IsInLoadedTree(string path)
+		{
+			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path))
+				
+				return false;
+			
+			// The directories below the root, not the root: the walk starts in it, whatever it is.
+			var rootLength = rootPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Length;
+			
+			try {
+				
+				for(var directory = Path.GetDirectoryName(path); directory is not null && directory.Length > rootLength; directory = Path.GetDirectoryName(directory))
+					if((File.GetAttributes(directory) & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+						
+						return false;
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				
+				return false;
+			}
+			
+			return true;
+		}
+		
 		/// <summary>
 		///     Makes an <c>.editorconfig</c> an analyzer-config document of the project, or gives
 		///     the document it already is the file's text (#413). Roslyn's formatter reads the
 		///     style of the code a refactoring or a code fix writes from these documents, and the
 		///     compiler reads diagnostic severities from them, as in a project. Without them an
 		///     AdhocWorkspace formats in Roslyn's defaults whatever the directory's own config says.
+		///     Returns whether the workspace took the change.
+		///     <para>
+		///         A config that is a symbolic link is read through the link, but is not entered
+		///         in <see cref="physicalIndex"/>, which holds sources only. A change to the file
+		///         it leads to is therefore not seen under the link's name; the config is read
+		///         again when the link itself is reported, or at the next load.
+		///     </para>
 		/// </summary>
-		void AddOrUpdateAnalyzerConfig(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
+		bool AddOrUpdateAnalyzerConfig(AdhocWorkspace adhocWorkspace, ProjectId projectId, string path)
 		{
 			using var stream = FileReader.OpenUnbounded(path);
 			
@@ -132,10 +166,14 @@ internal sealed partial class WorkspaceManager
 				: solution.AddAnalyzerConfigDocument(DocumentId.CreateNewId(projectId), AnalyzerConfigName, text, filePath: path)
 			;
 			
-			if(!adhocWorkspace.TryApplyChanges(newSolution))
+			var applied = adhocWorkspace.TryApplyChanges(newSolution);
+			
+			if(!applied)
 				logger.LogInfo("Workspace", $"Analyzer config not applied, the workspace moved on: {path}");
 			
 			InvalidateCompilation();
+			
+			return applied;
 		}
 		
 		// A drive root or a directory marked as the system's own is never searched for sources.
@@ -204,9 +242,13 @@ internal sealed partial class WorkspaceManager
 			lock(adhocSyncLock) {
 				
 				// A config is a document of its own kind, and never one of the sources below.
+				// One the workspace has is read again wherever it lies. A new one is taken only
+				// from where the load would have found it, so that the workspace is the same
+				// before and after a restart.
 				if(IsAnalyzerConfig(path)) {
 					
-					AddOrUpdateAnalyzerConfig(adhocWorkspace, projectId, path);
+					if(!adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty || IsInLoadedTree(path))
+						AddOrUpdateAnalyzerConfig(adhocWorkspace, projectId, path);
 					
 					return;
 				}

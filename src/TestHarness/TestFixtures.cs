@@ -213,6 +213,9 @@ static class TestFixtures
 			: Skip.NotApplicable("no case-sensitive directory here: a default macOS volume, or Windows without the WSL feature fsutil needs")
 	;
 	
+	// Says nothing but where the search for configs ends.
+	const string RootConfig = "root = true\n";
+	
 	/// <summary>
 	///     Copies the repo's <c>global.json</c> to <see cref="TempRoot"/>, so every fixture project resolves the
 	///     SDK the repo pins. Fixtures live outside the repo, so without it each one resolves the newest SDK on
@@ -223,22 +226,31 @@ static class TestFixtures
 	///     Written only when it differs, before any server starts: a fixture workspace counts a change to it as a
 	///     reload input. Best-effort like <see cref="SweepStale"/>: another harness run may be writing the same
 	///     file, and a pin that could not be written leaves the fixtures on the newest SDK, as before it existed —
-	///     never a run that does not start.
+	///     never a run that does not start. It also writes the <c>.editorconfig</c> that keeps a developer's
+	///     own, further up, away from the fixtures (#413), on the same terms.
 	/// </summary>
 	public static void PinSdk(string repoRoot)
 	{
 		var source = Path.Combine(repoRoot, "global.json");
 		var target = Path.Combine(TempRoot, "global.json");
+		var config = Path.Combine(TempRoot, ".editorconfig");
 		
 		try {
+			
+			Directory.CreateDirectory(TempRoot);
+			
+			// Fixtures are styled by the .editorconfig files above them, an AdhocWorkspace's
+			// as much as a project's (#413). One at the root of them all ends that at the
+			// harness's own directory, so a config in the developer's home directory cannot
+			// change what a test sees. A fixture that wants a style writes its own.
+			if(!File.Exists(config) || File.ReadAllText(config) != RootConfig)
+				File.WriteAllText(config, RootConfig);
 			
 			if(!File.Exists(source))
 				
 				return;
 			
 			var pinned = File.ReadAllText(source);
-			
-			Directory.CreateDirectory(TempRoot);
 			
 			if(!File.Exists(target) || File.ReadAllText(target) != pinned)
 				File.WriteAllText(target, pinned);

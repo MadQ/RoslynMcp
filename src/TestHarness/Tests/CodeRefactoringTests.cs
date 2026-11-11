@@ -460,7 +460,6 @@ internal static class CodeRefactoringTests
 				: (false, $"FAIL  ({problem}: {JsonValue.Create(after).ToJsonString()}) [{sw.ElapsedMilliseconds}ms]");
 		}
 		
-
 		// An AdhocWorkspace has no build to hand it its configs, so it keeps them current itself
 		// (#413): an .editorconfig that appears after the load is used by the next code action. The
 		// file is written through the server, which syncs the workspace before it answers, so the
@@ -518,7 +517,6 @@ internal static class CodeRefactoringTests
 			return (false, $"FAIL  (the deleted config still applies: {goneText}) [{sw.ElapsedMilliseconds}ms]");
 		}
 		
-
 		List<TestCase> tests = [
 			new("list offers Roslyn's refactorings and keeps dialog actions out", RunNoDialogActions),
 			new("a preview's diff is the size of the change, not of the file", RunDiffIsLocal),
@@ -560,7 +558,6 @@ internal static class CodeRefactoringTests
 	// CS0117 on line 7: Target has no method named Missing.
 	const string CallerSource = "namespace Fixture;\n\npublic static class Caller\n{\n\tpublic static void Run()\n\t{\n\t\tTarget.Missing();\n\t}\n}\n\npublic static class Target\n{\n}\n";
 	
-
 	// A statement to extract, then thirty methods the refactoring does not touch. Every blank line is
 	// indented, so the only empty line of the file is the one after its last newline.
 	static readonly string WideSource =

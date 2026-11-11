@@ -33,12 +33,8 @@ internal static class WorkspaceWalker
 	///     <paramref name="prune"/> rejects. Never follows a directory symlink or junction — a link
 	///     can point back up the tree — and skips unreadable directories instead of throwing.
 	/// </summary>
-	public static IEnumerable<string> EnumerateFiles(string root, string namePattern, bool recursive, PrunePredicate prune) =>
-		new FileSystemEnumerable<string>(root, (ref FileSystemEntry entry) => entry.ToFullPath(), Options(recursive)) {
-			
-			ShouldIncludePredicate = (ref FileSystemEntry entry) => !entry.IsDirectory && FileSystemName.MatchesSimpleExpression(namePattern, entry.FileName, ignoreCase),
-			ShouldRecursePredicate = (ref FileSystemEntry entry) => !IsLink(ref entry) && !prune(ref entry),
-		}
+	public static IEnumerable<string> EnumerateFiles(string root, string namePattern, bool recursive, PrunePredicate prune)
+		=> EnumerateFiles(root, [namePattern], recursive, prune)
 	;
 	
 	/// <summary>
@@ -63,7 +59,6 @@ internal static class WorkspaceWalker
 		return false;
 	}
 	
-
 	/// <summary>
 	///     Lazily enumerates the directories under <paramref name="root"/> — not the root itself —
 	///     that <paramref name="prune"/> does not reject, each with the time it was last written.
