@@ -19,6 +19,7 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 	static readonly TimeSpan PollInterval     = TimeSpan.FromMilliseconds(500);
 	static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(30);
 	static readonly TimeSpan OutputGrace      = TimeSpan.FromSeconds(2);
+	static readonly TimeSpan OutputLimit      = TimeSpan.FromSeconds(30);
 	static readonly byte[]   ToolsChanged     = [.."""{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}"""u8, (byte) '\n'];
 	
 	readonly Stream                    clientOutput  = Console.OpenStandardOutput();
@@ -173,20 +174,28 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 				
 				break;
 			
-			var head = MessageHead.Read(line.Span);
+			// From here until it is passed on or dropped, the line is at work (RunServerAsync).
+			source.MarkForward();
+			
+			var head    = MessageHead.Read(line.Span);
+			var retired = false;
 			
 			lock(sync) {
 				
 				// A server that was swapped out has nobody waiting for it, so nothing it still says is an answer.
 				if(source != server)
-					
-					continue;
-				
-				if(head.IsRequest)
+					retired = true;
+				else if(head.IsRequest)
 					serverWaiting.Add(head.Id!);
 			}
 			
-			source.MarkForward();
+			if(retired) {
+				
+				source.MarkForward();
+				
+				continue;
+			}
+			
 			await WriteClientAsync(line);
 			source.MarkForward();
 			
@@ -214,7 +223,11 @@ sealed class HostSession(DevHome home, HostLog log, IReadOnlyList<string> argume
 		
 		await Task.WhenAny(pump, source.WaitForExitAsync());
 		
-		while(!pump.IsCompleted) {
+		// Bounded: whatever holds the pipe may also write to it now and then, and a server that is gone
+		// must end the session all the same.
+		var waited = Stopwatch.StartNew();
+		
+		while(!pump.IsCompleted && waited.Elapsed < OutputLimit) {
 			
 			var seen = source.Forwards;
 			
