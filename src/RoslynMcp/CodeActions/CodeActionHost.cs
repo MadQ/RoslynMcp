@@ -46,11 +46,13 @@ internal sealed class CodeActionHost
 	// never finds a set beside another load's count.
 	readonly ConcurrentDictionary<(string Path, long MtimeTicks), (ProviderSet Set, int? ShortAt)> fromReferences = new();
 	
-	// For each project file, the analyzer references whose file was not there when the project's
-	// providers were last asked for (#424), so that roslyn_info can name them. Replaced whole at every
-	// such call, so a reference the project no longer lists is forgotten with it, and one whose file
-	// has been found is gone.
-	readonly ConcurrentDictionary<string, ImmutableArray<string>> missingByProject = new(SecurityBoundary.PathComparer);
+	// For each project file and each of its targets, the analyzer references whose file was not there
+	// when that target's providers were last asked for (#424), so that roslyn_info can name them. A
+	// target's list is replaced whole at every such call, so a reference it no longer lists is
+	// forgotten with it, and one whose file has been found is gone. By target, since the targets of a
+	// multi-target project are projects of their own with one file between them and need not miss the
+	// same references: under the file alone, the target asked last would speak for all.
+	readonly ConcurrentDictionary<string, ImmutableDictionary<string, ImmutableArray<string>>> missingByProject = new(SecurityBoundary.PathComparer);
 	
 	// Providers the config files name, keyed by the declaring file and the entry. The stamp beside each set
 	// is what the entry resolved to — the assemblies with their modification times, or the problem — so a
@@ -94,8 +96,18 @@ internal sealed class CodeActionHost
 					yield return cached.Set.Report;
 			
 			// A reference that was missing when its project was last asked for, and still is; once,
-			// however many projects list it.
-			foreach(var path in missingByProject.Values.SelectMany(paths => paths).Distinct(SecurityBoundary.PathComparer))
+			// however many projects and targets list it. A project whose file is gone is never asked
+			// again, so what it was missing is not said any more. Between a file going away and the
+			// next call for a project that lists it, the file is in neither list: this report is what
+			// the calls so far found, not a look at the projects.
+			var stillMissing = missingByProject
+				.Where(project => File.Exists(project.Key))
+				.SelectMany(project => project.Value.Values)
+				.SelectMany(paths => paths)
+				.Distinct(SecurityBoundary.PathComparer)
+			;
+			
+			foreach(var path in stillMissing)
 				if(!File.Exists(path))
 					yield return MissingReference(path).Report;
 			
@@ -441,11 +453,14 @@ internal sealed class CodeActionHost
 			sets.Add(set);
 		}
 		
-		// What this project is missing now, in place of what it was missing at the last call.
-		if(missing.Count > 0)
-			missingByProject[project.FilePath] = missing.ToImmutable();
-		else
-			missingByProject.TryRemove(project.FilePath, out _);
+		// What this target is missing now, in place of what it was missing at the last call.
+		var found  = missing.ToImmutable();
+		var target = project.Name;
+		
+		missingByProject.AddOrUpdate(
+			project.FilePath,
+			_ => found.IsEmpty ? ImmutableDictionary<string, ImmutableArray<string>>.Empty : ImmutableDictionary<string, ImmutableArray<string>>.Empty.SetItem(target, found),
+			(_, targets) => found.IsEmpty ? targets.Remove(target) : targets.SetItem(target, found));
 	}
 	
 	// A source that yields nothing because its file is not there, with the remedy that fits where

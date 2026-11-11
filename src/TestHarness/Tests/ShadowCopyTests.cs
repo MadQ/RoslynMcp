@@ -613,6 +613,8 @@ internal static partial class ShadowCopyTests
 				
 				File.Delete(missing);
 				
+				// roslyn_info reports what the calls so far found, so the project is asked once more
+				// before it is read: until then the file is in neither of its lists, on purpose.
 				await NamedSourceAsync(server, project, "project", file);
 				
 				var gone = await ListedAsync(file);
@@ -632,11 +634,12 @@ internal static partial class ShadowCopyTests
 				await NamedSourceAsync(server, project, "project", file);
 				
 				var dropped = await ListedAsync(packaged);
-				var pass    = edit?["match_count"]?.GetValue<int>() == 1 && dropped.Length == 0 && (await ListedAsync(file)).Length == 1;
+				var kept    = await ListedAsync(file);
+				var pass    = edit?["match_count"]?.GetValue<int>() == 1 && dropped.Length == 0 && kept.Length == 1;
 				
 				return (pass, pass
 					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
-					: $"FAIL  (after the reference was taken out of the project (edit: {edit?.ToJsonString() ?? "no answer"}), roslyn_info still lists it {dropped.Length} time(s)) [{sw.ElapsedMilliseconds}ms]");
+					: $"FAIL  (after the reference was taken out of the project (edit: {edit?.ToJsonString() ?? "no answer"}), roslyn_info lists it {dropped.Length} time(s), expected 0, and the reference still in the project {kept.Length} time(s), expected 1) [{sw.ElapsedMilliseconds}ms]");
 			}
 			finally {
 				await DefaultWorkspaceTests.StopServerAsync(process, server);

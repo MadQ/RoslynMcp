@@ -72,17 +72,37 @@ internal static class AnalyzerLoading
 	/// </summary>
 	public static string MissingReferenceRemedy(IReadOnlyCollection<string> paths)
 	{
-		var packaged = paths.Count(path => SecurityBoundary.StartsWithPath(path, NuGetPackageLocator.Root));
+		var packaged = paths.Count(IsUnderPackageCache);
 		
+		// Worded for one path and for several alike: the caller has named them.
 		if(packaged == paths.Count)
 			
-			return "The NuGet package cache is where it belongs: restore the project's packages with roslyn_restore_packages, then ask again.";
+			return "Under the NuGet package cache the server knows: restore the project's packages with roslyn_restore_packages, then ask again.";
 		
 		if(packaged == 0)
 			
-			return "It is not in the NuGet package cache, so it is most likely the output of a project referenced as an analyzer: build it with roslyn_build_project, then ask again.";
+			return "Not under the NuGet package cache the server knows, so most likely the output of a project referenced as an analyzer: build it with roslyn_build_project, then ask again.";
 		
-		return "Those in the NuGet package cache come back with roslyn_restore_packages; the others are most likely the output of a project referenced as an analyzer, which roslyn_build_project builds. Then ask again.";
+		return "Those under the NuGet package cache the server knows come back with roslyn_restore_packages; the others are most likely the output of a project referenced as an analyzer, which roslyn_build_project builds. Then ask again.";
+	}
+	
+	// Under the cache directory itself, not beside it: a sibling whose name begins the same way
+	// ("packages-old") is not the cache. The root is whatever the environment names, so it is made a
+	// full path first, and one that cannot be is no cache anything is under. A cache the server does
+	// not know of (a folder nuget.config names) is taken for a build output; the remedy named for
+	// that, a build, restores as well.
+	private static bool IsUnderPackageCache(string path)
+	{
+		string root;
+		
+		try {
+			root = Path.GetFullPath(NuGetPackageLocator.Root);
+		}
+		catch(Exception failure) when(failure is ArgumentException or NotSupportedException or PathTooLongException) {
+			return false;
+		}
+		
+		return SecurityBoundary.StartsWithPath(path, Path.TrimEndingDirectorySeparator(root) + Path.DirectorySeparatorChar);
 	}
 	
 	private static ImmutableArray<DiagnosticAnalyzer> GetShadowedAnalyzers(AnalyzerReference reference, string language, int locations)
