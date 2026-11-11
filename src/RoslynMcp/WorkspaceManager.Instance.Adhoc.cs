@@ -113,8 +113,8 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		// Whether the loading walk reaches a path: it lies under the root, and no directory
-		// between the two is one the walk stays out of (an excluded name, or a hidden or system
-		// directory). A directory that cannot be asked counts as one it stays out of.
+		// between the two is one the walk stays out of (an excluded name, a hidden or system
+		// directory, or a link). A directory that cannot be asked counts as one it stays out of.
 		bool IsInLoadedTree(string path)
 		{
 			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path))
@@ -127,7 +127,7 @@ internal sealed partial class WorkspaceManager
 			try {
 				
 				for(var directory = Path.GetDirectoryName(path); directory is not null && directory.Length > rootLength; directory = Path.GetDirectoryName(directory))
-					if((File.GetAttributes(directory) & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+					if((File.GetAttributes(directory) & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.ReparsePoint)) != 0)
 						
 						return false;
 			}

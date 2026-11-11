@@ -324,7 +324,6 @@ internal sealed class CodeFixTestProvider : CodeFixProvider
 		;
 	}
 	
-
 	static async Task<Solution> ModifyAnalyzerConfigAsync(
 		Document document,
 		string marker,
