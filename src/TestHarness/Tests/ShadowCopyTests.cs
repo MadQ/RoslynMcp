@@ -646,6 +646,156 @@ internal static partial class ShadowCopyTests
 			}
 		}
 		
+		// A directory of its own holding one build of the fixture analyzer and its helper.
+		(FixtureProject Holder, string[] Dlls) NewFixtureBuild(string label, int build)
+		{
+			var holder = TestFixtures.NewAdhocDir(label);
+			
+			fixtures.Add(holder);
+			
+			return (holder, TrackShadows(FixtureAnalyzers.Write(holder.Dir, build)));
+		}
+		
+		string[] TrackShadows(string[] dlls)
+		{
+			foreach(var dll in dlls)
+				shadows.Add(Path.GetDirectoryName(ShadowPathOf(dll))!);
+			
+			return dlls;
+		}
+		
+		// What the fixture analyzer reported for the project: one message, naming the analyzer build
+		// that ran and the helper build it found.
+		static async Task<string[]> FixtureMessagesAsync(TestContext server, FixtureProject project)
+		{
+			var diagnostics = await server.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = project.Csproj, includeAnalyzers = true });
+			
+			return [..(diagnostics?["items"]?.AsArray() ?? [])
+				.Where(item => item?["code"]?.GetValue<string>() == FixtureAnalyzers.DiagnosticId)
+				.Select(item => item?["message"]?.GetValue<string>() ?? string.Empty)
+				.Distinct()];
+		}
+		
+		// The sources roslyn_info lists for one assembly file, after the project's providers were
+		// asked for. By the file's path: several sources of these tests have one name.
+		static async Task<JsonNode[]> SourcesAtAsync(TestContext server, FixtureProject project, string dll)
+		{
+			await server.CallToolJsonAsync("roslyn_list_refactorings", new { projectPath = project.Csproj, filePath = "Probe.cs", line = 5, column = 3 });
+			
+			var info = await server.CallToolJsonAsync("roslyn_info", new { });
+			
+			return [..(info?["code_actions"]?["sources"]?.AsArray() ?? [])
+				.Where(entry => string.Equals(entry?["origin"]?.GetValue<string>(), dll, StringComparison.OrdinalIgnoreCase))
+				.Select(entry => entry!)];
+		}
+		
+		static string Describe(IEnumerable<JsonNode> sources)
+			=> string.Join(" | ", sources.Select(source => source.ToJsonString())) is { Length: > 0 } text ? text : "none";
+		
+		// An analyzer rebuilt in place is the new build at the next call (#418). The caches above the
+		// loader always asked for a new load when a file's time changed, but the loader knew its
+		// assemblies by path alone and handed back the first one, so the analyzers, the fix
+		// providers and everything built from them stayed those of the first build until the server
+		// was restarted, with no sign of it. This repository is the case: its own analyzers are an
+		// analyzer reference of the server project. The fixture is rebuilt with its helper, under
+		// the same names, so the new build can only be loaded beside the old one, not into its
+		// context. After the rebuild the analyzer must report as build 2 with helper 2, the source
+		// must have build 2's two fix providers, and roslyn_info must list the file once (#425): it
+		// listed the set of every build ever loaded, under one name.
+		async Task<(bool pass, string msg)> RunRebuiltInPlace()
+		{
+			var sw             = Stopwatch.StartNew();
+			var (holder, dlls) = NewFixtureBuild("ShadowRebuiltDll", 1);
+			var project        = NewOrderedProject("ShadowRebuilt", dlls);
+			
+			var (process, server) = await Start(project, new Dictionary<string, string>());
+			
+			try {
+				
+				if(server is null)
+					return (false, "FAIL  (server did not answer initialize)");
+				
+				var firstMessages = await FixtureMessagesAsync(server, project);
+				var firstSources  = await SourcesAtAsync(server, project, dlls[0]);
+				
+				if(!firstMessages.SequenceEqual([FixtureAnalyzers.Message(1, 1)]) || firstSources.Length != 1 || firstSources[0]["fixes"]?.GetValue<int>() != 1)
+					return (false, $"FAIL  (the first build: reported [{string.Join(", ", firstMessages)}]; sources: {Describe(firstSources)}) [{sw.ElapsedMilliseconds}ms]");
+				
+				TrackShadows(FixtureAnalyzers.Write(holder.Dir, 2));
+				
+				var messages = await FixtureMessagesAsync(server, project);
+				var sources  = await SourcesAtAsync(server, project, dlls[0]);
+				var pass     = messages.SequenceEqual([FixtureAnalyzers.Message(2, 2)])
+					&& sources.Length == 1
+					&& sources[0]["fixes"]?.GetValue<int>() == 2
+					&& Loaded(sources[0]);
+				
+				return (pass, pass
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  (after the rebuild: reported [{string.Join(", ", messages)}], expected [{FixtureAnalyzers.Message(2, 2)}]; sources: {Describe(sources)}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				await DefaultWorkspaceTests.StopServerAsync(process, server);
+			}
+		}
+		
+		// Analyzer assemblies of one name in different directories all load, each with the helper
+		// beside it (#419). With one load context for every reference, the second assembly of a name
+		// failed as already loaded: two projects on different versions of an analyzer package, in one
+		// solution or in two workspaces of one server, and one of them lost its analyzers and fix
+		// providers. And a dependency was taken from whichever registered location came first, across
+		// all projects. One server, four projects, asked in this order:
+		//   - build 1 with its helper, so that helper 1 is the first of its name the server knows
+		//     and has loaded;
+		//   - a copy of build 1 in another directory: the same bytes from another path load as well;
+		//   - build 2 with its helper: it must run as build 2 and find helper 2, the one beside it,
+		//     not the helper 1 that is already loaded;
+		//   - a copy of build 1's analyzer alone: no helper is beside it, so it gets the highest
+		//     version the server knows of, helper 2, although two locations of helper 1 were
+		//     registered before it. Taking the first one registered would give helper 1.
+		async Task<(bool pass, string msg)> RunSameNameSideBySide()
+		{
+			var sw           = Stopwatch.StartNew();
+			var (_, first)   = NewFixtureBuild("ShadowSideOneDll", 1);
+			var (_, second)  = NewFixtureBuild("ShadowSideTwoDll", 2);
+			var copied       = CopyToHolder("ShadowSideCopyDll", first);
+			var alone        = CopyToHolder("ShadowSideAloneDll", [first[0]]);
+			
+			(string Label, FixtureProject Project, string Dll, string Expected, int Fixes)[] cases = [
+				("build 1",                 NewOrderedProject("ShadowSideOne", first),   first[0],  FixtureAnalyzers.Message(1, 1), 1),
+				("a copy of build 1",       NewOrderedProject("ShadowSideCopy", copied), copied[0], FixtureAnalyzers.Message(1, 1), 1),
+				("build 2",                 NewOrderedProject("ShadowSideTwo", second),  second[0], FixtureAnalyzers.Message(2, 2), 2),
+				("build 1 without helper",  NewOrderedProject("ShadowSideAlone", alone), alone[0],  FixtureAnalyzers.Message(1, 2), 1),
+			];
+			
+			var (process, server) = await Start(cases[0].Project, new Dictionary<string, string>());
+			
+			try {
+				
+				if(server is null)
+					return (false, "FAIL  (server did not answer initialize)");
+				
+				var failures = new List<string>();
+				
+				foreach(var (label, project, dll, expected, fixes) in cases) {
+					
+					var messages = await FixtureMessagesAsync(server, project);
+					var sources  = await SourcesAtAsync(server, project, dll);
+					
+					if(!messages.SequenceEqual([expected]) || sources.Length != 1 || !Loaded(sources[0]) || sources[0]["fixes"]?.GetValue<int>() != fixes)
+						failures.Add($"{label}: reported [{string.Join(", ", messages)}], expected [{expected}]; sources: {Describe(sources)}");
+				}
+				
+				return (failures.Count == 0, failures.Count == 0
+					? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+					: $"FAIL  ({string.Join(" || ", failures)}) [{sw.ElapsedMilliseconds}ms]");
+			}
+			finally {
+				await DefaultWorkspaceTests.StopServerAsync(process, server);
+			}
+		}
+		
+
 		List<TestCase> tests = [
 			new("a shadow copy cut short is replaced, not loaded", RunTruncated),
 			new("a shadow copy of the right length that is no assembly is copied again", RunCorrupt),
@@ -656,6 +806,8 @@ internal static partial class ShadowCopyTests
 			new("an analyzer or fix provider lost to a missing dependency is named in the source's problems", RunLostTypesAreNamed),
 			new("a result cached while a dependency was missing does not outlive a later project that names it", RunSiblingNamedLater),
 			new("an analyzer reference whose file is missing is a source with the remedy that fits, listed once, and loads once the file is there", RunMissingReference),
+			new("an analyzer rebuilt in place is the new build at the next call, and is listed once", RunRebuiltInPlace),
+			new("analyzer assemblies of one name in different directories all load, each with the helper beside it", RunSameNameSideBySide),
 		];
 		
 		return new TestGroup($"Shadow Copies ({tests.Count} tests)", tests, Teardown: () => {
