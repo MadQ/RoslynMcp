@@ -321,8 +321,8 @@ internal sealed class ServerArgs
                     break;
 
                 case "--no-buildhost-pin":
-                    // Bare on/off flag; presence disables the BuildHost pin. An on/off token after it is taken and ignored.
-                    noBuildHostPin = true;
+                    // Bare flag means the pin is disabled; an on/off token after it says otherwise.
+                    noBuildHostPin = ParseOnOff(value) ?? true;
                     break;
 
                 case "--code-actions":
@@ -331,8 +331,9 @@ internal sealed class ServerArgs
                     break;
 
                 case "--trust-project-providers":
-                    // Bare on/off flag; presence grants the trust. An on/off token after it is taken and ignored.
-                    trustProjectProviders = true;
+                    // Bare flag grants the trust; an on/off token after it says otherwise, so that
+                    // `--trust-project-providers false` is not a grant.
+                    trustProjectProviders = ParseOnOff(value) ?? true;
                     break;
             }
         }

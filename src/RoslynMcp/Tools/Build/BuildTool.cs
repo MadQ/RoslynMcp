@@ -235,6 +235,11 @@ internal sealed class BuildTool : RoslynMcpTool
 					failedOutput = text;
 					exitCode     = code;
 				}
+				else if(failedOutput is null && exitCode == 0) {
+					
+					// The code dotnet gave, also for a build the output shows to have succeeded.
+					exitCode = code;
+				}
 			}
 		}
 		catch(OperationCanceledException) {
@@ -267,8 +272,9 @@ internal sealed class BuildTool : RoslynMcpTool
 		var succeeded = failedOutput is null;
 		
 		// When genuinely failed with no structured errors (locked file, linker, restore),
-		// surface the raw output tail so agents don't need to run dotnet build themselves.
-		var errorDetails = failedOutput is not null && errors.Length == 0
+		// surface the raw output tail so agents don't need to run dotnet build themselves. Asked
+		// of the failed build's own output: another project's errors do not explain this one.
+		var errorDetails = failedOutput is not null && !ParseMSBuildDiagnostics(failedOutput, rootPath).Any(d => d.Severity == "error")
 			? TailLines(failedOutput, 30)
 			: null
 		;
@@ -376,16 +382,14 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		var graph = solution.GetProjectDependencyGraph();
 		
-		// By file, not by id: a multi-targeted project is several Roslyn projects, and a reference
-		// to any of them builds the one project file.
+		// By id, which is one framework of a project: a reference to another framework of a
+		// multi-targeted project does not build the one asked for.
 		var referenced = targeting
 			.SelectMany(project => graph.GetProjectsThatThisProjectTransitivelyDependsOn(project.Id))
-			.Select(id => solution.GetProject(id)?.FilePath)
-			.OfType<string>()
-			.ToHashSet(SecurityBoundary.PathComparer)
+			.ToHashSet()
 		;
 		
-		return [..targeting.Select(project => project.FilePath!).Where(file => !referenced.Contains(file))];
+		return [..targeting.Where(project => !referenced.Contains(project.Id)).Select(project => project.FilePath!)];
 	}
 	
 	/// <summary>

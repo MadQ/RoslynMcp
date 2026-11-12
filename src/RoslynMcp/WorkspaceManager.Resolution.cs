@@ -125,6 +125,7 @@ internal sealed partial class WorkspaceManager
 	
 	// Starts one interval before any tick count, so the first question always searches.
 	long noDefaultSince = -NoDefaultRetryMs;
+	int  lookupFailureLogged;
 	
 	/// <summary>
 	///     The directory of the default workspace, which relative paths are tried against first;
@@ -141,6 +142,11 @@ internal sealed partial class WorkspaceManager
 			return Path.GetDirectoryName(ResolveDefaultWorkspacePath());
 		}
 		catch(Exception ex) when(IsDefaultLookupFailure(ex)) {
+			
+			// "Nothing found" is the ordinary answer. Anything else is said once, since it is
+			// swallowed here and the path quietly goes to the working directory.
+			if(ex is not NoDefaultWorkspaceException && Interlocked.Exchange(ref lookupFailureLogged, 1) == 0)
+				logger.LogInfo("Workspace", $"Default workspace lookup failed, relative paths resolve against the working directory: {ex.GetType().Name}: {ex.Message}");
 			
 			Volatile.Write(ref noDefaultSince, Environment.TickCount64);
 			
