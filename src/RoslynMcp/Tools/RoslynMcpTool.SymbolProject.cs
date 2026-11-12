@@ -32,7 +32,7 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Methods only.</summary>
 		Method,
 		
-		/// <summary>Anything but a type: a method, property, field or event, for a tool that reads a member's body.</summary>
+		/// <summary>Anything but a type: a method, property, field or event, for the tool that reads a member's body (the call graph).</summary>
 		Member,
 	}
 	
@@ -217,19 +217,16 @@ internal abstract partial class RoslynMcpTool
 				.Where(symbol => symbol.Kind != SymbolKind.Namespace)
 		];
 		
-		// A qualified name narrows where it leaves anything. A form the display string does not
-		// reproduce (global::Ns.Type, Outer+Inner) keeps the matches of its last part: it is a
-		// way of telling declarations apart, not a second test for the name.
-		found = Narrowed(found, symbol => IsNamed(symbol, symbolName));
+		// A qualified name must match as one. Where it matches nothing here — a type of a
+		// referenced assembly (System.Threading.Timer, beside a Timer in source), a form the
+		// display string does not reproduce, a namespace mistyped — there is no source
+		// declaration of that name, and the caller's fallback asks each compilation, which reads
+		// a name exactly as the tool itself will. Keeping the matches of the last part instead
+		// would hand the call to a declaration it did not name.
+		found = [..found.Where(symbol => IsNamed(symbol, symbolName))];
 		
-		if(containingType is not null) {
-			
-			var typeName = SimpleNameOf(containingType);
-			
-			found = Narrowed(
-				[..found.Where(symbol => symbol.ContainingType?.Name == typeName)],
-				symbol => IsNamed(symbol.ContainingType!, containingType));
-		}
+		if(containingType is not null)
+			found = [..found.Where(symbol => symbol.ContainingType is { } type && IsNamed(type, containingType))];
 		
 		found = sought switch {
 			
@@ -264,8 +261,9 @@ internal abstract partial class RoslynMcpTool
 	///     not have; empty when none does. The projects whose own assembly declares the symbol
 	///     come before one that merely sees it: a constructor or an explicit interface
 	///     implementation is in the index under another name, and its declaring project is the
-	///     one a tool can read its source from. Compiles project after project until one answers,
-	///     all of them for a name that is nowhere, which is what a misspelled name costs here.
+	///     one a tool can read its source from. Compiles every project, to find each that declares
+	///     the name, and stops early only for a symbol of a referenced assembly; that is what a
+	///     name outside the index costs here, a misspelled one included.
 	/// </summary>
 	static async Task<DeclaringProject[]> ProjectsResolvingAsync(Solution solution, string symbolName, string? containingType, SymbolSought sought, CancellationToken cancellationToken)
 	{
@@ -275,21 +273,33 @@ internal abstract partial class RoslynMcpTool
 		
 		foreach(var project in solution.Projects.DistinctBy(candidate => candidate.FilePath, SecurityBoundary.PathComparer)) {
 			
-			if(project.FilePath is not { } file
-				|| await project.GetCompilationAsync(cancellationToken) is not { } compilation
-				|| FindSymbol(compilation, symbolName, containingType) is not { } symbol
-				|| sought is SymbolSought.Type && symbol is not INamedTypeSymbol
-				|| sought is SymbolSought.Method && symbol is not IMethodSymbol
-				|| sought is SymbolSought.Member && symbol is INamedTypeSymbol)
+			if(project.FilePath is not { } file || await project.GetCompilationAsync(cancellationToken) is not { } compilation)
 				continue;
 			
-			// Its own, or a symbol of a referenced assembly, which no project declares and every
-			// project that sees it sees alike: either way there is nothing better to look for.
+			// Read as the tool itself reads the name in one compilation, and of the kind it is
+			// after: a type-first answer would hide a member of the same name from a tool that
+			// wants the member (a constructor named as its type, for the call graph).
+			var symbol = sought switch {
+				
+				SymbolSought.Type   => FindSymbol(compilation, symbolName, containingType) as INamedTypeSymbol,
+				SymbolSought.Method => FindSymbols(compilation, symbolName, containingType).FirstOrDefault(candidate => candidate is IMethodSymbol),
+				SymbolSought.Member => FindSymbols(compilation, symbolName, containingType).FirstOrDefault(candidate => candidate is not INamedTypeSymbol),
+				_                   => FindSymbol(compilation, symbolName, containingType),
+			};
+			
+			if(symbol is null)
+				continue;
+			
 			// A symbol of a referenced assembly: no project declares it, and every project that
-			// sees it sees it alike, so the first one stands for all.
-			if(!symbol.Locations.Any(location => location.IsInSource))
+			// sees it sees it alike, so the first one stands for all — unless a project before
+			// it declares the name in source, which then is what was asked for.
+			if(!symbol.Locations.Any(location => location.IsInSource)) {
+				
+				if(declaring.Count > 0)
+					continue;
 				
 				return [new DeclaringProject(file, symbol)];
+			}
 			
 			if(SymbolEqualityComparer.Default.Equals(symbol.ContainingAssembly, compilation.Assembly))
 				declaring.Add(new DeclaringProject(file, symbol));
@@ -301,11 +311,6 @@ internal abstract partial class RoslynMcpTool
 		// project is never preferred. One that only sees it stands in when none declares it.
 		return declaring.Count > 0 ? [..declaring] : seeing is not null ? [seeing] : [];
 	}
-	
-	/// <summary>The symbols a test keeps, or all of them when it keeps none.</summary>
-	static ISymbol[] Narrowed(ISymbol[] symbols, Func<ISymbol, bool> keep)
-		=> symbols.Where(keep).ToArray() is { Length: > 0 } kept ? kept : symbols
-	;
 	
 	// Namespaces, containing types and the name, without type arguments: the form a qualified name
 	// is given in once its generic arity is dropped (Ns.Outer`1 → Ns.Outer).

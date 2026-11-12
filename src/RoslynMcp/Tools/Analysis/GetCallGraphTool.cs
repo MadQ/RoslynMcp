@@ -60,6 +60,14 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
 		
+		// Declared, but in no file of this project: a symbol of a referenced project. Its body is
+		// not this compilation's to read, and an empty graph would say that it calls nothing.
+		if(symbol.DeclaringSyntaxReferences.Length > 0 && !symbol.DeclaringSyntaxReferences.Any(reference => compilation.ContainsSyntaxTree(reference.SyntaxTree)))
+			
+			return scope.Error(new ErrorResult(
+				$"'{FormatSymbolName(symbol)}' is declared in another project than the one given.",
+				"Pass the .csproj that declares it as projectPath, or omit projectPath to have the declaring project found."));
+		
 		var allCalls = new List<CallSiteEntry>();
 		
 		foreach(var syntaxRef in symbol.DeclaringSyntaxReferences) {
