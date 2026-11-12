@@ -36,9 +36,9 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		"For direct file edits without a review step, use roslyn_replace_in_code instead.")]
 	public async Task<object> ChangeSignature(
 		[Description("Method name to change, e.g. 'ProcessOrder'. Use roslyn_get_type_members to verify the exact name before proceeding.")] string methodName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
 		McpServer server,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple methods share the same name, e.g. 'OrderService'.")] string? containingType = null,
 		[Description("Parameters to add as a JSON array: [{\"name\":\"x\",\"type\":\"string\",\"defaultValue\":\"\\\"default\\\"\"}]. Each entry requires name, type, and defaultValue. Omit or pass null to preview the overload structure without adding parameters.")] string? addParameters = null)
 	{
@@ -47,6 +47,14 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		if(!TryStripChatSymbolRef(ref methodName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			
 			return scope.Error(refError!);
+		
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, methodName, containingType, null, server, cancellationToken);
+		
+		if(projectError is not null)
+			
+			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

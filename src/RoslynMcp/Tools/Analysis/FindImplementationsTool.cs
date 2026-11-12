@@ -23,8 +23,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		"For the full inheritance graph of a type (base chain, all interfaces, all derived), use roslyn_get_type_hierarchy instead.")]
 	public async Task<object> FindImplementations(
 		[Description("The symbol name, e.g. 'IDisposable', 'SymbolVisitor', 'Accept'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to narrow the search, e.g. 'SymbolVisitor' when searching for 'Accept'.")] string? containingType = null,
 		[Description("Number of implementations to skip (for paging). Default: 0.")] int skip = 0,
 		[Description("Maximum number of implementations to return. Default: 50, max: 200.")] int take = 50,
@@ -39,6 +39,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

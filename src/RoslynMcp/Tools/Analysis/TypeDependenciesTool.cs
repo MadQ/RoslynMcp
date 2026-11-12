@@ -17,7 +17,7 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 		"Does not inspect nested types, attributes, method bodies, local variables, or called methods.")]
 	public object GetTypeDependencies(
 		[Description("The type to inspect, as a simple name (e.g. 'WorkspaceManager') or fully-qualified name (e.g. 'RoslynMcp.WorkspaceManager'). Simple names are resolved by scanning the global namespace.")] string typeName,
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Number of dependencies to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum dependencies to return. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null)
@@ -31,6 +31,10 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<TypeDependencyEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

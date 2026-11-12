@@ -18,9 +18,9 @@ namespace RoslynMcp.Analyzers;
 ///     RMCP008 — A parameter on the tool method is missing a <c>[Description]</c> attribute
 ///               (<c>CancellationToken</c> and <c>McpServer</c> parameters are exempt — SDK-injected
 ///               infrastructure, never surfaced in the agent-facing tool schema).
-///     RMCP009 — A <c>projectPath</c> parameter does not use the description constant matching its shape
-///               (<c>ProjectPathDescription</c> for required <c>string</c>, <c>OptionalProjectPathDescription</c>
-///               for <c>string? = null</c>), or is nullable without the <c>= null</c> default.
+///     RMCP009 — A <c>projectPath</c> parameter is not declared <c>string? projectPath = null</c> with
+///               <c>OptionalProjectPathDescription</c>: it is required, lacks the <c>= null</c> default, or
+///               describes itself inline.
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
@@ -61,10 +61,10 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 		DiagnosticSeverity.Error,
 		isEnabledByDefault: true,
 		description:
-			"A required 'string projectPath' parameter must use [Description(ProjectPathDescription)]; an optional one " +
-			"must be declared 'string? projectPath = null' and use [Description(OptionalProjectPathDescription)] — both " +
-			"shared constants defined in RoslynMcpTool. Inline description strings drift and diverge across tools, and " +
-			"a nullable projectPath without '= null' is still advertised to agents as required."
+			"A projectPath parameter must be declared 'string? projectPath = null' and use " +
+			"[Description(OptionalProjectPathDescription)], the shared constant defined in RoslynMcpTool. A required " +
+			"projectPath is a tool that does not find its project on its own, inline description strings drift and " +
+			"diverge across tools, and a nullable projectPath without '= null' is still advertised to agents as required."
 	);
 	
 	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule007, Rule008, Rule009];
@@ -103,27 +103,24 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 				continue;
 			}
 			
-			// RMCP009 — projectPath must use the description constant matching its shape: a required
-			// 'string projectPath' takes ProjectPathDescription; an optional 'string? projectPath = null'
-			// takes OptionalProjectPathDescription. The MCP schema marks a parameter optional only when it
-			// has a C# default, so a nullable projectPath without a literal '= null' is reported too.
+			// RMCP009 — projectPath has one shape: 'string? projectPath = null' with
+			// OptionalProjectPathDescription. Every tool finds its project without being told since
+			// #296, and a required projectPath would be a tool that fell behind. The MCP schema marks
+			// a parameter optional only when it has a C# default, so a nullable projectPath without a
+			// literal '= null' is reported too.
 			var shape = ProjectPathShape(param);
 			
 			if(shape is not ProjectPathKind.None) {
 				
-				var optional = shape is ProjectPathKind.Optional;
-				
-				var (expectedConstant, shapeText) = optional
-					? ("OptionalProjectPathDescription", "string? projectPath = null")
-					: ("ProjectPathDescription",         "string projectPath")
-				;
+				const string ExpectedConstant = "OptionalProjectPathDescription";
+				const string ShapeText        = "string? projectPath = null";
 				
 				// Literally '= null': '= ""' or '= default' would still make the parameter optional but let
 				// the declaration drift from the shape the rule and the description promise.
 				var nullDefault = param.Default?.Value is LiteralExpressionSyntax { RawKind: (int) SyntaxKind.NullLiteralExpression };
 				
-				if(optional && !nullDefault || !UsesDescriptionConstant(param, expectedConstant))
-					context.ReportDiagnostic(Diagnostic.Create(Rule009, param.Identifier.GetLocation(), methodName, shapeText, expectedConstant));
+				if(shape is not ProjectPathKind.Optional || !nullDefault || !UsesDescriptionConstant(param, ExpectedConstant))
+					context.ReportDiagnostic(Diagnostic.Create(Rule009, param.Identifier.GetLocation(), methodName, ShapeText, ExpectedConstant));
 			}
 		}
 	}

@@ -26,8 +26,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		"Results are paged; use skip/take for large result sets.")]
 	public async Task<object> FindReferences(
 		[Description("The symbol name to find, e.g. 'WindowKey', 'RestoreFromPlacements', 'trackedWindows'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional type name to disambiguate when multiple types have a member with the same name, e.g. 'WindowTracker'. Without this, all symbols matching symbolName are searched and their references are combined.")] string? containingType = null,
 		[Description("Number of references to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
@@ -45,6 +45,10 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

@@ -21,8 +21,8 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		"Pair with roslyn_find_callers to trace the full call chain in both directions.")]
 	public async Task<object> GetCallGraph(
 		[Description("Method name to analyze, e.g. 'GetCompilation', 'ProcessOrder'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple methods share the same name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		[Description("Number of call sites to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of call sites to return. Default: 50, max: 200.")] int take = 50,
@@ -37,6 +37,10 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<CallSiteEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

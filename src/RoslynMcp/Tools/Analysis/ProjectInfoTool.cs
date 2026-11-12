@@ -36,22 +36,57 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			"load_warnings (null when healthy) reports load-health issues: MSBuild workspace load failures and " +
 			"projects whose metadata references were silently dropped by the design-time build — symbol results " +
 			"over those projects may be incomplete; a server restart (fresh load) usually clears it. " +
+			"For a solution (projectPath omitted with a solution as default workspace, or a .sln/.slnx given) the answer is " +
+			"{ solution, projects: [...] } with every project in that same shape; for one project it is the project alone. " +
 			"For build errors or NuGet restore issues, use roslyn_build_project instead.")
 	]
 	public object GetProjectInfo(
-		[Description(ProjectPathDescription)] string projectPath,
-		[Description("When true (default), reads package references directly from the .csproj — fast and accurate for explicit references only. When false, infers packages from resolved metadata reference paths, which may include transitive dependencies.")] bool directOnly = true)
+		[Description("When true (default), reads package references directly from the .csproj — fast and accurate for explicit references only. When false, infers packages from resolved metadata reference paths, which may include transitive dependencies.")] bool directOnly = true,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
-		using var scope = BeginTool("roslyn_get_project_info", null, new { directOnly });
+		using var scope = BeginTool("roslyn_get_project_info", null, new { directOnly, projectPath });
 		
-		if(!TryGetProject(projectPath, out var project, out var error))
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 			
-			return scope.Error(error);
+			return scope.Error(projectError);
 		
 		if(!TryResolveWorkspaceInfo(projectPath, out var rootPath, out var isMSBuild, out _, out var wsError))
 			
 			return scope.Error(wsError);
 		
+		var loadWarnings = workspace.GetLoadWarnings(projectPath) is { Length: > 0 } warnings ? warnings : null;
+		
+		// A solution, given or the default one, is every project of it (#296): a multi-targeted
+		// project once, since its frameworks share the project file the facts are read from.
+		if(isMSBuild && ResolvedSolutionPath(projectPath) is { } solutionPath) {
+			
+			if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+				
+				return scope.Error(solutionError);
+			
+			ProjectInfoResult[] projects = [..
+				solution.Projects
+					.Where(candidate => candidate.FilePath is not null)
+					.DistinctBy(candidate => candidate.FilePath, SecurityBoundary.PathComparer)
+					.Select(candidate => Describe(candidate, rootPath, isMSBuild, directOnly, null, null))
+			];
+			
+			return scope.Outcome($"{projects.Length} project(s)", new SolutionInfoResult(Path.GetRelativePath(rootPath, solutionPath), projects, loadWarnings));
+		}
+		
+		if(!TryGetProject(projectPath, out var project, out var error))
+			
+			return scope.Error(error);
+		
+		return scope.Outcome(project.Name, Describe(project, rootPath, isMSBuild, directOnly, AdhocCaution(projectPath), loadWarnings));
+	}
+	
+	/// <summary>
+	///     The facts of one project. <paramref name="adhocCaution"/> and <paramref name="loadWarnings"/>
+	///     are the single-project call's; for a solution they are said once, on the whole answer.
+	/// </summary>
+	static ProjectInfoResult Describe(Project project, string rootPath, bool isMSBuild, bool directOnly, string? adhocCaution, string[]? loadWarnings)
+	{
 		var compOpts  = project.CompilationOptions  as CSharpCompilationOptions;
 		var parseOpts = project.ParseOptions         as CSharpParseOptions;
 		
@@ -77,10 +112,10 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		// Let the agent know that property values are not condition-evaluated.
 		var caution = props.HasValues
 			? "MSBuild-derived properties (version, root_namespace, etc.) are read verbatim from the .csproj XML — Condition attributes are not evaluated. Values may differ from the effective resolved values for a given build configuration."
-			: AdhocCaution(projectPath)
+			: adhocCaution
 		;
 		
-		return scope.Outcome(project.Name, new ProjectInfoResult(
+		return new ProjectInfoResult(
 			project.Name,
 			project.AssemblyName,
 			project.FilePath is not null
@@ -98,10 +133,10 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			props.TargetFrameworks,
 			props.AllowUnsafeBlocks,
 			props.WarningsAsErrors,
-			workspace.GetLoadWarnings(projectPath) is { Length: > 0 } loadWarnings ? loadWarnings : null)
+			loadWarnings)
 		{
 			Caution = caution
-		});
+		};
 	}
 	
 	private static string? InferTfm(Project project)

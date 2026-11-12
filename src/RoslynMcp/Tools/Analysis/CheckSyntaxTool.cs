@@ -23,12 +23,14 @@ internal sealed class CheckSyntaxTool : RoslynMcpTool
 		"or when it contains using directives or namespace declarations (which are invalid inside a class body). " +
 		"By default (includeSemantics: false), only syntax is checked — fast, no workspace loaded. " +
 		"Set includeSemantics: true to use the full project compilation so the snippet is checked against " +
-		"project-defined types, global usings, and all referenced assemblies.")]
+		"project-defined types, global usings, and all referenced assemblies. That needs one project: pass projectPath " +
+		"(a .csproj), or filePath, a source file of the project the snippet belongs to.")]
 	public object CheckSyntax(
 		[Description("The C# code snippet to validate.")] string code,
-		[Description(ProjectPathDescription)] string projectPath,
 		[Description("When true (default), wraps the snippet in a dummy class so member declarations and method bodies are valid inputs. Set to false when the snippet is a complete class, namespace, or compilation unit, or when it contains using directives or namespace declarations (which are invalid inside a class body).")] bool wrapInClass = true,
-		[Description("When false (default), only syntax is checked — fast, no workspace loaded. When true, the full project compilation is used so the snippet is validated against project-defined types, global usings, and referenced assemblies.")] bool includeSemantics = false)
+		[Description("When false (default), only syntax is checked — fast, no workspace loaded. When true, the full project compilation is used so the snippet is validated against project-defined types, global usings, and referenced assemblies.")] bool includeSemantics = false,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
+		[Description("With includeSemantics: a source file of the project the snippet belongs to, e.g. 'Core/Foo.cs'. Names the project when projectPath is omitted or is a solution.")] string? filePath = null)
 	{
 		using var scope = BeginTool("roslyn_check_syntax", null, new { wrapInClass, includeSemantics });
 		
@@ -42,6 +44,18 @@ internal sealed class CheckSyntaxTool : RoslynMcpTool
 		Diagnostic[] diagnostics;
 		
 		if(includeSemantics) {
+			
+			// A snippet is checked against one project's types, and nothing here says which: no
+			// symbol to look up, no file unless one is given. So one of the two must be (#296).
+			if(string.IsNullOrWhiteSpace(projectPath) && string.IsNullOrWhiteSpace(filePath))
+				
+				return scope.Error(new ErrorResult(
+					"includeSemantics needs the project to check the snippet against, and none was named.",
+					"Pass projectPath (a .csproj), or filePath: a source file of the project the snippet belongs to."));
+			
+			if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+				
+				return scope.Error(projectError);
 			
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
 				

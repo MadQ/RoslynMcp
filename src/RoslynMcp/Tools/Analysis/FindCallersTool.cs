@@ -27,8 +27,8 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		"Pair with roslyn_get_call_graph to also trace what the callee itself depends on.")]
 	public async Task<object> FindCallers(
 		[Description("Symbol name to find callers of, e.g. 'GetCompilation', 'ProcessOrder'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types share a method name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		[Description("When true (default), returns only direct callers. Set false to include indirect calls via interface dispatch or delegates.")] bool isDirect = true,
 		[Description("Number of callers to skip. Default: 0.")] int skip = 0,
@@ -47,6 +47,10 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<CallerEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

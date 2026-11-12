@@ -24,7 +24,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		"Check your code for compiler errors and warnings — fast, in-process, no build needed. " +
 		"Use this after editing code to verify correctness before committing or continuing work. " +
 		"Returns a structured summary (error count, warning count) plus paginated individual items " +
-		"with code, file, line, and message. A .sln/.slnx projectPath checks every project in the solution " +
+		"with code, file, line, and message. A solution — a .sln/.slnx projectPath, or projectPath omitted with a solution as default workspace — checks every project in it, and each item then names its project " +
 		"(with filePath: the project or projects that compile that file). " +
 		"Pass take: 0 for a lightweight error-count-only check " +
 		"with no items returned. When take: 0, the response includes full counts but items is null — " +
@@ -37,8 +37,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		"For NuGet restore failures, MSBuild target errors, or " +
 		"source generator issues, use roslyn_build_project instead.")]
 	public async Task<object> GetDiagnostics(
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project. A path that names no file in the compilation is an error, never an empty (clean) result.")] string? filePath = null,
 		[Description("Filter by severity: 'errors', 'warnings', 'all' (errors and warnings — the default), 'info' (info and above), or 'hidden' (everything, the IDE analyzers' hidden findings included).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
@@ -62,6 +62,11 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 			
 			// With the counts of the run the page comes from, as a computed page logs them.
 			return scope.Outcome(cached is DiagnosticsResult page ? $"{page.Summary} (cached page)" : "cached page", cached);
+		
+		// Omitted, the path is the default workspace: for a solution, every project of it (#296).
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
@@ -315,7 +320,13 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				}
 		;
 		
-		DiagnosticItem[] items = [..filtered.Select(d => ToItem(d, rootPath))];
+		// Each item names its project where the path stands for more than one (#296): the same
+		// file name, and the same error, can sit in several.
+		var projectOf = ProjectsByTree(targets);
+		
+		DiagnosticItem[] items = [..filtered.Select(d => ToItem(d, rootPath) with {
+			Project = d.Location.SourceTree is { } tree && projectOf is not null && projectOf.TryGetValue(tree, out var name) ? name : null
+		})];
 		
 		return scope.Outcome(summary, Shape(PaginateAndStore(items, ref skip, take, Shape)));
 	}
@@ -392,6 +403,27 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.
+	/// <summary>
+	///     The name of the project each syntax tree is compiled by, or <see langword="null"/> when the
+	///     targets are one project (its frameworks included), where naming it on every item would
+	///     say nothing. A file compiled by several projects is named for the first.
+	/// </summary>
+	static Dictionary<SyntaxTree, string>? ProjectsByTree((Compilation Compilation, Project? Project)[] targets)
+	{
+		if(targets.Select(target => target.Project?.FilePath).OfType<string>().Distinct(SecurityBoundary.PathComparer).Count() < 2)
+			
+			return null;
+		
+		var projects = new Dictionary<SyntaxTree, string>();
+		
+		foreach(var (compilation, project) in targets)
+			if(project?.FilePath is { } file)
+				foreach(var tree in compilation.SyntaxTrees)
+					projects.TryAdd(tree, Path.GetFileNameWithoutExtension(file));
+		
+		return projects;
+	}
+	
 	private static DiagnosticItem ToItem(Diagnostic d, string rootPath)
 	{
 		var span = d.Location.GetLineSpan();

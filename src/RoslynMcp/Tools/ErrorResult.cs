@@ -113,7 +113,16 @@ internal sealed record SymbolCandidate(
 	[property: JsonPropertyName("containingType")] string? ContainingType,
 	[property: JsonPropertyName("filePath")]       string? FilePath,
 	[property: JsonPropertyName("line")]           int     Line
-);
+)
+{
+	/// <summary>
+	///     The project file that declares the candidate, set when the candidates are one per project
+	///     of a solution (#296): the value to pass back as projectPath.
+	/// </summary>
+	[JsonPropertyName("project")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Project { get; init; }
+}
 
 /// <summary>
 ///     Ambiguous-name failure carrying the candidate list in machine-usable form, so the calling

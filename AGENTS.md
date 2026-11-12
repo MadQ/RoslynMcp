@@ -60,7 +60,7 @@ Use `roslyn_build_project` to build — not `dotnet build` in a terminal.
 |-----------|----------------|
 | `WorkspaceManager` | LRU-cached workspace instances; auto-detects `.csproj` → `MSBuildWorkspace` or directory → `AdhocWorkspace`; loads outside its cache lock (#277), one load per workspace at a time — a call for a workspace whose load is in progress waits for it (`pendingLoads`, keyed by the cache key `PlanLoad` decides up front, #377); exposes `GetCompilation()`, `GetSolution()`, `GetProject()`, `GetWorkspaceInfo()`, `InvalidateFile()`; smart path resolution |
 | `WorkspaceResolver` | Per-tool facade over `WorkspaceManager`; exposes `GetCompilation()`, `GetProject()`, `GetRootPath()`, `GetSolution()`, `GetWorkspaceInfo()`, `InvalidateFile()`; throws on path resolution failure (caught and structured by `RoslynMcpTool.TryGetCompilation`/`TryGetProject`) |
-| `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines `ProjectPathDescription` constant |
+| `RoslynMcpTool` | Base class for all tools; provides `TryGetCompilation()` and `TryGetProject()` helpers with consistent error responses; defines the `OptionalProjectPathDescription` constant; `TryResolveSymbolProjectArg` (`RoslynMcpTool.SymbolProject.cs`) finds the project that declares a symbol named by a call whose `projectPath` is omitted or a solution (#296): `SymbolFinder.FindSourceDeclarationsAsync` over the solution, one entry per project file (a multi-targeted project is one), none is `symbol not found` unless a referenced assembly has the name, several are a candidate list with each candidate's `project`, never a preference |
 | `SearchFilesTool` | `roslyn_search_files` — regex search across workspace files with paging; prerequisite for finding code to analyze with Roslyn tools |
 | `SemanticSearchTool` | `roslyn_semantic_search` — Roslyn syntax-tree filtering for context-aware search (comments, strings, identifiers, code, xmldocs); C#-only, slower but more precise |
 | `FindStringLiteralTool` | `roslyn_find_string_literal` — string-literal-only search; matches against decoded `Token.ValueText` by default (escape sequences resolved, quotes stripped); `mode: "glob"` for `*`/`?` glob; `matchRaw: true` to match raw source text instead; returns both `text` (raw) and `value` (decoded) per result; covers all string forms including raw and UTF-8 variants |
@@ -218,7 +218,7 @@ When discovering files/content:
 - `roslyn_get_file_outline` — use to understand a file's type/member structure (signatures only, no bodies); more token-efficient than `roslyn_read_file` for exploration
 - `roslyn_find_references` — without `containingType`, searches ALL symbols matching the name (union of results). Use `containingType` to narrow.
 - `roslyn_list_types` — without `namespaceFilter`, returns only project-defined types (not framework). Use `namespaceFilter` for sub-namespace scoping.
-- `roslyn_get_diagnostics` — use `severity: "errors"` or `take: 0` for a fast error-only check during editing; a `.sln`/`.slnx` `projectPath` checks every project. Every other tool that works on one project rejects a solution path with `solution_needs_project` and lists the `.csproj` files to pick from (#376)
+- `roslyn_get_diagnostics` — use `severity: "errors"` or `take: 0` for a fast error-only check during editing; a solution (a `.sln`/`.slnx` `projectPath`, or none with a solution as default workspace) checks every project, and each item names its `project`. `roslyn_list_types`, `roslyn_find_unused` and `roslyn_get_project_info` cover every project of a solution the same way (#296). A tool that names a symbol finds the project that declares it; a tool that names a file, the project that contains it. Only a call that names neither — `roslyn_check_syntax` with `includeSemantics` and no `filePath` — still answers a solution with `solution_needs_project` and the `.csproj` files to pick from (#376)
 - `roslyn_build_project` — checks Roslyn diagnostics first (fast, in-process). Only runs `dotnet build` if Roslyn is clean. To check that code compiles, use `roslyn_get_diagnostics` instead. When a build is needed, make **one** call with `projectPath` omitted (whole solution) — never one call per project, never several in parallel (they only queue), and no `forceBuild` unless diagnostics are untrustworthy. Skip it entirely before a TestHarness run, which builds everything itself.
 - `roslyn_preview_rename` / `roslyn_apply_rename` — always call preview first; renames can affect dozens of files. The token from preview is required by apply.
 - `roslyn_change_signature` / `roslyn_apply_signature_change` — same two-step pattern as rename: preview returns a diff + token, apply commits it.
@@ -533,24 +533,27 @@ Parameter descriptions follow the same principle — write for the AI to underst
 **Both are enforced at compile time:**
 - **RMCP007** — every `[McpServerTool]` method must have a `[Description]` attribute (Error)
 - **RMCP008** — every parameter on a `[McpServerTool]` method must have `[Description]`, except `CancellationToken` (Error)
-- **RMCP009** — a required `string projectPath` must use `[Description(ProjectPathDescription)]`; an optional one must be declared `string? projectPath = null` (a literal `null` default) and use `[Description(OptionalProjectPathDescription)]` — inline strings drift; the constants are the single source of truth (Error)
+- **RMCP009** — a `projectPath` parameter must be declared `string? projectPath = null` (a literal `null` default) and use `[Description(OptionalProjectPathDescription)]` — a required `projectPath` is a tool that does not find its project on its own (#296), and inline strings drift; the constant is the single source of truth (Error)
 - **RMCP010** — a string literal (descriptions, hints, messages) must not name a tool without its `roslyn_` prefix: an agent calls what it reads, and `apply_rename` is an unknown tool (Warning, #326). The names checked are the compilation's own `[McpServerTool(Name = …)]` values with an underscore after the prefix, so a new tool is covered at once, one-word names (`info`, `respawn`) are not matched, and the TestHarness, which declares no tools, is never checked. Comments are not checked
 
-**Always use `ProjectPathDescription` or `OptionalProjectPathDescription`** for the `projectPath` parameter — constants with the canonical, full description. Inline text drifts and diverges. Never duplicate them.
+**Always use `OptionalProjectPathDescription`** for the `projectPath` parameter — the constant with the canonical, full description. Inline text drifts and diverges. Never duplicate it.
 
 #### Parameter Conventions
 
 ```csharp
 public object MyToolMethod(
     [Description("...")] string requiredParam,           // required params first
-    [Description(ProjectPathDescription)] string projectPath,  // required shape: last required param
-    [Description("...")] string? optionalParam = null)   // optional params after projectPath — or see the optional shape below.
+    CancellationToken cancellationToken,                 // then the SDK-injected ones
+    [Description(OptionalProjectPathDescription)] string? projectPath = null,  // then projectPath, optional
+    [Description("...")] string? optionalParam = null)   // and the other optional params
 ```
 
-Actually: `projectPath` comes in two shapes, each enforced by RMCP009:
+`projectPath` has one shape, enforced by RMCP009: `[Description(OptionalProjectPathDescription)] string? projectPath = null`, declared after every required parameter (and after `CancellationToken`). A statement near the top of the method normalizes it — after `BeginTool`, after any `TryStripChatSymbolRef` on the names it uses, and after `TryServeCachedPage` — and from there on `projectPath` is a plain non-null string and every helper works unchanged. Which statement depends on what the tool can find its project by:
 
-- **Optional** — `[Description(OptionalProjectPathDescription)] string? projectPath = null`, declared after every required parameter (and after `CancellationToken`). The first statement after `BeginTool` normalizes it: `if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError)) return scope.Error(projectError);` for solution-level tools (an omitted value becomes the default workspace path, or `missing_project_path` when there is none), or the `TryResolveProjectArg(projectPath, filePath, …)` overload for file-anchored tools, which resolves an omitted value to the .csproj of the project in the default solution that contains `filePath` — and fails with `ambiguous_file` when a suffix-only `filePath` names different files in different projects. From there on `projectPath` is a plain non-null string and every helper works unchanged.
-- **Required** — `[Description(ProjectPathDescription)] string projectPath`, declared last among required parameters. Still used by tools whose target project cannot yet be inferred without it: symbol-by-name and project-aggregate tools, plus the rename/signature apply tools (#296 tracks making those optional).
+- **Solution-level and aggregate tools** — `if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError)) return scope.Error(projectError);` An omitted value becomes the default workspace path, or `missing_project_path` when there is none. A tool that covers a project then takes every project the path stands for from `GetTargetsAsync` and names the project on each item when there are several.
+- **File-anchored tools** — the `TryResolveProjectArg(projectPath, filePath, …)` overload, which resolves an omitted value, or a solution, to the .csproj of the project that contains `filePath` — and fails with `ambiguous_file` when a suffix-only `filePath` names different files in different projects.
+- **Symbol-by-name tools** — `TryResolveSymbolProjectArg(projectPath, symbolName, containingType, …)`, with the `filePath` overload for tools that also take a position, or `ResolveSymbolProjectArgAsync` for the two that may elicit (`roslyn_preview_rename`, `roslyn_change_signature`). An omitted value, or a solution, becomes the .csproj that declares the symbol; a name declared in several projects fails with the candidates.
+- **Apply tools** — nothing: the token's `WorkspaceBinding` is the workspace, and a `projectPath` that is given is only checked against it (`CheckApplyWorkspace`).
 
 **Why omitting `projectPath` is safe (#295):**
 An omitted `projectPath` resolves to the **session default workspace**, fixed by startup inputs only — `--root` / a bare positional argument, then `ROSLYNMCP_ROOT`, then the server CWD; from that directory the one `.sln`/`.slnx` in it (or the one pinned by `"solution"` in `.madq_roslynmcp.json`), else the nearest solution above it, else its single `.csproj`. It never depends on which workspaces happen to be cached, so it is not a guess — the concern that originally made `projectPath` mandatory. When nothing qualifies, the call fails with `missing_project_path` and a hint naming `--root`.
@@ -635,11 +638,11 @@ Without this, subsequent Roslyn tools see the stale in-memory source tree, not t
 
 #### Key Points (Summary)
 
-- `projectPath` is either optional (`string? projectPath = null` + `OptionalProjectPathDescription`, normalized with `TryResolveProjectArg` right after `BeginTool` — the only way a tool opts in to the default workspace; `ResolveProjectPath("")` itself throws, so a required `projectPath` never silently resolves to the default) or required (`string projectPath` + `ProjectPathDescription`, last required parameter) — RMCP009 enforces the pairing
+- `projectPath` is always `string? projectPath = null` + `OptionalProjectPathDescription` (RMCP009), normalized near the top of the method with `TryResolveProjectArg` (solution-level, aggregate, file-anchored) or `TryResolveSymbolProjectArg` (symbol by name) — the only way a tool reaches the default workspace; `ResolveProjectPath("")` itself throws
 - `using var scope = BeginTool(...)` is always the first statement
 - `Name` in `[McpServerTool]` must match `BeginTool`'s first argument exactly
 - Every `return` with a value must go through `scope.Outcome`, `scope.Error`, or `scope.Failed`
-- Use `[Description(ProjectPathDescription)]` / `[Description(OptionalProjectPathDescription)]` — never inline text for `projectPath`
+- Use `[Description(OptionalProjectPathDescription)]` — never inline text for `projectPath`
 - Use `scope.Error<T>` when `T : ToolResult, IToolError`; use `scope.Failed` otherwise
 - Mutation tools: call `workspace.InvalidateFile` after every successful write
 

@@ -25,7 +25,7 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		"rather than project source code.")]
 	public async Task<object> GetMemberBody(
 		[Description("The declared symbol name, e.g. 'GetCompilation', 'RootPath', 'WorkspaceManager'. Use the simple name, not a qualified path.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		CancellationToken ct = default)
 	{
@@ -34,6 +34,10 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			
 			return scope.Error(refError!);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

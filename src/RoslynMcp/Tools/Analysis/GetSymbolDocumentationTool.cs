@@ -22,7 +22,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		"Returns a structured empty result (not an error) when no XML doc comments are found for the symbol.")]
 	public object GetSymbolDocumentation(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_documentation", symbolName, new { containingType, projectPath });
@@ -30,6 +30,10 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			
 			return scope.Error(refError!);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

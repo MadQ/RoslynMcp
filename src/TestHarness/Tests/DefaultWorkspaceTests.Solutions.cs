@@ -14,23 +14,22 @@ static partial class DefaultWorkspaceTests
 		
 		return new List<TestCase> {
 			
-			// #376: a tool that works on one project, given the solution, used to answer for the
-			// solution's first project (App) — and Greet, which is in Lib, was "not found". It must
-			// say that it needs one project, and name them, so the agent can pass one back. Passed back
-			// exactly as returned: this server's working directory is not the workspace root, so a
-			// path relative to the root would resolve elsewhere (review of #378).
-			new("DefaultWorkspace: a solution passed to a one-project tool is an error that lists the projects", async () => {
+			// #376, #296: a tool that works on one project, given the solution, used to answer for the
+			// solution's first project (App) — and Greet, which is in Lib, was "not found". A tool
+			// that names a symbol now finds the project that declares it. One that names nothing a
+			// project could be found by (a snippet checked against "the project") must still say
+			// that it needs one, and name them, so the agent can pass one back.
+			new("DefaultWorkspace: a solution passed to a one-project tool finds the symbol's project, or lists the projects", async () => {
 				
-				var (ok, data)   = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = fx.PathOf("DefaultWs.slnx") });
-				var found        = data?["found_projects"]?.AsArray().Select(p => p?.GetValue<string>() ?? "").ToArray() ?? [];
-				var choice       = found.FirstOrDefault(p => p.EndsWith("Lib.csproj")) ?? "";
-				var (libOk, lib) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = choice });
+				var solution          = fx.PathOf("DefaultWs.slnx");
+				var (ok, data)        = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", containingType = "Greeter", projectPath = solution });
+				var (checkOk, check)  = await Call(rootedCtx, "roslyn_check_syntax", new { code = "int x = 1;", includeSemantics = true, projectPath = solution });
+				var found             = check?["found_projects"]?.AsArray().Select(p => p?.GetValue<string>() ?? "").ToArray() ?? [];
 				
-				return Verdict(ok
-					&& data?["error"]?.GetValue<string>() == "solution_needs_project"
-					&& found.Any(p => p.EndsWith("App.csproj")) && found.Any(p => p.EndsWith("Lib.csproj"))
-					&& libOk && lib?["error"] is null,
-					$"expected solution_needs_project naming App and Lib, and a body through Lib.csproj; got {data?.ToJsonString() ?? "null"} / {lib?.ToJsonString() ?? "null"}");
+				return Verdict(ok && (data?["file"]?.GetValue<string>() ?? "").Contains("Greeter.cs")
+					&& checkOk && check?["error"]?.GetValue<string>() == "solution_needs_project"
+					&& found.Any(p => p.EndsWith("App.csproj")) && found.Any(p => p.EndsWith("Lib.csproj")),
+					$"expected Greet from Lib/Greeter.cs, and solution_needs_project naming App and Lib; got {data?.ToJsonString() ?? "null"} / {check?.ToJsonString() ?? "null"}");
 			}),
 			
 			// #376: Stray.csproj lies under the solution's directory, so it loads the solution — which
