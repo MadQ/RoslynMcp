@@ -48,7 +48,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, methodName, containingType, null, server, cancellationToken);
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, methodName, containingType, SymbolSought.Method, null, server, cancellationToken);
 		
 		if(projectError is not null)
 			

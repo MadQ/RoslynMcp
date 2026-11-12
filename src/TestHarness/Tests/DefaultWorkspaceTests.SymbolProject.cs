@@ -44,6 +44,23 @@ static partial class DefaultWorkspaceTests
 					$"expected two candidates naming App.csproj and Lib.csproj, and Lib's declaration on the retry; got {data?.ToJsonString() ?? "null"} / {retry?.ToJsonString() ?? "null"}");
 			}),
 			
+			// What a tool is after decides which declarations count. Shadowed is a class in Lib and
+			// a method in App. A type before any member, applied across the solution, sent the call
+			// graph of the method to Lib, where there is no such method. The method tool must land in
+			// App and the type tool in Lib, neither with a candidate list. And a qualified name must
+			// narrow: Lib.TwiceDeclared is one of the two TwiceDeclared, so it is no longer ambiguous.
+			new("DefaultWorkspace: the kind of symbol a tool is after, and a qualified name, pick the project", async () => {
+				
+				var (graphOk, graph)     = await Call(rootedCtx, "roslyn_get_call_graph", new { symbolName = "Shadowed" });
+				var (membersOk, members) = await Call(rootedCtx, "roslyn_get_type_members", new { typeName = "Shadowed" });
+				var (namedOk, named)     = await Call(rootedCtx, "roslyn_get_symbol_definition", new { symbolName = "Lib.TwiceDeclared" });
+				
+				return Verdict(graphOk && graph?["error"] is null
+					&& membersOk && members?["error"] is null
+					&& namedOk && named?["error"] is null && named["candidates"] is null,
+					$"expected the method in App, the type in Lib and Lib.TwiceDeclared, with no error; got {graph?.ToJsonString() ?? "null"} / {members?.ToJsonString() ?? "null"} / {named?.ToJsonString() ?? "null"}");
+			}),
+			
 			// The frameworks of a multi-targeted project are one project. Split has two target
 			// frameworks, so Roslyn holds it twice, and its class is declared "twice"; a lookup
 			// through its solution must find one project and return the member, not a candidate
@@ -54,6 +71,18 @@ static partial class DefaultWorkspaceTests
 				
 				return Verdict(ok && data?["candidates"] is null && (data?["file"]?.GetValue<string>() ?? "").Contains("Split.cs"),
 					$"expected M from Split.cs; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// A solution may list a project that lies outside its own directory, under another
+			// solution: Sln/Apart.slnx lists ../Apart/Apart.csproj, and the nearest solution above
+			// Apart is Single.slnx, which does not list it. The project found for the symbol must be
+			// read in the solution it was found in, not in whichever solution its path leads to.
+			new("DefaultWorkspace: a symbol's project outside its solution's directory is read in that solution", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Warned", projectPath = single.PathOf("Sln/Apart.slnx") });
+				
+				return Verdict(ok && (data?["file"]?.GetValue<string>() ?? "").Contains("Warned.cs"),
+					$"expected Warned from Apart/Warned.cs; got {data?.ToJsonString() ?? "null"}");
 			}),
 			
 			// A name with no declaration in source is not "not found" when it is a symbol of a
@@ -114,22 +143,25 @@ static partial class DefaultWorkspaceTests
 			new("DefaultWorkspace: find_unused without projectPath reports the second project's unused symbols", async () => {
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_find_unused", new { take = 200 });
-				var text       = data?.ToJsonString() ?? "null";
 				
-				return Verdict(ok && data?["error"] is null && text.Contains("Unreferenced") && text.Contains("\"project\":\"Lib\""),
-					$"expected Unreferenced with project Lib; got {text}");
+				// On the one entry: another entry's project would not do.
+				var entry = data?["unused"]?.AsArray().FirstOrDefault(item => (item?["name"]?.GetValue<string>() ?? "").Contains("Unreferenced"));
+				
+				return Verdict(ok && entry?["project"]?.GetValue<string>() == "Lib",
+					$"expected Unreferenced with project Lib; got {data?.ToJsonString() ?? "null"}");
 			}),
 			
 			// A snippet names no symbol and no file, so nothing says which project's types it is to be
-			// checked against: with includeSemantics and neither path the call must say what to pass.
-			// With a file of Lib it must resolve Lib's type, which App's compilation would also
-			// see, so the snippet uses an internal type of Lib that only Lib itself can name.
+			// checked against: with includeSemantics and neither path, on a solution, the call must
+			// say that it needs a project and that a filePath names one. With a file of Lib it must
+			// resolve Lib's type, which App's compilation would not: the snippet uses an internal
+			// type of Lib that only Lib itself can name.
 			new("DefaultWorkspace: check_syntax with semantics asks for a project or a file, and takes the file's project", async () => {
 				
 				var (ok, data)         = await Call(rootedCtx, "roslyn_check_syntax", new { code = "Lib.WarnHolder holder = null!;", includeSemantics = true });
 				var (fileOk, withFile) = await Call(rootedCtx, "roslyn_check_syntax", new { code = "Lib.WarnHolder holder = null!;", includeSemantics = true, filePath = "Lib/Greeter.cs" });
 				
-				return Verdict(ok && (data?["hint"]?.GetValue<string>() ?? "").Contains("filePath")
+				return Verdict(ok && data?["error"]?.GetValue<string>() == "solution_needs_project" && (data["hint"]?.GetValue<string>() ?? "").Contains("filePath")
 					&& fileOk && withFile?["error_count"]?.GetValue<int>() == 0,
 					$"expected a hint naming filePath, and no errors through Lib/Greeter.cs; got {data?.ToJsonString() ?? "null"} / {withFile?.ToJsonString() ?? "null"}");
 			}),

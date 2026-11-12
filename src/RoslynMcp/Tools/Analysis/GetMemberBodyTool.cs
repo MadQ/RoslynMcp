@@ -35,7 +35,7 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, out projectPath, out var projectError))
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Any, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
 		

@@ -46,7 +46,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, out projectPath, out var projectError))
+		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, SymbolSought.Type, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
 		

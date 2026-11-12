@@ -96,7 +96,7 @@ internal sealed class ListTypesTool : RoslynMcpTool
 			
 			var name = SymbolFormatter.FormatType(type);
 			
-			yield return project is not null && own ? $"{name} [{Path.GetFileNameWithoutExtension(project.FilePath)}]" : name;
+			yield return project?.FilePath is { } file && own ? $"{name} [{Path.GetFileNameWithoutExtension(file)}]" : name;
 		}
 	}
 	

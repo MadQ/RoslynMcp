@@ -38,7 +38,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, out projectPath, out var projectError))
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Method, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
 		

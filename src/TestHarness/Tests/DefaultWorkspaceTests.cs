@@ -67,6 +67,9 @@ static partial class DefaultWorkspaceTests
 		fx.Write("Lib/TwiceDeclared.cs", "namespace Lib;\n\npublic class TwiceDeclared { }\n");
 		fx.Write("Lib/NoProjectRename.cs", "namespace Lib;\n\npublic class NoProjectRename\n{\n\tpublic int OldName(int a) => a;\n}\n");
 		fx.Write("Lib/Unreferenced.cs", "namespace Lib;\n\ninternal class Unreferenced { }\n");
+		// #296 review: one name for a type in Lib and for a method in App.
+		fx.Write("Lib/Shadowed.cs", "namespace Lib;\n\npublic class Shadowed { }\n");
+		fx.Write("App/ShadowUser.cs", "namespace App;\n\npublic class ShadowUser\n{\n\tpublic int Shadowed() => 1;\n}\n");
 		
 		// #376: a warning (CS0168) in Lib, the solution's second project, for the solution-wide
 		// diagnostics test; and a project under the solution's directory that the solution does not

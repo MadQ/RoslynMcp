@@ -52,7 +52,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, filePath, server, cancellationToken);
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.Any, filePath, server, cancellationToken);
 		
 		if(projectError is not null)
 			

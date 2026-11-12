@@ -16,7 +16,9 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		"Finds all usages (call sites, type references, field accesses) of a named symbol across the project — " +
 		"use this instead of grep for symbol searches; text search cannot resolve overloads, aliases, or cross-file semantics. " +
 		"Essential before renaming or refactoring to understand full impact. " +
-		"Without containingType, searches ALL symbols matching the name and returns the union of their references, " +
+		"With no projectPath, or a solution, the project is the one that declares the name: a name declared in several projects " +
+		"fails with the candidates and their projects, never a union across them. " +
+		"Without containingType, searches ALL symbols matching the name in the project and returns the union of their references, " +
 		"ensuring no call sites are missed when multiple types share a member name. " +
 		"Provide containingType to search only the symbol declared on that specific type. " +
 		"Returns references as project-relative file:line strings (e.g. 'src/Foo.cs:42'). " +
@@ -46,7 +48,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, filePath, out projectPath, out var projectError))
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Any, filePath, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
 		

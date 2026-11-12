@@ -23,8 +23,9 @@ internal sealed class CheckSyntaxTool : RoslynMcpTool
 		"or when it contains using directives or namespace declarations (which are invalid inside a class body). " +
 		"By default (includeSemantics: false), only syntax is checked — fast, no workspace loaded. " +
 		"Set includeSemantics: true to use the full project compilation so the snippet is checked against " +
-		"project-defined types, global usings, and all referenced assemblies. That needs one project: pass projectPath " +
-		"(a .csproj), or filePath, a source file of the project the snippet belongs to.")]
+		"project-defined types, global usings, and all referenced assemblies. That needs one project: where the default " +
+		"workspace is a solution, pass projectPath (a .csproj) or filePath, a source file of the project the snippet " +
+		"belongs to; otherwise the answer is solution_needs_project with the projects to choose from.")]
 	public object CheckSyntax(
 		[Description("The C# code snippet to validate.")] string code,
 		[Description("When true (default), wraps the snippet in a dummy class so member declarations and method bodies are valid inputs. Set to false when the snippet is a complete class, namespace, or compilation unit, or when it contains using directives or namespace declarations (which are invalid inside a class body).")] bool wrapInClass = true,
@@ -45,14 +46,10 @@ internal sealed class CheckSyntaxTool : RoslynMcpTool
 		
 		if(includeSemantics) {
 			
-			// A snippet is checked against one project's types, and nothing here says which: no
-			// symbol to look up, no file unless one is given. So one of the two must be (#296).
-			if(string.IsNullOrWhiteSpace(projectPath) && string.IsNullOrWhiteSpace(filePath))
-				
-				return scope.Error(new ErrorResult(
-					"includeSemantics needs the project to check the snippet against, and none was named.",
-					"Pass projectPath (a .csproj), or filePath: a source file of the project the snippet belongs to."));
-			
+			// A snippet names no symbol, so nothing but a file says which project of a solution it
+			// is to be checked against. With neither a project nor a file, a default workspace that
+			// is one project is that project, and a solution is answered by the guard below:
+			// solution_needs_project, with the projects to choose from and filePath as the way out.
 			if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
 				
 				return scope.Error(projectError);

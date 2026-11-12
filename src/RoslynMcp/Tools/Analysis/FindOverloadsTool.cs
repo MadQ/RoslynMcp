@@ -26,7 +26,7 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, methodName, containingType, out projectPath, out var projectError))
+		if(!TryResolveSymbolProjectArg(projectPath, methodName, containingType, SymbolSought.Method, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
 		
