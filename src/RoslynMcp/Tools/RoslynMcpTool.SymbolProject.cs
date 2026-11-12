@@ -48,67 +48,30 @@ internal abstract partial class RoslynMcpTool
 	///         each with the project to pass back. Within one project nothing changes; several
 	///         matches there are the tool's own to handle, as before.
 	///     </para>
+	///     <para>
+	///         With a <paramref name="filePath"/>, for a tool that can also be pointed at a
+	///         position, the file decides the project, as for every file-anchored tool, and the
+	///         name is not looked up. Returns the project path to go on with, or the error.
+	///         Awaited, with the call's token: the lookup reads the declaration index of the
+	///         solution, and for a name outside it compiles project after project, which a
+	///         cancelled call must not sit through (#444).
+	///     </para>
 	/// </summary>
-	protected bool TryResolveSymbolProjectArg(
-		string? projectPath,
-		string symbolName,
-		string? containingType,
-		SymbolSought sought,
-		out string resolved,
-		[NotNullWhen(false)] out ToolResult? error)
-	{
-		if(!TryResolveProjectArg(projectPath, out resolved, out error))
-			
-			return false;
-		
-		// Sync over async, like the compilation fetch: the tools that call this are not async and
-		// have no cancellation token, and no synchronization context is in play.
-		var declared = DeclaringProjectsOfAsync(resolved, symbolName, containingType, sought, CancellationToken.None).GetAwaiter().GetResult();
-		
-		if(declared is not { } found)
-			
-			return true;
-		
-		var (candidates, rootPath) = found;
-		
-		if(candidates.Length == 1) {
-			
-			resolved = PickProject(candidates[0]);
-			
-			return true;
-		}
-		
-		error = candidates.Length == 0
-			? SymbolNotFoundError(symbolName)
-			: AmbiguousProjectError(candidates, symbolName, rootPath)
-		;
-		
-		return false;
-	}
-	
-	/// <summary>
-	///     The same for a tool that can also be pointed at a position: with a
-	///     <paramref name="filePath"/> the file decides the project, as for every file-anchored
-	///     tool, and the name is not looked up.
-	/// </summary>
-	protected bool TryResolveSymbolProjectArg(
+	protected Task<(string Resolved, ToolResult? Error)> ResolveSymbolProjectArgAsync(
 		string? projectPath,
 		string symbolName,
 		string? containingType,
 		SymbolSought sought,
 		string? filePath,
-		out string resolved,
-		[NotNullWhen(false)] out ToolResult? error)
-		=> string.IsNullOrWhiteSpace(filePath)
-			? TryResolveSymbolProjectArg(projectPath, symbolName, containingType, sought, out resolved, out error)
-			: TryResolveProjectArg(projectPath, filePath, out resolved, out error)
+		CancellationToken cancellationToken)
+		=> ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, sought, filePath, null, cancellationToken)
 	;
 	
 	/// <summary>
-	///     The same for the tools that change code by a symbol's name, which may ask the user: where
-	///     elicitation is on (<see cref="ProjectConfig.EffectiveElicit"/>) and the client supports
-	///     it, declarations in several projects are put to the user before the call fails with the
-	///     candidates. Returns the project path to go on with, or the error.
+	///     The same for the tools that change code by a symbol's name, which may ask the user: with
+	///     a <paramref name="server"/>, where elicitation is on
+	///     (<see cref="ProjectConfig.EffectiveElicit"/>) and the client supports it, declarations
+	///     in several projects are put to the user before the call fails with the candidates.
 	/// </summary>
 	protected async Task<(string Resolved, ToolResult? Error)> ResolveSymbolProjectArgAsync(
 		string? projectPath,
@@ -116,7 +79,7 @@ internal abstract partial class RoslynMcpTool
 		string? containingType,
 		SymbolSought sought,
 		string? filePath,
-		McpServer server,
+		McpServer? server,
 		CancellationToken cancellationToken)
 	{
 		if(!string.IsNullOrWhiteSpace(filePath))
@@ -141,7 +104,7 @@ internal abstract partial class RoslynMcpTool
 			
 			return (resolved, SymbolNotFoundError(symbolName));
 		
-		if(ProjectConfig.EffectiveElicit(rootPath, logger)) {
+		if(server is not null && ProjectConfig.EffectiveElicit(rootPath, logger)) {
 			
 			ISymbol[] symbols = [..candidates.Select(candidate => candidate.Symbol)];
 			

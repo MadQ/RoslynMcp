@@ -15,8 +15,9 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 		"field types, parameter types, return types, base type, interfaces, and generic constraints. " +
 		"Answers what the type couples to before extracting, moving, or refactoring it. " +
 		"Does not inspect nested types, attributes, method bodies, local variables, or called methods.")]
-	public object GetTypeDependencies(
+	public async Task<object> GetTypeDependencies(
 		[Description("The type to inspect, as a simple name (e.g. 'WorkspaceManager') or fully-qualified name (e.g. 'RoslynMcp.WorkspaceManager'). Simple names are resolved by scanning the global namespace.")] string typeName,
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Number of dependencies to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum dependencies to return. Default: 50, max: 200.")] int take = 50,
@@ -32,9 +33,13 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, SymbolSought.Type, out projectPath, out var projectError))
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, typeName, null, SymbolSought.Type, null, cancellationToken);
+		
+		if(projectError is not null)
 			
 			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

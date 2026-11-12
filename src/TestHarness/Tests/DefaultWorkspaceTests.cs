@@ -70,6 +70,10 @@ static partial class DefaultWorkspaceTests
 		// #296 review: one name for a type in Lib and for a method in App.
 		fx.Write("Lib/Shadowed.cs", "namespace Lib;\n\npublic class Shadowed { }\n");
 		fx.Write("App/ShadowUser.cs", "namespace App;\n\npublic class ShadowUser\n{\n\tpublic int Shadowed() => ShadowHelper();\n\n\tint ShadowHelper() => 1;\n}\n");
+		// #444: a constructor with a call in it, which the declaration index lists under another
+		// name than .ctor; and a source type that shares its simple name with a framework type.
+		fx.Write("Lib/CtorHolder.cs", "namespace Lib;\n\npublic class CtorHolder\n{\n\tpublic CtorHolder() { CtorInit(); }\n\n\tvoid CtorInit() { }\n}\n");
+		fx.Write("App/Timer.cs", "namespace App;\n\npublic class Timer { }\n");
 		
 		// #376: a warning (CS0168) in Lib, the solution's second project, for the solution-wide
 		// diagnostics test; and a project under the solution's directory that the solution does not

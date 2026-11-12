@@ -20,10 +20,11 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		"Results are returned in declaration order, paged with default take=50 and max take=200. " +
 		"For the full source code of a specific member, use roslyn_get_member_body. " +
 		"For XML documentation only, use roslyn_get_symbol_documentation."),]
-	public object GetTypeMembers(
+	public async Task<object> GetTypeMembers(
 		[Description("The type to inspect, as a simple name (e.g. 'WorkspaceManager') or fully-qualified name (e.g. 'RoslynMcp.WorkspaceManager'). Use roslyn_list_types to discover available type names.")]
 		string typeName,
 		
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)]
 		string? projectPath = null,
 		
@@ -46,9 +47,13 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, SymbolSought.Type, out projectPath, out var projectError))
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, typeName, null, SymbolSought.Type, null, cancellationToken);
+		
+		if(projectError is not null)
 			
 			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
