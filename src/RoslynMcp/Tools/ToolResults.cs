@@ -801,4 +801,15 @@ internal sealed record CodeActionsInfo(
 	string[]?                                                           Assemblies,
 	[property: JsonPropertyName("user_config")]    string               UserConfig,
 	[property: JsonPropertyName("sources")]        ProviderSourceInfo[] Sources
-);
+)
+{
+	/// <summary>
+	///     The project sources left out of <see cref="Sources"/> because they loaded without a problem
+	///     and hold neither a refactoring nor a fix (#448): the helper assemblies of analyzer packages,
+	///     source generators and analyzer-only assemblies, which made up some thirty of forty-two
+	///     entries on a repository with a few analyzer packages. Absent when none was left out.
+	/// </summary>
+	[JsonPropertyName("sources_without_providers")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public int? SourcesWithoutProviders { get; init; }
+}
