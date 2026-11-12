@@ -284,6 +284,9 @@ internal abstract partial class RoslynMcpTool
 				SymbolSought.Type   => FindSymbol(compilation, symbolName, containingType) as INamedTypeSymbol,
 				SymbolSought.Method => FindSymbols(compilation, symbolName, containingType).FirstOrDefault(candidate => candidate is IMethodSymbol),
 				SymbolSought.Member => FindSymbols(compilation, symbolName, containingType).FirstOrDefault(candidate => candidate is not INamedTypeSymbol),
+				
+				// Any and All alike: nothing of the name is in the index here, type or member,
+				// so there is no member for a type-first answer to hide.
 				_                   => FindSymbol(compilation, symbolName, containingType),
 			};
 			
@@ -291,14 +294,20 @@ internal abstract partial class RoslynMcpTool
 				continue;
 			
 			// A symbol of a referenced assembly: no project declares it, and every project that
-			// sees it sees it alike, so the first one stands for all — unless a project before
-			// it declares the name in source, which then is what was asked for.
+			// sees it sees it alike, so the first one stands for all. Asked for by its own name
+			// (IDisposable), that ends the search: a source type of the name would have been in
+			// the index. Asked for inside a containing type, another project may still declare a
+			// type of that name with such a member in source (a constructor, which the index
+			// lists under another name), and that is then what was asked for, whichever project
+			// comes first.
 			if(!symbol.Locations.Any(location => location.IsInSource)) {
 				
-				if(declaring.Count > 0)
-					continue;
+				if(containingType is null && declaring.Count == 0)
+					
+					return [new DeclaringProject(file, symbol)];
 				
-				return [new DeclaringProject(file, symbol)];
+				seeing ??= new DeclaringProject(file, symbol);
+				continue;
 			}
 			
 			if(SymbolEqualityComparer.Default.Equals(symbol.ContainingAssembly, compilation.Assembly))
