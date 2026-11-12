@@ -18,13 +18,17 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 	public object FindOverloads(
 		[Description("Method name to find overloads for, e.g. 'Save', 'ProcessOrder'.")] string methodName,
 		[Description("Containing type that declares the method, e.g. 'UserService' or 'MyApp.Services.UserService'.")] string containingType,
-		[Description(ProjectPathDescription)] string projectPath)
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_find_overloads", methodName, new { containingType });
 		
 		if(!TryStripChatSymbolRef(ref methodName, out var refError) || !TryStripChatSymbolRef(ref containingType, out refError))
 			
 			return scope.Error(refError!);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, methodName, containingType, SymbolSought.Method, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

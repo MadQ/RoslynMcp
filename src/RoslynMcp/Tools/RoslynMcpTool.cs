@@ -1105,32 +1105,19 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	;
 	
 	/// <summary>
-	///     Parameter description for a required <c>string projectPath</c> — tools whose target project cannot
-	///     yet be inferred when the argument is omitted. RMCP009 pins it to that parameter shape.
-	/// </summary>
-	protected const string ProjectPathDescription =
-		"Path to a .csproj, project directory, or source file — absolute or relative (a relative path is resolved against the default workspace root when it exists there, else against the server's working directory). " +
-		"A .sln/.slnx only where the tool covers the whole solution; a tool that works on one project answers a solution with " +
-		"solution_needs_project and lists the .csproj files to choose from. " +
-		"REQUIRED - must be explicitly specified. " +
-		"Supports smart resolution: directory → searches for .csproj; file → walks up to find .csproj. " +
-		"NOTE: a directory or file path that cannot locate a .csproj falls back to AdhocWorkspace (no MSBuild, " +
-		"reduced functionality). Prefer passing the .csproj path directly for full MSBuild support."
-	;
-	
-	/// <summary>
-	///     Parameter description for an optional <c>string? projectPath = null</c>. RMCP009 pins it to that
-	///     parameter shape, so the two descriptions cannot be swapped by accident.
+	///     Parameter description for <c>string? projectPath = null</c>, the one shape a projectPath has
+	///     since #296; RMCP009 pins the parameter to it.
 	/// </summary>
 	protected const string OptionalProjectPathDescription =
 		"Optional — omit to use the session's default workspace (a solution or project set by the server's --root). Otherwise a .csproj, .sln/.slnx, " +
 		"project directory, or source file path (a relative path resolves against the default workspace root when it exists there, else against the server's working directory). For a solution — the default " +
-		"one or one given — a filePath argument selects the project that contains that file."
+		"one or one given — the tool finds the project itself: the one that contains a filePath argument, the one that declares a symbol named " +
+		"by the call (declared in several, the call fails with the candidates and their projects), or every project where the tool covers a whole solution."
 	;
 	
 	/// <summary>
-	///     Hint on the <c>missing_project_path</c> error — raised when a tool that requires <c>projectPath</c>
-	///     receives an empty one, or an optional one is omitted and no default workspace could be derived
+	///     Hint on the <c>missing_project_path</c> error — raised when <c>projectPath</c> is omitted and no
+	///     default workspace could be derived
 	///     (<see cref="NoDefaultWorkspaceException"/>).
 	/// </summary>
 	protected const string MissingProjectPathHint =

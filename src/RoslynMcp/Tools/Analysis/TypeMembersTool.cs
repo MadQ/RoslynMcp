@@ -24,8 +24,8 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		[Description("The type to inspect, as a simple name (e.g. 'WorkspaceManager') or fully-qualified name (e.g. 'RoslynMcp.WorkspaceManager'). Use roslyn_list_types to discover available type names.")]
 		string typeName,
 		
-		[Description(ProjectPathDescription)]
-		string projectPath,
+		[Description(OptionalProjectPathDescription)]
+		string? projectPath = null,
 		
 		[Description("Optional member kind filter: 'field', 'property', 'method', 'event'. Omit to return all kinds. 'enum' filters to enum member fields.")]
 		string? memberKind = null,
@@ -45,6 +45,10 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<object?>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, SymbolSought.Type, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

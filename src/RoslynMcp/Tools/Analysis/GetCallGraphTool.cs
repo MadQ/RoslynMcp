@@ -21,8 +21,8 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		"Pair with roslyn_find_callers to trace the full call chain in both directions.")]
 	public async Task<object> GetCallGraph(
 		[Description("Method name to analyze, e.g. 'GetCompilation', 'ProcessOrder'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple methods share the same name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		[Description("Number of call sites to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of call sites to return. Default: 50, max: 200.")] int take = 50,
@@ -38,6 +38,10 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Member, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);
@@ -45,17 +49,36 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
-		var symbol   = FindSymbol(compilation, symbolName, containingType);
+		
+		// A member before a type of the same name: the calls are in a member's body, and a type
+		// that shares the name (one of a referenced project included) has none to show (#296).
+		var symbol = FindSymbols(compilation, symbolName, containingType).FirstOrDefault(candidate => candidate is not INamedTypeSymbol)
+			?? FindSymbol(compilation, symbolName, containingType)
+		;
 		
 		if(symbol is null)
 			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
+		
+		// Declared, but in no file of this project: a symbol of a referenced project. Its body is
+		// not this compilation's to read, and an empty graph would say that it calls nothing.
+		if(symbol.DeclaringSyntaxReferences.Length > 0 && !symbol.DeclaringSyntaxReferences.Any(reference => compilation.ContainsSyntaxTree(reference.SyntaxTree)))
+			
+			return scope.Error(new ErrorResult(
+				$"'{FormatSymbolName(symbol)}' is declared in another project than the one given.",
+				"Pass the .csproj that declares it as projectPath, or omit projectPath to have the declaring project found."));
 		
 		var allCalls = new List<CallSiteEntry>();
 		
 		foreach(var syntaxRef in symbol.DeclaringSyntaxReferences) {
 			
 			var syntaxNode    = await syntaxRef.GetSyntaxAsync(cancellationToken);
+			
+			// A symbol of a referenced project is declared in a tree this compilation does not
+			// hold, and asking it for that tree's model throws.
+			if(!compilation.ContainsSyntaxTree(syntaxNode.SyntaxTree))
+				continue;
+			
 			var semanticModel = compilation.GetSemanticModel(syntaxNode.SyntaxTree);
 			var operation     = semanticModel.GetOperation(syntaxNode, cancellationToken);
 			

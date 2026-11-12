@@ -24,7 +24,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		"Check your code for compiler errors and warnings — fast, in-process, no build needed. " +
 		"Use this after editing code to verify correctness before committing or continuing work. " +
 		"Returns a structured summary (error count, warning count) plus paginated individual items " +
-		"with code, file, line, and message. A .sln/.slnx projectPath checks every project in the solution " +
+		"with code, file, line, and message. A solution — a .sln/.slnx projectPath, or projectPath omitted with a solution as default workspace — checks every project in it, and each item then names its project " +
 		"(with filePath: the project or projects that compile that file). " +
 		"Pass take: 0 for a lightweight error-count-only check " +
 		"with no items returned. When take: 0, the response includes full counts but items is null — " +
@@ -37,8 +37,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		"For NuGet restore failures, MSBuild target errors, or " +
 		"source generator issues, use roslyn_build_project instead.")]
 	public async Task<object> GetDiagnostics(
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project. A path that names no file in the compilation is an error, never an empty (clean) result.")] string? filePath = null,
 		[Description("Filter by severity: 'errors', 'warnings', 'all' (errors and warnings — the default), 'info' (info and above), or 'hidden' (everything, the IDE analyzers' hidden findings included).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
@@ -62,6 +62,11 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 			
 			// With the counts of the run the page comes from, as a computed page logs them.
 			return scope.Outcome(cached is DiagnosticsResult page ? $"{page.Summary} (cached page)" : "cached page", cached);
+		
+		// Omitted, the path is the default workspace: for a solution, every project of it (#296).
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
@@ -118,6 +123,13 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		var missingReferences = new HashSet<string>(SecurityBoundary.PathComparer);
 		var fileFound   = false;
 		
+		// Each item names its project where the path stands for more than one (#296): the same
+		// file name, and the same error, can sit in several. A diagnostic with a place in a file
+		// is its tree's project's. One without (a missing reference, no entry point) is told by
+		// the compilation it came from, which only the loop below knows.
+		var projectOf = ProjectsByTree(targets);
+		var unlocated = new Dictionary<Diagnostic, string>(ReferenceEqualityComparer.Instance);
+		
 		foreach(var (compilation, project) in targets) {
 			
 			// A project's own directory counts as well as the root: a solution may list a project
@@ -129,6 +141,17 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				=> IsUnderRoot(diagnostic, rootPath)
 					|| (projectDirectory is not null && IsUnderRoot(diagnostic, projectDirectory))
 			;
+			
+			void Keep(IEnumerable<Diagnostic> found)
+			{
+				foreach(var diagnostic in found) {
+					
+					diagnostics.Add(diagnostic);
+					
+					if(projectOf is not null && diagnostic.Location.SourceTree is null && project?.FilePath is { } file)
+						unlocated[diagnostic] = Path.GetFileNameWithoutExtension(file);
+				}
+			}
 			
 			SyntaxTree? tree = null;
 			
@@ -145,10 +168,10 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 					continue;
 				
 				fileFound = true;
-				diagnostics.AddRange(compilation.GetSemanticModel(tree).GetDiagnostics());
+				Keep(compilation.GetSemanticModel(tree).GetDiagnostics());
 			}
 			else
-				diagnostics.AddRange(compilation.GetDiagnostics().Where(Ours));
+				Keep(compilation.GetDiagnostics().Where(Ours));
 			
 			if(includeAnalyzers && project is not null) {
 				
@@ -164,7 +187,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				var ours = analyzerDiags.Where(Ours);
 				
 				// Keep file-scoped queries file-scoped for analyzer output too.
-				diagnostics.AddRange(tree is null ? ours : ours.Where(d => d.Location.SourceTree == tree));
+				Keep(tree is null ? ours : ours.Where(d => d.Location.SourceTree == tree));
 			}
 		}
 		
@@ -182,10 +205,11 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		string? analyzerNote = notes.Count > 0 ? string.Join(" ", notes.Distinct()) : null;
 		
 		// Deduplicate by identity tuple — multi-TFM workspaces can surface the same
-		// diagnostic from duplicate document entries across target frameworks.
+		// diagnostic from duplicate document entries across target frameworks. One with no
+		// place in a file is one per project: the same missing reference in two projects is two.
 		var filtered = diagnostics
 			.Where(GetSeverityFilter(severity))
-			.DistinctBy(d => (d.Severity, d.Id, d.Location.SourceTree?.FilePath, d.Location.GetLineSpan().StartLinePosition.Line, d.Location.GetLineSpan().StartLinePosition.Character, d.GetMessage()))
+			.DistinctBy(d => (d.Severity, d.Id, d.Location.SourceTree?.FilePath, d.Location.GetLineSpan().StartLinePosition.Line, d.Location.GetLineSpan().StartLinePosition.Character, d.GetMessage(), unlocated.GetValueOrDefault(d)))
 			.OrderByDescending(d => d.Severity)
 			.ThenBy(d => d.Location.SourceTree?.FilePath)
 			.ThenBy(d => d.Location.GetLineSpan().StartLinePosition.Line)
@@ -315,7 +339,11 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				}
 		;
 		
-		DiagnosticItem[] items = [..filtered.Select(d => ToItem(d, rootPath))];
+		DiagnosticItem[] items = [..filtered.Select(d => ToItem(d, rootPath) with {
+			Project = d.Location.SourceTree is { } tree
+				? projectOf?.GetValueOrDefault(tree)
+				: unlocated.GetValueOrDefault(d)
+		})];
 		
 		return scope.Outcome(summary, Shape(PaginateAndStore(items, ref skip, take, Shape)));
 	}
@@ -389,6 +417,28 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		var more  = missing.Count > named ? $" and {missing.Count - named} more" : "";
 		
 		return $"{missing.Count} analyzer reference(s) were not found, so their analyzers did not run: {names}{more}. {AnalyzerLoading.MissingReferenceRemedy(missing)}";
+	}
+	
+	/// <summary>
+	///     The name of the project each syntax tree is compiled by, or <see langword="null"/> when the
+	///     targets are one project (its frameworks included), where naming it on every item would
+	///     say nothing. Each project parses its own tree of a file, so a file compiled by several
+	///     projects is told apart here; it is the caller's de-duplication that keeps one of them.
+	/// </summary>
+	static Dictionary<SyntaxTree, string>? ProjectsByTree((Compilation Compilation, Project? Project)[] targets)
+	{
+		if(targets.Select(target => target.Project?.FilePath).OfType<string>().Distinct(SecurityBoundary.PathComparer).Count() < 2)
+			
+			return null;
+		
+		var projects = new Dictionary<SyntaxTree, string>();
+		
+		foreach(var (compilation, project) in targets)
+			if(project?.FilePath is { } file)
+				foreach(var tree in compilation.SyntaxTrees)
+					projects.TryAdd(tree, Path.GetFileNameWithoutExtension(file));
+		
+		return projects;
 	}
 	
 	// Both tools now return project-relative paths via TryMakeRelative on the base class.

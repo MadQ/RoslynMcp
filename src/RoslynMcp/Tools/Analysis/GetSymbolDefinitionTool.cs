@@ -20,7 +20,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		"project source — the definition is not available as source in that case.")]
 	public object GetSymbolDefinition(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
 		using var scope = BeginTool("roslyn_get_symbol_definition", symbolName, new { containingType, projectPath });
@@ -28,6 +28,10 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		if(!TryStripChatSymbolRef(ref symbolName, out var refError) || !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			
 			return scope.Error(refError!);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Any, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

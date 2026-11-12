@@ -29,12 +29,12 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 		"per-file files[] breakdown (state, error, recovery guidance) alongside the file/deletion/rename counts. " +
 		"When the renamed symbol is a type whose file name matches the type name, the old file is also renamed on disk " +
 		"after its content is confirmed written — a case-only rename (e.g. Foo.cs → foo.cs) uses a two-step move. " +
-		"projectPath must resolve to the same workspace the preview was created against; a mismatch fails with a structured error.")]
+		"projectPath may be omitted: the token knows the workspace its preview was made in. When given, it must resolve to that same workspace; a mismatch fails with a structured error.")]
 	public async Task<ApplyRenameResult> ApplyRename(
 		[Description("The confirmation token returned by roslyn_preview_rename. Tokens are single-use — they expire after being applied or rejected.")] string token,
 		[Description("'y' to apply this rename once; 'session' to apply and auto-approve the same symbol for all future renames in this session; 'n' to cancel without writing any files.")] string approval,
-		[Description(ProjectPathDescription)] string projectPath,
-		CancellationToken cancellationToken
+		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null
 	)
 	{
 		using var scope = BeginTool("roslyn_apply_rename", $"{token} ({approval})");
@@ -71,7 +71,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 					"The preview token does not contain an originating workspace. Re-run roslyn_preview_rename.",
 					null, null, "workspace binding missing", null, null));
 			
-			if(CheckApplyWorkspace(operation.WorkspaceBinding, projectPath, "roslyn_preview_rename") is { } refusal)
+			if(!string.IsNullOrWhiteSpace(projectPath) && CheckApplyWorkspace(operation.WorkspaceBinding, projectPath, "roslyn_preview_rename") is { } refusal)
 				return scope.Failed(refusal.Detail, new ApplyRenameResult(refusal.Message, null, null, refusal.Kind, null, null));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;

@@ -18,7 +18,9 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		"distinguish overloads or track aliases. " +
 		"Returns all methods that invoke the named symbol, with fully qualified caller name, file path, " +
 		"and 1-based line number per call site. " +
-		"Without containingType, searches ALL symbols matching the name; provide containingType to narrow to one type. " +
+		"Without containingType, searches ALL symbols matching the name in the project; provide containingType to narrow to one type. " +
+		"With no projectPath, or a solution, the project is the one that declares the name: a name declared in several projects " +
+		"fails with the candidates and their projects, never a union across them. " +
 		"By default returns only direct callers (isDirect=true); set isDirect=false to also include indirect " +
 		"calls via interface dispatch or delegates. " +
 		"Results are paged; pass page_token from a previous response to get subsequent pages. " +
@@ -27,8 +29,8 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		"Pair with roslyn_get_call_graph to also trace what the callee itself depends on.")]
 	public async Task<object> FindCallers(
 		[Description("Symbol name to find callers of, e.g. 'GetCompilation', 'ProcessOrder'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types share a method name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		[Description("When true (default), returns only direct callers. Set false to include indirect calls via interface dispatch or delegates.")] bool isDirect = true,
 		[Description("Number of callers to skip. Default: 0.")] int skip = 0,
@@ -47,6 +49,10 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<CallerEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.All, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

@@ -23,8 +23,8 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		"For just the concrete implementations of an interface, roslyn_find_implementations is more direct.")]
 	public async Task<object> GetTypeHierarchy(
 		[Description("The type to query, as a simple name (e.g. 'WorkspaceManager') or fully-qualified name (e.g. 'RoslynMcp.WorkspaceManager'). Simple names are resolved by scanning the global namespace.")] string typeName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Number of items to skip in the paged interfaces-and-derived list. Default: 0.")] int skip = 0,
 		[Description("Maximum items to return from the paged interfaces-and-derived list. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null)
@@ -38,6 +38,10 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, SymbolSought.Type, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

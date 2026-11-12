@@ -26,7 +26,16 @@ internal sealed record DiagnosticItem(
 	[property: JsonPropertyName("target_frameworks")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string[]? TargetFrameworks = null
-);
+)
+{
+	/// <summary>
+	///     The project the diagnostic was found in, set by <c>roslyn_get_diagnostics</c> when the
+	///     path stands for several projects (a solution, given or the default one; #296).
+	/// </summary>
+	[JsonPropertyName("project")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Project { get; init; }
+}
 
 // ── Analysis tools ──────────────────────────────────────────────────────────
 
@@ -58,7 +67,13 @@ internal sealed record UnusedSymbolEntry(
 	[property: JsonPropertyName("reason")]        string Reason,
 	[property: JsonPropertyName("file")]          string File,
 	[property: JsonPropertyName("line")]          int    Line
-);
+)
+{
+	/// <summary>The project that declares the symbol, set when the call covers several projects (#296).</summary>
+	[JsonPropertyName("project")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Project { get; init; }
+}
 
 internal sealed record FindUnusedResult(
 	[property: JsonPropertyName("total_unused")] int                 TotalUnused,
@@ -389,6 +404,18 @@ internal sealed record GetUsingsResult(
 	[property: JsonPropertyName("file")]          string                        File,
 	[property: JsonPropertyName("usings")]        GetUsingsTool.UsingDirective[] Usings,
 	[property: JsonPropertyName("global_usings")] string[]                       GlobalUsings
+) : ToolResult;
+
+/// <summary>
+///     What <c>roslyn_get_project_info</c> returns for a solution, given or the default one (#296):
+///     the solution and every project of it, each in the shape a single project is returned in.
+/// </summary>
+internal sealed record SolutionInfoResult(
+	[property: JsonPropertyName("solution")]      string              Solution,
+	[property: JsonPropertyName("projects")]      ProjectInfoResult[] Projects,
+	[property: JsonPropertyName("load_warnings")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string[]? LoadWarnings
 ) : ToolResult;
 
 internal sealed record ProjectInfoResult(

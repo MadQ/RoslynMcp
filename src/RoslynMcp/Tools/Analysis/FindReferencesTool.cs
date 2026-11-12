@@ -16,7 +16,9 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		"Finds all usages (call sites, type references, field accesses) of a named symbol across the project — " +
 		"use this instead of grep for symbol searches; text search cannot resolve overloads, aliases, or cross-file semantics. " +
 		"Essential before renaming or refactoring to understand full impact. " +
-		"Without containingType, searches ALL symbols matching the name and returns the union of their references, " +
+		"With no projectPath, or a solution, the project is the one that declares the name: a name declared in several projects " +
+		"fails with the candidates and their projects, never a union across them. " +
+		"Without containingType, searches ALL symbols matching the name in the project and returns the union of their references, " +
 		"ensuring no call sites are missed when multiple types share a member name. " +
 		"Provide containingType to search only the symbol declared on that specific type. " +
 		"Returns references as project-relative file:line strings (e.g. 'src/Foo.cs:42'). " +
@@ -26,8 +28,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		"Results are paged; use skip/take for large result sets.")]
 	public async Task<object> FindReferences(
 		[Description("The symbol name to find, e.g. 'WindowKey', 'RestoreFromPlacements', 'trackedWindows'.")] string symbolName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional type name to disambiguate when multiple types have a member with the same name, e.g. 'WindowTracker'. Without this, all symbols matching symbolName are searched and their references are combined.")] string? containingType = null,
 		[Description("Number of references to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of references to return. Default: 50, max: 200.")] int take = 50,
@@ -45,6 +47,10 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
+		
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.All, filePath, out projectPath, out var projectError))
+			
+			return scope.Error(projectError);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

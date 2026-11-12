@@ -36,9 +36,9 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 	public async Task<object> PreviewRename(
 		[Description("Current symbol name to rename, e.g. 'WindowKey'. Use roslyn_get_type_members or roslyn_find_references to verify the exact name before renaming.")] string symbolName,
 		[Description("New name for the symbol, e.g. 'WindowIdentity'. Must be a valid C# identifier.")] string newName,
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
 		McpServer server,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to narrow the search when multiple symbols share the same name, e.g. 'WindowTracker'.")] string? containingType = null,
 		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
 		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
@@ -51,6 +51,14 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		   !TryStripChatSymbolRefOptional(ref containingType, out refError))
 			
 			return scope.Error(refError!);
+		
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.All, filePath, server, cancellationToken);
+		
+		if(projectError is not null)
+			
+			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		// Use TryGetProject so symbol and solution both derive from the same workspace
 		// snapshot — Renamer.RenameSymbolAsync requires the symbol to belong to the

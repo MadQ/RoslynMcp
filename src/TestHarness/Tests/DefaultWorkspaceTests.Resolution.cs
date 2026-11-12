@@ -12,15 +12,18 @@ static partial class DefaultWorkspaceTests
 		
 		return new List<TestCase> {
 			
-			// Only tools whose projectPath is optional may use the default. A tool that still requires it
-			// must reject "" even when a default exists — otherwise it would silently search the default
-			// solution's first project (App here), not fail as the schema promises.
-			new("DefaultWorkspace: a required projectPath still rejects the empty string", async () => {
+			// No tool requires projectPath since #296, so an empty one is an omitted one. With a default
+			// workspace the call finds its project: Greet is declared in Lib, the solution's second
+			// project, which a search of the first one (App) would miss. Without a default it is
+			// missing_project_path, never a search of whatever happens to be loaded.
+			new("DefaultWorkspace: an empty projectPath is an omitted one", async () => {
 				
-				var (ok, data) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", projectPath = "" });
+				var (ok, data)       = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Greet", projectPath = "" });
+				var (bareOk, onBare) = await Call(bareCtx,   "roslyn_get_member_body", new { symbolName = "Greet", projectPath = "" });
 				
-				return Verdict(ok && data?["error"]?.GetValue<string>() == "missing_project_path",
-					$"expected missing_project_path, got {data?.ToJsonString() ?? "null"}");
+				return Verdict(ok && (data?["file"]?.GetValue<string>() ?? "").Contains("Greeter.cs")
+					&& bareOk && onBare?["error"]?.GetValue<string>() == "missing_project_path",
+					$"expected Greet from Lib/Greeter.cs, and missing_project_path without a default; got {data?.ToJsonString() ?? "null"} / {onBare?.ToJsonString() ?? "null"}");
 			}),
 			
 			// A root with nothing to load: the structured error must name the fix.

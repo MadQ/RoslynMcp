@@ -61,6 +61,16 @@ static partial class DefaultWorkspaceTests
 		fx.Write("App/Consumer.cs", "namespace App;\n\npublic class Consumer\n{\n\tpublic string Use() => new Lib.Greeter().Greet();\n}\n");
 		fx.Write("Notes.md", "# notes\n");
 		
+		// #296: a type declared under one name in both projects, for the candidate list; a member of
+		// Lib renamed with no projectPath on either call; and a symbol of Lib nothing refers to.
+		fx.Write("App/TwiceDeclared.cs", "namespace App;\n\npublic class TwiceDeclared\n{\n\tpublic int Mark() => 1;\n}\n");
+		fx.Write("Lib/TwiceDeclared.cs", "namespace Lib;\n\npublic class TwiceDeclared\n{\n\tpublic int Mark() => 2;\n}\n");
+		fx.Write("Lib/NoProjectRename.cs", "namespace Lib;\n\npublic class NoProjectRename\n{\n\tpublic int OldName(int a) => a;\n}\n");
+		fx.Write("Lib/Unreferenced.cs", "namespace Lib;\n\ninternal class Unreferenced { }\n");
+		// #296 review: one name for a type in Lib and for a method in App.
+		fx.Write("Lib/Shadowed.cs", "namespace Lib;\n\npublic class Shadowed { }\n");
+		fx.Write("App/ShadowUser.cs", "namespace App;\n\npublic class ShadowUser\n{\n\tpublic int Shadowed() => ShadowHelper();\n\n\tint ShadowHelper() => 1;\n}\n");
+		
 		// #376: a warning (CS0168) in Lib, the solution's second project, for the solution-wide
 		// diagnostics test; and a project under the solution's directory that the solution does not
 		// list, so that a .csproj loads the solution and still names none of its projects.
@@ -324,7 +334,7 @@ static partial class DefaultWorkspaceTests
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
-		List<TestCase> tests = [.. FileTests(f), .. SolutionTests(f), .. ApplyTests(f), .. DefaultTests(f), .. FollowupTests(f)];
+		List<TestCase> tests = [.. FileTests(f), .. SolutionTests(f), .. ApplyTests(f), .. DefaultTests(f), .. FollowupTests(f), .. SymbolProjectTests(f)];
 		
 		return new TestGroup($"DefaultWorkspace ({tests.Count} tests)", tests, Teardown: async () => {
 			

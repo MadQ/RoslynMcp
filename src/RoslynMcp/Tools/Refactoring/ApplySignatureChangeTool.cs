@@ -28,12 +28,12 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 		"On success, writes all changed files to disk — including the new overload and any updated call sites — via a " +
 		"crash-safe, TOCTOU-guarded physical apply, and reports a per-file files[] breakdown (state, error, recovery " +
 		"guidance) alongside the file count. " +
-		"projectPath must resolve to the same workspace the preview was created against; a mismatch fails with a structured error.")]
+		"projectPath may be omitted: the token knows the workspace its preview was made in. When given, it must resolve to that same workspace; a mismatch fails with a structured error.")]
 	public async Task<ApplySignatureChangeResult> ApplySignatureChange(
 		[Description("The confirmation token returned by roslyn_change_signature. Tokens are single-use — they expire after being applied or rejected.")] string token,
 		[Description("'y' to apply this signature change once; 'session' to apply and auto-approve the same method for all future changes in this session; 'n' to cancel without writing any files.")] string approval,
-		[Description(ProjectPathDescription)] string projectPath,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_apply_signature_change", $"{token} ({approval})");
 		
@@ -69,7 +69,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 					"The preview token does not contain an originating workspace. Re-run roslyn_change_signature.",
 					null, "workspace binding missing", null));
 			
-			if(CheckApplyWorkspace(operation.WorkspaceBinding, projectPath, "roslyn_change_signature") is { } refusal)
+			if(!string.IsNullOrWhiteSpace(projectPath) && CheckApplyWorkspace(operation.WorkspaceBinding, projectPath, "roslyn_change_signature") is { } refusal)
 				return scope.Failed(refusal.Detail, new ApplySignatureChangeResult(refusal.Message, null, refusal.Kind, null));
 			
 			var boundProjectPath = operation.WorkspaceBinding.CanonicalPath;

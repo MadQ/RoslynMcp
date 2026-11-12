@@ -18,10 +18,11 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 		"Finds private, internal, and effectively internal source symbols with zero direct static references across the loaded solution. " +
 		"Checks types, methods, constructors, fields, properties, and events. " +
 		"Conservatively skips generated symbols, attributed symbols, members of attributed or generated types, partial methods, protected members, interface implementations, and inheritance-dispatched members. " +
-		"Results are paged and include declaration locations, confidence, and a reason. Dynamic or reflection-based usage cannot be detected.")]
+		"Results are paged and include declaration locations, confidence, and a reason. Dynamic or reflection-based usage cannot be detected. " +
+		"For a solution (projectPath omitted with a solution as default workspace, or a .sln/.slnx given) the symbols of every project are checked, and each result names its project.")]
 	public async Task<object> FindUnused(
-		[Description(ProjectPathDescription)] string projectPath,
 		CancellationToken cancellationToken,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Number of unused symbols to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum number of unused symbols to return. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null)
@@ -32,9 +33,17 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+		if(!TryResolveProjectArg(projectPath, out projectPath, out var projectError))
 			
-			return scope.Error(error!);
+			return scope.Error(projectError);
+		
+		// Every project the path stands for (#296): the symbols of each are candidates, and each
+		// is looked for across the whole solution, as before.
+		var (targets, targetError) = await GetTargetsAsync(projectPath, forFile: false, cancellationToken);
+		
+		if(targetError is not null)
+			
+			return scope.Error(targetError);
 		
 		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
 			
@@ -43,13 +52,52 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
+		
+		var several = targets.Select(target => target.Project?.FilePath).OfType<string>().Distinct(SecurityBoundary.PathComparer).Count() > 1;
+		var unused  = new List<UnusedCandidate>();
+		
+		// One framework of a multi-targeted project, the first, as before this covered several
+		// projects: each candidate is a reference search across the solution, and the same symbol
+		// under another framework would only be searched again to be dropped below.
+		var searched = new HashSet<string>(SecurityBoundary.PathComparer);
+		
+		foreach(var (compilation, project) in targets)
+			if(project?.FilePath is not { } projectFile || searched.Add(projectFile))
+				await CollectUnusedAsync(compilation, several && project?.FilePath is { } file ? Path.GetFileNameWithoutExtension(file) : null, solution, rootPath, unused, cancellationToken);
+		
+		var unusedSymbols = unused
+			.Select(u => u.Symbol)
+			.ToHashSet(SymbolEqualityComparer.Default)
+		;
+		
+		// By declaration: the frameworks of a multi-targeted project report the same symbol.
+		var allResults = unused
+			.Where(u => !HasUnusedContainingType(u.Symbol, unusedSymbols))
+			.Select(u => u.Entry)
+			.DistinctBy(e => (e.File, e.Line, e.Name))
+			.OrderBy(e => e.File, StringComparer.Ordinal)
+			.ThenBy(e => e.Line)
+			.ThenBy(e => e.Name, StringComparer.Ordinal)
+			.ToArray()
+		;
+		
+		var shape  = PageShape(BuildCaution(projectPath));
+		var result = PaginateAndStore(allResults, ref skip, take, shape);
+		
+		return scope.Outcome($"{result.Items.Length}/{result.Total} unused symbol(s)", shape(result));
+	}
+	
+	/// <summary>
+	///     Adds the unused symbols of one compilation. <paramref name="projectName"/> is set where
+	///     the call covers several projects, and goes on each entry.
+	/// </summary>
+	static async Task CollectUnusedAsync(Compilation compilation, string? projectName, Solution solution, string rootPath, List<UnusedCandidate> unused, CancellationToken cancellationToken)
+	{
 		var hasFriendAssemblies = HasFriendAssemblies(compilation.Assembly);
 		var candidates          = new List<ISymbol>();
 		var seen                = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
 		
 		CollectCandidates(compilation.Assembly.GlobalNamespace, candidates, seen);
-		
-		var unused = new List<UnusedCandidate>();
 		
 		foreach(var symbol in candidates) {
 			
@@ -73,27 +121,10 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 				Confidence:    GetConfidence(symbol),
 				Reason:        GetReason(symbol, hasFriendAssemblies),
 				File:          file,
-				Line:          span.StartLinePosition.Line + 1)));
+				Line:          span.StartLinePosition.Line + 1) {
+					Project = projectName
+				}));
 		}
-		
-		var unusedSymbols = unused
-			.Select(u => u.Symbol)
-			.ToHashSet(SymbolEqualityComparer.Default)
-		;
-		
-		var allResults = unused
-			.Where(u => !HasUnusedContainingType(u.Symbol, unusedSymbols))
-			.Select(u => u.Entry)
-			.OrderBy(e => e.File, StringComparer.Ordinal)
-			.ThenBy(e => e.Line)
-			.ThenBy(e => e.Name, StringComparer.Ordinal)
-			.ToArray()
-		;
-		
-		var shape  = PageShape(BuildCaution(projectPath));
-		var result = PaginateAndStore(allResults, ref skip, take, shape);
-		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} unused symbol(s)", shape(result));
 	}
 	
 	// Builds every page of one query, first and cached alike. A static factory taking plain values, so

@@ -23,12 +23,15 @@ internal sealed class CheckSyntaxTool : RoslynMcpTool
 		"or when it contains using directives or namespace declarations (which are invalid inside a class body). " +
 		"By default (includeSemantics: false), only syntax is checked — fast, no workspace loaded. " +
 		"Set includeSemantics: true to use the full project compilation so the snippet is checked against " +
-		"project-defined types, global usings, and all referenced assemblies.")]
+		"project-defined types, global usings, and all referenced assemblies. That needs one project: where the default " +
+		"workspace is a solution, pass projectPath (a .csproj) or filePath, a source file of the project the snippet " +
+		"belongs to; otherwise the answer is solution_needs_project with the projects to choose from.")]
 	public object CheckSyntax(
 		[Description("The C# code snippet to validate.")] string code,
-		[Description(ProjectPathDescription)] string projectPath,
 		[Description("When true (default), wraps the snippet in a dummy class so member declarations and method bodies are valid inputs. Set to false when the snippet is a complete class, namespace, or compilation unit, or when it contains using directives or namespace declarations (which are invalid inside a class body).")] bool wrapInClass = true,
-		[Description("When false (default), only syntax is checked — fast, no workspace loaded. When true, the full project compilation is used so the snippet is validated against project-defined types, global usings, and referenced assemblies.")] bool includeSemantics = false)
+		[Description("When false (default), only syntax is checked — fast, no workspace loaded. When true, the full project compilation is used so the snippet is validated against project-defined types, global usings, and referenced assemblies.")] bool includeSemantics = false,
+		[Description(OptionalProjectPathDescription)] string? projectPath = null,
+		[Description("With includeSemantics: a source file of the project the snippet belongs to, e.g. 'Core/Foo.cs'. Names the project when projectPath is omitted or is a solution.")] string? filePath = null)
 	{
 		using var scope = BeginTool("roslyn_check_syntax", null, new { wrapInClass, includeSemantics });
 		
@@ -42,6 +45,14 @@ internal sealed class CheckSyntaxTool : RoslynMcpTool
 		Diagnostic[] diagnostics;
 		
 		if(includeSemantics) {
+			
+			// A snippet names no symbol, so nothing but a file says which project of a solution it
+			// is to be checked against. With neither a project nor a file, a default workspace that
+			// is one project is that project, and a solution is answered by the guard below:
+			// solution_needs_project, with the projects to choose from and filePath as the way out.
+			if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+				
+				return scope.Error(projectError);
 			
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
 				
