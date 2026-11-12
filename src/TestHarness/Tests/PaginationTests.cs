@@ -288,8 +288,8 @@ static class PaginationTests
 			new("pagination: roslyn_get_diagnostics pages from one analyzer run, and its token keeps the page size",
 				async () => {
 					
-					static int CacheHits(string[] log)
-						=> log.Count(line => line.Contains("\"get_diagnostics\"", StringComparison.Ordinal) && line.Contains("\"HIT\"", StringComparison.Ordinal));
+					static int Tagged(string[] log, string tag)
+						=> log.Count(line => line.Contains("\"get_diagnostics\"", StringComparison.Ordinal) && line.Contains($"\"{tag}\"", StringComparison.Ordinal));
 					
 					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var before, out var logFailure))
 						
@@ -319,14 +319,69 @@ static class PaginationTests
 						
 						return (false, logFailure);
 					
-					var hits = CacheHits(after) - CacheHits(before);
+					// One run and two slices of it: the first call is the only one that computed.
+					var hits   = Tagged(after, "HIT") - Tagged(before, "HIT");
+					var misses = Tagged(after, "MISS") - Tagged(before, "MISS");
 					
 					return Verdict(
 						total == 7
 							&& sizes.SequenceEqual([3, 3, 1])
 							&& seen.Distinct().Count() == 7
-							&& hits == 2,
-						$"total {total}, expected 7; page sizes [{string.Join(", ", sizes)}], expected [3, 3, 1]; distinct findings {seen.Distinct().Count()} of {seen.Count}; pages served from the cache: {hits}, expected 2");
+							&& hits == 2
+							&& misses == 1,
+						$"total {total}, expected 7; page sizes [{string.Join(", ", sizes)}], expected [3, 3, 1]; distinct findings {seen.Distinct().Count()} of {seen.Count}; pages served from the cache: {hits}, expected 2; calls that computed: {misses}, expected 1");
+				}),
+			
+			// A page kept from an earlier call must not outlive a change to the code (#435). Only
+			// the server's own writes clear the cache, and a save in an editor, by the client's
+			// own edit tool or by git reaches the workspace through the watcher, which cleared
+			// nothing: the next page came from the run before the change, with its counts and
+			// line numbers, for as long as paging went on. For diagnostics that is a verdict on
+			// code that is no longer there. The first page is taken, one of the seven unused
+			// locals is deleted on disk behind the server's back, and once the workspace serves
+			// the new text the token must give a page of the new result: six warnings in all,
+			// the three after the first three, and no further page.
+			new("pagination: a page token does not serve a result from before a change made outside the server",
+				async () => {
+					
+					var query = new { projectPath = diagnosed.Csproj, includeAnalyzers = true, severity = "warnings" };
+					var first = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, take = 3 });
+					
+					if(first?["total"]?.GetValue<int>() != 7 || Token(first) is not { } token)
+						
+						return (false, $"FAIL  (the first page: {first?.ToJsonString() ?? "no answer"})");
+					
+					var path = diagnosed.PathOf("Warned.cs");
+					
+					File.WriteAllText(path, File.ReadAllText(path).Replace("\t\tint unused7;\n", string.Empty));
+					
+					var deadline = DateTime.UtcNow.AddSeconds(15);
+					var synced   = false;
+					
+					while(DateTime.UtcNow < deadline && !synced) {
+						
+						await Task.Delay(250);
+						
+						await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call", @params = new { name = "roslyn_read_file", arguments = new { filePath = "Warned.cs", projectPath = diagnosed.Csproj } } });
+						
+						var blocks = (await ctx.ReceiveAsync())?["result"]?["content"]?.AsArray();
+						
+						synced = blocks is { Count: > 1 }
+							&& blocks[0]?["text"]?.GetValue<string>().Contains("\"roslyn\"") == true
+							&& blocks[1]?["text"]?.GetValue<string>().Contains("unused7") == false;
+					}
+					
+					if(!synced)
+						
+						return (false, "FAIL  (Warned.cs was changed on disk fifteen seconds ago and the workspace still serves the old text)");
+					
+					var second = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, page_token = token });
+					
+					return Verdict(
+						second?["total"]?.GetValue<int>() == 6
+							&& second["items"]?.AsArray().Count == 3
+							&& !HasMore(second),
+						$"the page after the change: total {second?["total"]}, expected 6; items {second?["items"]?.AsArray().Count}, expected 3; has_more {HasMore(second)}, expected false");
 				}),
 		};
 		

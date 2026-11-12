@@ -54,10 +54,14 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		// used to be a bare position, and every page computed the whole result again to skip
 		// into it: the compilation's diagnostics from its cache, but every analyzer anew, which on
 		// a solution with analyzer packages took over twenty seconds a page. A count-only call
-		// has no page to serve.
-		if(take != 0 && scope.TryServeCachedPage<DiagnosticItem>(page_token, ref skip, ref take, 50, 200, out var cached))
+		// has no page to serve; a negative take asks for no items either. Any other take is
+		// brought into 1..200 here, and not again below.
+		var countOnly = take <= 0;
+		
+		if(!countOnly && scope.TryServeCachedPage<DiagnosticItem>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
-			return scope.Outcome("cached page", cached);
+			// With the counts of the run the page comes from, as a computed page logs them.
+			return scope.Outcome(cached is DiagnosticsResult page ? $"{page.Summary} (cached page)" : "cached page", cached);
 		
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
@@ -199,8 +203,6 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 			? "0 errors, 0 warnings"
 			: $"{errorCount} error(s), {warningCount} warning(s)"
 		;
-		
-		take = Math.Clamp(take, 0, 200);
 
 		// Detect transient workspace-load noise: flood of type-resolution failures across many files.
 		// Full-project queries only — a file-scoped query hitting the same pattern is plausibly real
@@ -272,7 +274,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		
 		// take: 0 fast path — return counts only. items is null (not []) to distinguish
 		// "not requested" from "requested but empty".
-		if(take is 0)
+		if(countOnly)
 			return scope.Outcome(summary, new DiagnosticsResult(
 				summary,
 				"roslyn",
@@ -291,7 +293,11 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		
 		// The whole result, in the shape it is returned in, so that a later page costs a slice of
 		// it. Every page of the query carries the counts, the hint and the load findings of this
-		// run: they are about the result as a whole, not about the page.
+		// run: they are about the result as a whole, not about the page. At severity 'hidden'
+		// with analyzers on a solution this is the largest set any tool keeps, some tens of
+		// thousands of small records; the cache holds fifty sets at most and lets one go a
+		// minute after its last page was asked for. The shape below keeps strings and counts,
+		// never a compilation.
 		object Shape(PaginatedResult<DiagnosticItem> page)
 			=> new DiagnosticsResult(
 				summary,
