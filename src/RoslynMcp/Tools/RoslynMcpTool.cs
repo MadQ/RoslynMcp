@@ -46,6 +46,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		// A scope disposed by an exception, whose entry waits for the filter to name the exception.
 		internal ToolScope? Unfinished;
+		
+		// When the filter was entered, for the wait before the tool method ran (#449): the time
+		// the SDK took to bind the arguments, resolve the tool and get it a thread. A tool's own
+		// clock starts in BeginTool and cannot see it.
+		internal readonly long Arrived = Stopwatch.GetTimestamp();
 	}
 	
 	/// <summary>
@@ -204,6 +209,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		};
 	}
 	
+	// A wait before the tool method ran that is worth a note in its log entry.
+	const int WaitWorthLoggingMs = 250;
+	
 	/// <summary>
 	///     Starts a timed tool scope. Dispose the returned handle to log the outcome.
 	///     Usage: <c>using var scope = BeginTool("roslyn_foo", subject);</c>
@@ -217,8 +225,17 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		var scope  = new ToolScope(name, subject, logger, () => activeScope.Value = null, paginationCache);
 		activeScope.Value = scope;
 		
-		if(callFrame.Value is { } frame)
+		if(callFrame.Value is { } frame) {
+			
 			frame.Started = true;
+			
+			// Said only when it is long enough to matter: an entry otherwise shows a call that
+			// took 267 ms where the client waited seventy seconds for it (#445).
+			var waited = (long) Stopwatch.GetElapsedTime(frame.Arrived).TotalMilliseconds;
+			
+			if(waited >= WaitWorthLoggingMs)
+				scope.Record($"waited {waited} ms before the tool ran ({ThreadPoolProbe.Describe()})");
+		}
 		
 		return scope;
 	}
@@ -526,6 +543,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	private (WorkspaceChangeCounter Changes, long At, bool ReadsCode) ViewOf(string op, string projectPath, bool readsCode)
 	{
+		// Every guard passes here with the path it resolves, the one the server picked included.
+		activeScope.Value?.NoteProject(projectPath);
+		
 		var changes = ResolveWithRetry(op, () => workspace.GetChangeCounter(projectPath, readsCode));
 		
 		return (changes, changes.Value, readsCode);

@@ -28,9 +28,10 @@ internal sealed class CodeActionHost
 	// internal). The LSP host skips those too: the apply path writes documents and nothing else.
 	const string RequiresNonDocumentChangeTag = "RequiresNonDocumentChange";
 	
-	// Built-ins the server never runs, by the stem of their type name (see IsDenied): the server has
+	// Built-ins the server never offers, by the stem of their type name (see IsDenied): the server has
 	// its own signature change; rename tracking is an editor feature; the rest open a dialog, so every
-	// action of theirs would be filtered out anyway, and not running them saves the work.
+	// action of theirs would be filtered out anyway. They are run for one thing only: the list tool's
+	// log note on which of them would have had an action (DeniedWithActionsAsync, #449).
 	static readonly ImmutableHashSet<string> builtInDeny = ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase,
 		"ChangeSignature", "RenameTracking", "ExtractInterface", "ExtractClass", "PullMemberUp", "MoveStaticMembers", "MoveToNamespace");
 	
@@ -194,6 +195,58 @@ internal sealed class CodeActionHost
 			: string.CompareOrdinal(left.Title, right.Title));
 		
 		return new RefactoringQuery(providers.Settings, actions.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable());
+	}
+	
+	/// <summary>
+	///     Which of Roslyn's own providers on the server's deny-list would have had an action at the
+	///     span, by type-name stem (ExtractInterface). For the log only, never for an answer: it is how
+	///     the demand for the dialog-driven refactorings becomes visible (#443, #449). They are asked
+	///     only whether they register anything: nothing they register is kept, flattened or offered.
+	///     One that throws has nothing to say, which is no failure of the call. A provider the user's
+	///     configuration denies is not run at all.
+	///     <para>
+	///         A query of its own, and not part of <see cref="GetRefactoringsAsync"/>: the preview asks
+	///         for the same list and would pay for an answer nobody reads.
+	///     </para>
+	/// </summary>
+	public async Task<ImmutableArray<string>> DeniedWithActionsAsync(Document document, TextSpan span, CancellationToken cancellationToken)
+	{
+		var settings = CodeActionSettings.Resolve(document.Project.FilePath ?? document.FilePath ?? string.Empty, logger);
+		
+		if(!settings.Enabled || !settings.BuiltIn)
+			
+			return [];
+		
+		var userDeny    = ImmutableHashSet.CreateRange(StringComparer.OrdinalIgnoreCase, settings.Deny);
+		var withActions = ImmutableArray.CreateBuilder<string>();
+		
+		foreach(var entry in builtIn.Value.Refactorings) {
+			
+			if(!entry.AppliesTo(document) || !IsDenied(entry, builtInDeny) || IsDenied(entry, userDeny))
+				continue;
+			
+			
+			cancellationToken.ThrowIfCancellationRequested();
+			
+			var registered = 0;
+			var context    = new CodeRefactoringContext(document, span, _ => Interlocked.Increment(ref registered), cancellationToken);
+			
+			try {
+				
+				await (entry.Provider.ComputeRefactoringsAsync(context) ?? Task.CompletedTask).ConfigureAwait(false);
+			}
+			catch(OperationCanceledException) when(cancellationToken.IsCancellationRequested) {
+				throw;
+			}
+			catch(Exception) {
+				continue;
+			}
+			
+			if(Volatile.Read(ref registered) > 0)
+				withActions.Add(Stem(entry.Name[(entry.Name.LastIndexOf('.') + 1)..]));
+		}
+		
+		return withActions.ToImmutable();
 	}
 	
 	/// <summary>
