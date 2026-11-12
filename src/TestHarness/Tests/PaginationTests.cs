@@ -398,25 +398,26 @@ static class PaginationTests
 					var query = new { projectPath = diagnosed.Csproj, includeAnalyzers = true, severity = "warnings" };
 					var first = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, take = 3 });
 					
-					if(first?["total"]?.GetValue<int>() != 6 || Token(first) is not { } token)
+					// Whatever the tests before this one left: the file adds one warning to it.
+					if(first?["total"]?.GetValue<int>() is not { } before || Token(first) is not { } token)
 						
 						return (false, $"FAIL  (the first page: {first?.ToJsonString() ?? "no answer"})");
 					
 					File.WriteAllText(diagnosed.PathOf("Added.cs"), "class Added\n{\n\tvoid Run()\n\t{\n\t\tint unusedAdded;\n\t}\n}\n");
 					
 					var deadline = DateTime.UtcNow.AddSeconds(30);
-					var total    = 6;
+					var total    = before;
 					
-					while(DateTime.UtcNow < deadline && total == 6) {
+					while(DateTime.UtcNow < deadline && total == before) {
 						
 						await Task.Delay(250);
 						
 						var page = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, page_token = token });
 						
-						total = page?["total"]?.GetValue<int>() ?? -1;
+						total = page?["total"]?.GetValue<int>() ?? before;
 					}
 					
-					return Verdict(total == 7, $"the page after the file was added: total {total}, expected 7 (6 is the result from before it)");
+					return Verdict(total == before + 1, $"the page after the file was added: total {total}, expected {before + 1} ({before} is the result from before it)");
 				}),
 		};
 		

@@ -20,4 +20,15 @@ internal sealed class WorkspaceChangeCounter
 	public long Value => Interlocked.Read(ref count);
 	
 	public void Increment() => Interlocked.Increment(ref count);
+	
+	/// <summary>
+	///     Set when the workspace is disposed. Nothing computed from it is current after that,
+	///     whatever the count: a call that got hold of the workspace just before would otherwise
+	///     read a count that never moves again.
+	/// </summary>
+	public bool Retired => Volatile.Read(ref retired);
+	
+	bool retired;
+	
+	public void Retire() => Volatile.Write(ref retired, true);
 }

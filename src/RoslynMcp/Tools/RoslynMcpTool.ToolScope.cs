@@ -91,7 +91,7 @@ internal abstract partial class RoslynMcpTool
 				
 				var at = usedWorkspaceAt;
 				
-				return () => changes.Value == at;
+				return () => changes.Value == at && !changes.Retired;
 			}
 		}
 		

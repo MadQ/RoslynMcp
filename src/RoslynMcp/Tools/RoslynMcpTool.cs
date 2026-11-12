@@ -509,12 +509,6 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	private const int MaxResolveRetryDelayMs   = 1_000;
 	
 	/// <summary>
-	///     Invokes a workspace resolution/read operation, transparently waiting out a transient mid-reload
-	///     fault: on a retryable exception it backs off and retries up to <see cref="WorkspaceResolveAttempts"/>
-	///     times, then rethrows the last fault so the caller's existing catch/mapping produces the structured
-	///     error. Deterministic path-resolution failures rethrow immediately. Read-only — never wrap a write.
-	/// </summary>
-	/// <summary>
 	///     The change counter of the workspace a guard is about to read, and its count at this
 	///     moment, taken before the guard fetches anything (#435). In that order a change that lands
 	///     while the guard is at work, or just after it, is one the count does not have yet, so a
@@ -537,7 +531,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		return (changes, changes.Value, readsCode);
 	}
 	
-
+	/// <summary>
+	///     Invokes a workspace resolution/read operation, transparently waiting out a transient mid-reload
+	///     fault: on a retryable exception it backs off and retries up to <see cref="WorkspaceResolveAttempts"/>
+	///     times, then rethrows the last fault so the caller's existing catch/mapping produces the structured
+	///     error. Deterministic path-resolution failures rethrow immediately. Read-only — never wrap a write.
+	/// </summary>
 	private T ResolveWithRetry<T>(string op, Func<T> resolve)
 	{
 		for(var attempt = 0; ; attempt++) {
