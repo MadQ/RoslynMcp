@@ -18,7 +18,9 @@ internal sealed class InfoTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_info", Title = "Server Info", ReadOnly = true, OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Returns server metadata: version, build hash, process ID, uptime, and MSBuild discovery method, plus the code-action " +
+		"Returns server metadata: version, build hash, process ID, uptime, and MSBuild discovery method; the default workspace " +
+		"(default_workspace: the solution or project an omitted projectPath stands for, or why there is none, and which setting " +
+		"chose its root); and the code-action " +
 		"provider sources loaded so far (built-in, bundled, the projects' analyzer references, configured entries) with what " +
 		"each yielded and any load problems — the place to look when a configured refactoring or fix provider does not show up. " +
 		"Use to confirm which server instance is running, verify the version, or diagnose server state. " +
@@ -45,6 +47,6 @@ internal sealed class InfoTool : RoslynMcpTool
 			UserConfig.FilePath,
 			[..codeActionHost.Reports.Select(ProviderSourceInfo.From)]);
 		
-		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker, codeActions));
+		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker, codeActions, workspace.DescribeDefaultWorkspace()));
 	}
 }

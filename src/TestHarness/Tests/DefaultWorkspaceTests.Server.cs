@@ -24,12 +24,21 @@ static partial class DefaultWorkspaceTests
 	///     The same, with <paramref name="environment"/> set for the server as well — for a test that needs a
 	///     setting the harness's own server must not have (a short load timeout, say).
 	/// </summary>
-	internal static async Task<(Process process, TestContext? server)> StartServerLoggingToAsync(TestContext ctx, string root, string logPath, IReadOnlyDictionary<string, string> environment)
+	internal static Task<(Process process, TestContext? server)> StartServerLoggingToAsync(TestContext ctx, string root, string logPath, IReadOnlyDictionary<string, string> environment)
+		=> StartServerWithArgsAsync(ctx, root, logPath, environment, $"--root \"{root}\"")
+	;
+	
+	/// <summary>
+	///     The same, with the server's own command line given whole — for a test of how the arguments
+	///     are read, which the <c>--root</c> every other server gets would hide. <paramref name="root"/>
+	///     is only what the returned context reports as its root.
+	/// </summary>
+	internal static async Task<(Process process, TestContext? server)> StartServerWithArgsAsync(TestContext ctx, string root, string logPath, IReadOnlyDictionary<string, string> environment, string serverArgs)
 	{
 		var psi = new ProcessStartInfo("dotnet")
 		{
 			
-			Arguments              = $"run --no-build --no-launch-profile --project \"{ctx.ServerProj}\" -f net10.0 -- --root \"{root}\"",
+			Arguments              = $"run --no-build --no-launch-profile --project \"{ctx.ServerProj}\" -f net10.0 -- {serverArgs}",
 			WorkingDirectory       = TestFixtures.TempRoot,
 			RedirectStandardInput  = true,
 			RedirectStandardOutput = true,

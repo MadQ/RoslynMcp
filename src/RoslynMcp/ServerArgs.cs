@@ -162,6 +162,14 @@ internal sealed class ServerArgs
     public string? Root { get; }
 
     /// <summary>
+    ///     Where <see cref="Root"/> came from: <c>--root</c>, <c>positional argument</c> or
+    ///     <c>ROSLYNMCP_ROOT</c>; <c>null</c> when it is unset and the process CWD stands in.
+    ///     Reported by <c>roslyn_info</c>, so that a default workspace nobody expected can be traced
+    ///     to the setting that chose it (#298).
+    /// </summary>
+    public string? RootSource { get; }
+
+    /// <summary>
     ///     Extra directory names the server stays out of when walking and watching a workspace, on
     ///     top of the built-in list (see <see cref="IgnoreRules"/>). CLI: <c>--ignore &lt;name&gt;</c>
     ///     (may repeat). Env: <c>ROSLYNMCP_IGNORE</c>, comma- or semicolon-separated. Bare directory
@@ -252,11 +260,27 @@ internal sealed class ServerArgs
                 continue;
             }
 
-            var value = i + 1 < length && !args[i + 1].StartsWith('-')
-                ? args[++i]
-                : (string?) null;
+            var flag = arg.ToLowerInvariant();
+            var next = i + 1 < length && !args[i + 1].StartsWith('-')
+                ? args[i + 1]
+                : null;
 
-            switch(arg.ToLowerInvariant()) {
+            // What follows a flag is its value only when the flag takes one. After an on/off flag
+            // that is a token that reads as on/off, and nothing else: `--elicit .` must leave the
+            // `.` to be the positional root, which it used to swallow (#298), while
+            // `--no-buildhost-pin true` must not make `true` the root. A flag this build does not
+            // know keeps the token, as it always has: it may be a newer build's flag with a value.
+            var value = flag switch {
+
+                "--no-buildhost-pin" or "--trust-project-providers" or "--elicit" or "--code-actions"
+                    => ParseOnOff(next) is not null ? next : null,
+                _   => next,
+            };
+
+            if(value is not null)
+                i++;
+
+            switch(flag) {
 
                 case "--workspace":
                     workspaceFlag = value;
@@ -297,8 +321,8 @@ internal sealed class ServerArgs
                     break;
 
                 case "--no-buildhost-pin":
-                    // Bare on/off flag; presence disables the BuildHost pin. Any value is ignored.
-                    noBuildHostPin = true;
+                    // Bare flag means the pin is disabled; an on/off token after it says otherwise.
+                    noBuildHostPin = ParseOnOff(value) ?? true;
                     break;
 
                 case "--code-actions":
@@ -307,8 +331,9 @@ internal sealed class ServerArgs
                     break;
 
                 case "--trust-project-providers":
-                    // Bare on/off flag; presence grants the trust. Any value is ignored.
-                    trustProjectProviders = true;
+                    // Bare flag grants the trust; an on/off token after it says otherwise, so that
+                    // `--trust-project-providers false` is not a grant.
+                    trustProjectProviders = ParseOnOff(value) ?? true;
                     break;
             }
         }
@@ -338,6 +363,11 @@ internal sealed class ServerArgs
         // an empty root carries no meaning, same reasoning as MsBuildPath below.
         Root = NullIfEmpty(rootFlag) ?? NullIfEmpty(rootPositional) ?? NullIfEmpty(Env("ROSLYNMCP_ROOT"));
 
+        RootSource = NullIfEmpty(rootFlag) is not null ? "--root"
+            : NullIfEmpty(rootPositional) is not null ? "positional argument"
+            : Root is not null ? "ROSLYNMCP_ROOT"
+            : null;
+
         // LogPath keeps a presence-based merge: its empty string is load-bearing (logging disabled),
         // so an explicit --log-path "" must mask ROSLYNMCP_LOG_PATH. MsBuildPath has no such
         // meaning for empty, so each source binds only when non-empty — otherwise --msbuild-path ""
@@ -363,13 +393,15 @@ internal sealed class ServerArgs
             : !envVsVersionValid && !string.IsNullOrWhiteSpace(envVsVersion) ? envVsVersion
             : null;
 
-        // Per-value precedence: the CLI flag binds only when it parses to a valid bool;
+        // Per-value precedence: the CLI flag binds only when it reads as on/off;
         // otherwise the env var is consulted. An unparseable --elicit value must not
         // suppress a valid ROSLYNMCP_ELICIT. A valid value from either source counts as
         // "specified" and blocks the project-config layer; otherwise the decision stays open.
-        // That tri-state is why this uses bool.TryParse rather than the EnvTrue helper below —
-        // it needs to distinguish "parsed" from "false". Plain on/off flags use EnvTrue.
-        if(bool.TryParse(elicitFlag, out var cliElicit)) {
+        // That tri-state is why the env var uses bool.TryParse rather than the EnvTrue helper
+        // below — it needs to distinguish "parsed" from "false". Plain on/off flags use EnvTrue.
+        // The CLI value is read as the argument loop took it (ParseOnOff): `--elicit off` must
+        // not come out as on.
+        if(ParseOnOff(elicitFlag) is { } cliElicit) {
 
             ElicitSpecified = true;
             Elicit          = cliElicit;
@@ -429,6 +461,8 @@ internal sealed class ServerArgs
             CodeActions          = envCodeActions ?? true;
         }
 
+        // A grant from either source, as for the pin above: `--trust-project-providers false` is
+        // no grant of its own, and does not take back one the env var or the user's file gives.
         TrustProjectProviders = trustProjectProviders || EnvTrue("ROSLYNMCP_TRUST_PROJECT_PROVIDERS");
         UserConfigPath        = NullIfEmpty(Env("ROSLYNMCP_USER_CONFIG"));
 
@@ -452,9 +486,9 @@ internal sealed class ServerArgs
     /// <summary>An on/off switch value; null when the value is absent or neither — the caller then asks the next source.</summary>
     static bool? ParseOnOff(string? value) => value?.ToLowerInvariant() switch {
 
-        "on" or "true" or "1"   => true,
-        "off" or "false" or "0" => false,
-        _                       => null,
+        "on" or "true" or "yes" or "1"  => true,
+        "off" or "false" or "no" or "0" => false,
+        _                               => null,
     };
 
     /// <summary>

@@ -324,7 +324,7 @@ static partial class DefaultWorkspaceTests
 		
 		// In the order the tests have always run: a few depend on an earlier one — the Stray build on the
 		// restore before it, apply tests on files that earlier tests renamed.
-		List<TestCase> tests = [.. FileTests(f), .. SolutionTests(f), .. ApplyTests(f), .. DefaultTests(f)];
+		List<TestCase> tests = [.. FileTests(f), .. SolutionTests(f), .. ApplyTests(f), .. DefaultTests(f), .. FollowupTests(f)];
 		
 		return new TestGroup($"DefaultWorkspace ({tests.Count} tests)", tests, Teardown: async () => {
 			
