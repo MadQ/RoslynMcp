@@ -49,7 +49,7 @@ internal sealed class TypeDependenciesTool : RoslynMcpTool
 		
 		if(type is null)
 			
-			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
+			return scope.Failed("type not found", TypeNotFoundError(typeName, projectPath));
 		
 		var collector = new DependencyCollector();
 		

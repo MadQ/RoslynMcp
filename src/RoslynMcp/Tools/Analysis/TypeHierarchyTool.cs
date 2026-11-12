@@ -55,7 +55,7 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 		
 		if(type is null)
 			
-			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
+			return scope.Failed("type not found", TypeNotFoundError(typeName, projectPath));
 		
 		var baseTypes   = GetBaseTypeChain(type);
 		

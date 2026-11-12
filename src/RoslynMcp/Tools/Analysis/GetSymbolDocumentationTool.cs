@@ -48,7 +48,7 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		
 		if(symbol is null)
 			
-			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 		
 		var xml = symbol.GetDocumentationCommentXml();
 		

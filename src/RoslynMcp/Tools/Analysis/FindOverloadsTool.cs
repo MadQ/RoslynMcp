@@ -43,7 +43,7 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 		
 		if(type is null)
 			
-			return scope.Failed("type not found", new ErrorResult($"Type '{containingType}' not found in the project."));
+			return scope.Failed("type not found", TypeNotFoundError(containingType, projectPath));
 		
 		var overloads = type.GetMembers(methodName)
 			.OfType<IMethodSymbol>()

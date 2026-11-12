@@ -126,7 +126,7 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			
 			return scope.Failed("symbol not found", new PreviewRenameResult(
 				null, null,
-				$"Symbol '{symbolName}' not found. {SymbolNotFoundHint}",
+				$"Symbol '{symbolName}' not found. {WithLoadProblem(SymbolNotFoundHint, projectPath)}",
 				false
 			));
 		

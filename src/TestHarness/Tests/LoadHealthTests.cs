@@ -288,6 +288,42 @@ static class LoadHealthTests
 					: (true, "PASS  (Bad's diagnostics phantom, Good's not)");
 			}),
 			
+			// A name that is not found in an unhealthy project cannot be told from a misspelled one unless
+			// the answer says how the project loaded (#447): an agent asked for seven types of referenced
+			// assemblies in such a workspace, read "not found" seven times, and gave up on the tool. The name
+			// here exists nowhere, so the lookup itself is the same in all three calls; what differs is the
+			// project asked. Bad carries the load's problem; Good, which is not built from Bad, does not
+			// (the narrowing of the test above); the solution does, since any project might have declared it.
+			new("load health: a name not found in an unhealthy project says how it loaded", async () =>
+			{
+				const string missing = "NoSuchTypeAnywhere447";
+				
+				async Task<string> HintAsync(string tool, object arguments) =>
+					(await ctx.CallToolJsonAsync(tool, arguments))?["hint"]?.GetValue<string>() ?? ""
+				;
+				
+				var badType  = await HintAsync("roslyn_get_type_members", new { typeName = missing, projectPath = bad });
+				var goodType = await HintAsync("roslyn_get_type_members", new { typeName = missing, projectPath = good });
+				var badName  = await HintAsync("roslyn_get_symbol_definition", new { symbolName = missing, projectPath = bad });
+				var anywhere = await HintAsync("roslyn_get_symbol_definition", new { symbolName = missing, projectPath = s.PathOf("LoadHealthSln.slnx") });
+				
+				if(!badType.Contains("MSBuild failure"))
+					
+					return Skip.SetupUnavailable($"{NotFailed} (the type-not-found answer for Bad names no load failure: '{badType}')");
+				
+				if(goodType.Length > 0)
+					
+					return (false, $"FAIL  (Good is not built from Bad, yet its type-not-found answer has a hint: '{goodType}')");
+				
+				if(!badName.Contains("MSBuild failure") || !badName.Contains("roslyn_get_type_members"))
+					
+					return (false, $"FAIL  (the symbol-not-found answer for Bad should keep its own hint and add the load's: '{badName}')");
+				
+				return anywhere.Contains("MSBuild failure") && anywhere.Contains("Bad")
+					? (true, "PASS  (Bad and the solution name the load failure, Good does not)")
+					: (false, $"FAIL  (the symbol-not-found answer for the solution does not name the load failure: '{anywhere}')");
+			}),
+			
 			// The same narrowing for the build: Good keeps the Roslyn fast path. Whether the dotnet build
 			// that follows succeeds (the fixture is not restored) is not what is tested.
 			new("load health: build_project keeps the fast path for a project beside a failing one", async () =>

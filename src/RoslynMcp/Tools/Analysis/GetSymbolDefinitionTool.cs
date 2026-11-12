@@ -49,7 +49,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		
 		if(symbol is null)
 			
-			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 		
 		var location = symbol.Locations.FirstOrDefault(loc => loc.IsInSource);
 		

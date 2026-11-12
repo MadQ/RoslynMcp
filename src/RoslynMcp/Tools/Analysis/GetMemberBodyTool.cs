@@ -55,7 +55,7 @@ internal sealed class GetMemberBodyTool : RoslynMcpTool
 		
 		if(symbol is null)
 			
-			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 		
 		var syntaxRefs = symbol.DeclaringSyntaxReferences;
 		
