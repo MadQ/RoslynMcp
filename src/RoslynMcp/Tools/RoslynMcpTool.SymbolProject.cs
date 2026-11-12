@@ -102,7 +102,7 @@ internal abstract partial class RoslynMcpTool
 		
 		if(candidates.Length == 0)
 			
-			return (resolved, SymbolNotFoundError(symbolName));
+			return (resolved, SymbolNotFoundError(symbolName, resolved));
 		
 		if(server is not null && ProjectConfig.EffectiveElicit(rootPath, logger)) {
 			

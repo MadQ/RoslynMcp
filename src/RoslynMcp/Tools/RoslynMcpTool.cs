@@ -2315,10 +2315,70 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     Callers must pass this to <c>scope.Failed("symbol not found", ...)</c> — the analyzer
 	///     requires the scope terminal to appear directly at the return site.
 	/// </summary>
-	protected static ErrorResult SymbolNotFoundError(string symbolName) =>
+	protected ErrorResult SymbolNotFoundError(string symbolName, string projectPath) =>
 		new(
 			$"Symbol '{symbolName}' not found.",
-			SymbolNotFoundHint);
+			WithLoadProblem(SymbolNotFoundHint, projectPath));
+	
+	/// <summary>
+	///     The "type not found" <see cref="ErrorResult"/> of the tools that take a type by name. Like
+	///     <see cref="SymbolNotFoundError"/>, it says when the workspace loaded badly (#447).
+	/// </summary>
+	protected ErrorResult TypeNotFoundError(string typeName, string projectPath) =>
+		new(
+			$"Type '{typeName}' not found in the project.",
+			LoadProblemHint(projectPath));
+	
+	/// <summary><paramref name="hint"/>, followed by <see cref="LoadProblemHint"/> when there is one.</summary>
+	protected string WithLoadProblem(string hint, string projectPath) =>
+		LoadProblemHint(projectPath) is { } problem ? $"{hint} {problem}" : hint
+	;
+	
+	/// <summary>
+	///     What to tell an agent whose name was not found while the workspace is unhealthy for the
+	///     project asked about, or <see langword="null"/> when it is healthy (#447). A project that
+	///     loaded without its references has none of their types, and "not found" alone cannot be told
+	///     from a misspelled name: an agent got seven such answers in a row and gave up on the tool.
+	///     <para>
+	///         Narrowed like the diagnostics hint (<see cref="WorkspaceHealth.Covering"/>): a project
+	///         path counts what that project is built from, a solution path every project, since the
+	///         name may have been any project's to declare. The solution is peeked, so the hint never
+	///         runs a reload. Never throws: it is colour on an answer the caller already has.
+	///     </para>
+	/// </summary>
+	protected string? LoadProblemHint(string projectPath)
+	{
+		if(TryGetHealth(projectPath) is not { IsHealthy: false } health)
+			
+			return null;
+		
+		try {
+			
+			var (path, kind) = workspace.Resolve(projectPath);
+			var solution     = workspace.PeekSolution(projectPath);
+			
+			// A path that is no project of the solution keeps the whole of it: narrowing to nothing
+			// would call an unhealthy workspace healthy.
+			if(kind != ResolutionKind.Solution && solution.Projects.Any(project => project.FilePath is { } file && SecurityBoundary.PathComparer.Equals(file, path)))
+				health = health.Covering(solution, [path]);
+		}
+		catch {
+			
+			return null;
+		}
+		
+		if(health.IsHealthy)
+			
+			return null;
+		
+		return health.OnlyNeedsRestore
+			? $"The workspace {health.Problem}. A name from a package or a framework assembly is not found for that "
+				+ "reason, whether or not it is spelled right: restore, then ask again."
+			: $"The workspace {health.Problem}. A name from a referenced assembly or project may be missing for that "
+				+ "reason, and not because it is wrong. roslyn_check_drift shows the state of the load; "
+				+ "roslyn_respawn reloads the workspace when it does not recover by itself, and a failure of the "
+				+ "project file itself has to be fixed there: no reload repairs it.";
+	}
 	
 	/// <summary>
 	///     Detects a VS Code Copilot chat symbol-reference prefix ("sym:" or "#sym:") that chat

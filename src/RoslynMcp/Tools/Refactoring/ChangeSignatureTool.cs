@@ -84,7 +84,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		if(symbol is not IMethodSymbol method)
 			
 			return scope.Failed("not a method", symbol is null
-				? SymbolNotFoundError(methodName)
+				? SymbolNotFoundError(methodName, projectPath)
 				: new ErrorResult($"'{methodName}' is a {symbol.Kind}, not a method."));
 		
 		// Parse the parameters to add.

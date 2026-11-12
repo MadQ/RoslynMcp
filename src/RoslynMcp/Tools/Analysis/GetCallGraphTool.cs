@@ -62,7 +62,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		
 		if(symbol is null)
 			
-			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 		
 		// Declared, but in no file of this project: a symbol of a referenced project. Its body is
 		// not this compilation's to read, and an empty graph would say that it calls nothing.

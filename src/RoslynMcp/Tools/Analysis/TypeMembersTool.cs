@@ -63,7 +63,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 		
 		if(type is null)
 			
-			return scope.Failed("type not found", new ErrorResult($"Type '{typeName}' not found in the project."));
+			return scope.Failed("type not found", TypeNotFoundError(typeName, projectPath));
 		
 		IEnumerable<ISymbol> members = type.GetMembers();
 		

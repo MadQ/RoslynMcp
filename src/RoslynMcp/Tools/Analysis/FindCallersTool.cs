@@ -94,7 +94,7 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		
 		if(symbols.Length == 0)
 			
-			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 		
 		var allCallers = new List<CallerEntry>();
 		

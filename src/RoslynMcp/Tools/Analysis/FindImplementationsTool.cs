@@ -56,7 +56,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		if(symbol is null)
 			
-			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName));
+			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 		
 		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
 			
