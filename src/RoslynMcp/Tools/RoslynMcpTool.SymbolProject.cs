@@ -236,7 +236,8 @@ internal abstract partial class RoslynMcpTool
 		DeclaringProject? seeing = null;
 		
 		// Whether a symbol of a referenced assembly ends the search (see below). The index is
-		// asked once, and it is cheap: no compilation.
+		// asked once. It costs no compilation the loop would not do: where it finds the name it
+		// may compile the projects that hold it, and those are compiled below in any case.
 		var typeInSource = containingType is not null
 			&& (await SymbolFinder.FindSourceDeclarationsAsync(solution, SimpleNameOf(containingType), ignoreCase: false, cancellationToken)).Any(symbol => symbol is INamedTypeSymbol)
 		;
