@@ -640,6 +640,10 @@ internal sealed partial class WorkspaceManager
 			disposed = true
 			;
 			
+			// Nothing computed from this instance is current any more: the next call for the path
+			// loads another one, with a counter of its own (#435).
+			Changes.Retire();
+			
 			// And a reload still queued on MSBuildGate to give up, so that the waits below are short.
 			disposing.Cancel();
 			

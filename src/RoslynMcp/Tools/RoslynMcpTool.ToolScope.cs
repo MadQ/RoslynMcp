@@ -51,6 +51,50 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records the workspace mode so the log line can show MSB/ADH.</summary>
 		internal void SetWorkspaceMode(bool isMSBuild) => this.isMSBuild = isMSBuild;
 		
+		WorkspaceChangeCounter? usedWorkspace;
+		long                    usedWorkspaceAt;
+		bool                    usedWorkspaceForCode;
+		
+		/// <summary>
+		///     Records the workspace this call computes its result from, and the count of its
+		///     changes from before the call took its view of it (see <c>ViewOf</c>). Called by
+		///     every resolution guard, beside <see cref="SetWorkspaceMode"/>. The first guard that
+		///     reads code counts, since that is where the call first looked at the code; a guard
+		///     that only resolved a root before it has read none, and its count is replaced.
+		/// </summary>
+		internal void NoteWorkspace(WorkspaceChangeCounter changes, long at, bool readsCode)
+		{
+			if(usedWorkspace is not null && (usedWorkspaceForCode || !readsCode))
+				
+				return;
+			
+			usedWorkspace        = changes;
+			usedWorkspaceAt      = at;
+			usedWorkspaceForCode = readsCode;
+		}
+		
+		/// <summary>
+		///     Whether the workspace this call used is still as it was when the call took its view
+		///     of it, for a result that is kept beyond the call (#435). Null for a call that used
+		///     no workspace: its result is not tied to one. A cached result carries this, and a
+		///     later page is cut from it only while it says yes: a change made through the server
+		///     clears the cache, but a save in an editor reaches the workspace through the watcher
+		///     and cleared nothing, so the next page came from before the change.
+		/// </summary>
+		internal Func<bool>? WorkspaceUnchanged
+		{
+			get
+			{
+				if(usedWorkspace is not { } changes)
+					
+					return null;
+				
+				var at = usedWorkspaceAt;
+				
+				return () => changes.Value == at && !changes.Retired;
+			}
+		}
+		
 		/// <summary>
 		///     The <c>filePath</c> of this call when it names no document of any project in the solution
 		///     the call resolved to (#376). The call keeps the solution — a tool that only reads or writes

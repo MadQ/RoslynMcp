@@ -5,8 +5,35 @@ namespace RoslynMcp;
 
 internal sealed partial class WorkspaceManager
 {
+	/// <summary>
+	///     The change counter of the workspace a resolved path is served by.
+	///     <paramref name="reloadFirst"/> is for a caller that is about to read code: a reload that
+	///     is pending is brought in first. It would otherwise happen inside the caller's own read
+	///     and move the count the caller has just taken, and whatever the caller kept would be
+	///     stale the moment it was stored. A caller that reads no code leaves the reload to
+	///     whoever needs the workspace next.
+	/// </summary>
+	public WorkspaceChangeCounter GetChangeCounter(string resolvedProjectPath, bool reloadFirst)
+	{
+		var instance = GetOrLoadInstance(resolvedProjectPath);
+		
+		if(reloadFirst)
+			instance.GetSolution();
+		
+		return instance.Changes;
+	}
+	
 	sealed partial class WorkspaceInstance
 	{
+		/// <summary>
+		///     Counted wherever the compilations are dropped, which is every place this workspace
+		///     takes a change, and wherever a reload is flagged without dropping them: the
+		///     workspace is then known to be behind disk, though nothing in it has changed yet.
+		///     One counter for the life of the instance: a reload swaps the
+		///     workspace inside it and counts as a change like any other.
+		/// </summary>
+		public WorkspaceChangeCounter Changes { get; } = new();
+		
 		// ── Workspace reload ────────────────────────────────────────────────
 		
 		/// <summary>
@@ -317,6 +344,7 @@ internal sealed partial class WorkspaceManager
 					projectMap[kvp.Key] = kvp.Value;
 
 				compilationCache.Clear();
+				Changes.Increment();
 
 				// Swapped in with the solution it was built from, under the same lock.
 				physicalIndex            = newPhysicalIndex;
@@ -413,7 +441,9 @@ internal sealed partial class WorkspaceManager
 			@lock.EnterWriteLock();
 			
 			try {
+				
 				compilationCache.Clear();
+				Changes.Increment();
 			}
 			finally {
 				@lock.ExitWriteLock();

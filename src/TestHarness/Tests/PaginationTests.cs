@@ -35,7 +35,10 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class PaginationTests
 {
-	internal static TestGroup Build(TestContext ctx)
+	/// <param name="ctx">The harness's connection to the server.</param>
+	/// <param name="serverLogDir">Directory the harness pointed ROSLYNMCP_LOG_PATH at.</param>
+	/// <param name="serverLogGlob">File pattern of the server's log in that directory.</param>
+	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
 		
 		var fx     = TestFixtures.NewMsBuildProject("Pagination");
@@ -49,6 +52,11 @@ static class PaginationTests
 			otherProject.Write($"Alternate{i}.cs", $"// PAGEMARK {i}\nclass Alternate{i} {{ }}\n");
 		
 		fx.Write("Other.cs", "class Other { }\n");
+		
+		// A project of its own for the diagnostics test: seven locals nobody uses, seven warnings.
+		var diagnosed = TestFixtures.NewMsBuildProject("PaginationDiag");
+		
+		diagnosed.Write("Warned.cs", "class Warned\n{\n\tvoid Run()\n\t{\n" + string.Concat(Enumerable.Range(1, 7).Select(n => $"\t\tint unused{n};\n")) + "\t}\n}\n");
 		
 		// Captured by the earlier tests, consumed by the later ones — the tests run in order.
 		string?   token1 = null;
@@ -267,8 +275,152 @@ static class PaginationTests
 			
 			new("pagination: evicted token with changed pattern, filter or project matches the cached-mismatch behavior",
 				CheckQueryBinding),
+			
+			// roslyn_get_diagnostics pages like every other tool (#435). Its token was a bare
+			// position of its own: every page computed the whole result again, and with analyzers
+			// that is every analyzer again, twenty seconds a page on a solution with analyzer
+			// packages. The token did not carry the page size either, so a token passed alone fell
+			// back to pages of fifty. The fixture has seven warnings (seven locals never used) and
+			// is paged in threes with analyzers on: 3 + 3 + 1. Every page after the first is asked
+			// for with the token alone, must keep the size of three, and must be served from the
+			// cache, which the server's log says for each call; together the pages must hold every
+			// warning once.
+			new("pagination: roslyn_get_diagnostics pages from one analyzer run, and its token keeps the page size",
+				async () => {
+					
+					static int Tagged(string[] log, string tag)
+						=> log.Count(line => line.Contains("\"get_diagnostics\"", StringComparison.Ordinal) && line.Contains($"\"{tag}\"", StringComparison.Ordinal));
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var before, out var logFailure))
+						
+						return (false, logFailure);
+					
+					var query = new { projectPath = diagnosed.Csproj, includeAnalyzers = true, severity = "warnings" };
+					var first = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, take = 3 });
+					var total = first?["total"]?.GetValue<int>() ?? -1;
+					var seen  = new List<string>();
+					var sizes = new List<int>();
+					var pages = 0;
+					
+					for(var page = first; page is not null && pages < 10; pages++) {
+						
+						var items = page["items"]?.AsArray() ?? [];
+						
+						sizes.Add(items.Count);
+						seen.AddRange(items.Select(item => $"{item?["code"]}@{item?["line"]}"));
+						
+						if(Token(page) is not { } token)
+							break;
+						
+						page = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, page_token = token });
+					}
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var after, out logFailure))
+						
+						return (false, logFailure);
+					
+					// One run and two slices of it: the first call is the only one that computed.
+					var hits   = Tagged(after, "HIT") - Tagged(before, "HIT");
+					var misses = Tagged(after, "MISS") - Tagged(before, "MISS");
+					
+					return Verdict(
+						total == 7
+							&& sizes.SequenceEqual([3, 3, 1])
+							&& seen.Distinct().Count() == 7
+							&& hits == 2
+							&& misses == 1,
+						$"total {total}, expected 7; page sizes [{string.Join(", ", sizes)}], expected [3, 3, 1]; distinct findings {seen.Distinct().Count()} of {seen.Count}; pages served from the cache: {hits}, expected 2; calls that computed: {misses}, expected 1");
+				}),
+			
+			// A page kept from an earlier call must not outlive a change to the code (#435). Only
+			// the server's own writes clear the cache, and a save in an editor, by the client's
+			// own edit tool or by git reaches the workspace through the watcher, which cleared
+			// nothing: the next page came from the run before the change, with its counts and
+			// line numbers, for as long as paging went on. For diagnostics that is a verdict on
+			// code that is no longer there. The first page is taken, one of the seven unused
+			// locals is deleted on disk behind the server's back, and once the workspace serves
+			// the new text the token must give a page of the new result: six warnings in all,
+			// the three after the first three, and no further page.
+			new("pagination: a page token does not serve a result from before a change made outside the server",
+				async () => {
+					
+					var query = new { projectPath = diagnosed.Csproj, includeAnalyzers = true, severity = "warnings" };
+					var first = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, take = 3 });
+					
+					if(first?["total"]?.GetValue<int>() != 7 || Token(first) is not { } token)
+						
+						return (false, $"FAIL  (the first page: {first?.ToJsonString() ?? "no answer"})");
+					
+					var path = diagnosed.PathOf("Warned.cs");
+					
+					File.WriteAllText(path, File.ReadAllText(path).Replace("\t\tint unused7;\n", string.Empty));
+					
+					var deadline = DateTime.UtcNow.AddSeconds(15);
+					var synced   = false;
+					
+					while(DateTime.UtcNow < deadline && !synced) {
+						
+						await Task.Delay(250);
+						
+						await ctx.SendAsync(new { jsonrpc = "2.0", id = ctx.NextId(), method = "tools/call", @params = new { name = "roslyn_read_file", arguments = new { filePath = "Warned.cs", projectPath = diagnosed.Csproj } } });
+						
+						var blocks = (await ctx.ReceiveAsync())?["result"]?["content"]?.AsArray();
+						
+						synced = blocks is { Count: > 1 }
+							&& blocks[0]?["text"]?.GetValue<string>().Contains("\"roslyn\"") == true
+							&& blocks[1]?["text"]?.GetValue<string>().Contains("unused7") == false;
+					}
+					
+					if(!synced)
+						
+						return (false, "FAIL  (Warned.cs was changed on disk fifteen seconds ago and the workspace still serves the old text)");
+					
+					var second = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, page_token = token });
+					
+					return Verdict(
+						second?["total"]?.GetValue<int>() == 6
+							&& second["items"]?.AsArray().Count == 3
+							&& !HasMore(second),
+						$"the page after the change: total {second?["total"]}, expected 6; items {second?["items"]?.AsArray().Count}, expected 3; has_more {HasMore(second)}, expected false");
+				}),
+			
+			// The same for a change the workspace cannot take in place (#435): a new source file
+			// only flags a reload, and the reload runs when a call next reads code. A call with a
+			// page token reads none, so a count that moved only when the reload was swapped in
+			// left the token serving the result from before the file existed, for as long as
+			// paging went on. The first page is taken, a file with one more unused local is
+			// added behind the server's back, and the same token is sent until it answers with
+			// seven warnings. Nothing else is called in between, on purpose: any tool that reads
+			// code would run the reload and hide the fault.
+			new("pagination: a page token does not serve a result from before a file added outside the server",
+				async () => {
+					
+					var query = new { projectPath = diagnosed.Csproj, includeAnalyzers = true, severity = "warnings" };
+					var first = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, take = 3 });
+					
+					// Whatever the tests before this one left: the file adds one warning to it.
+					if(first?["total"]?.GetValue<int>() is not { } before || Token(first) is not { } token)
+						
+						return (false, $"FAIL  (the first page: {first?.ToJsonString() ?? "no answer"})");
+					
+					File.WriteAllText(diagnosed.PathOf("Added.cs"), "class Added\n{\n\tvoid Run()\n\t{\n\t\tint unusedAdded;\n\t}\n}\n");
+					
+					var deadline = DateTime.UtcNow.AddSeconds(30);
+					var total    = before;
+					
+					while(DateTime.UtcNow < deadline && total == before) {
+						
+						await Task.Delay(250);
+						
+						var page = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, page_token = token });
+						
+						total = page?["total"]?.GetValue<int>() ?? before;
+					}
+					
+					return Verdict(total == before + 1, $"the page after the file was added: total {total}, expected {before + 1} ({before} is the result from before it)");
+				}),
 		};
 		
-		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); return Task.CompletedTask; });
+		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); diagnosed.Dispose(); return Task.CompletedTask; });
 	}
 }

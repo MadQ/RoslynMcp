@@ -706,6 +706,13 @@ internal sealed partial class WorkspaceManager
 				if(Volatile.Read(ref reloadVersion) == 0)
 					Interlocked.Increment(ref reloadVersion);
 				#pragma warning restore CS0420
+
+				// The workspace is behind disk from here on, and stays so until a call that reads
+				// code runs the reload. A page token reads none, so without this count its cached
+				// result would keep being served as current (#435). Counted after the flag: a
+				// call that reads the new count must also find the reload pending, or it would
+				// keep a result from before the change as current.
+				Changes.Increment();
 			}
 
 			Workspace ws;
