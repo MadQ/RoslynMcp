@@ -74,6 +74,7 @@ static partial class DefaultWorkspaceTests
 		// name than .ctor; and a source type that shares its simple name with a framework type.
 		fx.Write("Lib/CtorHolder.cs", "namespace Lib;\n\npublic class CtorHolder\n{\n\tpublic CtorHolder() { CtorInit(); }\n\n\tvoid CtorInit() { }\n}\n");
 		fx.Write("App/Timer.cs", "namespace App;\n\npublic class Timer { }\n");
+		fx.Write("Lib/Timer.cs", "namespace Lib;\n\npublic class Timer { }\n");
 		
 		// #376: a warning (CS0168) in Lib, the solution's second project, for the solution-wide
 		// diagnostics test; and a project under the solution's directory that the solution does not

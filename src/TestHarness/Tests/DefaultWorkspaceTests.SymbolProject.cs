@@ -94,9 +94,11 @@ static partial class DefaultWorkspaceTests
 			}),
 			
 			// A qualified name that no source declaration answers to is not handed to a declaration
-			// of its last part. App declares a class Timer; System.Threading.Timer is the framework's.
-			// The hierarchy asked for must be the framework type's, whose base is MarshalByRefObject,
-			// not that of App.Timer, whose base is object.
+			// of its last part. App and Lib each declare a class Timer; System.Threading.Timer is
+			// the framework's. Taken by its last part the name is "declared in 2 projects", an
+			// error. Two namesakes, not one: with one the call would land in that project, whose
+			// compilation resolves the framework type all the same, and the test could not fail.
+			// The hierarchy must be the framework type's, whose base is MarshalByRefObject.
 			new("DefaultWorkspace: a qualified framework name is not taken for a source type of the same simple name", async () => {
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_type_hierarchy", new { typeName = "System.Threading.Timer" });

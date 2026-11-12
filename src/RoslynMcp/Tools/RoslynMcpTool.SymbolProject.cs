@@ -142,7 +142,7 @@ internal abstract partial class RoslynMcpTool
 				
 				return null;
 			
-			var solution = ResolveWithRetry("TryResolveSymbolProjectArg", () => workspace.GetSolution(projectPath));
+			var solution = ResolveWithRetry("ResolveSymbolProjectArg", () => workspace.GetSolution(projectPath));
 			
 			if(solution.Projects.Any(project => project.FilePath is null))
 				
@@ -160,7 +160,7 @@ internal abstract partial class RoslynMcpTool
 		}
 		catch(Exception ex) when(ex is not OperationCanceledException && !IsFatal(ex)) {
 			
-			logger.LogInfo("TryResolveSymbolProjectArg", $"{ex.GetType().Name}: {ex.Message}");
+			logger.LogInfo("ResolveSymbolProjectArg", $"{ex.GetType().Name}: {ex.Message}");
 			
 			return null;
 		}
@@ -225,14 +225,21 @@ internal abstract partial class RoslynMcpTool
 	///     come before one that merely sees it: a constructor or an explicit interface
 	///     implementation is in the index under another name, and its declaring project is the
 	///     one a tool can read its source from. Compiles every project, to find each that declares
-	///     the name, and stops early only for a symbol of a referenced assembly; that is what a
-	///     name outside the index costs here, a misspelled one included.
+	///     the name, and stops early only for a symbol of a referenced assembly whose containing
+	///     type, if one was given, is no type in source either; that is what a name outside the
+	///     index costs here, a misspelled one included.
 	/// </summary>
 	static async Task<DeclaringProject[]> ProjectsResolvingAsync(Solution solution, string symbolName, string? containingType, SymbolSought sought, CancellationToken cancellationToken)
 	{
 		var declaring = new List<DeclaringProject>();
 		
 		DeclaringProject? seeing = null;
+		
+		// Whether a symbol of a referenced assembly ends the search (see below). The index is
+		// asked once, and it is cheap: no compilation.
+		var typeInSource = containingType is not null
+			&& (await SymbolFinder.FindSourceDeclarationsAsync(solution, SimpleNameOf(containingType), ignoreCase: false, cancellationToken)).Any(symbol => symbol is INamedTypeSymbol)
+		;
 		
 		foreach(var project in solution.Projects.DistinctBy(candidate => candidate.FilePath, SecurityBoundary.PathComparer)) {
 			
@@ -262,10 +269,11 @@ internal abstract partial class RoslynMcpTool
 			// the index. Asked for inside a containing type, another project may still declare a
 			// type of that name with such a member in source (a constructor, which the index
 			// lists under another name), and that is then what was asked for, whichever project
-			// comes first.
+			// comes first. So the search goes on only where a type of that name is in source at
+			// all; for a member of a framework type (WriteLine in Console) it ends here too.
 			if(!symbol.Locations.Any(location => location.IsInSource)) {
 				
-				if(containingType is null && declaring.Count == 0)
+				if(!typeInSource && declaring.Count == 0)
 					
 					return [new DeclaringProject(file, symbol)];
 				
