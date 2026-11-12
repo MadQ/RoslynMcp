@@ -24,6 +24,9 @@ internal static class ThreadPoolProbe
 	// A wait this long is logged. Well above what a busy but healthy pool shows.
 	const int SlowMs = 1_000;
 	
+	// How often a wait that has not ended yet is logged.
+	const int StillWaitingMs = 5_000;
+	
 	static int started;
 	
 	/// <summary>Starts the probe, once per process. The thread is a background one and ends with the process.</summary>
@@ -44,20 +47,36 @@ internal static class ThreadPoolProbe
 	static void Run(FileLogger logger)
 	{
 		// One item at a time: while one is waiting, queueing more would only add to what it waits behind.
-		var waiting = 0;
+		var waiting  = 0;
+		var queued   = 0L;
+		var reported = 0L;
 		
 		while(true) {
 			
 			Thread.Sleep(IntervalMs);
 			
-			if(Interlocked.Exchange(ref waiting, 1) != 0)
+			if(Interlocked.Exchange(ref waiting, 1) != 0) {
+				
+				// The item's own line is written when it runs. A pool that never gives it a thread, or a
+				// server killed before it does, would leave nothing, so this thread says it meanwhile.
+				var soFar = (long) Stopwatch.GetElapsedTime(queued).TotalMilliseconds;
+				
+				if(soFar - reported >= StillWaitingMs) {
+					
+					reported = soFar;
+					logger.LogInfo("ThreadPool", $"a queued work item has been waiting {soFar} ms for a thread ({Describe()}): tool calls sent since then have not started");
+				}
+				
 				continue;
+			}
 			
-			var queued = Stopwatch.GetTimestamp();
+			var item = queued = Stopwatch.GetTimestamp();
+			
+			reported = 0;
 			
 			ThreadPool.UnsafeQueueUserWorkItem(_ => {
 				
-				var waited = (long) Stopwatch.GetElapsedTime(queued).TotalMilliseconds;
+				var waited = (long) Stopwatch.GetElapsedTime(item).TotalMilliseconds;
 				
 				Volatile.Write(ref waiting, 0);
 				

@@ -67,8 +67,10 @@ internal sealed class ListRefactoringsTool : RefactoringToolBase
 		
 		// In the log, not in the answer: the refactorings the server keeps back because they need a
 		// dialog, where one would have applied here. It is the only place their demand shows (#449).
-		if(!query.DeniedWithActions.IsEmpty)
-			scope.Record($"denied with actions: {string.Join(", ", query.DeniedWithActions)}");
+		var denied = await codeActionHost.DeniedWithActionsAsync(target.Document, target.Span, cancellationToken);
+		
+		if(!denied.IsEmpty)
+			scope.Record($"denied with actions: {string.Join(", ", denied)}");
 		
 		return scope.Outcome($"{query.Actions.Length} action(s), {query.Unavailable.Length} unavailable, {query.Failures.Length} provider failure(s)", result);
 	}
