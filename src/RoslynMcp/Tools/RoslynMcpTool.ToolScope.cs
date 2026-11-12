@@ -53,21 +53,24 @@ internal abstract partial class RoslynMcpTool
 		
 		WorkspaceChangeCounter? usedWorkspace;
 		long                    usedWorkspaceAt;
+		bool                    usedWorkspaceForCode;
 		
 		/// <summary>
-		///     Records the workspace this call computes its result from, and how often that
-		///     workspace had changed by then. Called by every resolution guard, beside
-		///     <see cref="SetWorkspaceMode"/>; the first one counts, since that is where the call
-		///     took its view of the code.
+		///     Records the workspace this call computes its result from, and the count of its
+		///     changes from before the call took its view of it (see <c>ViewOf</c>). Called by
+		///     every resolution guard, beside <see cref="SetWorkspaceMode"/>. The first guard that
+		///     reads code counts, since that is where the call first looked at the code; a guard
+		///     that only resolved a root before it has read none, and its count is replaced.
 		/// </summary>
-		internal void NoteWorkspace(WorkspaceChangeCounter changes)
+		internal void NoteWorkspace(WorkspaceChangeCounter changes, long at, bool readsCode)
 		{
-			if(usedWorkspace is not null)
+			if(usedWorkspace is not null && (usedWorkspaceForCode || !readsCode))
 				
 				return;
 			
-			usedWorkspace   = changes;
-			usedWorkspaceAt = changes.Value;
+			usedWorkspace        = changes;
+			usedWorkspaceAt      = at;
+			usedWorkspaceForCode = readsCode;
 		}
 		
 		/// <summary>

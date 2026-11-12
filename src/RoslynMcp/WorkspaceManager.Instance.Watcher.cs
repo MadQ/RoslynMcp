@@ -698,6 +698,11 @@ internal sealed partial class WorkspaceManager
 
 				reloadFlagged = true;
 
+				// The workspace is behind disk from here on, and stays so until a call that reads
+				// code runs the reload. A page token reads none, so without this count its cached
+				// result would keep being served as current (#435).
+				Changes.Increment();
+
 				// Logged even when the version guard below skips the bump — the path that caused a
 				// reload was otherwise invisible in the log (#273).
 				logger.LogInfo("Reload", path is null ? $"Flagged ({reason})" : $"Flagged ({reason}): {path}");

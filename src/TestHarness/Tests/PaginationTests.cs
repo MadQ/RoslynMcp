@@ -383,6 +383,41 @@ static class PaginationTests
 							&& !HasMore(second),
 						$"the page after the change: total {second?["total"]}, expected 6; items {second?["items"]?.AsArray().Count}, expected 3; has_more {HasMore(second)}, expected false");
 				}),
+			
+			// The same for a change the workspace cannot take in place (#435): a new source file
+			// only flags a reload, and the reload runs when a call next reads code. A call with a
+			// page token reads none, so a count that moved only when the reload was swapped in
+			// left the token serving the result from before the file existed, for as long as
+			// paging went on. The first page is taken, a file with one more unused local is
+			// added behind the server's back, and the same token is sent until it answers with
+			// seven warnings. Nothing else is called in between, on purpose: any tool that reads
+			// code would run the reload and hide the fault.
+			new("pagination: a page token does not serve a result from before a file added outside the server",
+				async () => {
+					
+					var query = new { projectPath = diagnosed.Csproj, includeAnalyzers = true, severity = "warnings" };
+					var first = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, take = 3 });
+					
+					if(first?["total"]?.GetValue<int>() != 6 || Token(first) is not { } token)
+						
+						return (false, $"FAIL  (the first page: {first?.ToJsonString() ?? "no answer"})");
+					
+					File.WriteAllText(diagnosed.PathOf("Added.cs"), "class Added\n{\n\tvoid Run()\n\t{\n\t\tint unusedAdded;\n\t}\n}\n");
+					
+					var deadline = DateTime.UtcNow.AddSeconds(30);
+					var total    = 6;
+					
+					while(DateTime.UtcNow < deadline && total == 6) {
+						
+						await Task.Delay(250);
+						
+						var page = await Call("roslyn_get_diagnostics", new { query.projectPath, query.includeAnalyzers, query.severity, page_token = token });
+						
+						total = page?["total"]?.GetValue<int>() ?? -1;
+					}
+					
+					return Verdict(total == 7, $"the page after the file was added: total {total}, expected 7 (6 is the result from before it)");
+				}),
 		};
 		
 		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); diagnosed.Dispose(); return Task.CompletedTask; });

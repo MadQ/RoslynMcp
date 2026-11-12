@@ -66,6 +66,7 @@ internal sealed partial class WorkspaceManager
 							
 							logger.LogInfo("Reload", $"Flagged (incremental apply failed): {fullPath}");
 							Interlocked.Increment(ref reloadVersion);
+							Changes.Increment();
 						}
 					}
 					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -81,6 +82,7 @@ internal sealed partial class WorkspaceManager
 						// of the FSW debounce timer (#276).
 						logger.LogInfo("Reload", $"Flagged (incremental apply threw {ex.GetType().Name}): {fullPath}");
 						Interlocked.Increment(ref reloadVersion);
+						Changes.Increment();
 					}
 				}
 				else if(impact is WorkspaceEditImpact.Reload) {
@@ -149,6 +151,7 @@ internal sealed partial class WorkspaceManager
 		{
 			logger.LogInfo("Reload", path is null ? "Flagged (ApplyChanges failed)" : $"Flagged (ApplyChanges failed): {path}");
 			Interlocked.Increment(ref reloadVersion);
+			Changes.Increment();
 		}
 		
 		

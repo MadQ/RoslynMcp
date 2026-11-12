@@ -303,10 +303,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			var originalPath = projectPath;
 			
+			var view = ViewOf("TryGetCompilation", projectPath, readsCode: true);
+			
 			compilation = ResolveWithRetry("TryGetCompilation", () => workspace.GetCompilation(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
-			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
+			activeScope.Value?.NoteWorkspace(view.Changes, view.At, view.ReadsCode);
 			
 			// Annotate when non-obvious resolution occurred.
 			var kind = workspace.GetResolutionKind(projectPath)
@@ -420,10 +422,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
+			var view = ViewOf("TryGetProject", projectPath, readsCode: true);
+			
 			project = ResolveWithRetry("TryGetProject", () => workspace.GetProject(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
-			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
+			activeScope.Value?.NoteWorkspace(view.Changes, view.At, view.ReadsCode);
 			
 			// Annotate when non-obvious resolution occurred.
 			var kind = workspace.GetResolutionKind(projectPath)
@@ -510,6 +514,30 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     times, then rethrows the last fault so the caller's existing catch/mapping produces the structured
 	///     error. Deterministic path-resolution failures rethrow immediately. Read-only — never wrap a write.
 	/// </summary>
+	/// <summary>
+	///     The change counter of the workspace a guard is about to read, and its count at this
+	///     moment, taken before the guard fetches anything (#435). In that order a change that lands
+	///     while the guard is at work, or just after it, is one the count does not have yet, so a
+	///     result computed from the guard's view and kept for later pages is found out as stale.
+	///     Read after the fetch, such a change would be counted in, and the result would pass for
+	///     current.
+	///     <para>
+	///         <paramref name="readsCode"/> is for a guard that hands out a compilation, a project
+	///         or a solution. Such a guard brings a pending reload in anyway, and here it is
+	///         brought in before the count is read, so that the guard's own fetch does not move
+	///         it. A guard that only resolves a root or a boundary reads no code and must not wait
+	///         for a reload: its count is a first word, which a later guard that reads code
+	///         replaces.
+	///     </para>
+	/// </summary>
+	private (WorkspaceChangeCounter Changes, long At, bool ReadsCode) ViewOf(string op, string projectPath, bool readsCode)
+	{
+		var changes = ResolveWithRetry(op, () => workspace.GetChangeCounter(projectPath, readsCode));
+		
+		return (changes, changes.Value, readsCode);
+	}
+	
+
 	private T ResolveWithRetry<T>(string op, Func<T> resolve)
 	{
 		for(var attempt = 0; ; attempt++) {
@@ -572,12 +600,14 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
+			var view = ViewOf("TryResolveFileContext", projectPath, readsCode: false);
+			
 			var (rPath, isMSBuild, _) = ResolveWithRetry("TryResolveFileContext", () => workspace.GetWorkspaceInfo(projectPath));
 			rootPath = rPath;
 			boundary = ResolveWithRetry("TryResolveFileContext", () => workspace.GetSecurityBoundary(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(isMSBuild);
-			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
+			activeScope.Value?.NoteWorkspace(view.Changes, view.At, view.ReadsCode);
 			
 			return true;
 		}
@@ -604,13 +634,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
+			var view = ViewOf("TryResolveSolution", projectPath, readsCode: true);
+			
 			solution = ResolveWithRetry("TryResolveSolution", () => workspace.GetSolution(projectPath));
 			
 			// Recorded here, not left to the scope's MSBuild default: a tool that only reads the solution
 			// (search, list) would otherwise log an AdhocWorkspace call with an MSBuild label (#303).
 			// The instance is already loaded by GetSolution, so the lookup is a cache hit.
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
-			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
+			activeScope.Value?.NoteWorkspace(view.Changes, view.At, view.ReadsCode);
 			
 			return true;
 		}
@@ -714,11 +746,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			// GetWorkspaceInfo rather than GetRootPath: the same lookup also says whether the workspace is
 			// MSBuild or Adhoc, which the scope must record — list_files resolves only its root, and
 			// without this logged an AdhocWorkspace call with an MSBuild label (#303).
+			var view = ViewOf("TryResolveRoot", projectPath, readsCode: false);
+			
 			var (rPath, isMSBuild, _) = ResolveWithRetry("TryResolveRoot", () => workspace.GetWorkspaceInfo(projectPath));
 			rootPath = rPath;
 			
 			activeScope.Value?.SetWorkspaceMode(isMSBuild);
-			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
+			activeScope.Value?.NoteWorkspace(view.Changes, view.At, view.ReadsCode);
 			
 			return true;
 		}
@@ -750,13 +784,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		try {
 			
+			var view = ViewOf("TryResolveWorkspaceInfo", projectPath, readsCode: false);
+			
 			var (rPath, msb, csproj) = ResolveWithRetry("TryResolveWorkspaceInfo", () => workspace.GetWorkspaceInfo(projectPath));
 			rootPath   = rPath;
 			isMSBuild  = msb;
 			csprojPath = csproj;
 			
 			activeScope.Value?.SetWorkspaceMode(msb);
-			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
+			activeScope.Value?.NoteWorkspace(view.Changes, view.At, view.ReadsCode);
 			
 			return true;
 		}
