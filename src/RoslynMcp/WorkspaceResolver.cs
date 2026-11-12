@@ -33,6 +33,25 @@ internal sealed class WorkspaceResolver
 	public string GetDefaultWorkspacePath()
 		=> manager.ResolveDefaultWorkspacePath();
 	
+	/// <summary>The default workspace, or why there is none, for <c>roslyn_info</c>. Loads nothing.</summary>
+	public Tools.DefaultWorkspaceInfo DescribeDefaultWorkspace()
+		=> manager.DescribeDefaultWorkspace();
+	
+	/// <summary>
+	///     A projectPath made absolute as resolution makes it: against the default workspace root
+	///     when it names something there, else against the working directory (#298).
+	/// </summary>
+	public string RootedPath(string projectPath)
+		=> manager.RootedPath(projectPath, out _);
+	
+	/// <summary>Whether a projectPath is a relative one that resolves against the default workspace root.</summary>
+	public bool IsRootRelative(string projectPath)
+	{
+		manager.RootedPath(projectPath, out var underDefaultRoot);
+		
+		return underDefaultRoot;
+	}
+	
 	/// <summary>
 	///     Resolves a projectPath to the .sln/.slnx, .csproj, or directory it stands for. Throws the same
 	///     typed path exceptions as every other member; call it after a guarded resolution has already

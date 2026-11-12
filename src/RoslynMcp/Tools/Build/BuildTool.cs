@@ -197,16 +197,37 @@ internal sealed class BuildTool : RoslynMcpTool
 			}
 		}
 		
-		// Slow path: run actual dotnet build.
-		var args = BuildArgs(buildTarget, targetFramework)
+		// Slow path: run actual dotnet build. A solution built with -f fails for every project that
+		// does not target that framework (NETSDK1005), so with both given the projects that do are
+		// built one after the other; what they reference is built with them (#298). With none found
+		// the solution is handed to dotnet as it is, which then says what is wrong.
+		string[] buildTargets = solutionPath is not null && targetFramework is not null && !outsideWorkspace
+			&& ProjectsTargeting(workspace.PeekSolution(projectPath), targetFramework) is { Length: > 0 } targeting
+				? targeting
+				: [buildTarget]
 		;
 		
-		string		output;
-		TimeSpan	elapsed;
-		int			exitCode;
+		if(buildTargets.Length > 1 || buildTargets[0] != buildTarget)
+			scope.Record($"{buildTargets.Length} project(s) target {targetFramework}");
+		
+		var output   = "";
+		var elapsed  = TimeSpan.Zero;
+		var exitCode = 0;
 		
 		try {
-			(output, elapsed, exitCode) = await RunDotnetAsync(args, rootPath, scope, cancellationToken);
+			
+			foreach(var target in buildTargets) {
+				
+				var (text, took, code) = await RunDotnetAsync(BuildArgs(target, targetFramework), rootPath, scope, cancellationToken);
+				
+				output  += text;
+				elapsed += took;
+				
+				// The first failure is the one reported; the projects after it are still built, as
+				// a solution build goes on past a project that fails.
+				if(exitCode == 0)
+					exitCode = code;
+			}
 		}
 		catch(OperationCanceledException) {
 			
@@ -310,6 +331,52 @@ internal sealed class BuildTool : RoslynMcpTool
 		// Every TFM starts with "net" (net48, netstandard2.0, net10.0-windows); a project whose own name
 		// merely ends in parentheses is not one framework of several.
 		return open > 0 && name.AsSpan(open + 1).StartsWith("net", StringComparison.OrdinalIgnoreCase) ? name[(open + 1)..^1] : null;
+	}
+	
+	/// <summary>
+	///     The project files of a solution that target a framework, each once. A multi-targeted
+	///     project says so in its name (<see cref="FrameworkOf"/>). A project with one framework
+	///     does not, and is told by the framework directory of its output path; one whose output
+	///     path has no such directory is kept, and dotnet decides, as it did for every project
+	///     before.
+	/// </summary>
+	static string[] ProjectsTargeting(Solution solution, string targetFramework)
+	{
+		var files = new List<string>();
+		
+		foreach(var project in solution.Projects) {
+			
+			if(project.FilePath is not { } file || files.Contains(file, SecurityBoundary.PathComparer))
+				continue;
+			
+			var targets = FrameworkOf(project) is { } framework
+				? string.Equals(framework, targetFramework, StringComparison.OrdinalIgnoreCase)
+				: project.OutputFilePath is not { } outputPath
+					|| !HasFrameworkDirectory(outputPath)
+					|| outputPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Contains(targetFramework, StringComparer.OrdinalIgnoreCase)
+			;
+			
+			if(targets)
+				files.Add(file);
+		}
+		
+		return [..files];
+	}
+	
+	/// <summary>Whether an output path has a directory named like a target framework (<c>bin/Debug/net10.0/</c>).</summary>
+	static bool HasFrameworkDirectory(string outputPath)
+	{
+		foreach(var part in Path.GetDirectoryName(outputPath)?.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? []) {
+			
+			// "net" and a digit, or "netstandard"/"netcoreapp": not a directory that merely starts with net.
+			if(part.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase)
+				|| part.StartsWith("netcoreapp", StringComparison.OrdinalIgnoreCase)
+				|| (part.Length > 3 && part.StartsWith("net", StringComparison.OrdinalIgnoreCase) && char.IsAsciiDigit(part[3])))
+				
+				return true;
+		}
+		
+		return false;
 	}
 	
 	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope, CancellationToken cancellationToken)

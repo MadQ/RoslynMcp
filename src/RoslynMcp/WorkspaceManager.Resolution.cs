@@ -23,7 +23,7 @@ internal sealed partial class WorkspaceManager
 			throw new ArgumentException("projectPath is required by this tool and cannot be empty.", nameof(inputPath));
 		
 		// Short (8.3) names expanded before anything routes by extension: SAME~1.CSP is Same.csproj (#386).
-		var fullPath = FileIdentity.LongPath(Path.GetFullPath(inputPath));
+		var fullPath = FileIdentity.LongPath(RootedPath(inputPath, out _));
 		
 		if(SecurityBoundary.IsDangerousProjectPath(fullPath))
 			throw new InvalidProjectPathException(fullPath, "Path is not a valid project location");
@@ -71,6 +71,56 @@ internal sealed partial class WorkspaceManager
 			return (inferred, ResolutionKind.InferredFromCache);
 		
 		throw new InvalidProjectPathException(fullPath, "Path does not exist");
+	}
+	
+	/// <summary>
+	///     Makes a projectPath absolute. A relative one is taken against the directory of the default
+	///     workspace first, when there is one and the path names something in it, and against the
+	///     working directory otherwise (#298). Tools report paths relative to the workspace root, so
+	///     that is what an agent passes back, and a client often starts the server somewhere else,
+	///     which is why <c>--root</c> exists. The working directory stays the fallback so that every
+	///     path that resolved before still does; with no default workspace nothing changes. Only the
+	///     startup inputs and the file system decide, never which workspaces are loaded.
+	/// </summary>
+	public string RootedPath(string inputPath, out bool underDefaultRoot)
+	{
+		underDefaultRoot = false;
+		
+		// An empty path is left for the caller to reject.
+		if(string.IsNullOrWhiteSpace(inputPath))
+			
+			return inputPath;
+		
+		if(Path.IsPathFullyQualified(inputPath))
+			
+			return Path.GetFullPath(inputPath);
+		
+		string? root;
+		
+		try {
+			root = Path.GetDirectoryName(ResolveDefaultWorkspacePath());
+		}
+		catch(Exception ex) when(ex is NoDefaultWorkspaceException or MultipleProjectsFoundException or IOException or UnauthorizedAccessException) {
+			
+			root = null;
+		}
+		
+		var underWorkingDirectory = Path.GetFullPath(inputPath);
+		
+		if(root is null)
+			
+			return underWorkingDirectory;
+		
+		var underRoot = Path.GetFullPath(inputPath, root);
+		
+		// The same place either way, as when the server was started in the repository.
+		if(SecurityBoundary.PathComparer.Equals(underRoot, underWorkingDirectory) || !(File.Exists(underRoot) || Directory.Exists(underRoot)))
+			
+			return underWorkingDirectory;
+		
+		underDefaultRoot = true;
+		
+		return underRoot;
 	}
 	
 	/// <summary>
@@ -211,12 +261,7 @@ internal sealed partial class WorkspaceManager
 	{
 		if(Volatile.Read(ref defaultWorkspacePath) is not { } path) {
 			
-			var configured = ServerArgs.Current.Root;
-			
-			var (root, source) = configured is not null
-				? (Path.GetFullPath(configured), "configured root")
-				: (Environment.CurrentDirectory, "server working directory")
-			;
+			var (root, source) = DefaultWorkspaceRoot();
 			
 			var found = FindDefaultWorkspace(root, source, logger);
 			
@@ -227,6 +272,38 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		return path;
+	}
+	
+	/// <summary>
+	///     The directory or file the default workspace is looked for in, and what named it. Both are
+	///     fixed at startup.
+	/// </summary>
+	static (string Root, string Source) DefaultWorkspaceRoot()
+		=> ServerArgs.Current.Root is { } configured
+			? (Path.GetFullPath(configured), "configured root")
+			: (Environment.CurrentDirectory, "server working directory")
+	;
+	
+	/// <summary>
+	///     The default workspace as <c>roslyn_info</c> reports it (#298): the path an omitted
+	///     <c>projectPath</c> stands for, or the reason there is none, with the root it was looked
+	///     for in and the setting that named the root. The same cached answer as
+	///     <see cref="ResolveDefaultWorkspacePath"/>, and like it filesystem-only: asking never
+	///     loads a workspace.
+	/// </summary>
+	public DefaultWorkspaceInfo DescribeDefaultWorkspace()
+	{
+		var (root, _) = DefaultWorkspaceRoot();
+		var source    = ServerArgs.Current.RootSource ?? "server working directory";
+		
+		try {
+			
+			return new(ResolveDefaultWorkspacePath(), root, source, null);
+		}
+		catch(Exception ex) when(ex is NoDefaultWorkspaceException or MultipleProjectsFoundException or IOException or UnauthorizedAccessException) {
+			
+			return new(null, root, source, ex.Message);
+		}
 	}
 	
 	/// <summary>

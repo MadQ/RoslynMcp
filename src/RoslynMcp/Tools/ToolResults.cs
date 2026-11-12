@@ -736,8 +736,28 @@ internal sealed record InfoResult(
 	string?                                           Marker = null,
 	[property: JsonPropertyName("code_actions")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	CodeActionsInfo?                                  CodeActions = null
+	CodeActionsInfo?                                  CodeActions = null,
+	[property: JsonPropertyName("default_workspace")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	DefaultWorkspaceInfo?                             DefaultWorkspace = null
 ) : ToolResult;
+
+/// <summary>
+///     What an omitted <c>projectPath</c> stands for, as <c>roslyn_info</c> reports it (#298): the
+///     solution or project, or <paramref name="Unavailable"/> saying why there is none, with the
+///     root it was looked for in and what named that root (<c>--root</c>, <c>positional argument</c>,
+///     <c>ROSLYNMCP_ROOT</c> or <c>server working directory</c>).
+/// </summary>
+internal sealed record DefaultWorkspaceInfo(
+	[property: JsonPropertyName("path")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string? Path,
+	[property: JsonPropertyName("root")]        string Root,
+	[property: JsonPropertyName("root_source")] string RootSource,
+	[property: JsonPropertyName("unavailable")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	string? Unavailable
+);
 
 /// <summary>
 ///     The code-action host as <c>roslyn_info</c> reports it (#389): whether the Features composition

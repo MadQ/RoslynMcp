@@ -162,6 +162,14 @@ internal sealed class ServerArgs
     public string? Root { get; }
 
     /// <summary>
+    ///     Where <see cref="Root"/> came from: <c>--root</c>, <c>positional argument</c> or
+    ///     <c>ROSLYNMCP_ROOT</c>; <c>null</c> when it is unset and the process CWD stands in.
+    ///     Reported by <c>roslyn_info</c>, so that a default workspace nobody expected can be traced
+    ///     to the setting that chose it (#298).
+    /// </summary>
+    public string? RootSource { get; }
+
+    /// <summary>
     ///     Extra directory names the server stays out of when walking and watching a workspace, on
     ///     top of the built-in list (see <see cref="IgnoreRules"/>). CLI: <c>--ignore &lt;name&gt;</c>
     ///     (may repeat). Env: <c>ROSLYNMCP_IGNORE</c>, comma- or semicolon-separated. Bare directory
@@ -252,11 +260,27 @@ internal sealed class ServerArgs
                 continue;
             }
 
-            var value = i + 1 < length && !args[i + 1].StartsWith('-')
-                ? args[++i]
-                : (string?) null;
+            var flag = arg.ToLowerInvariant();
+            var next = i + 1 < length && !args[i + 1].StartsWith('-')
+                ? args[i + 1]
+                : null;
 
-            switch(arg.ToLowerInvariant()) {
+            // What follows a flag is its value only when the flag takes one. An on/off flag takes
+            // none, or only a token that reads as on/off: `--elicit .` must leave the `.` to be the
+            // positional root, which it used to swallow (#298). A flag this build does not know
+            // keeps the token, as it always has: it may be a newer build's flag with a value.
+            var value = flag switch {
+
+                "--no-buildhost-pin" or "--trust-project-providers" => null,
+                "--elicit"                                          => bool.TryParse(next, out _) ? next : null,
+                "--code-actions"                                    => ParseOnOff(next) is not null ? next : null,
+                _                                                   => next,
+            };
+
+            if(value is not null)
+                i++;
+
+            switch(flag) {
 
                 case "--workspace":
                     workspaceFlag = value;
@@ -297,7 +321,7 @@ internal sealed class ServerArgs
                     break;
 
                 case "--no-buildhost-pin":
-                    // Bare on/off flag; presence disables the BuildHost pin. Any value is ignored.
+                    // Bare on/off flag; presence disables the BuildHost pin. It takes no value.
                     noBuildHostPin = true;
                     break;
 
@@ -307,7 +331,7 @@ internal sealed class ServerArgs
                     break;
 
                 case "--trust-project-providers":
-                    // Bare on/off flag; presence grants the trust. Any value is ignored.
+                    // Bare on/off flag; presence grants the trust. It takes no value.
                     trustProjectProviders = true;
                     break;
             }
@@ -337,6 +361,11 @@ internal sealed class ServerArgs
         // Explicit flag beats the positional alias; either beats the env var. Empty means absent —
         // an empty root carries no meaning, same reasoning as MsBuildPath below.
         Root = NullIfEmpty(rootFlag) ?? NullIfEmpty(rootPositional) ?? NullIfEmpty(Env("ROSLYNMCP_ROOT"));
+
+        RootSource = NullIfEmpty(rootFlag) is not null ? "--root"
+            : NullIfEmpty(rootPositional) is not null ? "positional argument"
+            : Root is not null ? "ROSLYNMCP_ROOT"
+            : null;
 
         // LogPath keeps a presence-based merge: its empty string is load-bearing (logging disabled),
         // so an explicit --log-path "" must mask ROSLYNMCP_LOG_PATH. MsBuildPath has no such

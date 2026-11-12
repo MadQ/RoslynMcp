@@ -307,18 +307,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
-			// Annotate when non-obvious resolution occurred.
-			var kind = workspace.GetResolutionKind(projectPath)
-			;
-			
-			activeScope.Value?.Record(kind switch {
-				
-				ResolutionKind.Directory          => "dir→.csproj",
-				ResolutionKind.FileWalkUp         => "file→.csproj",
-				ResolutionKind.InferredFromCache  => $"inferred from '{Path.GetFileName(projectPath)}'",
-				ResolutionKind.Adhoc              => "adhoc (no .csproj)",
-				_                                 => null!
-			});
+			NoteResolution(projectPath);
 			
 			// Re-checked on originalPath: after a cache hit it is already the absolute path — nothing new to cache.
 			if(cacheable && !Path.IsPathRooted(originalPath)) {
@@ -326,9 +315,10 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				// Cache the absolute .csproj path, not the workspace root directory.
 				// GetWorkspaceInfo().RootPath is the solution root (e.g. J:\Projects\RoslynMcp),
 				// which when passed back on the next call would load an AdhocWorkspace with no
-				// BCL references. Path.GetFullPath resolves relative to CWD — the same resolution
-				// that WorkspaceManager.ResolveProjectPath performs.
-				var resolvedFull = Path.GetFullPath(originalPath)
+				// BCL references. Made absolute by the rule WorkspaceManager.ResolveProjectPath
+				// itself resolves by (default workspace root first, then the CWD), or the cached
+				// entry would name another path than the uncached call found (#298).
+				var resolvedFull = workspace.RootedPath(originalPath)
 				;
 				
 				lock(pathCacheLock) {
@@ -406,6 +396,27 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		}
 	}
 	/// <summary>
+	///     Annotates the log entry when the path was resolved in a way the argument does not show: a
+	///     relative path taken against the default workspace root and not the working directory
+	///     (#298), a directory or a file standing for its project, a name found in a loaded
+	///     workspace, or no project at all.
+	/// </summary>
+	void NoteResolution(string projectPath)
+	{
+		if(workspace.IsRootRelative(projectPath))
+			activeScope.Value?.Record("root-relative");
+		
+		activeScope.Value?.Record(workspace.GetResolutionKind(projectPath) switch {
+			
+			ResolutionKind.Directory          => "dir→.csproj",
+			ResolutionKind.FileWalkUp         => "file→.csproj",
+			ResolutionKind.InferredFromCache  => $"inferred from '{Path.GetFileName(projectPath)}'",
+			ResolutionKind.Adhoc              => "adhoc (no .csproj)",
+			_                                 => null!
+		});
+	}
+	
+	/// <summary>
 	///     Tries to resolve a project path and get the project instance. Returns structured errors on failure.
 	///     Use this for tools that need Project-level metadata (ProjectInfoTool, etc.).
 	/// </summary>
@@ -423,18 +434,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
 			
-			// Annotate when non-obvious resolution occurred.
-			var kind = workspace.GetResolutionKind(projectPath)
-			;
-			
-			activeScope.Value?.Record(kind switch {
-				
-				ResolutionKind.Directory          => "dir→.csproj",
-				ResolutionKind.FileWalkUp         => "file→.csproj",
-				ResolutionKind.InferredFromCache  => $"inferred from '{Path.GetFileName(projectPath)}'",
-				ResolutionKind.Adhoc              => "adhoc (no .csproj)",
-				_                                 => null!
-			});
+			NoteResolution(projectPath);
 			
 			return true;
 		}
@@ -1068,7 +1068,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     yet be inferred when the argument is omitted. RMCP009 pins it to that parameter shape.
 	/// </summary>
 	protected const string ProjectPathDescription =
-		"Path to a .csproj, project directory, or source file — absolute or relative (relative paths are resolved against the server's working directory). " +
+		"Path to a .csproj, project directory, or source file — absolute or relative (a relative path is resolved against the default workspace root when it exists there, else against the server's working directory). " +
 		"A .sln/.slnx only where the tool covers the whole solution; a tool that works on one project answers a solution with " +
 		"solution_needs_project and lists the .csproj files to choose from. " +
 		"REQUIRED - must be explicitly specified. " +
@@ -1083,7 +1083,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected const string OptionalProjectPathDescription =
 		"Optional — omit to use the session's default workspace (a solution or project set by the server's --root). Otherwise a .csproj, .sln/.slnx, " +
-		"project directory, or source file path (relative paths resolve against the server's working directory). For a solution — the default " +
+		"project directory, or source file path (a relative path resolves against the default workspace root when it exists there, else against the server's working directory). For a solution — the default " +
 		"one or one given — a filePath argument selects the project that contains that file."
 	;
 	

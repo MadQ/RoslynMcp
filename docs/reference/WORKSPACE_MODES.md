@@ -289,7 +289,8 @@ A tool call that omits `projectPath` uses the session's **default workspace**, r
 
 1. **Root:** `--root <path>` (or a bare positional path) > `ROSLYNMCP_ROOT` > the server's working directory.
 2. **Workspace:** a `.sln`/`.slnx`/`.csproj` root is used as-is. A directory resolves to the solution named by `"solution"` in `.madq_roslynmcp.json`, else the one `.sln`/`.slnx` in it, else the nearest solution above it, else its single `.csproj`.
-3. **Guards:** drive roots and system directories are rejected, the search never goes downward, and the default is never an AdhocWorkspace. With no usable default, the call fails with `missing_project_path` and a hint to pass `projectPath` or `--root`.
+3. **Relative paths:** a relative `projectPath` is resolved against the default workspace's directory when it names something there, and against the server's working directory otherwise. Tools report paths relative to the workspace root, so those can be passed back as they are. `roslyn_info` reports the default workspace and which setting chose its root.
+4. **Guards:** drive roots and system directories are rejected, the search never goes downward, and the default is never an AdhocWorkspace. With no usable default, the call fails with `missing_project_path` and a hint to pass `projectPath` or `--root`.
 
 File-based tools (`roslyn_read_file`, `roslyn_get_file_outline`, the editing tools, …) then pick the project **in that solution that contains the file**, so a file in any project works. Build, clean, and restore target the whole solution. A `.sln`/`.slnx` path is also accepted as an explicit `projectPath`.
 
