@@ -306,6 +306,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			compilation = ResolveWithRetry("TryGetCompilation", () => workspace.GetCompilation(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
 			
 			// Annotate when non-obvious resolution occurred.
 			var kind = workspace.GetResolutionKind(projectPath)
@@ -422,6 +423,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			project = ResolveWithRetry("TryGetProject", () => workspace.GetProject(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
 			
 			// Annotate when non-obvious resolution occurred.
 			var kind = workspace.GetResolutionKind(projectPath)
@@ -575,6 +577,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			boundary = ResolveWithRetry("TryResolveFileContext", () => workspace.GetSecurityBoundary(projectPath));
 			
 			activeScope.Value?.SetWorkspaceMode(isMSBuild);
+			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
 			
 			return true;
 		}
@@ -607,6 +610,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			// (search, list) would otherwise log an AdhocWorkspace call with an MSBuild label (#303).
 			// The instance is already loaded by GetSolution, so the lookup is a cache hit.
 			activeScope.Value?.SetWorkspaceMode(workspace.IsAdhoc(projectPath) is false);
+			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
 			
 			return true;
 		}
@@ -714,6 +718,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			rootPath = rPath;
 			
 			activeScope.Value?.SetWorkspaceMode(isMSBuild);
+			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
 			
 			return true;
 		}
@@ -751,6 +756,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			csprojPath = csproj;
 			
 			activeScope.Value?.SetWorkspaceMode(msb);
+			activeScope.Value?.NoteWorkspace(workspace.GetChangeCounter(projectPath));
 			
 			return true;
 		}
@@ -1444,7 +1450,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		var hasMore = skip + page.Length < allResults.Length;
 		
 		var token = hasMore
-			? new PageCursor(paginationCache.Store(allResults, shape, activeScope.Value?.PaginationKey), skip + page.Length, take).ToString()
+			? new PageCursor(paginationCache.Store(allResults, shape, activeScope.Value?.PaginationKey, activeScope.Value?.WorkspaceUnchanged), skip + page.Length, take).ToString()
 			: null
 		;
 		

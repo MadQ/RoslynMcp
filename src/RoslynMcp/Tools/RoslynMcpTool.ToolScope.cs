@@ -51,6 +51,47 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records the workspace mode so the log line can show MSB/ADH.</summary>
 		internal void SetWorkspaceMode(bool isMSBuild) => this.isMSBuild = isMSBuild;
 		
+		WorkspaceChangeCounter? usedWorkspace;
+		long                    usedWorkspaceAt;
+		
+		/// <summary>
+		///     Records the workspace this call computes its result from, and how often that
+		///     workspace had changed by then. Called by every resolution guard, beside
+		///     <see cref="SetWorkspaceMode"/>; the first one counts, since that is where the call
+		///     took its view of the code.
+		/// </summary>
+		internal void NoteWorkspace(WorkspaceChangeCounter changes)
+		{
+			if(usedWorkspace is not null)
+				
+				return;
+			
+			usedWorkspace   = changes;
+			usedWorkspaceAt = changes.Value;
+		}
+		
+		/// <summary>
+		///     Whether the workspace this call used is still as it was when the call took its view
+		///     of it, for a result that is kept beyond the call (#435). Null for a call that used
+		///     no workspace: its result is not tied to one. A cached result carries this, and a
+		///     later page is cut from it only while it says yes: a change made through the server
+		///     clears the cache, but a save in an editor reaches the workspace through the watcher
+		///     and cleared nothing, so the next page came from before the change.
+		/// </summary>
+		internal Func<bool>? WorkspaceUnchanged
+		{
+			get
+			{
+				if(usedWorkspace is not { } changes)
+					
+					return null;
+				
+				var at = usedWorkspaceAt;
+				
+				return () => changes.Value == at;
+			}
+		}
+		
 		/// <summary>
 		///     The <c>filePath</c> of this call when it names no document of any project in the solution
 		///     the call resolved to (#376). The call keeps the solution — a tool that only reads or writes

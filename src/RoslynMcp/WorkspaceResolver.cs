@@ -93,6 +93,14 @@ internal sealed class WorkspaceResolver
 		return manager.GetLastSyncedUtc(resolved);
 	}
 	
+	/// <summary>The change counter of the workspace that serves the project path (#435).</summary>
+	public WorkspaceChangeCounter GetChangeCounter(string projectPath)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.GetChangeCounter(resolved);
+	}
+	
 	public Solution PeekSolution(string projectPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);

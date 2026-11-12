@@ -14,7 +14,9 @@ internal sealed class PaginationCache
 {
 	// Shape is the tool's own page-to-result function, stored with the items so every later page
 	// is built by the same code as the first — a Func<PaginatedResult<T>, object> for the T[] in Items.
-	record CachedResult(Array Items, Delegate Shape, string? QueryKey, DateTime LastAccess);
+	// StillCurrent says whether the workspace the items were computed from is as it was then; null
+	// for items that came from no workspace.
+	record CachedResult(Array Items, Delegate Shape, string? QueryKey, Func<bool>? StillCurrent, DateTime LastAccess);
 	
 	private readonly Dictionary<string, CachedResult> cache = new();
 	private readonly object syncRoot = new();
@@ -22,8 +24,13 @@ internal sealed class PaginationCache
 	private const int              MaxEntries = 50;
 	private static readonly TimeSpan Ttl      = TimeSpan.FromSeconds(60);
 	
-	/// <summary>Stores a full result set with its shape function and returns the entry's id.</summary>
-	public string Store<T>(T[] items, Func<PaginatedResult<T>, object> shape, string? queryKey)
+	/// <summary>
+	///     Stores a full result set with its shape function and returns the entry's id.
+	///     <paramref name="stillCurrent"/> is asked at every later lookup, and an entry it says no
+	///     for is not served (#435): the cache is cleared by the server's own writes, but a change
+	///     someone else makes reaches the workspace through the watcher, which clears nothing.
+	/// </summary>
+	public string Store<T>(T[] items, Func<PaginatedResult<T>, object> shape, string? queryKey, Func<bool>? stillCurrent)
 	{
 		var id = Guid.NewGuid().ToString("N")[..12];
 		
@@ -39,7 +46,7 @@ internal sealed class PaginationCache
 				cache.Remove(oldest.Key);
 			}
 			
-			cache[id] = new CachedResult(items, shape, queryKey, DateTime.UtcNow);
+			cache[id] = new CachedResult(items, shape, queryKey, stillCurrent, DateTime.UtcNow);
 		}
 		
 		return id;
@@ -47,8 +54,9 @@ internal sealed class PaginationCache
 	
 	/// <summary>
 	///     Looks up an entry by id and issuing tool/query identity. False when it is unknown, expired,
-	///     belongs to another query, or holds a different element type. A mismatch leaves the entry
-	///     it belongs to untouched; an unavailable identity never hits.
+	///     belongs to another query, holds a different element type, or was computed from a
+	///     workspace that has changed since. A mismatch leaves the entry it belongs to untouched; an
+	///     unavailable identity never hits.
 	/// </summary>
 	public bool TryGet<T>(
 		string id,
@@ -61,6 +69,7 @@ internal sealed class PaginationCache
 			if(cache.TryGetValue(id, out var entry)
 				&& DateTime.UtcNow - entry.LastAccess < Ttl
 				&& queryKey is not null && entry.QueryKey == queryKey
+				&& entry.StillCurrent?.Invoke() != false
 				&& entry.Items is T[] typed
 				&& entry.Shape is Func<PaginatedResult<T>, object> typedShape) {
 				
