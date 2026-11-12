@@ -81,6 +81,45 @@ static partial class DefaultWorkspaceTests
 					$"expected two candidates by the simple name and Lib's body by the qualified one; got {bare?.ToJsonString() ?? "null"} / {body}");
 			}),
 			
+			// Greet is declared in Lib and visible from App. Asked for through App, the call graph
+			// cannot read its body: the file is not App's. It used to throw, and with the foreign
+			// files skipped it would answer with an empty graph, which reads as "calls nothing". It
+			// must say that the symbol is another project's.
+			new("DefaultWorkspace: the call graph of a symbol declared in a referenced project is an error, not an empty graph", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_call_graph", new { symbolName = "Greet", containingType = "Greeter", projectPath = fx.PathOf("App/App.csproj") });
+				
+				return Verdict(ok && (data?["error"]?.GetValue<string>() ?? "").Contains("another project"),
+					$"expected an error naming another project; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// A qualified name that no source declaration answers to is not handed to a declaration
+			// of its last part. App and Lib each declare a class Timer; System.Threading.Timer is
+			// the framework's. Taken by its last part the name is "declared in 2 projects", an
+			// error. Two namesakes, not one: with one the call would land in that project, whose
+			// compilation resolves the framework type all the same, and the test could not fail.
+			// The hierarchy must be the framework type's, whose base is MarshalByRefObject.
+			new("DefaultWorkspace: a qualified framework name is not taken for a source type of the same simple name", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_type_hierarchy", new { typeName = "System.Threading.Timer" });
+				var text       = data?.ToJsonString() ?? "null";
+				
+				return Verdict(ok && data?["error"] is null && text.Contains("MarshalByRefObject"),
+					$"expected the hierarchy of System.Threading.Timer, with MarshalByRefObject; got {text}");
+			}),
+			
+			// A constructor is in the declaration index under its type's name, not as .ctor, so the
+			// index has nothing for it and each project's compilation is asked. CtorHolder's
+			// constructor is in Lib and calls CtorInit: the graph must show that call.
+			new("DefaultWorkspace: a constructor is found through the per-project lookup", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_call_graph", new { symbolName = ".ctor", containingType = "CtorHolder" });
+				var text       = data?.ToJsonString() ?? "null";
+				
+				return Verdict(ok && data?["error"] is null && text.Contains("CtorInit"),
+					$"expected the call to CtorInit; got {text}");
+			}),
+			
 			// The frameworks of a multi-targeted project are one project. Split has two target
 			// frameworks, so Roslyn holds it twice, and its class is declared "twice"; a lookup
 			// through its solution must find one project and return the member, not a candidate

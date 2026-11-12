@@ -15,9 +15,10 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 		"Given a method name and containing type, returns all overloads with full signatures. " +
 		"Use this before editing, calling, renaming, or changing a method that may have multiple overloads. " +
 		"Requires containingType so results stay scoped to one type instead of mixing unrelated methods across the project.")]
-	public object FindOverloads(
+	public async Task<object> FindOverloads(
 		[Description("Method name to find overloads for, e.g. 'Save', 'ProcessOrder'.")] string methodName,
 		[Description("Containing type that declares the method, e.g. 'UserService' or 'MyApp.Services.UserService'.")] string containingType,
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
 		using var scope = BeginTool("roslyn_find_overloads", methodName, new { containingType });
@@ -26,9 +27,13 @@ internal sealed class FindOverloadsTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, methodName, containingType, SymbolSought.Method, out projectPath, out var projectError))
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, methodName, containingType, SymbolSought.Method, null, cancellationToken);
+		
+		if(projectError is not null)
 			
 			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

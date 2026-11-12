@@ -39,9 +39,13 @@ internal sealed class TypeHierarchyTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, typeName, null, SymbolSought.Type, out projectPath, out var projectError))
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, typeName, null, SymbolSought.Type, null, cancellationToken);
+		
+		if(projectError is not null)
 			
 			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

@@ -18,8 +18,9 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		"For full parsed documentation (parameters, returns, remarks), use roslyn_get_symbol_documentation. " +
 		"Returns a structured metadata error if the symbol is defined in a compiled assembly rather than " +
 		"project source — the definition is not available as source in that case.")]
-	public object GetSymbolDefinition(
+	public async Task<object> GetSymbolDefinition(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
@@ -29,9 +30,13 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Any, out projectPath, out var projectError))
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.Any, null, cancellationToken);
+		
+		if(projectError is not null)
 			
 			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

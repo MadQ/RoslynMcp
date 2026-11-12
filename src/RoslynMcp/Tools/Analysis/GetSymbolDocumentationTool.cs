@@ -20,8 +20,9 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 		"For a brief summary only, use roslyn_get_symbol_definition; for full source code when docs are " +
 		"absent, use roslyn_get_member_body. " +
 		"Returns a structured empty result (not an error) when no XML doc comments are found for the symbol.")]
-	public object GetSymbolDocumentation(
+	public async Task<object> GetSymbolDocumentation(
 		[Description("The symbol name, e.g. 'WorkspaceManager', 'GetCompilation', 'RootPath'.")] string symbolName,
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types have a member with the same name, e.g. 'WorkspaceManager'.")] string? containingType = null)
 	{
@@ -31,9 +32,13 @@ internal sealed class GetSymbolDocumentationTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Any, out projectPath, out var projectError))
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.Any, null, cancellationToken);
+		
+		if(projectError is not null)
 			
 			return scope.Error(projectError);
+		
+		projectPath = resolvedProject;
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
