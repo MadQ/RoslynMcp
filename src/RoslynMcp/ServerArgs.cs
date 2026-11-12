@@ -461,6 +461,8 @@ internal sealed class ServerArgs
             CodeActions          = envCodeActions ?? true;
         }
 
+        // A grant from either source, as for the pin above: `--trust-project-providers false` is
+        // no grant of its own, and does not take back one the env var or the user's file gives.
         TrustProjectProviders = trustProjectProviders || EnvTrue("ROSLYNMCP_TRUST_PROJECT_PROVIDERS");
         UserConfigPath        = NullIfEmpty(Env("ROSLYNMCP_USER_CONFIG"));
 
