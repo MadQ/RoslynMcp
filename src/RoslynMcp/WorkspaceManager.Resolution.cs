@@ -78,9 +78,13 @@ internal sealed partial class WorkspaceManager
 	///     workspace first, when there is one and the path names something in it, and against the
 	///     working directory otherwise (#298). Tools report paths relative to the workspace root, so
 	///     that is what an agent passes back, and a client often starts the server somewhere else,
-	///     which is why <c>--root</c> exists. The working directory stays the fallback so that every
-	///     path that resolved before still does; with no default workspace nothing changes. Only the
-	///     startup inputs and the file system decide, never which workspaces are loaded.
+	///     which is why <c>--root</c> exists. The working directory stays the fallback, so every
+	///     path that resolved before still resolves; with no default workspace nothing changes.
+	///     One thing does change: a path that names something under both directories ("." or "src",
+	///     with the server started in another checkout) now means the one under the default root.
+	///     The root is what the user pointed the server at, and it is what the paths in tool
+	///     results are relative to. Only the startup inputs and the file system decide, never which
+	///     workspaces are loaded.
 	/// </summary>
 	public string RootedPath(string inputPath, out bool underDefaultRoot)
 	{
@@ -95,19 +99,9 @@ internal sealed partial class WorkspaceManager
 			
 			return Path.GetFullPath(inputPath);
 		
-		string? root;
-		
-		try {
-			root = Path.GetDirectoryName(ResolveDefaultWorkspacePath());
-		}
-		catch(Exception ex) when(ex is NoDefaultWorkspaceException or MultipleProjectsFoundException or IOException or UnauthorizedAccessException) {
-			
-			root = null;
-		}
-		
 		var underWorkingDirectory = Path.GetFullPath(inputPath);
 		
-		if(root is null)
+		if(DefaultWorkspaceDirectory() is not { } root)
 			
 			return underWorkingDirectory;
 		
@@ -122,6 +116,46 @@ internal sealed partial class WorkspaceManager
 		
 		return underRoot;
 	}
+	
+	// When the search for a default workspace last came up empty. The search lists directories and
+	// walks up to the drive root, and RootedPath asks several times per tool call, so an empty
+	// answer is kept for a moment. Not for good: a solution may be created while the server runs,
+	// and an omitted projectPath, which always searches, would find it.
+	const int NoDefaultRetryMs = 2_000;
+	
+	// Starts one interval before any tick count, so the first question always searches.
+	long noDefaultSince = -NoDefaultRetryMs;
+	
+	/// <summary>
+	///     The directory of the default workspace, which relative paths are tried against first;
+	///     <see langword="null"/> when there is no default workspace.
+	/// </summary>
+	string? DefaultWorkspaceDirectory()
+	{
+		if(Volatile.Read(ref defaultWorkspacePath) is null && Environment.TickCount64 - Volatile.Read(ref noDefaultSince) < NoDefaultRetryMs)
+			
+			return null;
+		
+		try {
+			
+			return Path.GetDirectoryName(ResolveDefaultWorkspacePath());
+		}
+		catch(Exception ex) when(IsDefaultLookupFailure(ex)) {
+			
+			Volatile.Write(ref noDefaultSince, Environment.TickCount64);
+			
+			return null;
+		}
+	}
+	
+	/// <summary>
+	///     What the search for a default workspace fails with: nothing found, several found, a
+	///     directory that cannot be read, or a configured root that is not a path at all.
+	/// </summary>
+	static bool IsDefaultLookupFailure(Exception ex)
+		=> ex is NoDefaultWorkspaceException or MultipleProjectsFoundException or IOException or UnauthorizedAccessException
+			or ArgumentException or NotSupportedException or System.Security.SecurityException
+	;
 	
 	/// <summary>
 	///     Walks upward from <paramref name="startDir"/> looking for a single .sln or .slnx file.
@@ -293,14 +327,19 @@ internal sealed partial class WorkspaceManager
 	/// </summary>
 	public DefaultWorkspaceInfo DescribeDefaultWorkspace()
 	{
-		var (root, _) = DefaultWorkspaceRoot();
-		var source    = ServerArgs.Current.RootSource ?? "server working directory";
+		var source = ServerArgs.Current.RootSource ?? "server working directory";
+		
+		// The root as it was given, until it has been made a full path: that step fails for a
+		// root that is not a path, and the answer must still name it.
+		var root = ServerArgs.Current.Root ?? Environment.CurrentDirectory;
 		
 		try {
 			
+			(root, _) = DefaultWorkspaceRoot();
+			
 			return new(ResolveDefaultWorkspacePath(), root, source, null);
 		}
-		catch(Exception ex) when(ex is NoDefaultWorkspaceException or MultipleProjectsFoundException or IOException or UnauthorizedAccessException) {
+		catch(Exception ex) when(IsDefaultLookupFailure(ex)) {
 			
 			return new(null, root, source, ex.Message);
 		}

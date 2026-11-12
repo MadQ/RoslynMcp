@@ -74,30 +74,39 @@ static partial class DefaultWorkspaceTests
 			}),
 			
 			// The argument reader took the token after any flag as that flag's value, so
-			// "--elicit ." lost the positional root to a flag that takes none. A server is
-			// started with both on/off flags of that kind before a positional root and no
-			// --root; roslyn_info must report the fixture's solution, from the positional
-			// argument. A swallowed root would leave the working directory, which holds no
-			// solution.
+			// "--elicit ." lost the positional root to a flag that takes none. Three servers are
+			// started with no --root, each with a positional root in another place: directly after
+			// --elicit, directly after --no-buildhost-pin (which never had a value), and after an
+			// on/off token that does belong to the flag before it. roslyn_info must report the
+			// fixture's solution, from the positional argument, every time: a swallowed root would
+			// leave the working directory, which holds no solution, and an on/off token left
+			// behind would become the root itself.
 			new("DefaultWorkspace: an on/off flag does not swallow the positional root after it", async () => {
 				
-				var logPath = Path.Combine(TestFixtures.TempRoot, "logs", $"defaultws-flags-{Guid.NewGuid():N}.log");
+				var failures = new List<string>();
 				
-				var (process, server) = await StartServerWithArgsAsync(ctx, fx.Dir, logPath, new Dictionary<string, string>(), $"--no-buildhost-pin --elicit \"{fx.Dir}\"");
+				foreach(var flags in new[] { "--no-buildhost-pin --elicit", "--elicit --no-buildhost-pin", "--elicit off --no-buildhost-pin true" }) {
+					
+					var logPath = Path.Combine(TestFixtures.TempRoot, "logs", $"defaultws-flags-{Guid.NewGuid():N}.log");
+					
+					var (process, server) = await StartServerWithArgsAsync(ctx, fx.Dir, logPath, new Dictionary<string, string>(), $"{flags} \"{fx.Dir}\"");
+					
+					try {
+						
+						var (ok, data) = await Call(server, "roslyn_info", new { });
+						var info       = data?["default_workspace"];
+						
+						if(!ok
+							|| !(info?["path"]?.GetValue<string>() ?? "").EndsWith("DefaultWs.slnx")
+							|| info?["root_source"]?.GetValue<string>() != "positional argument")
+							failures.Add($"after '{flags}': {info?.ToJsonString() ?? "null"}");
+					}
+					finally {
+						await StopServerAsync(process, server);
+					}
+				}
 				
-				try {
-					
-					var (ok, data) = await Call(server, "roslyn_info", new { });
-					var info       = data?["default_workspace"];
-					
-					return Verdict(ok
-						&& (info?["path"]?.GetValue<string>() ?? "").EndsWith("DefaultWs.slnx")
-						&& info?["root_source"]?.GetValue<string>() == "positional argument",
-						$"expected DefaultWs.slnx from the positional argument; got {info?.ToJsonString() ?? "null"}");
-				}
-				finally {
-					await StopServerAsync(process, server);
-				}
+				return Verdict(failures.Count == 0, $"expected DefaultWs.slnx from the positional argument; got {string.Join("; ", failures)}");
 			}),
 			
 			// dotnet build of a solution with -f fails for every project that does not target

@@ -214,6 +214,9 @@ internal sealed class BuildTool : RoslynMcpTool
 		var elapsed  = TimeSpan.Zero;
 		var exitCode = 0;
 		
+		// The output of the first build that failed, for the tail shown when no error line parses.
+		string? failedOutput = null;
+		
 		try {
 			
 			foreach(var target in buildTargets) {
@@ -223,10 +226,15 @@ internal sealed class BuildTool : RoslynMcpTool
 				output  += text;
 				elapsed += took;
 				
-				// The first failure is the one reported; the projects after it are still built, as
-				// a solution build goes on past a project that fails.
-				if(exitCode == 0)
-					exitCode = code;
+				// Each build is judged on its own output: read from the joined text, one project's
+				// "Build succeeded." would pass for another's failure. The first failure is the one
+				// reported; the projects after it are still built, as a solution build goes on past
+				// a project that fails.
+				if(failedOutput is null && !BuildSucceeded(text, code, rootPath)) {
+					
+					failedOutput = text;
+					exitCode     = code;
+				}
 			}
 		}
 		catch(OperationCanceledException) {
@@ -256,18 +264,12 @@ internal sealed class BuildTool : RoslynMcpTool
 		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")]
 		;
 		
-		// dotnet build sometimes exits with a non-zero code despite a clean compilation —
-		// MSBuild analyzer diagnostics (MSBL*, NU*) can set the exit code without emitting
-		// a parseable CS error line. Trust the output text over the exit code: if the output
-		// says "Build succeeded." and we found no structured errors, the build succeeded.
-		var buildSucceededText = output.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase)
-		;
-		var succeeded          = exitCode == 0 || (errors.Length == 0 && buildSucceededText);
+		var succeeded = failedOutput is null;
 		
 		// When genuinely failed with no structured errors (locked file, linker, restore),
 		// surface the raw output tail so agents don't need to run dotnet build themselves.
-		var errorDetails = !succeeded && errors.Length == 0
-			? TailLines(output, 30)
+		var errorDetails = failedOutput is not null && errors.Length == 0
+			? TailLines(failedOutput, 30)
 			: null
 		;
 		
@@ -334,50 +336,88 @@ internal sealed class BuildTool : RoslynMcpTool
 	}
 	
 	/// <summary>
-	///     The project files of a solution that target a framework, each once. A multi-targeted
-	///     project says so in its name (<see cref="FrameworkOf"/>). A project with one framework
-	///     does not, and is told by the framework directory of its output path; one whose output
-	///     path has no such directory is kept, and dotnet decides, as it did for every project
-	///     before.
+	///     Whether one dotnet build succeeded. dotnet build sometimes exits with a non-zero code
+	///     despite a clean compilation: MSBuild analyzer diagnostics (MSBL*, NU*) can set the exit
+	///     code without emitting a parseable CS error line. The output text is trusted over the exit
+	///     code: "Build succeeded." with no structured error is a build that succeeded.
+	/// </summary>
+	static bool BuildSucceeded(string output, int exitCode, string rootPath)
+		=> exitCode == 0
+			|| (output.Contains("Build succeeded.", StringComparison.OrdinalIgnoreCase)
+				&& !ParseMSBuildDiagnostics(output, rootPath).Any(d => d.Severity == "error"))
+	;
+	
+	/// <summary>
+	///     The project files of a solution to build for a framework: those that target it, each
+	///     once, without the ones another of them references, since building a project builds what
+	///     it references. A multi-targeted project says what it targets in its name
+	///     (<see cref="FrameworkOf"/>). A project with one framework does not, and is told by the
+	///     framework directory of its output path; one whose output path shows none is kept, and
+	///     dotnet decides, as it did for every project before.
 	/// </summary>
 	static string[] ProjectsTargeting(Solution solution, string targetFramework)
 	{
-		var files = new List<string>();
+		var targeting = new List<Project>();
 		
 		foreach(var project in solution.Projects) {
 			
-			if(project.FilePath is not { } file || files.Contains(file, SecurityBoundary.PathComparer))
+			if(project.FilePath is not { } file || targeting.Any(taken => SecurityBoundary.PathComparer.Equals(taken.FilePath, file)))
 				continue;
 			
 			var targets = FrameworkOf(project) is { } framework
 				? string.Equals(framework, targetFramework, StringComparison.OrdinalIgnoreCase)
-				: project.OutputFilePath is not { } outputPath
-					|| !HasFrameworkDirectory(outputPath)
-					|| outputPath.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Contains(targetFramework, StringComparer.OrdinalIgnoreCase)
+				: FrameworkDirectories(project) is not { Length: > 0 } directories
+					|| directories.Contains(targetFramework, StringComparer.OrdinalIgnoreCase)
 			;
 			
 			if(targets)
-				files.Add(file);
+				targeting.Add(project);
 		}
 		
-		return [..files];
+		var graph = solution.GetProjectDependencyGraph();
+		
+		// By file, not by id: a multi-targeted project is several Roslyn projects, and a reference
+		// to any of them builds the one project file.
+		var referenced = targeting
+			.SelectMany(project => graph.GetProjectsThatThisProjectTransitivelyDependsOn(project.Id))
+			.Select(id => solution.GetProject(id)?.FilePath)
+			.OfType<string>()
+			.ToHashSet(SecurityBoundary.PathComparer)
+		;
+		
+		return [..targeting.Select(project => project.FilePath!).Where(file => !referenced.Contains(file))];
 	}
 	
-	/// <summary>Whether an output path has a directory named like a target framework (<c>bin/Debug/net10.0/</c>).</summary>
-	static bool HasFrameworkDirectory(string outputPath)
+	/// <summary>
+	///     The directories of a project's output path that are named like a target framework
+	///     (<c>bin/Debug/net10.0/</c>), looked for below the project's own directory only: a
+	///     checkout under <c>C:\net48-legacy\</c> says nothing about the project. Empty when the
+	///     output lies elsewhere or shows no framework.
+	/// </summary>
+	static string[] FrameworkDirectories(Project project)
 	{
-		foreach(var part in Path.GetDirectoryName(outputPath)?.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) ?? []) {
+		if(project.OutputFilePath is not { } outputPath || Path.GetDirectoryName(project.FilePath) is not { } projectDirectory)
 			
-			// "net" and a digit, or "netstandard"/"netcoreapp": not a directory that merely starts with net.
-			if(part.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase)
-				|| part.StartsWith("netcoreapp", StringComparison.OrdinalIgnoreCase)
-				|| (part.Length > 3 && part.StartsWith("net", StringComparison.OrdinalIgnoreCase) && char.IsAsciiDigit(part[3])))
-				
-				return true;
-		}
+			return [];
 		
-		return false;
+		var below = Path.GetRelativePath(projectDirectory, Path.GetDirectoryName(outputPath) ?? outputPath);
+		
+		if(Path.IsPathRooted(below) || below.StartsWith("..", StringComparison.Ordinal))
+			
+			return [];
+		
+		return [..below.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Where(IsFrameworkName)];
 	}
+	
+	/// <summary>
+	///     Whether a directory name reads as a target framework: "net" and a digit, or
+	///     "netstandard"/"netcoreapp", and not a name that merely starts with net.
+	/// </summary>
+	static bool IsFrameworkName(string part)
+		=> part.StartsWith("netstandard", StringComparison.OrdinalIgnoreCase)
+			|| part.StartsWith("netcoreapp", StringComparison.OrdinalIgnoreCase)
+			|| (part.Length > 3 && part.StartsWith("net", StringComparison.OrdinalIgnoreCase) && char.IsAsciiDigit(part[3]))
+	;
 	
 	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope, CancellationToken cancellationToken)
 		=> await DotnetRunner.RunAsync(args, workingDirectory, scope.Record, cancellationToken);

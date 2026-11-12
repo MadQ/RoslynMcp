@@ -265,16 +265,16 @@ internal sealed class ServerArgs
                 ? args[i + 1]
                 : null;
 
-            // What follows a flag is its value only when the flag takes one. An on/off flag takes
-            // none, or only a token that reads as on/off: `--elicit .` must leave the `.` to be the
-            // positional root, which it used to swallow (#298). A flag this build does not know
-            // keeps the token, as it always has: it may be a newer build's flag with a value.
+            // What follows a flag is its value only when the flag takes one. After an on/off flag
+            // that is a token that reads as on/off, and nothing else: `--elicit .` must leave the
+            // `.` to be the positional root, which it used to swallow (#298), while
+            // `--no-buildhost-pin true` must not make `true` the root. A flag this build does not
+            // know keeps the token, as it always has: it may be a newer build's flag with a value.
             var value = flag switch {
 
-                "--no-buildhost-pin" or "--trust-project-providers" => null,
-                "--elicit"                                          => bool.TryParse(next, out _) ? next : null,
-                "--code-actions"                                    => ParseOnOff(next) is not null ? next : null,
-                _                                                   => next,
+                "--no-buildhost-pin" or "--trust-project-providers" or "--elicit" or "--code-actions"
+                    => ParseOnOff(next) is not null ? next : null,
+                _   => next,
             };
 
             if(value is not null)
@@ -321,7 +321,7 @@ internal sealed class ServerArgs
                     break;
 
                 case "--no-buildhost-pin":
-                    // Bare on/off flag; presence disables the BuildHost pin. It takes no value.
+                    // Bare on/off flag; presence disables the BuildHost pin. An on/off token after it is taken and ignored.
                     noBuildHostPin = true;
                     break;
 
@@ -331,7 +331,7 @@ internal sealed class ServerArgs
                     break;
 
                 case "--trust-project-providers":
-                    // Bare on/off flag; presence grants the trust. It takes no value.
+                    // Bare on/off flag; presence grants the trust. An on/off token after it is taken and ignored.
                     trustProjectProviders = true;
                     break;
             }
@@ -392,13 +392,15 @@ internal sealed class ServerArgs
             : !envVsVersionValid && !string.IsNullOrWhiteSpace(envVsVersion) ? envVsVersion
             : null;
 
-        // Per-value precedence: the CLI flag binds only when it parses to a valid bool;
+        // Per-value precedence: the CLI flag binds only when it reads as on/off;
         // otherwise the env var is consulted. An unparseable --elicit value must not
         // suppress a valid ROSLYNMCP_ELICIT. A valid value from either source counts as
         // "specified" and blocks the project-config layer; otherwise the decision stays open.
-        // That tri-state is why this uses bool.TryParse rather than the EnvTrue helper below —
-        // it needs to distinguish "parsed" from "false". Plain on/off flags use EnvTrue.
-        if(bool.TryParse(elicitFlag, out var cliElicit)) {
+        // That tri-state is why the env var uses bool.TryParse rather than the EnvTrue helper
+        // below — it needs to distinguish "parsed" from "false". Plain on/off flags use EnvTrue.
+        // The CLI value is read as the argument loop took it (ParseOnOff): `--elicit off` must
+        // not come out as on.
+        if(ParseOnOff(elicitFlag) is { } cliElicit) {
 
             ElicitSpecified = true;
             Elicit          = cliElicit;
@@ -481,9 +483,9 @@ internal sealed class ServerArgs
     /// <summary>An on/off switch value; null when the value is absent or neither — the caller then asks the next source.</summary>
     static bool? ParseOnOff(string? value) => value?.ToLowerInvariant() switch {
 
-        "on" or "true" or "1"   => true,
-        "off" or "false" or "0" => false,
-        _                       => null,
+        "on" or "true" or "yes" or "1"  => true,
+        "off" or "false" or "no" or "0" => false,
+        _                               => null,
     };
 
     /// <summary>
