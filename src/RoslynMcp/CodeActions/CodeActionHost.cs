@@ -28,9 +28,10 @@ internal sealed class CodeActionHost
 	// internal). The LSP host skips those too: the apply path writes documents and nothing else.
 	const string RequiresNonDocumentChangeTag = "RequiresNonDocumentChange";
 	
-	// Built-ins the server never runs, by the stem of their type name (see IsDenied): the server has
+	// Built-ins the server never offers, by the stem of their type name (see IsDenied): the server has
 	// its own signature change; rename tracking is an editor feature; the rest open a dialog, so every
-	// action of theirs would be filtered out anyway, and not running them saves the work.
+	// action of theirs would be filtered out anyway. They are run for one thing only: the list tool's
+	// log note on which of them would have had an action (DeniedWithActionsAsync, #449).
 	static readonly ImmutableHashSet<string> builtInDeny = ImmutableHashSet.Create(StringComparer.OrdinalIgnoreCase,
 		"ChangeSignature", "RenameTracking", "ExtractInterface", "ExtractClass", "PullMemberUp", "MoveStaticMembers", "MoveToNamespace");
 	
