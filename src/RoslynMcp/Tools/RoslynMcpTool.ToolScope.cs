@@ -51,6 +51,17 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>Records the workspace mode so the log line can show MSB/ADH.</summary>
 		internal void SetWorkspaceMode(bool isMSBuild) => this.isMSBuild = isMSBuild;
 		
+		string? project;
+		
+		/// <summary>
+		///     Records the project path a resolution guard is working on, for the log entry of a call
+		///     that fails. The last one counts: a tool that narrows a solution to a project resolves
+		///     the solution first.
+		/// </summary>
+		internal void NoteProject(string projectPath)
+			=> project = projectPath
+		;
+		
 		WorkspaceChangeCounter? usedWorkspace;
 		long                    usedWorkspaceAt;
 		bool                    usedWorkspaceForCode;
@@ -439,6 +450,13 @@ internal abstract partial class RoslynMcpTool
 				: detail is null ? notes
 				: $"{detail}; {notes}"
 			;
+			
+			// A failed call says which project it was resolved against (#449). The arguments of a
+			// failure are logged, but not every tool has projectPath among them, and since #296
+			// the project is often one the server picked: seven "type not found" answers could
+			// be tied to their project only through a neighbouring line of the log.
+			if(failed && project is not null)
+				logged = logged is null ? $"project {project}" : $"{logged}; project {project}";
 			
 			log.LogTool(name, elapsed, !failed, isMSBuild, estimatedTokens, subject, logged, cacheTag, responsePeek, args);
 			

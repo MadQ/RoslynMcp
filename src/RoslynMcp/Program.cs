@@ -260,6 +260,7 @@ lifetime.ApplicationStarted.Register(() => {
 		logger.LogInfo("Workspace", $"WARN: --vs-version / ROSLYNMCP_VS_VERSION value '{ServerArgs.Current.VsVersionRejected}' is not a major (17), major.minor (17.14), or vswhere range ([17.0,18.0)) — ignored");
 	
 	ServerHeartbeat.Initialize();
+	ThreadPoolProbe.Start(logger);
 	
 	// Warn if any agent config points to a stale path (e.g. after dotnet tool update).
 	var currentExe = Environment.ProcessPath

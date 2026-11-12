@@ -61,6 +61,10 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			
 			return scope.Error(new ErrorResult(modeError));
 		
+		// In every entry, not only a failed one's arguments: whether edits to C# are one-line
+		// literals or patterns across lines is what says which other tool could have made them (#449).
+		scope.Record(matchMode.ToString().ToLowerInvariant());
+		
 		Regex regex;
 		
 		try {

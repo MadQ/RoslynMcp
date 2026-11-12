@@ -115,7 +115,16 @@ internal sealed record ResolvedProviders(
 	CodeActionSettings                                     Settings,
 	ImmutableArray<ProviderEntry<CodeRefactoringProvider>> Refactorings,
 	ImmutableArray<ProviderEntry<CodeFixProvider>>         Fixes,
-	ImmutableArray<ProviderSourceReport>                   Sources);
+	ImmutableArray<ProviderSourceReport>                   Sources)
+{
+	/// <summary>
+	///     The refactoring providers that apply to the document and are on the server's own deny-list.
+	///     They are never offered; they are kept so that the log can say when one of them would have
+	///     had an action (#449). A provider the user's configuration denies is not among them: that
+	///     one is not to be run at all.
+	/// </summary>
+	public ImmutableArray<ProviderEntry<CodeRefactoringProvider>> DeniedBuiltIn { get; init; } = [];
+}
 
 /// <summary>A provider that threw while computing its actions. The others still ran.</summary>
 internal sealed record ProviderFailure(string Provider, string Error);
@@ -134,7 +143,15 @@ internal sealed record RefactoringQuery(
 	ImmutableArray<RefactoringAction>    Actions,
 	ImmutableArray<UnavailableAction>    Unavailable,
 	ImmutableArray<ProviderSourceReport> Sources,
-	ImmutableArray<ProviderFailure>      Failures);
+	ImmutableArray<ProviderFailure>      Failures)
+{
+	/// <summary>
+	///     The deny-listed built-in providers that had an action at the position, by type-name stem
+	///     (ExtractInterface). For the log only, never for the answer: it is how the demand for the
+	///     dialog-driven refactorings becomes visible (#443, #449).
+	/// </summary>
+	public ImmutableArray<string> DeniedWithActions { get; init; } = [];
+}
 
 internal sealed record AvailableCodeFix(
 	string          DiagnosticId,

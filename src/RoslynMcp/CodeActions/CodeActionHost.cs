@@ -142,12 +142,20 @@ internal sealed class CodeActionHost
 		}
 		
 		var deny = builtInDeny.Union(settings.Deny);
+		var userDeny = ImmutableHashSet.CreateRange(StringComparer.OrdinalIgnoreCase, settings.Deny);
 		
 		return new ResolvedProviders(
 			settings,
 			Select(sets.SelectMany(set => set.Refactorings), document, deny),
 			Select(sets.SelectMany(set => set.Fixes), document, deny),
-			[..sets.Select(set => set.Report)]);
+			[..sets.Select(set => set.Report)])
+		{
+			DeniedBuiltIn = [..
+				sets.SelectMany(set => set.Refactorings)
+					.Where(entry => entry.AppliesTo(document) && IsDenied(entry, builtInDeny) && !IsDenied(entry, userDeny))
+					.DistinctBy(entry => entry.Name)
+			]
+		};
 	}
 	
 	/// <summary>
@@ -193,7 +201,44 @@ internal sealed class CodeActionHost
 			? byProvider
 			: string.CompareOrdinal(left.Title, right.Title));
 		
-		return new RefactoringQuery(providers.Settings, actions.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable());
+		return new RefactoringQuery(providers.Settings, actions.ToImmutable(), unavailable.ToImmutable(), providers.Sources, failures.ToImmutable())
+		{
+			DeniedWithActions = await DeniedWithActionsAsync(providers.DeniedBuiltIn, document, span, cancellationToken).ConfigureAwait(false)
+		};
+	}
+	
+	/// <summary>
+	///     Which of the deny-listed built-in providers would have had an action at the span. They are
+	///     asked only whether they register anything: nothing they register is kept, flattened or
+	///     offered. One that throws has nothing to say, which is no failure of the call.
+	/// </summary>
+	static async Task<ImmutableArray<string>> DeniedWithActionsAsync(ImmutableArray<ProviderEntry<CodeRefactoringProvider>> denied, Document document, TextSpan span, CancellationToken cancellationToken)
+	{
+		var withActions = ImmutableArray.CreateBuilder<string>();
+		
+		foreach(var entry in denied) {
+			
+			cancellationToken.ThrowIfCancellationRequested();
+			
+			var registered = 0;
+			var context    = new CodeRefactoringContext(document, span, _ => Interlocked.Increment(ref registered), cancellationToken);
+			
+			try {
+				
+				await (entry.Provider.ComputeRefactoringsAsync(context) ?? Task.CompletedTask).ConfigureAwait(false);
+			}
+			catch(OperationCanceledException) when(cancellationToken.IsCancellationRequested) {
+				throw;
+			}
+			catch(Exception) {
+				continue;
+			}
+			
+			if(Volatile.Read(ref registered) > 0)
+				withActions.Add(Stem(entry.Name[(entry.Name.LastIndexOf('.') + 1)..]));
+		}
+		
+		return withActions.ToImmutable();
 	}
 	
 	/// <summary>
