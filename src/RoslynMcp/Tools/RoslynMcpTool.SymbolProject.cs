@@ -19,11 +19,21 @@ internal abstract partial class RoslynMcpTool
 		/// <summary>A type of the name before any member of it, as <see cref="FindSymbol"/> finds a name in one compilation.</summary>
 		Any,
 		
+		/// <summary>
+		///     Every declaration of the name, types and members alike, as <see cref="FindSymbols"/>
+		///     collects them: for the tools that search or rename by name, where a type must not
+		///     win over a member of the same name in another project without the caller knowing.
+		/// </summary>
+		All,
+		
 		/// <summary>Types only: the name is a type's by the tool's own contract.</summary>
 		Type,
 		
 		/// <summary>Methods only.</summary>
 		Method,
+		
+		/// <summary>Anything but a type: a method, property, field or event, for a tool that reads a member's body.</summary>
+		Member,
 	}
 	
 	/// <summary>
@@ -180,8 +190,8 @@ internal abstract partial class RoslynMcpTool
 			// Not in the declaration index, the name may still be a symbol: one of a referenced
 			// assembly (IDisposable, for its implementations), which is the same symbol from every
 			// project that can see it, or one the index does not list by that name.
-			if(declared.Length == 0 && await FirstProjectResolvingAsync(solution, symbolName, containingType, sought, cancellationToken) is { } resolving)
-				declared = [resolving];
+			if(declared.Length == 0)
+				declared = await ProjectsResolvingAsync(solution, symbolName, containingType, sought, cancellationToken);
 			
 			return (declared, workspace.GetRootPath(projectPath));
 		}
@@ -204,14 +214,29 @@ internal abstract partial class RoslynMcpTool
 	{
 		ISymbol[] found = [..
 			(await SymbolFinder.FindSourceDeclarationsAsync(solution, SimpleNameOf(symbolName), ignoreCase: false, cancellationToken))
-				.Where(symbol => symbol.Kind != SymbolKind.Namespace && IsNamed(symbol, symbolName))
-				.Where(symbol => containingType is null || symbol.ContainingType is { } type && IsNamed(type, containingType))
+				.Where(symbol => symbol.Kind != SymbolKind.Namespace)
 		];
+		
+		// A qualified name narrows where it leaves anything. A form the display string does not
+		// reproduce (global::Ns.Type, Outer+Inner) keeps the matches of its last part: it is a
+		// way of telling declarations apart, not a second test for the name.
+		found = Narrowed(found, symbol => IsNamed(symbol, symbolName));
+		
+		if(containingType is not null) {
+			
+			var typeName = SimpleNameOf(containingType);
+			
+			found = Narrowed(
+				[..found.Where(symbol => symbol.ContainingType?.Name == typeName)],
+				symbol => IsNamed(symbol.ContainingType!, containingType));
+		}
 		
 		found = sought switch {
 			
 			SymbolSought.Type   => [..found.OfType<INamedTypeSymbol>()],
 			SymbolSought.Method => [..found.OfType<IMethodSymbol>()],
+			SymbolSought.Member => [..found.Where(symbol => symbol is not INamedTypeSymbol)],
+			SymbolSought.All    => found,
 			
 			// A type of the name before any member of it, and only without a containing type,
 			// which a top-level type does not have.
@@ -235,15 +260,17 @@ internal abstract partial class RoslynMcpTool
 	}
 	
 	/// <summary>
-	///     A project whose compilation resolves the name, for a name the declaration index does
-	///     not have; <see langword="null"/> when none does. A project whose own assembly declares
-	///     the symbol comes before one that merely sees it: a constructor or an explicit interface
+	///     The projects whose compilation resolves the name, for a name the declaration index does
+	///     not have; empty when none does. The projects whose own assembly declares the symbol
+	///     come before one that merely sees it: a constructor or an explicit interface
 	///     implementation is in the index under another name, and its declaring project is the
 	///     one a tool can read its source from. Compiles project after project until one answers,
 	///     all of them for a name that is nowhere, which is what a misspelled name costs here.
 	/// </summary>
-	static async Task<DeclaringProject?> FirstProjectResolvingAsync(Solution solution, string symbolName, string? containingType, SymbolSought sought, CancellationToken cancellationToken)
+	static async Task<DeclaringProject[]> ProjectsResolvingAsync(Solution solution, string symbolName, string? containingType, SymbolSought sought, CancellationToken cancellationToken)
 	{
+		var declaring = new List<DeclaringProject>();
+		
 		DeclaringProject? seeing = null;
 		
 		foreach(var project in solution.Projects.DistinctBy(candidate => candidate.FilePath, SecurityBoundary.PathComparer)) {
@@ -252,18 +279,33 @@ internal abstract partial class RoslynMcpTool
 				|| await project.GetCompilationAsync(cancellationToken) is not { } compilation
 				|| FindSymbol(compilation, symbolName, containingType) is not { } symbol
 				|| sought is SymbolSought.Type && symbol is not INamedTypeSymbol
-				|| sought is SymbolSought.Method && symbol is not IMethodSymbol)
+				|| sought is SymbolSought.Method && symbol is not IMethodSymbol
+				|| sought is SymbolSought.Member && symbol is INamedTypeSymbol)
 				continue;
 			
-			if(SymbolEqualityComparer.Default.Equals(symbol.ContainingAssembly, compilation.Assembly))
+			// Its own, or a symbol of a referenced assembly, which no project declares and every
+			// project that sees it sees alike: either way there is nothing better to look for.
+			// A symbol of a referenced assembly: no project declares it, and every project that
+			// sees it sees it alike, so the first one stands for all.
+			if(!symbol.Locations.Any(location => location.IsInSource))
 				
-				return new DeclaringProject(file, symbol);
+				return [new DeclaringProject(file, symbol)];
 			
-			seeing ??= new DeclaringProject(file, symbol);
+			if(SymbolEqualityComparer.Default.Equals(symbol.ContainingAssembly, compilation.Assembly))
+				declaring.Add(new DeclaringProject(file, symbol));
+			else
+				seeing ??= new DeclaringProject(file, symbol);
 		}
 		
-		return seeing;
+		// Every project that declares it, for the caller to tell one from several: here too a
+		// project is never preferred. One that only sees it stands in when none declares it.
+		return declaring.Count > 0 ? [..declaring] : seeing is not null ? [seeing] : [];
 	}
+	
+	/// <summary>The symbols a test keeps, or all of them when it keeps none.</summary>
+	static ISymbol[] Narrowed(ISymbol[] symbols, Func<ISymbol, bool> keep)
+		=> symbols.Where(keep).ToArray() is { Length: > 0 } kept ? kept : symbols
+	;
 	
 	// Namespaces, containing types and the name, without type arguments: the form a qualified name
 	// is given in once its generic arity is dropped (Ns.Outer`1 → Ns.Outer).
@@ -282,7 +324,8 @@ internal abstract partial class RoslynMcpTool
 	{
 		var name = WithoutArity(given);
 		
-		if(!name.Contains('.'))
+		// A leading dot is part of a name (.ctor), not a qualifier.
+		if(name.LastIndexOf('.') <= 0)
 			
 			return symbol.Name == name;
 		

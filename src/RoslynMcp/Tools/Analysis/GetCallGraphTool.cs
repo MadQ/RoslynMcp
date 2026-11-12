@@ -38,7 +38,7 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Method, out projectPath, out var projectError))
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Member, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
 		
@@ -49,7 +49,12 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
 			return scope.Error(rootError);
-		var symbol   = FindSymbol(compilation, symbolName, containingType);
+		
+		// A member before a type of the same name: the calls are in a member's body, and a type
+		// that shares the name (one of a referenced project included) has none to show (#296).
+		var symbol = FindSymbols(compilation, symbolName, containingType).FirstOrDefault(candidate => candidate is not INamedTypeSymbol)
+			?? FindSymbol(compilation, symbolName, containingType)
+		;
 		
 		if(symbol is null)
 			
@@ -60,6 +65,12 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		foreach(var syntaxRef in symbol.DeclaringSyntaxReferences) {
 			
 			var syntaxNode    = await syntaxRef.GetSyntaxAsync(cancellationToken);
+			
+			// A symbol of a referenced project is declared in a tree this compilation does not
+			// hold, and asking it for that tree's model throws.
+			if(!compilation.ContainsSyntaxTree(syntaxNode.SyntaxTree))
+				continue;
+			
 			var semanticModel = compilation.GetSemanticModel(syntaxNode.SyntaxTree);
 			var operation     = semanticModel.GetOperation(syntaxNode, cancellationToken);
 			

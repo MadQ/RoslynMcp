@@ -48,7 +48,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.Any, filePath, out projectPath, out var projectError))
+		if(!TryResolveSymbolProjectArg(projectPath, symbolName, containingType, SymbolSought.All, filePath, out projectPath, out var projectError))
 			
 			return scope.Error(projectError);
 		

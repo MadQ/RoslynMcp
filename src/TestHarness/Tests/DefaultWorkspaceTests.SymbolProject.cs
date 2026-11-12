@@ -45,20 +45,40 @@ static partial class DefaultWorkspaceTests
 			}),
 			
 			// What a tool is after decides which declarations count. Shadowed is a class in Lib and
-			// a method in App. A type before any member, applied across the solution, sent the call
-			// graph of the method to Lib, where there is no such method. The method tool must land in
-			// App and the type tool in Lib, neither with a candidate list. And a qualified name must
-			// narrow: Lib.TwiceDeclared is one of the two TwiceDeclared, so it is no longer ambiguous.
-			new("DefaultWorkspace: the kind of symbol a tool is after, and a qualified name, pick the project", async () => {
+			// a method in App, and the method calls ShadowHelper. A type before any member, applied
+			// across the solution, sent the call graph of the method to Lib, where the class has no
+			// calls: an empty answer with no error. The call graph must show the call, so it was
+			// taken in App; the type tool must land in Lib. A tool that searches by name takes
+			// neither side: both are candidates, each with its project.
+			new("DefaultWorkspace: the kind of symbol a tool is after picks the project, or neither", async () => {
 				
 				var (graphOk, graph)     = await Call(rootedCtx, "roslyn_get_call_graph", new { symbolName = "Shadowed" });
 				var (membersOk, members) = await Call(rootedCtx, "roslyn_get_type_members", new { typeName = "Shadowed" });
-				var (namedOk, named)     = await Call(rootedCtx, "roslyn_get_symbol_definition", new { symbolName = "Lib.TwiceDeclared" });
+				var (refsOk, refs)       = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "Shadowed" });
 				
-				return Verdict(graphOk && graph?["error"] is null
+				var projects = refs?["candidates"]?.AsArray().Select(c => c?["project"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				
+				return Verdict(graphOk && (graph?.ToJsonString() ?? "").Contains("ShadowHelper")
 					&& membersOk && members?["error"] is null
-					&& namedOk && named?["error"] is null && named["candidates"] is null,
-					$"expected the method in App, the type in Lib and Lib.TwiceDeclared, with no error; got {graph?.ToJsonString() ?? "null"} / {members?.ToJsonString() ?? "null"} / {named?.ToJsonString() ?? "null"}");
+					&& refsOk && projects.Length == 2 && projects.Any(p => p.EndsWith("App.csproj")) && projects.Any(p => p.EndsWith("Lib.csproj")),
+					$"expected the call to ShadowHelper, the type's members, and two candidates for the search; got {graph?.ToJsonString() ?? "null"} / {members?.ToJsonString() ?? "null"} / {refs?.ToJsonString() ?? "null"}");
+			}),
+			
+			// A qualified containing type must narrow. Mark is a member of TwiceDeclared in both
+			// projects; by the type's simple name that is two projects, and qualifying it did not
+			// help, since only the last part was compared. Lib.TwiceDeclared is one of them: the
+			// body must be Lib's, the one that returns 2.
+			new("DefaultWorkspace: a qualified containing type picks one of two projects", async () => {
+				
+				var (bareOk, bare) = await Call(rootedCtx, "roslyn_get_member_body", new { symbolName = "Mark", containingType = "TwiceDeclared" });
+				
+				await rootedCtx!.SendAsync(new { jsonrpc = "2.0", id = rootedCtx.NextId(), method = "tools/call", @params = new { name = "roslyn_get_member_body", arguments = new { symbolName = "Mark", containingType = "Lib.TwiceDeclared" } } });
+				
+				var blocks = (await rootedCtx.ReceiveAsync())?["result"]?["content"]?.AsArray();
+				var body   = blocks is { Count: > 1 } ? blocks[1]?["text"]?.GetValue<string>() ?? "" : "";
+				
+				return Verdict(bareOk && bare?["candidates"]?.AsArray().Count == 2 && body.Contains("=> 2"),
+					$"expected two candidates by the simple name and Lib's body by the qualified one; got {bare?.ToJsonString() ?? "null"} / {body}");
 			}),
 			
 			// The frameworks of a multi-targeted project are one project. Split has two target

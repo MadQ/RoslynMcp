@@ -59,8 +59,11 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 		// One framework of a multi-targeted project, the first, as before this covered several
 		// projects: each candidate is a reference search across the solution, and the same symbol
 		// under another framework would only be searched again to be dropped below.
-		foreach(var (compilation, project) in targets.DistinctBy(target => target.Project?.FilePath ?? "", SecurityBoundary.PathComparer))
-			await CollectUnusedAsync(compilation, several && project?.FilePath is { } file ? Path.GetFileNameWithoutExtension(file) : null, solution, rootPath, unused, cancellationToken);
+		var searched = new HashSet<string>(SecurityBoundary.PathComparer);
+		
+		foreach(var (compilation, project) in targets)
+			if(project?.FilePath is not { } projectFile || searched.Add(projectFile))
+				await CollectUnusedAsync(compilation, several && project?.FilePath is { } file ? Path.GetFileNameWithoutExtension(file) : null, solution, rootPath, unused, cancellationToken);
 		
 		var unusedSymbols = unused
 			.Select(u => u.Symbol)
