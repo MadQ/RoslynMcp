@@ -93,6 +93,18 @@ internal sealed class WorkspaceResolver
 		return manager.GetLastSyncedUtc(resolved);
 	}
 	
+	/// <summary>
+	///     The change counter of the workspace that serves the project path (#435).
+	///     <paramref name="reloadFirst"/> brings a pending reload in before it is handed out, for a
+	///     caller that is about to read code and would trigger that reload itself.
+	/// </summary>
+	public WorkspaceChangeCounter GetChangeCounter(string projectPath, bool reloadFirst)
+	{
+		var (resolved, _) = ResolveWithKind(projectPath);
+		
+		return manager.GetChangeCounter(resolved, reloadFirst);
+	}
+	
 	public Solution PeekSolution(string projectPath)
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);

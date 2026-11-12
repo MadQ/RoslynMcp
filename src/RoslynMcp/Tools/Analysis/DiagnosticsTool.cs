@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.ComponentModel;
-using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Diagnostics;
 using ModelContextProtocol.Server;
@@ -44,24 +43,25 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		[Description("Filter by severity: 'errors', 'warnings', 'all' (errors and warnings — the default), 'info' (info and above), or 'hidden' (everything, the IDE analyzers' hidden findings included).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
 		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items. When take: 0, items in the response is null (not an empty array).")] int take = 50,
-		[Description("Token from a previous response to get the next page without re-running the compilation.")] string? page_token = null,
+		[Description(PageTokenDescription)] string? page_token = null,
 		[Description("When true, also runs the project's analyzer references (NuGet + project analyzers) and Roslyn's IDE analyzers via CompilationWithAnalyzers and includes their diagnostics. Slower than compiler-only; assemblies are shadow-copied so the originals are never locked. IDE findings are mostly info or hidden: see severity. Default: false.")] bool includeAnalyzers = false)
 	{
-		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { severity, skip, take, includeAnalyzers });
+		// Every argument that decides the result is in here, the project among them: together with
+		// the tool's name and the file they are what a cached result set is found again by.
+		using var scope = BeginTool("roslyn_get_diagnostics", filePath, new { projectPath, severity, skip, take, includeAnalyzers });
 		
-		// Stateless page token overrides skip/severity — agents don't need to track offsets manually.
-		if(page_token is not null)
-			try {
-				
-				var decoded = JsonSerializer.Deserialize<PageTokenData>(Convert.FromBase64String(page_token));
-				
-				if(decoded is not null) {
-					
-					skip     = decoded.Skip;
-					severity = decoded.Severity;
-				}
-			}
-			catch { /* malformed token — fall through to explicit params */ }
+		// A later page of a query whose result is still cached is cut from it (#435). The token
+		// used to be a bare position, and every page computed the whole result again to skip
+		// into it: the compilation's diagnostics from its cache, but every analyzer anew, which on
+		// a solution with analyzer packages took over twenty seconds a page. A count-only call
+		// has no page to serve; a negative take asks for no items either. Any other take is
+		// brought into 1..200 here, and not again below.
+		var countOnly = take <= 0;
+		
+		if(!countOnly && scope.TryServeCachedPage<DiagnosticItem>(page_token, ref skip, ref take, 50, 200, out var cached))
+			
+			// With the counts of the run the page comes from, as a computed page logs them.
+			return scope.Outcome(cached is DiagnosticsResult page ? $"{page.Summary} (cached page)" : "cached page", cached);
 		
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			
@@ -203,8 +203,6 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 			? "0 errors, 0 warnings"
 			: $"{errorCount} error(s), {warningCount} warning(s)"
 		;
-		
-		take = Math.Clamp(take, 0, 200);
 
 		// Detect transient workspace-load noise: flood of type-resolution failures across many files.
 		// Full-project queries only — a file-scoped query hitting the same pattern is plausibly real
@@ -276,7 +274,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		
 		// take: 0 fast path — return counts only. items is null (not []) to distinguish
 		// "not requested" from "requested but empty".
-		if(take is 0)
+		if(countOnly)
 			return scope.Outcome(summary, new DiagnosticsResult(
 				summary,
 				"roslyn",
@@ -293,36 +291,33 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				}
 			);
 		
-		var effectiveSkip  = Math.Clamp(skip, 0, total);
-		var effectiveCount = Math.Clamp(take, 0, total - effectiveSkip);
-		var hasMore        = effectiveSkip + effectiveCount < total;
-		
-		var nextToken = hasMore
-			? Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(
-				new PageTokenData(effectiveSkip + effectiveCount, severity)))
-			: null
+		// The whole result, in the shape it is returned in, so that a later page costs a slice of
+		// it. Every page of the query carries the counts, the hint and the load findings of this
+		// run: they are about the result as a whole, not about the page. At severity 'hidden'
+		// with analyzers on a solution this is the largest set any tool keeps, some tens of
+		// thousands of small records; the cache holds fifty sets at most and lets one go a
+		// minute after its last page was asked for. The shape below keeps strings and counts,
+		// never a compilation.
+		object Shape(PaginatedResult<DiagnosticItem> page)
+			=> new DiagnosticsResult(
+				summary,
+				"roslyn",
+				errorCount,
+				warningCount,
+				page.Total,
+				page.Items.Length,
+				page.HasMore,
+				page.PageToken,
+				page.Items,
+				possibleLoadIssue,
+				loadWarnings) {
+					Hint = hint
+				}
 		;
 		
-		var items = filtered[effectiveSkip..(effectiveSkip + effectiveCount)]
-			.Select(d => ToItem(d, rootPath))
-			.ToArray()
-		;
+		DiagnosticItem[] items = [..filtered.Select(d => ToItem(d, rootPath))];
 		
-		return scope.Outcome(summary, new DiagnosticsResult(
-			summary,
-			"roslyn",
-			errorCount,
-			warningCount,
-			total,
-			items.Length,
-			hasMore,
-			nextToken,
-			items,
-			possibleLoadIssue,
-			loadWarnings) {
-				Hint = hint
-			}
-		);
+		return scope.Outcome(summary, Shape(PaginateAndStore(items, ref skip, take, Shape)));
 	}
 	
 	/// <summary>
@@ -410,6 +405,4 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 			Message:  d.GetMessage()
 		);
 	}
-	
-	private sealed record PageTokenData(int Skip, string? Severity);
 }
