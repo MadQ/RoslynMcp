@@ -16,9 +16,10 @@ namespace RoslynMcp;
 ///     <c>ServerArgs.Initialize</c>. It decides there and then whether this process is a pruning run,
 ///     and when it is, the counter on disk starts over in that same step. The pruners (the log
 ///     directory, the heartbeat and shadow-copy directories, <see cref="BackupStore"/>) run whenever
-///     their owner is first built, which for the backup store is the first call of a tool that
-///     writes; a reset applied at a fixed point of startup came before every one of them, was never
-///     written, and left every process pruning (#445).
+///     their owner is first built: the logger and the heartbeat as the server starts, the backup
+///     store when a pruning run builds it right after them (and otherwise at the first call of a
+///     tool that writes). A reset applied at a fixed point of startup came before every one of
+///     them, was never written, and left every process pruning (#445).
 /// </remarks>
 internal static class FilePruner
 {
@@ -40,9 +41,6 @@ internal static class FilePruner
 
     static readonly ConcurrentDictionary<string, ConcurrentBag<DateTimeOffset>> _pruneErrors = new();
 
-
-    /// <summary>Exposes the cached startup run count to BackupStore for its pruning gate check.</summary>
-    internal static int CachedRunCount => cachedRunCount;
 
     /// <summary>
     ///     Whether this process prunes: its start brought the counter to

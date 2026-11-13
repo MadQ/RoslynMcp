@@ -262,9 +262,17 @@ lifetime.ApplicationStarted.Register(() => {
 	// The backup store is otherwise built by the first call of a tool that writes, and its prune
 	// starts when it is built. A pruning run has already started the counter over, so a server
 	// that never writes would spend the round without pruning a backup (#445). Building it is
-	// cheap: the pass itself runs on a thread of its own.
-	if(FilePruner.IsPruningRun)
-		host.Services.GetRequiredService<BackupStore>();
+	// cheap: the pass itself runs on a thread of its own. A store that cannot be built is the
+	// writing tools' to report when they are called, never a server that does not start.
+	if(FilePruner.IsPruningRun) {
+		
+		try {
+			host.Services.GetRequiredService<BackupStore>();
+		}
+		catch(Exception ex) {
+			logger.LogInfo("Backups", $"the backup store could not be built at startup, so nothing was pruned: {ex.GetType().Name}: {ex.Message}");
+		}
+	}
 	
 	// Warn if any agent config points to a stale path (e.g. after dotnet tool update).
 	var currentExe = Environment.ProcessPath

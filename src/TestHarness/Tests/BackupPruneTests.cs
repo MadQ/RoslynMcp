@@ -89,27 +89,43 @@ static class BackupPruneTests
 				
 				// A mutex belongs to the thread that took it, and a test's continuations do not stay
 				// on one: a thread of its own takes it, holds it, and lets it go when told.
+				// Nothing may leave the thread: an exception that does ends the harness without its
+				// summary line. What went wrong is the test's to report.
+				Exception? holderFailure = null;
+				
 				var holder = new Thread(() => {
 					
-					using var mutex = new Mutex(false, mutexName);
-					
 					try {
-						mutex.WaitOne();
+						
+						using var mutex = new Mutex(false, mutexName);
+						
+						try {
+							mutex.WaitOne();
+						}
+						catch(AbandonedMutexException) { }
+						
+						held.Set();
+						release.Wait();
+						mutex.ReleaseMutex();
 					}
-					catch(AbandonedMutexException) { }
-					
-					held.Set();
-					release.Wait();
-					mutex.ReleaseMutex();
+					catch(Exception ex) {
+						
+						holderFailure = ex;
+						held.Set();
+					}
 				}) { IsBackground = true };
 				
 				holder.Start();
 				
-				if(!held.Wait(TimeSpan.FromSeconds(30))) {
+				// The name is this fixture's alone, so the wait is for the thread to start. Joined on
+				// every way out below, before the events it waits on are disposed.
+				held.Wait();
+				
+				if(holderFailure is not null) {
 					
-					release.Set();
+					holder.Join();
 					
-					return Skip.SetupUnavailable("the store's prune mutex could not be taken within 30 s");
+					return (false, $"FAIL  (the store's prune mutex could not be taken: {holderFailure.GetType().Name}: {holderFailure.Message})");
 				}
 				
 				var (process, server) = await DefaultWorkspaceTests.StartServerLoggingToAsync(ctx, fx.Dir, Path.Combine(logs, $"{stem}.log"), environment);
@@ -155,6 +171,7 @@ static class BackupPruneTests
 				finally {
 					
 					release.Set();
+					holder.Join();
 					await DefaultWorkspaceTests.StopServerAsync(process, server);
 				}
 			}),
