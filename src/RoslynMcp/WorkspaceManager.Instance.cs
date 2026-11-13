@@ -324,6 +324,7 @@ internal sealed partial class WorkspaceManager
 						?? throw new InvalidOperationException($"Solution '{path}' contains no projects.")
 					;
 					logger.LogInfo("Load", $"Solution loaded in {slnSw.ElapsedMilliseconds}ms ({workspace.CurrentSolution.Projects.Count()} projects)");
+					logger.LogInfo("Load", ReferenceCounts(workspace.CurrentSolution));
 					// Before the watcher starts: its flush updates the index, and an update made
 					// while the index was still being built would be overwritten by it.
 					physicalIndex = BuildPhysicalIndex(workspace.CurrentSolution);
@@ -366,6 +367,7 @@ internal sealed partial class WorkspaceManager
 						projectMap[kvp.Key] = kvp.Value;
 					
 					logger.LogInfo("Load", $"Project loaded in {projSw.ElapsedMilliseconds}ms ({workspace.CurrentSolution.Projects.Count()} projects)");
+					logger.LogInfo("Load", ReferenceCounts(workspace.CurrentSolution));
 					
 					// Before the watcher starts: its flush updates the index, and an update made
 					// while the index was still being built would be overwritten by it.

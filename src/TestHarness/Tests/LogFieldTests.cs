@@ -109,6 +109,43 @@ static class LogFieldTests
 						&& !(answer?.ToJsonString() ?? "").Contains("ExtractInterface"),
 						$"expected ExtractInterface in the log entry and not in the answer; got [{string.Join(" | ", details)}] and {answer?.ToJsonString() ?? "null"}");
 				}),
+			
+			// A project that loads with only part of its references is healthy to the health check,
+			// and its missing types read as "not found" (#447, #456). Nothing recorded how many
+			// references a project had, so that state could only be guessed at afterwards. Each load
+			// now writes the count per project. The fixture was loaded by the calls above: its line
+			// must name the fixture's project with the references of a restored net10.0 project,
+			// which are well over a hundred; a count of zero or a missing name says nothing.
+			new("log fields: a load records how many metadata references each project resolved",
+				() => {
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var lines, out var failure))
+						
+						return Task.FromResult((false, failure));
+					
+					var project = Path.GetFileNameWithoutExtension(fx.Csproj!);
+					var counts  = new List<int>();
+					
+					foreach(var line in lines) {
+						
+						string? message;
+						
+						try {
+							message = JsonNode.Parse(line)?["message"]?.GetValue<string>();
+						}
+						catch(System.Text.Json.JsonException) {
+							continue;
+						}
+						
+						if(message is not null
+							&& message.Contains("metadata references per project:", StringComparison.Ordinal)
+							&& System.Text.RegularExpressions.Regex.Match(message, $@"[ ,]{System.Text.RegularExpressions.Regex.Escape(project)}(\(\S+\))? (\d+)") is { Success: true } match)
+							counts.Add(int.Parse(match.Groups[2].Value));
+					}
+					
+					return Task.FromResult(Verdict(counts.Count > 0 && counts.All(count => count > 50),
+						$"expected a reference line naming {project} with more than 50 references; found counts [{string.Join(", ", counts)}]"));
+				}),
 		};
 		
 		return new TestGroup($"Log Fields ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });

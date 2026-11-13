@@ -321,6 +321,7 @@ internal sealed partial class WorkspaceManager
 
 			Workspace? oldWorkspace = null;
 			int        projectCount = 0;
+			string     references   = "";
 
 			@lock.EnterWriteLock();
 
@@ -357,6 +358,7 @@ internal sealed partial class WorkspaceManager
 				;
 
 				projectCount = workspace.CurrentSolution.Projects.Count();
+				references   = ReferenceCounts(workspace.CurrentSolution);
 			}
 			finally {
 
@@ -370,6 +372,9 @@ internal sealed partial class WorkspaceManager
 
 			MarkSynced();
 			logger.LogInfo("Reload", $"Workspace reloaded in {sw.ElapsedMilliseconds}ms ({projectCount} projects)");
+			
+			if(references.Length > 0)
+				logger.LogInfo("Reload", references);
 
 			// Healing retries. A workspace promoted past the cap is unhealthy, and nothing else would reload
 			// it until the next edit: contention that outlasted the discards — a long build outside the
