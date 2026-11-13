@@ -334,6 +334,40 @@ internal sealed partial class WorkspaceManager
 			return string.Join("; ", parts);
 		}
 		
+		// How many projects the reference line names before it sums the rest.
+		const int ReferenceLineProjects = 60;
+		
+		/// <summary>
+		///     The metadata references each project of <paramref name="solution"/> resolved, as one log
+		///     line (#456). The health check knows a project with no references at all; one that loaded
+		///     with only part of them is healthy to it, and looks like a project whose types are "not
+		///     found" (#447). Nothing recorded how many references a project had, so that state could
+		///     only be guessed at afterwards. A count per project and load makes it readable: the same
+		///     project with fewer references than in its other loads came up short.
+		///     <para>
+		///         Fewest first, since a short project is what the line is read for; past
+		///         <see cref="ReferenceLineProjects"/> projects the rest are counted.
+		///     </para>
+		/// </summary>
+		static string ReferenceCounts(Solution solution)
+		{
+			var counts = solution.Projects
+				.Select(project => (project.Name, Metadata: project.MetadataReferences.Count, Projects: project.ProjectReferences.Count()))
+				.OrderBy(entry => entry.Metadata)
+				.ThenBy(entry => entry.Name, StringComparer.Ordinal)
+				.ToArray()
+			;
+			
+			var named = counts
+				.Take(ReferenceLineProjects)
+				.Select(entry => entry.Projects > 0 ? $"{entry.Name} {entry.Metadata} (+{entry.Projects} project)" : $"{entry.Name} {entry.Metadata}")
+			;
+			
+			var more = counts.Length > ReferenceLineProjects ? $", and {counts.Length - ReferenceLineProjects} project(s) with more" : "";
+			
+			return $"metadata references per project: {string.Join(", ", named)}{more}";
+		}
+		
 		void WarnIfUnhealthy(Workspace ws, LoadFindings findings)
 		{
 			if(ProjectsWithoutReferences(ws).Except(findings.NotRestored).ToArray() is { Length: > 0 } dropped)
