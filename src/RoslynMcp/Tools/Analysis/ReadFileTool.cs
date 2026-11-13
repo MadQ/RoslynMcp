@@ -133,6 +133,10 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		
 		var relative = Path.GetRelativePath(rootPath, canonicalPath);
 		
+		// In the log, which lines were read: with the lines a search reported for a declaration
+		// (#460) it says whether a read took them up, or still fetched the whole file.
+		scope.Record($"lines {first}-{last}");
+		
 		// Joined with '\n' whatever the file uses: the text is exact per line, not byte-exact for a
 		// CRLF file.
 		return scope.Outcome($"{result.Length}/{totalLines} line(s)", new ReadFileResult(

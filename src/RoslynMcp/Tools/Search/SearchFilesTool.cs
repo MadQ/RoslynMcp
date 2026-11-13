@@ -115,6 +115,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		var shape      = PageShape(ComposeCautions(fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
 		var result     = PaginateAndStore(allResults, ref skip, take, shape);
 		
+		scope.Record(GroupingNote(result.Items));
+		
 		return scope.Outcome($"{result.Total} match(es)", shape(result));
 		
 		async Task<List<MatchResult>> CollectAsync(Regex rx)
@@ -232,6 +234,42 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		}
 		
 		return [..files];
+	}
+	
+	/// <summary>
+	///     What the grouping of one page came to, for the log (#460): how many hits it lists, in how
+	///     many files and declaration groups, how many of the groups name a declaration and how many
+	///     hits declare what they are in, and the characters the same hits would have taken listed
+	///     flat, each with its file. The grouped answer measured 9% larger than the flat one on
+	///     sixty searches of one repository; with this beside the entry's own size, what it costs
+	///     in real use can be read from the log, per search.
+	/// </summary>
+	static string GroupingNote(MatchResult[] hits)
+	{
+		if(hits.Length == 0)
+			
+			return "";
+		
+		var files    = 0;
+		var groups   = 0;
+		var named    = 0;
+		var flat     = 0;
+		
+		for(var index = 0; index < hits.Length; index++) {
+			
+			var hit      = hits[index];
+			var newFile  = index == 0 || hits[index - 1].File != hit.File;
+			var newGroup = newFile || hits[index - 1].Declaration != hit.Declaration;
+			
+			files  += newFile ? 1 : 0;
+			groups += newGroup ? 1 : 0;
+			named  += newGroup && hit.Declaration is not null ? 1 : 0;
+			
+			// {"file":"…","line":N,"text":"…"}, and the comma after it.
+			flat += 30 + hit.File.Length + hit.Line.ToString().Length + hit.Text.Length;
+		}
+		
+		return $"{hits.Length} hit(s) in {files} file(s), {groups} group(s), {named} in a declaration, {hits.Count(hit => hit.Declares)} declaring; flat ~{flat} chars";
 	}
 	
 	// One hit as it is kept between pages: the line, and the declaration it is in.
