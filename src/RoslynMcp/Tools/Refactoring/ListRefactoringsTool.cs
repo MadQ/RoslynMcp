@@ -21,7 +21,7 @@ internal sealed class ListRefactoringsTool : RefactoringToolBase
 		"the actions: how many sources there were and how many refactoring and fix providers they loaded (per source, before " +
 		"duplicates and denied providers are dropped), and under problems only the sources with a problem — one that failed to " +
 		"load, or one this workspace cannot have — each with its first problem and a count of further ones. Look there when an " +
-		"expected refactoring is missing; roslyn_info has every source the server has loaded and kept, for all projects, with all " +
+		"expected refactoring is missing; roslyn_info has the sources the server has loaded and kept, for all projects (every one with allSources), with all " +
 		"problems (a source whose load failed only for the moment is named here and nowhere else). " +
 		"Step 1 of the three-step workflow: list, roslyn_preview_refactoring, " +
 		"roslyn_apply_refactoring. For a fix to a specific diagnostic use roslyn_preview_code_fix instead.")]

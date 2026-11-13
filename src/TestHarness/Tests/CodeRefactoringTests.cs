@@ -197,6 +197,44 @@ internal static class CodeRefactoringTests
 				: $"FAIL  (list: {listText}) [{sw.ElapsedMilliseconds}ms]");
 		}
 		
+		// roslyn_info is the first call an agent makes to see which server it is talking to, and it
+		// listed every analyzer assembly of every project as a provider source: forty-two entries on a
+		// repository with a few analyzer packages, some thirty of them a source generator or a helper
+		// assembly with no refactoring, no fix and no problem (#448). Those are now counted. The
+		// fixture's SDK references include such assemblies (the System.Text.Json source generator
+		// among them), and the list above has loaded them. So the default answer must list no project
+		// source that says nothing and must count some; allSources must list exactly that many more,
+		// with a silent one among them — a count that did not match the full list would be a number
+		// nobody can check.
+		async Task<(bool pass, string msg)> RunInfoSources()
+		{
+			var sw = Stopwatch.StartNew();
+			
+			static bool Silent(JsonNode? source)
+				=> source?["kind"]?.GetValue<string>() == "project"
+					&& source["refactorings"]?.GetValue<int>() == 0
+					&& source["fixes"]?.GetValue<int>() == 0
+					&& source["problems"] is null
+			;
+			
+			var brief    = (await ctx.CallToolJsonAsync("roslyn_info", new { }))?["code_actions"];
+			var full     = (await ctx.CallToolJsonAsync("roslyn_info", new { allSources = true }))?["code_actions"];
+			var listed   = brief?["sources"]?.AsArray() ?? [];
+			var all      = full?["sources"]?.AsArray() ?? [];
+			var uncounted = brief?["sources_without_providers"]?.GetValue<int>() ?? 0;
+			
+			var pass = uncounted > 0
+				&& !listed.Any(Silent)
+				&& listed.Any(source => source?["kind"]?.GetValue<string>() == "built-in")
+				&& all.Count == listed.Count + uncounted
+				&& all.Count(Silent) == uncounted
+				&& full?["sources_without_providers"] is null;
+			
+			return (pass, pass
+				? $"PASS  ({listed.Count} listed, {uncounted} counted) [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  (brief: {brief?.ToJsonString()} | all: {all.Count} source(s), {all.Count(Silent)} silent) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
 		// Move type's "Rename file to match type" is a document rename, which the apply path does not do.
 		async Task<(bool pass, string msg)> RunRenameFileRefused()
 		{
@@ -519,6 +557,7 @@ internal static class CodeRefactoringTests
 		
 		List<TestCase> tests = [
 			new("list offers Roslyn's refactorings and keeps dialog actions out", RunNoDialogActions),
+			new("roslyn_info counts the analyzer references without providers and lists them only on request", RunInfoSources),
 			new("a preview's diff is the size of the change, not of the file", RunDiffIsLocal),
 			new("move type to file creates the file and empties the old declaration", RunMoveType),
 			new("extract method on a selected statement", RunExtractMethod),
