@@ -6,7 +6,8 @@ namespace RoslynMcp;
 /// <summary>
 ///     Turns a code action into the solution it proposes. The server applies documents and nothing
 ///     else, so the action must come down to one <see cref="ApplyChangesOperation"/>; Roslyn's
-///     editor-only operations (open a document, navigate to a position) are ignored, anything else is
+///     editor-only operations (open a document, navigate to a position, note which wrapping style was
+///     picked) are ignored, anything else is
 ///     refused with a structured error rather than silently dropped.
 /// </summary>
 internal static class CodeActionOperations
@@ -31,7 +32,7 @@ internal static class CodeActionOperations
 				continue;
 			}
 			
-			unsupported |= !IsNavigation(operation);
+			unsupported |= !IsEditorOnly(operation);
 		}
 		
 		if(applyChanges is null || duplicate || unsupported) {
@@ -43,16 +44,24 @@ internal static class CodeActionOperations
 			
 			throw new UnsupportedCodeActionOperationException(
 				$"The code action returned an unsupported operation shape: {returnedShape}. " +
-				"Exactly one ApplyChangesOperation is required; navigation operations are ignored.");
+				"Exactly one ApplyChangesOperation is required; Roslyn's editor-only operations (navigation, usage tracking) are ignored.");
 		}
 		
 		return applyChanges.ChangedSolution;
 	}
 	
-	// Roslyn's editor operations: opening or navigating to a document means nothing to a headless host.
-	static bool IsNavigation(CodeActionOperation operation)
+	// Roslyn's operations that mean something to an editor only. Opening or navigating to a document
+	// means nothing to a headless host. Neither does the operation every wrapping action adds to its
+	// change (WrapItemsAction.RecordCodeActionOperation, #438): its Apply moves the action's title to
+	// the front of a static most-recently-used list, by which an editor orders the wrapping actions
+	// next time, and touches no workspace. Without it none of Roslyn's wrapping refactorings could be
+	// previewed. The type is private to Roslyn, hence the name; the namespace keeps another
+	// provider's operation of the same name refused, as every unknown operation is.
+	static bool IsEditorOnly(CodeActionOperation operation)
 		=> operation is OpenDocumentOperation
-			|| operation.GetType().Name.EndsWith("NavigationOperation", StringComparison.Ordinal);
+			|| operation.GetType().Name.EndsWith("NavigationOperation", StringComparison.Ordinal)
+			|| operation.GetType() is { Name: "RecordCodeActionOperation", Namespace: "Microsoft.CodeAnalysis.Wrapping" }
+	;
 }
 
 internal sealed class UnsupportedCodeActionOperationException(string message) : Exception(message);

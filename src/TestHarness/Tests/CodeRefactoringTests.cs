@@ -24,6 +24,7 @@ internal static class CodeRefactoringTests
 		fx.Write("Invert.cs", InvertSource);
 		fx.Write("Stale.cs", InvertSource.Replace("class Invert", "class Stale", StringComparison.Ordinal));
 		fx.Write("Wide.cs", WideSource);
+		fx.Write("Wrap.cs", "namespace Fixture;\n\npublic static class Wrap\n{\n\tpublic static int Sum(int first, int second, int third)\n\t{\n\t\treturn first + second + third;\n\t}\n}\n");
 		
 		// Two fixtures with a private .editorconfig (#413), one per workspace kind, written like
 		// every other fixture before the first tool call.
@@ -154,6 +155,25 @@ internal static class CodeRefactoringTests
 		
 		Task<(bool pass, string msg)> RunInvertIf()
 			=> RunRoundTrip(fx.Csproj!, "Invert.cs", 7, 3, null, null, "InvertIfCodeRefactoringProvider", null, "!big)", null, requireCleanDiagnostics: true);
+		
+		// Roslyn's wrapping refactorings were listed and none could be previewed (#438): each returns
+		// its change plus an operation that only notes, for an editor, which wrapping style was picked,
+		// and the preview refused every action with more than its one change. "Indent all parameters"
+		// puts each parameter of the one-line list on a line of its own, which is what is checked:
+		// the three parameters as three lines, in a file that still compiles.
+		async Task<(bool pass, string msg)> RunWrapParameters()
+		{
+			var result = await RunRoundTrip(fx.Csproj!, "Wrap.cs", 5, 26, null, null, "WrappingCodeRefactoringProvider", "Indent all parameters", "Sum(", null, requireCleanDiagnostics: true);
+			
+			if(!result.pass)
+				return result;
+			
+			string[] lines = [..(await File.ReadAllLinesAsync(fx.PathOf("Wrap.cs"))).Select(line => line.Trim())];
+			
+			return lines.Contains("int first,") && lines.Contains("int second,") && lines.Contains("int third)")
+				? result
+				: (false, $"FAIL  (the parameters are not one to a line: {string.Join(" | ", lines)})");
+		}
 		
 		// A source the list names: one problem as text, no list of them and no origin path.
 		static bool IsNamedProblem(JsonNode? source)
@@ -562,6 +582,7 @@ internal static class CodeRefactoringTests
 			new("move type to file creates the file and empties the old declaration", RunMoveType),
 			new("extract method on a selected statement", RunExtractMethod),
 			new("introduce local for a selected expression", RunIntroduceLocal),
+			new("a wrapping refactoring previews and applies: its usage-tracking operation is ignored", RunWrapParameters),
 			new("rename file to match type is refused as a document rename", RunRenameFileRefused),
 			new("invalid location, index and file are structured errors", RunInvalidInputs),
 			new("a refactoring token is refused by the code-fix apply and dropped by 'n'", RunTokenDiscipline),
