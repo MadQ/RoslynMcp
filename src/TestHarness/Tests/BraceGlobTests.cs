@@ -53,9 +53,14 @@ static class BraceGlobTests
 			
 			var data = await Call(tool, args);
 			
-			return data?["matches"] is JsonArray matches
-				? [.. matches.Select(m => Path.GetFileName(m!["file"]!.GetValue<string>())).Distinct().Order(StringComparer.Ordinal)]
-				: null;
+			// roslyn_search_files groups its hits by file (#460); the other two search tools list
+			// them flat, each with its file.
+			var files = SearchHits.Of(data)?.Select(m => m.File)
+				?? (data?["matches"] as JsonArray)?.Select(m => m!["file"]!.GetValue<string>());
+			
+			return files is null
+				? null
+				: [.. files.Select(file => Path.GetFileName(file)).Distinct().Order(StringComparer.Ordinal)];
 		}
 		
 		// Exactly these paths, in any order — a missing one and an extra one are both failures.

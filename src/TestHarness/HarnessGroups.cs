@@ -26,6 +26,7 @@ static class HarnessGroups
 	internal static readonly GroupEntry[] All = [
 		Group("Harness Protocol",                          g => HarnessProtocolTests.Build(g.Ctx)),
 		Group("Discovery Tools",                           g => DiscoveryTests.Build(g.Ctx)),
+		Group("Search Declarations",                       g => SearchDeclarationTests.Build(g.Ctx)),
 		Group("VsVersionPin",                              g => VsVersionPinTests.Build(g.Ctx)),
 		Group("ProjectStyleDetection",                     g => ProjectStyleDetectionTests.Build(g.Ctx)),
 		Group("String Literal Search",                     g => FindStringLiteralTests.Build(g.Ctx)),

@@ -159,7 +159,7 @@ static class MovedDirectoryTests
 							var found = await Call("roslyn_search_files", new { pattern = "class Renamed", projectPath = adhocRename.Dir });
 							
 							return found?["total_matches"]?.GetValue<int>() == 1
-								&& found["matches"]?[0]?["file"]?.GetValue<string>().Contains("New") == true;
+								&& SearchHits.Of(found)?[0].File.Contains("New") == true;
 						})
 						? (true,  "PASS")
 						: (false, "FAIL  (fifteen seconds after the rename, the type is not declared exactly once, under New)");
@@ -199,7 +199,7 @@ static class MovedDirectoryTests
 						return (false, $"FAIL  ({duplicates} CS0101 after the rename: the type is declared twice)");
 					
 					var found = await Call("roslyn_search_files", new { pattern = "class CaseRenamed", projectPath = adhocCase.Dir });
-					var file  = found?["matches"]?[0]?["file"]?.GetValue<string>();
+					var file  = SearchHits.Of(found) is [var first, ..] ? first.File : null;
 					
 					// macOS keeps the document under the old spelling, which still opens: see
 					// WORKSPACE_SYNC.md. The same search says nothing about how many there are.

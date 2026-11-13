@@ -13,7 +13,12 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_search_files", ReadOnly = true, Title = "Search Files", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Fast and precise code search — use instead of grep, Select-String, or findstr. Searches workspace files for lines matching a regex pattern. " +
-		"Returns file path, line number, and matching line text for each hit, with paging support. " +
+		"Returns the matching lines grouped by file and, within a file, by the declaration each hit is in: files[].in[] names the " +
+		"declaration ('method Enqueue', 'class Foo', 'field count'), its lines from its attached comment to its end ('108-158': " +
+		"pass them to roslyn_read_file to read the whole member) and where its node starts ('112:2': the line and column " +
+		"roslyn_replace_in_code takes), followed by matches[] with line and text. A match on the declaration's own name has " +
+		"declares: true, so a plain name finds its declaration without a keyword in the pattern. Hits outside any declaration " +
+		"(using directives, namespace lines) are in a group without those fields. " +
 		"Use this when searching file content — finding all lines where a symbol name, pattern, or phrase appears. " +
 		"For filename/path matching only (no content), use roslyn_list_files instead. " +
 		"For C#-specific context filtering (find matches only in comments, strings, identifiers, or xmldocs), use roslyn_semantic_search instead. " +
@@ -134,19 +139,34 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 					var lines = text.Lines;
 					var source = text.ToString();
 					
+					// Parsed for a file with a hit only, and then once: most files of a search have none.
+					SyntaxNode? root = null;
+					
 					for(int i = 0; i < lines.Count; i++) {
 						
 						var line = lines[i];
 						
-						if(rx.IsMatch(source.AsSpan(line.Start, line.Span.Length))) {
+						// The first match of the line says where on it the hit is; the line is one hit
+						// however often the pattern matches it.
+						var hit = FirstMatch(rx, source.AsSpan(line.Start, line.Span.Length));
+						
+						if(hit is null)
+							continue;
+						
+						root ??= await document.GetSyntaxRootAsync(cancellationToken);
+						
+						var (declaration, declares) = root is null
+							? (null, false)
+							: EnclosingDeclaration.At(root, text, new(line.Start + hit.Value.Index, hit.Value.Length));
+						
+						matches.Add(new MatchResult {
 							
-							matches.Add(new MatchResult {
-								
-								File = Path.GetRelativePath(rootPath, document.FilePath),
-								Line = i + 1,
-								Text = source.AsSpan(line.Start, line.Span.Length).Trim().ToString()
-							});
-						}
+							File        = Path.GetRelativePath(rootPath, document.FilePath),
+							Line        = i + 1,
+							Text        = source.AsSpan(line.Start, line.Span.Length).Trim().ToString(),
+							Declaration = declaration,
+							Declares    = declares,
+						});
 					}
 				}
 			
@@ -158,7 +178,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	// — the caution and hint included.
 	static Func<PaginatedResult<MatchResult>, object> PageShape(string? caution, string? hint)
 		=> page => new SearchFilesResult(
-			page.Items,
+			Group(page.Items),
 			page.Total,
 			page.Items.Length,
 			page.PageToken,
@@ -169,10 +189,58 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		}
 	;
 	
+	// The first match of the pattern in one line, or null. A span has no Match, only an enumerator.
+	static (int Index, int Length)? FirstMatch(Regex regex, ReadOnlySpan<char> line)
+	{
+		foreach(var match in regex.EnumerateMatches(line))
+			
+			return (match.Index, match.Length);
+		
+		return null;
+	}
+	
+	/// <summary>
+	///     The hits of one page as the answer shows them (#460): by file, and within a file by the
+	///     declaration each hit is in. The hits come in file and line order, so the groups are runs.
+	///     A file's path is written once, not once per hit, and ten hits in one method share the
+	///     method's header: what the lines and the start of the declaration cost is taken back by
+	///     what is no longer repeated.
+	/// </summary>
+	static SearchFileGroup[] Group(MatchResult[] hits)
+	{
+		var files = new List<SearchFileGroup>();
+		
+		for(var index = 0; index < hits.Length;) {
+			
+			var file    = hits[index].File;
+			var members = new List<SearchDeclarationGroup>();
+			
+			while(index < hits.Length && hits[index].File == file) {
+				
+				var declaration = hits[index].Declaration;
+				var lines       = new List<SearchHit>();
+				
+				for(; index < hits.Length && hits[index].File == file && hits[index].Declaration == declaration; index++)
+					lines.Add(new(hits[index].Line, hits[index].Text, hits[index].Declares ? true : null));
+				
+				members.Add(declaration is { } found
+					? new($"{found.Kind} {found.Name}", $"{found.FirstLine}-{found.EndLine}", $"{found.StartLine}:{found.StartColumn}", [..lines])
+					: new(null, null, null, [..lines]));
+			}
+			
+			files.Add(new(file, [..members]));
+		}
+		
+		return [..files];
+	}
+	
+	// One hit as it is kept between pages: the line, and the declaration it is in.
 	private sealed class MatchResult
 	{
 		public required string File { get; init; }
 		public required int Line { get; init; }
 		public required string Text { get; init; }
+		public EnclosingDeclaration? Declaration { get; init; }
+		public bool Declares { get; init; }
 	}
 }
