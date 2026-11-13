@@ -480,7 +480,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     among them does not — <see cref="LeadingTrivia"/> decides what a directive inside the
 	///     node's comment means. Returns -1 when no comment is attached.
 	/// </summary>
-	private static int AttachedCommentStart(SyntaxTriviaList leading)
+	internal static int AttachedCommentStart(SyntaxTriviaList leading)
 	{
 		var start      = -1;
 		var lineIsBare = false;

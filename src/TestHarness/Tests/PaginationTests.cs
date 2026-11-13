@@ -72,11 +72,11 @@ static class PaginationTests
 		static string[]? Files(JsonNode? data)
 		{
 			
-			if(data?["matches"] is not JsonArray matches || data["total_matches"]?.GetValue<int>() != 5)
+			if(SearchHits.Of(data) is not { } matches || data?["total_matches"]?.GetValue<int>() != 5)
 				
 				return null;
 			
-			return [..matches.Select(match => Path.GetFileName(match!["file"]!.GetValue<string>()))];
+			return [..matches.Select(match => Path.GetFileName(match.File))];
 		}
 		
 		static string? Token(JsonNode? data) => data?["page_token"]?.GetValue<string>();
@@ -103,8 +103,8 @@ static class PaginationTests
 				var expected = await Call("roslyn_search_files", new { query.pattern, query.filePattern, query.projectPath, skip = 2, take = 2 });
 				var actual = await Call("roslyn_search_files", new { query.pattern, query.filePattern, query.projectPath, page_token = token1 });
 				
-				if(expected?["matches"] is not JsonArray || actual?["matches"] is not JsonArray
-					|| !JsonNode.DeepEquals(expected["matches"], actual["matches"])
+				if(expected?["files"] is not JsonArray || actual?["files"] is not JsonArray
+					|| !JsonNode.DeepEquals(expected["files"], actual["files"])
 					|| !JsonNode.DeepEquals(expected["total_matches"], actual["total_matches"]))
 					
 					return (false, $"FAIL  (query {query}: expected {expected}, got {actual})");

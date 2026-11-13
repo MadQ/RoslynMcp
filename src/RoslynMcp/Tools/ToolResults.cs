@@ -553,8 +553,40 @@ internal sealed record ListFilesEmptyResult(
 	[property: JsonPropertyName("close_matches")] string[]? CloseMatches
 ) : ToolResult;
 
+/// <summary>
+///     The hits of <c>roslyn_search_files</c> in one file (#460), by the declaration each is in.
+/// </summary>
+internal sealed record SearchFileGroup(
+	[property: JsonPropertyName("file")] string                   File,
+	[property: JsonPropertyName("in")]   SearchDeclarationGroup[] In
+);
+
+/// <summary>
+///     The hits in one declaration: what it is (<c>method Enqueue</c>), the lines it takes from its
+///     attached comment to its end (<c>108-158</c>, what to read to see all of it), and where its
+///     node starts (<c>112:2</c>, the line and column <c>roslyn_replace_in_code</c> takes). All
+///     three are absent for hits in no declaration: a using directive, a namespace line.
+/// </summary>
+internal sealed record SearchDeclarationGroup(
+	[property: JsonPropertyName("declaration")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string?     Declaration,
+	[property: JsonPropertyName("lines")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string?     Lines,
+	[property: JsonPropertyName("at")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string?     At,
+	[property: JsonPropertyName("matches")]                                 SearchHit[] Matches
+);
+
+/// <summary>One matching line. <see cref="Declares"/> is set when the match is on the name of the declaration it is in.</summary>
+internal sealed record SearchHit(
+	[property: JsonPropertyName("line")] int    Line,
+	[property: JsonPropertyName("text")] string Text,
+	[property: JsonPropertyName("declares")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Declares
+);
+
 internal sealed record SearchFilesResult(
-	[property: JsonPropertyName("matches")]       object[] Matches,
+	[property: JsonPropertyName("files")]         SearchFileGroup[] Files,
 	[property: JsonPropertyName("total_matches")] int      TotalMatches,
 	[property: JsonPropertyName("returned")]      int      Returned,
 	[property: JsonPropertyName("page_token")]    string?  PageToken,

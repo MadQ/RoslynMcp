@@ -193,7 +193,7 @@ static class WorkspaceHygieneTests
 			var searchPattern = $"AdhocLabelProbe_{Guid.NewGuid():N}|class AdhocLabelProbe";
 			
 			var list   = await ctx.RunTestAsync("roslyn_list_files",   new { pattern = listPattern,   projectPath = fx.Dir }, data => data?["count"] is not null);
-			var search = await ctx.RunTestAsync("roslyn_search_files", new { pattern = searchPattern, projectPath = fx.Dir }, data => data?["matches"] is not null);
+			var search = await ctx.RunTestAsync("roslyn_search_files", new { pattern = searchPattern, projectPath = fx.Dir }, data => SearchHits.Of(data) is not null);
 			
 			if(!list.pass || !search.pass)
 				

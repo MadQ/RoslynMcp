@@ -43,7 +43,7 @@ static partial class DefaultWorkspaceTests
 			new("DefaultWorkspace: search_files without projectPath spans the solution", async () => {
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_search_files", new { pattern = "class (Greeter|Consumer)" });
-				var files      = data?["matches"]?.AsArray().Select(m => m?["file"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				var files      = SearchHits.Of(data)?.Select(m => m.File).ToArray() ?? [];
 				
 				return Verdict(ok
 					&& files.Any(f => f.Contains("Greeter.cs"))
@@ -240,7 +240,7 @@ static partial class DefaultWorkspaceTests
 				// The workspace's view of the file, through a content search: roslyn_read_file returns its
 				// source as a raw text block, which this group's JSON-only Call helper does not see.
 				var (readOk, read) = await Call(rootedCtx, "roslyn_search_files", new { pattern = "\"hello\"", mode = "literal", filePattern = "Greeter.cs" });
-				var lines          = read?["matches"]?.AsArray().Select(m => m?["text"]?.GetValue<string>() ?? "") ?? [];
+				var lines          = SearchHits.Of(read)?.Select(m => m.Text) ?? [];
 				
 				return Verdict(ok && readOk
 					&& lines.Any(l => l.Contains("\"hello\""))

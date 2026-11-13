@@ -110,6 +110,31 @@ static class LogFieldTests
 						$"expected ExtractInterface in the log entry and not in the answer; got [{string.Join(" | ", details)}] and {answer?.ToJsonString() ?? "null"}");
 				}),
 			
+			// Whether the grouped search answer (#460) pays for itself is a question for real use: it
+			// measured 9% larger than the flat one on sixty searches of one repository, and it is
+			// meant to save the read that used to follow a search. Both sides have to be in the log.
+			// The search's entry must say how its page grouped and what the same hits would have
+			// taken listed flat; the read's entry must say which lines were read, since only that
+			// shows a read taking up the lines a search reported. The search finds the class and
+			// its two members, three hits of which the two member names declare what they are in.
+			new("log fields: a search records how its hits grouped, and a read which lines it took",
+				async () => {
+					
+					await Call("roslyn_search_files", new { pattern = "LogFieldProbe|Value|Name", caseSensitive = true, filePattern = "LogFieldProbe.cs", projectPath = fx.Csproj });
+					await Call("roslyn_read_file", new { filePath = "LogFieldProbe.cs", startLine = 3, endLine = 5, projectPath = fx.Csproj });
+					
+					var (search, failure) = Details("search_files", "LogFieldProbe|Value|Name");
+					var (read, _)         = Details("read_file", "LogFieldProbe.cs");
+					
+					if(failure is not null)
+						
+						return (false, failure);
+					
+					return Verdict(search.Any(detail => detail.Contains("3 hit(s) in 1 file(s), 3 group(s), 3 in a declaration, 3 declaring; flat ~"))
+						&& read.Any(detail => detail.Contains("lines 3-5")),
+						$"expected the grouping note and 'lines 3-5'; got search [{string.Join(" | ", search)}] and read [{string.Join(" | ", read)}]");
+				}),
+			
 			// A project that loads with only part of its references is healthy to the health check,
 			// and its missing types read as "not found" (#447, #456). Nothing recorded how many
 			// references a project had, so that state could only be guessed at afterwards. Each load
