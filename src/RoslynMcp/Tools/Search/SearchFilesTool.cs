@@ -164,7 +164,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 						
 						// Any match of the line, not the first alone: 'logger' matches inside
 						// 'FileLogger' before it matches the field's name on the same line.
-						var declares = names.Length > 0 && MatchesAny(rx, source.AsSpan(line.Start, line.Span.Length), line.Start, names);
+						// Looked for only on a line that holds a name: most hits are lines of a body,
+						// where no match can be on one.
+						var declares = Array.Exists(names, name => name.Start < line.End && name.End > line.Start)
+							&& MatchesAny(rx, source.AsSpan(line.Start, line.Span.Length), line.Start, names);
 						
 						matches.Add(new MatchResult {
 							

@@ -80,16 +80,18 @@ static class SearchDeclarationTests
 			// is, and '^\s*…' says so itself) begins in the indentation, which the syntax tree counts
 			// as trivia before the declaration. Such a hit on the first line of a declaration was
 			// listed under the class around it, whose start an agent would then have handed to an
-			// edit. The attribute line is the method's first line, the field's line its only one.
+			// edit. The doc comment's line is the method's first line, and the field's line its only
+			// one: those two are the cases. The attribute line lies past the comment's start and was
+			// the method's before too; it is here as the line that must not change.
 			new("search declarations: a hit that starts in the indentation is still the declaration's", async () => {
 				
-				var hits = SearchHits.Of(await ctx.CallToolJsonAsync("roslyn_search_files", new { pattern = @"^\s*\[Obsolete\]|^\s*int", caseSensitive = true, projectPath = fx.Dir }));
+				var hits = SearchHits.Of(await ctx.CallToolJsonAsync("roslyn_search_files", new { pattern = @"^\s*/// <summary>|^\s*\[Obsolete\]|^\s*int", caseSensitive = true, projectPath = fx.Dir }));
 				
 				string Shown(int line) => hits?.FirstOrDefault(hit => hit.Line == line) is { } hit ? $"{hit.Declaration ?? "none"} {hit.At ?? "-"}" : "missing";
 				
-				return Shown(10) == "method Add 10:2" && Shown(16) == "field Step, Extra 16:2" && hits?.Length == 2
-					? (true, "PASS  (both lines under their own declaration)")
-					: (false, $"FAIL  (line 10: '{Shown(10)}', line 16: '{Shown(16)}', {hits?.Length ?? 0} hit(s))");
+				return Shown(9) == "method Add 10:2" && Shown(10) == "method Add 10:2" && Shown(16) == "field Step, Extra 16:2" && hits?.Length == 3
+					? (true, "PASS  (all three lines under their own declaration)")
+					: (false, $"FAIL  (line 9: '{Shown(9)}', line 10: '{Shown(10)}', line 16: '{Shown(16)}', {hits?.Length ?? 0} hit(s))");
 			}),
 			
 			// Whether a hit declares what it is in must not hang on which match comes first on the
