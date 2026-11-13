@@ -371,4 +371,44 @@ internal abstract partial class RoslynMcpTool
 			"Re-call with one candidate's project as projectPath. " +
 			"If the user's intent is not clear from the conversation, ask them which project they meant.");
 	}
+	
+	/// <summary>The parameter text for a <c>symbolName</c> that may hold several names (#459).</summary>
+	protected const string SeveralNamesDescription =
+		" Several names in one call: separate them with '|' or ',' (e.g. 'InvalidateFile|RequestReload'); each is looked up on its own and gets its own result or error."
+	;
+	
+	/// <summary>
+	///     The names in a <c>symbolName</c> argument (#459). Agents ask about several symbols at once:
+	///     nearly every symbol lookup in the logs was a text search for names joined by <c>|</c>,
+	///     because the tools that know symbols took one name a call. So a name list is split at
+	///     <c>|</c>, which is what they already write, and at a comma that is not between angle
+	///     brackets (<c>Dictionary&lt;TKey, TValue&gt;</c> is one name). Order kept, repeats dropped.
+	/// </summary>
+	protected static string[] SplitSymbolNames(string symbolName)
+	{
+		var names = new List<string>();
+		var depth = 0;
+		var start = 0;
+		
+		for(var index = 0; index <= symbolName.Length; index++) {
+			
+			var c = index < symbolName.Length ? symbolName[index] : '|';
+			
+			if(c == '<')
+				depth++;
+			else if(c == '>' && depth > 0)
+				depth--;
+			
+			if(c != '|' && (c != ',' || depth > 0))
+				continue;
+			
+			if(symbolName[start..index].Trim() is { Length: > 0 } name && !names.Contains(name))
+				names.Add(name);
+			
+			start = index + 1;
+		}
+		
+		return [..names];
+	}
+
 }

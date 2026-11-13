@@ -57,7 +57,59 @@ internal sealed record FindReferencesResult(
 	[property: JsonPropertyName("references")]       string[] References,
 	[property: JsonPropertyName("page_token")]       string?  PageToken,
 	[property: JsonPropertyName("has_more")]         bool     HasMore
+) : ToolResult
+{
+	/// <summary>
+	///     Where the symbols searched are declared in source, as <c>file:line</c> (#459). Roslyn's
+	///     reference search leaves the declaration out, and "where is it and who uses it" is one
+	///     question to an agent.
+	/// </summary>
+	[JsonPropertyName("declarations")]
+	[JsonPropertyOrder(-1)]
+	public string[] Declarations { get; init; } = [];
+}
+
+/// <summary>
+///     The answer of <c>roslyn_find_references</c> to several names (#459): one entry per name, in
+///     the order asked.
+/// </summary>
+internal sealed record SymbolsReferencesResult(
+	[property: JsonPropertyName("symbols")]   NamedReferences[] Symbols,
+	[property: JsonPropertyName("found")]     int               Found,
+	[property: JsonPropertyName("not_found")] int               NotFound
 ) : ToolResult;
+
+/// <summary>
+///     One name of a list: where it is declared, how often it is referenced and its first
+///     references, or the error a single-name call would have failed with. <see cref="HasMore"/>
+///     is set when there are more references than were listed: the name asked alone pages them.
+/// </summary>
+internal sealed record NamedReferences([property: JsonPropertyName("name")] string Name)
+{
+	[JsonPropertyName("declarations")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? Declarations { get; init; }
+	
+	[JsonPropertyName("symbols_searched")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? SymbolsSearched { get; init; }
+	
+	[JsonPropertyName("total_references")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public int? TotalReferences { get; init; }
+	
+	[JsonPropertyName("references")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? References { get; init; }
+	
+	[JsonPropertyName("has_more")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public bool? HasMore { get; init; }
+	
+	[JsonPropertyName("failed")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public object? Failed { get; init; }
+}
 
 internal sealed record UnusedSymbolEntry(
 	[property: JsonPropertyName("kind")]          string Kind,
@@ -251,6 +303,25 @@ internal sealed record SymbolDefinitionResult(
 	[property: JsonPropertyName("signature")]   string  Signature,
 	[property: JsonPropertyName("doc_summary")] string? DocSummary
 ) : ToolResult;
+
+/// <summary>
+///     The answer of <c>roslyn_get_symbol_definition</c> to several names (#459): one entry per name,
+///     in the order asked.
+/// </summary>
+internal sealed record SymbolDefinitionsResult(
+	[property: JsonPropertyName("definitions")] NamedDefinition[] Definitions,
+	[property: JsonPropertyName("found")]       int               Found,
+	[property: JsonPropertyName("not_found")]   int               NotFound
+) : ToolResult;
+
+/// <summary>One name of a list with its definition, or with its own error in the shape a single-name call fails with.</summary>
+internal sealed record NamedDefinition(
+	[property: JsonPropertyName("name")]                                    string  Name,
+	[property: JsonPropertyName("definition")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] object? Definition,
+	[property: JsonPropertyName("failed")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] object? Failed
+);
 
 internal sealed record SymbolDocumentationResult(
 	[property: JsonPropertyName("symbol_name")] string  SymbolName,
