@@ -12,12 +12,14 @@ namespace RoslynMcp;
 ///     over-pruning.
 /// </summary>
 /// <remarks>
-///     Call order required by callers in <c>Program.cs</c>:
-///     <list type="number">
-///         <item><see cref="IncrementAndGetRunCount"/> — once, immediately after <c>ServerArgs.Initialize</c></item>
-///         <item>DI construction (FileLogger, BackupStore constructors call <see cref="Prune"/>)</item>
-///         <item><see cref="ApplyPendingReset"/> — once, immediately after <c>builder.Build()</c></item>
-///     </list>
+///     <see cref="IncrementAndGetRunCount"/> runs once in <c>Program.cs</c>, immediately after
+///     <c>ServerArgs.Initialize</c>. It decides there and then whether this process is a pruning run,
+///     and when it is, the counter on disk starts over in that same step. The pruners (the log
+///     directory, the heartbeat and shadow-copy directories, <see cref="BackupStore"/>) run whenever
+///     their owner is first built: the logger and the heartbeat as the server starts, the backup
+///     store when a pruning run builds it right after them (and otherwise at the first call of a
+///     tool that writes). A reset applied at a fixed point of startup came before every one of
+///     them, was never written, and left every process pruning (#445).
 /// </remarks>
 internal static class FilePruner
 {
@@ -36,13 +38,16 @@ internal static class FilePruner
     // -1 means not yet initialized (Prune called before Increment, which shouldn't happen).
     static int  cachedRunCount = -1
 ;
-    static bool resetPending;
 
     static readonly ConcurrentDictionary<string, ConcurrentBag<DateTimeOffset>> _pruneErrors = new();
 
 
-    /// <summary>Exposes the cached startup run count to BackupStore for its pruning gate check.</summary>
-    internal static int CachedRunCount => cachedRunCount;
+    /// <summary>
+    ///     Whether this process prunes: its start brought the counter to
+    ///     <see cref="ServerArgs.PruneMinRuns"/>, and <see cref="IncrementAndGetRunCount"/> started
+    ///     the counter on disk over for it.
+    /// </summary>
+    internal static bool IsPruningRun => cachedRunCount >= ServerArgs.Current.PruneMinRuns;
 
     internal static void RecordPruneError(Exception ex)
     {
@@ -68,6 +73,12 @@ internal static class FilePruner
     ///     Must be called once, before DI construction, so <see cref="Prune"/> sees the
     ///     incremented count when called from constructors.
     ///     Returns 0 on any failure — callers treat 0 as "don't prune."
+    ///     <para>
+    ///         A count that has reached <see cref="ServerArgs.PruneMinRuns"/> makes this process a
+    ///         pruning run, and the file gets 0 in the same write, under the same mutex: the next
+    ///         processes count up from there whatever becomes of this one's pruning. A process that
+    ///         dies before it prunes costs one round, which the next starts make up for.
+    ///     </para>
     /// </summary>
     internal static int IncrementAndGetRunCount()
     {
@@ -98,10 +109,12 @@ internal static class FilePruner
 
                 count++;
 
+                var stored = count >= ServerArgs.Current.PruneMinRuns ? 0 : count;
+
                 // Atomic write: temp + rename eliminates partial-write corruption on crash.
                 var tmp = RunCountPath + ".tmp"
 ;
-                File.WriteAllText(tmp, count.ToString(CultureInfo.InvariantCulture));
+                File.WriteAllText(tmp, stored.ToString(CultureInfo.InvariantCulture));
                 File.Move(tmp, RunCountPath, overwrite: true);
 
                 cachedRunCount = count;
@@ -130,7 +143,6 @@ internal static class FilePruner
     ///     that are older than <paramref name="maxAge"/>, provided the run count has reached
     ///     <paramref name="minRuns"/>. A global named mutex ensures only one process prunes at a
     ///     time; if another holds it, this call is a no-op. Silently swallows all errors.
-    ///     Signals a pending counter reset (applied by <see cref="ApplyPendingReset"/>).
     /// </summary>
     internal static void Prune(
         string directory,
@@ -188,44 +200,12 @@ internal static class FilePruner
             catch {
                 // Directory enumeration failed — silently skip the entire pass.
             }
-
-            resetPending = true;
         }
         finally {
 
             if(owned)
                 try { mutex.ReleaseMutex(); }
                 catch { }
-        }
-    }
-
-    /// <summary>
-    ///     Called by BackupStore after its own age-aware prune pass to participate in the
-    ///     deferred counter reset without taking a dependency on <see cref="Prune"/>.
-    /// </summary>
-    internal static void RequestReset() => resetPending = true;
-
-    /// <summary>
-    ///     Writes the counter reset to disk if any pruning ran during this startup.
-    ///     Must be called from <c>Program.cs</c> after <c>builder.Build()</c>, once all
-    ///     DI constructors have had a chance to trigger their prune passes.
-    /// </summary>
-    internal static void ApplyPendingReset()
-    {
-        if(!resetPending)
-
-            return;
-
-        try {
-
-            var tmp = RunCountPath + ".tmp";
-            File.WriteAllText(tmp, "0");
-            File.Move(tmp, RunCountPath, overwrite: true);
-            cachedRunCount = 0;
-        }
-        catch(Exception ex) {
-            // Counter reset failed — prune will re-trigger on the next run.
-            RecordPruneError(ex);
         }
     }
 

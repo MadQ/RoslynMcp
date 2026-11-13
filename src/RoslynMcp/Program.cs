@@ -153,7 +153,8 @@ static int PrintHelp()
 ServerArgs.Initialize(args);
 
 // Increment the server start counter for pruning throttle — must run before DI construction
-// so FileLogger and BackupStore constructors see the updated count.
+// so FileLogger and BackupStore constructors see the updated count. It also starts the counter
+// over when this process is a pruning run (#445).
 FilePruner.IncrementAndGetRunCount()
 ;
 
@@ -232,10 +233,6 @@ builder.Services
 
 var host = builder.Build();
 
-// Reset the run counter after all DI constructors have run their prune passes.
-FilePruner.ApplyPendingReset()
-;
-
 var logger      = host.Services.GetRequiredService<FileLogger>();
 
 // Promote the crash handler to the locked path now that FileLogger is available.
@@ -261,6 +258,21 @@ lifetime.ApplicationStarted.Register(() => {
 	
 	ServerHeartbeat.Initialize();
 	ThreadPoolProbe.Start(logger);
+	
+	// The backup store is otherwise built by the first call of a tool that writes, and its prune
+	// starts when it is built. A pruning run has already started the counter over, so a server
+	// that never writes would spend the round without pruning a backup (#445). Building it is
+	// cheap: the pass itself runs on a thread of its own. A store that cannot be built is the
+	// writing tools' to report when they are called, never a server that does not start.
+	if(FilePruner.IsPruningRun) {
+		
+		try {
+			host.Services.GetRequiredService<BackupStore>();
+		}
+		catch(Exception ex) {
+			logger.LogInfo("Backups", $"the backup store could not be built at startup, so nothing was pruned: {ex.GetType().Name}: {ex.Message}");
+		}
+	}
 	
 	// Warn if any agent config points to a stale path (e.g. after dotnet tool update).
 	var currentExe = Environment.ProcessPath

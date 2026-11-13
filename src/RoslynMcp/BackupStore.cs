@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +16,9 @@ internal sealed class BackupStore
 {
 	const int    MaxPerFile   = 20;
 	const string MetaFileName = "meta.json";
+	
+	// How long the backup prune waits for another process that is pruning the same store.
+	static readonly TimeSpan PruneMutexWait = TimeSpan.FromMinutes(5);
 	
 	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Backup;
 	
@@ -55,7 +59,12 @@ internal sealed class BackupStore
 			return;
 		}
 		
-		PruneExpiredGlobal();
+		// Not here, on the caller's time: this constructor runs inside the first call of a tool that
+		// writes, with every other such call waiting for the singleton behind it, and the pass reads
+		// one meta file per backed-up file path — thousands of them on a machine that has been in use
+		// for a while. Two calls waited 76 and 16 seconds for it before their tools ran (#445).
+		if(FilePruner.IsPruningRun)
+			new Thread(PruneExpiredGlobal) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "RoslynMcp backup prune" }.Start();
 	}
 	
 	/// <summary>
@@ -537,32 +546,49 @@ internal sealed class BackupStore
 	
 	// Deletes backup snapshots older than ROSLYNMCP_BACKUP_MAX_AGE_DAYS across all hash
 	// directories. Meta-aware: reads each meta.json, removes expired entries, rewrites it
-	// atomically, and removes empty directories. Only runs when the server has started at
-	// least PruneMinRuns times. Uses the same global mutex as FilePruner.Prune so only one
-	// process prunes at a time.
+	// atomically, and removes empty directories. Only runs in a process that is a pruning run
+	// (FilePruner), on a thread of its own. A named mutex per store lets one process prune a store
+	// at a time; taken and released on this one thread, as a mutex must be.
+	//
+	// Each directory is pruned under the store's lock and the lock is let go between two of them:
+	// a snapshot being saved reads and rewrites the same meta file, and it waits for one
+	// directory's pass at most, never for the whole store's.
 	void PruneExpiredGlobal()
 	{
 		if(backupRoot is null)
 			
 			return;
 		
-		if(FilePruner.CachedRunCount < ServerArgs.Current.PruneMinRuns)
-			
-			return;
-		
-		var owned = false;
-		
-		using var mutex = new Mutex(false, @"Global\RoslynMcp_FilePruner");
+		var directories = 0;
+		var removed     = 0;
+		var owned       = false;
+		Mutex? mutex    = null;
 		
 		try {
 			
+			// Created in here: opening a named mutex another account made throws, and an exception
+			// that leaves this method leaves the thread, which ends the process.
+			//
+			// A mutex of this store's own, by its path. The directory pruners' mutex was shared
+			// before, and they give up at once when it is held: this pass, which holds its mutex for
+			// as long as it takes, would have cost every other process its log pruning, and a pass
+			// over one store has nothing to keep from a pass over another.
+			var storeId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(backupRoot).ToUpperInvariant())))[..16];
+			
+			mutex = new Mutex(false, $@"Global\RoslynMcp_BackupPruner_{storeId}");
+			
 			try {
 				
-				owned = mutex.WaitOne(0);
+				// Waited for: nothing waits for this thread, and another server pruning the same store
+				// is done in the time one pass takes.
+				owned = mutex.WaitOne(PruneMutexWait);
 				
-				if(!owned)
+				if(!owned) {
 					
-					return;  // another process is pruning — skip this run
+					logger.LogInfo("Backups", $"prune skipped: another process pruned this store for {PruneMutexWait.TotalMinutes:0} minutes");
+					
+					return;
+				}
 			}
 			catch(AbandonedMutexException) {
 				owned = true;
@@ -571,45 +597,61 @@ internal sealed class BackupStore
 				return;
 			}
 			
-			var cutoff = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays);
+			// The pass's own time, without the wait for another process.
+			var started = Stopwatch.GetTimestamp();
+			var cutoff  = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays);
 			
 			try {
 				
 				foreach(var dir in Directory.EnumerateDirectories(backupRoot)) {
 					
+					directories++;
+					asyncLock.Wait();
+					
 					try {
-						PruneExpiredInDir(dir, cutoff);
+						removed += PruneExpiredInDir(dir, cutoff);
 					}
 					catch(Exception ex) {
 						FilePruner.RecordPruneError(ex);
 					}
+					finally {
+						asyncLock.Release();
+					}
 				}
 			}
 			catch(Exception ex) {
-				// Enumeration of backup root failed — entire prune pass silently skipped.
+				// Enumeration of backup root failed — the rest of the prune pass is skipped.
 				FilePruner.RecordPruneError(ex);
 			}
 			
-			FilePruner.RequestReset();
+			logger.LogInfo("Backups", $"pruned in {(long) Stopwatch.GetElapsedTime(started).TotalMilliseconds} ms: {directories} directories read, {removed} expired snapshot(s) removed");
+		}
+		catch(Exception ex) {
+			
+			// The last frame of a thread: an exception that leaves it ends the process.
+			FilePruner.RecordPruneError(ex);
 		}
 		finally {
 			
 			if(owned)
-				try { mutex.ReleaseMutex(); }
+				try { mutex?.ReleaseMutex(); }
 				catch { }
+			
+			mutex?.Dispose();
 		}
 	}
 	
-	void PruneExpiredInDir(string dir, DateTime cutoff)
+	// The number of expired snapshots removed from the directory's meta file.
+	int PruneExpiredInDir(string dir, DateTime cutoff)
 	{
 		var metaFile = Path.Combine(dir, MetaFileName);
 		var entries  = ReadAllMetaEntries(metaFile);
 		
 		if(entries.Count == 0)
 			
-			return;
+			return 0;
 		
-		var changed = false;
+		var removed = 0;
 		
 		foreach(var (token, meta) in entries.ToArray()) {
 			
@@ -624,7 +666,7 @@ internal sealed class BackupStore
 				continue;
 			
 			entries.Remove(token);
-			changed = true;
+			removed++;
 			
 			var bakFile = FindBakFile(dir, token, meta.AbsolutePath);
 			
@@ -633,19 +675,21 @@ internal sealed class BackupStore
 				catch { }
 		}
 		
-		if(!changed)
+		if(removed == 0)
 			
-			return;
+			return 0;
 		
 		if(entries.Count == 0) {
 			
 			try { File.Delete(metaFile); } catch { }
 			try { Directory.Delete(dir); } catch { }
 			
-			return;
+			return removed;
 		}
 		
 		WriteMetaAtomic(metaFile, entries);
+		
+		return removed;
 	}
 	
 	void PruneOldBackups(string dir, string absolutePath)
