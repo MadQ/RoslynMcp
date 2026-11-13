@@ -24,6 +24,7 @@ record HarnessSelection(GroupEntry[] Groups, string? TestFilter, string? FilterN
 static class HarnessGroups
 {
 	internal static readonly GroupEntry[] All = [
+		Group("Harness Protocol",                          g => HarnessProtocolTests.Build(g.Ctx)),
 		Group("Discovery Tools",                           g => DiscoveryTests.Build(g.Ctx)),
 		Group("VsVersionPin",                              g => VsVersionPinTests.Build(g.Ctx)),
 		Group("ProjectStyleDetection",                     g => ProjectStyleDetectionTests.Build(g.Ctx)),
