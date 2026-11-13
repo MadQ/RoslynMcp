@@ -259,6 +259,13 @@ lifetime.ApplicationStarted.Register(() => {
 	ServerHeartbeat.Initialize();
 	ThreadPoolProbe.Start(logger);
 	
+	// The backup store is otherwise built by the first call of a tool that writes, and its prune
+	// starts when it is built. A pruning run has already started the counter over, so a server
+	// that never writes would spend the round without pruning a backup (#445). Building it is
+	// cheap: the pass itself runs on a thread of its own.
+	if(FilePruner.IsPruningRun)
+		host.Services.GetRequiredService<BackupStore>();
+	
 	// Warn if any agent config points to a stale path (e.g. after dotnet tool update).
 	var currentExe = Environment.ProcessPath
 	;

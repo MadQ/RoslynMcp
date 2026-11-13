@@ -44,6 +44,13 @@ internal static class FilePruner
     /// <summary>Exposes the cached startup run count to BackupStore for its pruning gate check.</summary>
     internal static int CachedRunCount => cachedRunCount;
 
+    /// <summary>
+    ///     Whether this process prunes: its start brought the counter to
+    ///     <see cref="ServerArgs.PruneMinRuns"/>, and <see cref="IncrementAndGetRunCount"/> started
+    ///     the counter on disk over for it.
+    /// </summary>
+    internal static bool IsPruningRun => cachedRunCount >= ServerArgs.Current.PruneMinRuns;
+
     internal static void RecordPruneError(Exception ex)
     {
         var bag = _pruneErrors.GetOrAdd(ex.Message, _ => new ConcurrentBag<DateTimeOffset>());

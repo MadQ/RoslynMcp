@@ -17,7 +17,7 @@ internal sealed class BackupStore
 	const int    MaxPerFile   = 20;
 	const string MetaFileName = "meta.json";
 	
-	// How long the backup prune waits for another pruner, in this process or another, to finish.
+	// How long the backup prune waits for another process that is pruning the same store.
 	static readonly TimeSpan PruneMutexWait = TimeSpan.FromMinutes(5);
 	
 	static readonly JsonSerializerOptions JsonOptions = RoslynMcpJson.Backup;
@@ -63,7 +63,7 @@ internal sealed class BackupStore
 		// writes, with every other such call waiting for the singleton behind it, and the pass reads
 		// one meta file per backed-up file path — thousands of them on a machine that has been in use
 		// for a while. Two calls waited 76 and 16 seconds for it before their tools ran (#445).
-		if(FilePruner.CachedRunCount >= ServerArgs.Current.PruneMinRuns)
+		if(FilePruner.IsPruningRun)
 			new Thread(PruneExpiredGlobal) { IsBackground = true, Priority = ThreadPriority.BelowNormal, Name = "RoslynMcp backup prune" }.Start();
 	}
 	
@@ -547,8 +547,8 @@ internal sealed class BackupStore
 	// Deletes backup snapshots older than ROSLYNMCP_BACKUP_MAX_AGE_DAYS across all hash
 	// directories. Meta-aware: reads each meta.json, removes expired entries, rewrites it
 	// atomically, and removes empty directories. Only runs in a process that is a pruning run
-	// (FilePruner), on a thread of its own. Uses the same global mutex as FilePruner.Prune so only
-	// one process prunes at a time; taken and released on this one thread, as a mutex must be.
+	// (FilePruner), on a thread of its own. A named mutex per store lets one process prune a store
+	// at a time; taken and released on this one thread, as a mutex must be.
 	//
 	// Each directory is pruned under the store's lock and the lock is let go between two of them:
 	// a snapshot being saved reads and rewrites the same meta file, and it waits for one
@@ -559,26 +559,33 @@ internal sealed class BackupStore
 			
 			return;
 		
-		var started     = Stopwatch.GetTimestamp();
 		var directories = 0;
 		var removed     = 0;
 		var owned       = false;
-		
-		using var mutex = new Mutex(false, @"Global\RoslynMcp_FilePruner");
+		Mutex? mutex    = null;
 		
 		try {
 			
+			// Created in here: opening a named mutex another account made throws, and an exception
+			// that leaves this method leaves the thread, which ends the process.
+			//
+			// A mutex of this store's own, by its path. The directory pruners' mutex was shared
+			// before, and they give up at once when it is held: this pass, which holds its mutex for
+			// as long as it takes, would have cost every other process its log pruning, and a pass
+			// over one store has nothing to keep from a pass over another.
+			var storeId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(backupRoot).ToUpperInvariant())))[..16];
+			
+			mutex = new Mutex(false, $@"Global\RoslynMcp_BackupPruner_{storeId}");
+			
 			try {
 				
-				// Waited for, where the pruners on the caller's time give up at once: nothing waits for
-				// this thread, and the holder is as likely this process's own startup, pruning the
-				// heartbeat and shadow-copy directories, as another server. Giving up there left the
-				// backups unpruned whenever the two met.
+				// Waited for: nothing waits for this thread, and another server pruning the same store
+				// is done in the time one pass takes.
 				owned = mutex.WaitOne(PruneMutexWait);
 				
 				if(!owned) {
 					
-					logger.LogInfo("Backups", $"prune skipped: the prune mutex was held for {PruneMutexWait.TotalMinutes:0} minutes");
+					logger.LogInfo("Backups", $"prune skipped: another process pruned this store for {PruneMutexWait.TotalMinutes:0} minutes");
 					
 					return;
 				}
@@ -590,7 +597,9 @@ internal sealed class BackupStore
 				return;
 			}
 			
-			var cutoff = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays);
+			// The pass's own time, without the wait for another process.
+			var started = Stopwatch.GetTimestamp();
+			var cutoff  = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays);
 			
 			try {
 				
@@ -625,8 +634,10 @@ internal sealed class BackupStore
 		finally {
 			
 			if(owned)
-				try { mutex.ReleaseMutex(); }
+				try { mutex?.ReleaseMutex(); }
 				catch { }
+			
+			mutex?.Dispose();
 		}
 	}
 	
