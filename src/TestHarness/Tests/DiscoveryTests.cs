@@ -11,7 +11,7 @@ static class DiscoveryTests
 				() => ctx.RunTestAsync(
 					"roslyn_search_files",
 					new { pattern = "WorkspaceManager", filePattern = "*.cs", take = 10, projectPath = ctx.TargetPath },
-					data => data?["matches"]?.AsArray().Count > 0)),
+					data => SearchHits.Of(data)?.Length > 0)),
 			
 			// ── Regression: unified match-mode enum (#253) ──
 			// Before #253 the search tools treated `pattern` as regex UNCONDITIONALLY — there was no
@@ -24,7 +24,7 @@ static class DiscoveryTests
 				() => ctx.RunTestAsync(
 					"roslyn_search_files",
 					new { pattern = "[Description(", mode = "literal", filePattern = "*.cs", take = 5, projectPath = ctx.TargetPath },
-					data => data?["error"] is null && data?["matches"]?.AsArray().Count > 0)),
+					data => data?["error"] is null && SearchHits.Of(data)?.Length > 0)),
 			
 			// mode:"glob" is anchored to the WHOLE line (^…$), so '*WorkspaceManager*' lowers to
 			// ^.*WorkspaceManager.*$ and matches any line containing the token. Confirms glob is honored
@@ -33,7 +33,7 @@ static class DiscoveryTests
 				() => ctx.RunTestAsync(
 					"roslyn_search_files",
 					new { pattern = "*WorkspaceManager*", mode = "glob", filePattern = "*.cs", take = 5, projectPath = ctx.TargetPath },
-					data => data?["error"] is null && data?["matches"]?.AsArray().Count > 0)),
+					data => data?["error"] is null && SearchHits.Of(data)?.Length > 0)),
 			
 			// An unrecognized mode must be a STRUCTURED validation error listing the valid values,
 			// never an unhandled exception. Asserts the TryParseMatchMode guard fires before any search.
