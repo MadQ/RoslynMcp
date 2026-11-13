@@ -147,6 +147,13 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		// Fixtures resolve the SDK the repo pins, not the newest one installed.
 		TestFixtures.PinSdk(repoRoot);
 		
+		// Every server this run starts keeps its snapshots under the fixture root, in a directory the
+		// sweep above removes with the fixture trees. They used to go to the developer's own backup
+		// store: 26,000 files in 7,600 directories after a few weeks, which is what made that store's
+		// prune slow enough to stall a call (#445). Set on this process, which the servers inherit
+		// their environment from and FileRewriteTests reads the location from.
+		Environment.SetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH", Path.Combine(TestFixtures.TempRoot, $"backups.{Guid.NewGuid():N}"));
+		
 		// -- Server build -----------------------------------------------------------------------
 		
 		Running = "server build";

@@ -153,7 +153,8 @@ static int PrintHelp()
 ServerArgs.Initialize(args);
 
 // Increment the server start counter for pruning throttle — must run before DI construction
-// so FileLogger and BackupStore constructors see the updated count.
+// so FileLogger and BackupStore constructors see the updated count. It also starts the counter
+// over when this process is a pruning run (#445).
 FilePruner.IncrementAndGetRunCount()
 ;
 
@@ -231,10 +232,6 @@ builder.Services
 ;
 
 var host = builder.Build();
-
-// Reset the run counter after all DI constructors have run their prune passes.
-FilePruner.ApplyPendingReset()
-;
 
 var logger      = host.Services.GetRequiredService<FileLogger>();
 
