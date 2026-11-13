@@ -75,6 +75,38 @@ static class SearchDeclarationTests
 					? (true, "PASS  (6 hits in 4 groups of one file)")
 					: (false, $"FAIL  ({files} file group(s), {groups} declaration group(s): {answer?.ToJsonString()})");
 			}),
+			
+			// A match need not start on the code. A pattern anchored at the line's start (every glob
+			// is, and '^\s*…' says so itself) begins in the indentation, which the syntax tree counts
+			// as trivia before the declaration. Such a hit on the first line of a declaration was
+			// listed under the class around it, whose start an agent would then have handed to an
+			// edit. The attribute line is the method's first line, the field's line its only one.
+			new("search declarations: a hit that starts in the indentation is still the declaration's", async () => {
+				
+				var hits = SearchHits.Of(await ctx.CallToolJsonAsync("roslyn_search_files", new { pattern = @"^\s*\[Obsolete\]|^\s*int", caseSensitive = true, projectPath = fx.Dir }));
+				
+				string Shown(int line) => hits?.FirstOrDefault(hit => hit.Line == line) is { } hit ? $"{hit.Declaration ?? "none"} {hit.At ?? "-"}" : "missing";
+				
+				return Shown(10) == "method Add 10:2" && Shown(16) == "field Step, Extra 16:2" && hits?.Length == 2
+					? (true, "PASS  (both lines under their own declaration)")
+					: (false, $"FAIL  (line 10: '{Shown(10)}', line 16: '{Shown(16)}', {hits?.Length ?? 0} hit(s))");
+			}),
+			
+			// Whether a hit declares what it is in must not hang on which match comes first on the
+			// line. On the field's line 'int' matches before 'Step' does: taking the first match
+			// alone, the line was not a declaration of Step, and an agent looking for declares: true
+			// would have gone on looking. The method's line matches 'int' and not its name, and the
+			// use of Step in the body is a use: neither declares.
+			new("search declarations: a later match on the line can be the one on the name", async () => {
+				
+				var hits = SearchHits.Of(await ctx.CallToolJsonAsync("roslyn_search_files", new { pattern = "int|Step", caseSensitive = true, projectPath = fx.Dir }));
+				
+				bool? Declares(int line) => hits?.FirstOrDefault(hit => hit.Line == line)?.Declares;
+				
+				return Declares(16) == true && Declares(11) == false && Declares(13) == false
+					? (true, "PASS  (the field line declares, the method line and the use do not)")
+					: (false, $"FAIL  (declares on line 16: {Declares(16)}, line 11: {Declares(11)}, line 13: {Declares(13)})");
+			}),
 		};
 		
 		return new TestGroup($"Search Declarations ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });

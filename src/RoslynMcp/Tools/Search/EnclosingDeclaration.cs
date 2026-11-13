@@ -24,9 +24,10 @@ namespace RoslynMcp.Tools;
 internal readonly record struct EnclosingDeclaration(string Kind, string Name, int FirstLine, int StartLine, int StartColumn, int EndLine)
 {
 	/// <summary>
-	///     The innermost declaration that holds <paramref name="match"/>, and whether the match is on
-	///     that declaration's own name. Null for a position in no declaration: a using directive, a
-	///     namespace line, a top-level statement.
+	///     The innermost declaration that holds <paramref name="position"/>, and where that
+	///     declaration's own name is written (several places, for a field declaration with several
+	///     names): a match that overlaps one of them is on the name. Null for a position in no
+	///     declaration: a using directive, a namespace line, a top-level statement.
 	///     <para>
 	///         A position in the trivia before a member is that member's only from its attached
 	///         comment on (the rule of <see cref="ReplaceInCodeTool.AttachedCommentStart"/>). A
@@ -34,9 +35,9 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 	///         the lines reported for a hit always hold the hit.
 	///     </para>
 	/// </summary>
-	public static (EnclosingDeclaration? Declaration, bool Declares) At(SyntaxNode root, SourceText text, TextSpan match)
+	public static (EnclosingDeclaration? Declaration, TextSpan[] Names) At(SyntaxNode root, SourceText text, int position)
 	{
-		var token = root.FindToken(match.Start);
+		var token = root.FindToken(position);
 		
 		foreach(var node in token.Parent?.AncestorsAndSelf() ?? []) {
 			
@@ -48,7 +49,11 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			var attached = ReplaceInCodeTool.AttachedCommentStart(leading);
 			var first    = attached >= 0 ? leading[attached].SpanStart : member.SpanStart;
 			
-			if(match.Start < first)
+			// From the start of that line, not from the comment or the node: a match anchored at the
+			// line's start (every glob is, and so is '^\s*public') begins in the indentation, which
+			// is trivia before both. Compared with the comment's own start, such a hit on a method's
+			// first line was listed under the class.
+			if(position < text.Lines.GetLineFromPosition(first).Start)
 				continue;
 			
 			var start = text.Lines.GetLinePosition(member.SpanStart);
@@ -61,10 +66,10 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 				start.Character + 1,
 				text.Lines.GetLinePosition(member.Span.End).Line + 1);
 			
-			return (declaration, names.Any(span => span.OverlapsWith(match)));
+			return (declaration, names);
 		}
 		
-		return (null, false);
+		return (null, []);
 	}
 	
 	// The kind, the name, and where the name is written, for the declarations a hit is reported in.

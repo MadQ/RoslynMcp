@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -157,9 +158,13 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 						
 						root ??= await document.GetSyntaxRootAsync(cancellationToken);
 						
-						var (declaration, declares) = root is null
-							? (null, false)
-							: EnclosingDeclaration.At(root, text, new(line.Start + hit.Value.Index, hit.Value.Length));
+						var (declaration, names) = root is null
+							? (null, [])
+							: EnclosingDeclaration.At(root, text, line.Start + hit.Value.Index);
+						
+						// Any match of the line, not the first alone: 'logger' matches inside
+						// 'FileLogger' before it matches the field's name on the same line.
+						var declares = names.Length > 0 && MatchesAny(rx, source.AsSpan(line.Start, line.Span.Length), line.Start, names);
 						
 						matches.Add(new MatchResult {
 							
@@ -201,6 +206,23 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		return null;
 	}
 	
+	// Whether any match of the pattern in one line overlaps one of the spans, which are positions in
+	// the file: the line starts at lineStart.
+	static bool MatchesAny(Regex regex, ReadOnlySpan<char> line, int lineStart, TextSpan[] spans)
+	{
+		foreach(var match in regex.EnumerateMatches(line)) {
+			
+			var found = new TextSpan(lineStart + match.Index, match.Length);
+			
+			foreach(var span in spans)
+				if(span.OverlapsWith(found))
+					
+					return true;
+		}
+		
+		return false;
+	}
+	
 	/// <summary>
 	///     The hits of one page as the answer shows them (#460): by file, and within a file by the
 	///     declaration each hit is in. The hits come in file and line order, so the groups are runs.
@@ -226,7 +248,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 					lines.Add(new(hits[index].Line, hits[index].Text, hits[index].Declares ? true : null));
 				
 				members.Add(declaration is { } found
-					? new($"{found.Kind} {found.Name}", $"{found.FirstLine}-{found.EndLine}", $"{found.StartLine}:{found.StartColumn}", [..lines])
+					? new($"{found.Kind} {found.Name}".TrimEnd(), $"{found.FirstLine}-{found.EndLine}", $"{found.StartLine}:{found.StartColumn}", [..lines])
 					: new(null, null, null, [..lines]));
 			}
 			
