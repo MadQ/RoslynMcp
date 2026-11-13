@@ -402,8 +402,16 @@ internal abstract partial class RoslynMcpTool
 			if(c != '|' && (c != ',' || depth > 0))
 				continue;
 			
-			if(symbolName[start..index].Trim() is { Length: > 0 } name && !names.Contains(name))
-				names.Add(name);
+			if(symbolName[start..index].Trim() is { Length: > 0 } name) {
+				
+				// The chat prefix a client puts before a symbol it was shown comes once per name, and
+				// the tools take it off the argument's start alone.
+				if(HasChatSymbolRefPrefix(name, out var bare) && bare.Length > 0)
+					name = bare;
+				
+				if(!names.Contains(name))
+					names.Add(name);
+			}
 			
 			start = index + 1;
 		}

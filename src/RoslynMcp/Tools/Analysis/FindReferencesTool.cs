@@ -53,19 +53,27 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			
 			return scope.Outcome("cached page", cached);
 		
-		// Several names (#459): each is one lookup, with its own project and its own answer. A
-		// position names one symbol, whatever the name argument holds.
-		if(line <= 0 && SplitSymbolNames(symbolName) is { Length: > 1 } names) {
+		// A position names one symbol, whatever the name argument holds. Otherwise the argument is a
+		// name or a list of names (#459), and a list that comes to one name ('Greet|') is that name.
+		var names = line > 0 ? [] : SplitSymbolNames(symbolName);
+		
+		if(names is [var only])
+			symbolName = only;
+		
+		// Several names: each is one lookup, with its own project and its own answer.
+		if(names.Length > 1) {
 			
 			var entries = new List<NamedReferences>(names.Length);
 			var found   = 0;
 			
 			foreach(var name in names) {
 				
-				var (references, failed, _) = await ReferencesOfAsync(name, containingType, projectPath, cancellationToken);
+				var (references, failed, failure) = await ReferencesOfAsync(name, containingType, projectPath, filePath, cancellationToken);
 				
 				if(references is null) {
 					
+					// The entry's detail counts the names found; which one failed, and why, is this.
+					scope.Record($"{name}: {failure}");
 					entries.Add(new(name) { Failed = failed });
 					
 					continue;
@@ -82,39 +90,54 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 				});
 			}
 			
-			var answer = new SymbolsReferencesResult([..entries], found, names.Length - found);
+			var answer = new SymbolsReferencesResult([..entries], found, names.Length - found) {
+				
+				// A cursor's position arrives as skip too, so this covers a page token sent with a list.
+				Hint = skip > 0 ? "skip and page_token do not apply to a list of names: each name's first references are listed. Ask one name alone to page through its references." : null,
+			};
 			
 			return found > 0
 				? scope.Outcome($"{found}/{names.Length} name(s) found, {entries.Sum(entry => entry.TotalReferences ?? 0)} reference(s)", answer)
 				: scope.Failed($"none of {names.Length} name(s) found", answer);
 		}
 		
-		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.All, filePath, cancellationToken);
-
-		if(projectError is not null)
+		string[] allResults, declarations, symbolsSearched;
+		
+		// By name: when containingType is specified, one symbol; without it ALL symbols matching the
+		// name, which prevents silently incomplete results when multiple types share a member name.
+		if(line <= 0) {
 			
-			return scope.Error(projectError);
-		
-		projectPath = resolvedProject;
-		
-		if(!TryGetCompilation(projectPath, out var compilation, out var error))
+			var (references, failed, failure) = await ReferencesOfAsync(symbolName, containingType, projectPath, filePath, cancellationToken);
 			
-			return scope.Error(error!);
-		
-		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+			if(references is null)
+				
+				return scope.Failed(failure!, failed!);
 			
-			return scope.Error(solutionError);
-		
-		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			projectPath = references.Project;
+			(allResults, declarations, symbolsSearched) = (references.Locations, references.Declarations, references.Searched);
+		}
+		else {
 			
-			return scope.Error(rootError);
-		
-		// Position (line > 0) pinpoints one symbol. Otherwise, when containingType is
-		// specified, search one symbol; without it search ALL symbols matching the name —
-		// prevents silently incomplete results when multiple types share a member name.
-		ISymbol[] symbols;
-		
-		if(line > 0) {
+			// A position (line > 0) pinpoints one symbol.
+			var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.All, filePath, cancellationToken);
+			
+			if(projectError is not null)
+				
+				return scope.Error(projectError);
+			
+			projectPath = resolvedProject;
+			
+			if(!TryGetCompilation(projectPath, out var compilation, out var error))
+				
+				return scope.Error(error);
+			
+			if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+				
+				return scope.Error(solutionError);
+			
+			if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+				
+				return scope.Error(rootError);
 			
 			if(filePath is null)
 				
@@ -126,18 +149,12 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 				
 				return scope.Error(AmbiguousSourceFileError(filePath, ambiguous));
 			
-			symbols = await FindSymbolAtPosition(compilation, tree, line, column, cancellationToken) is { } positional
-				? [positional]
-				: [];
-		}
-		else
-			symbols = FindSymbols(compilation, symbolName, containingType);
-		
-		if(symbols.Length == 0)
+			if(await FindSymbolAtPosition(compilation, tree, line, column, cancellationToken) is not { } positional)
+				
+				return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 			
-			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
-		
-		var (allResults, declarations, symbolsSearched) = await CollectAsync(symbols, solution, rootPath, cancellationToken);
+			(allResults, declarations, symbolsSearched) = await CollectAsync([positional], solution, rootPath, cancellationToken);
+		}
 		
 		if(allResults.Length == 0)
 			
@@ -149,17 +166,17 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", shape(result));
 	}
 	
-	/// <summary>What the search for one name found: every reference, where the symbols are declared, and which symbols they were.</summary>
-	sealed record Found(string[] Locations, string[] Declarations, string[] Searched);
+	/// <summary>What the search for one name found: every reference, where the symbols are declared, which symbols they were, and the project they were found in.</summary>
+	sealed record Found(string[] Locations, string[] Declarations, string[] Searched, string Project);
 	
 	/// <summary>
-	///     The references of one name of a list, found as a single-name call finds them: the project
-	///     that declares the name, every symbol of that name in it. Or the error a single-name call
-	///     would have failed with, and the reason for the log.
+	///     The references of one name, for a single-name call and for each name of a list alike: the
+	///     project that declares the name (or holds <paramref name="filePath"/>), every symbol of
+	///     that name in it. Or the error the call fails with for that name, and the reason for the log.
 	/// </summary>
-	async Task<(Found? References, object? Failed, string? Failure)> ReferencesOfAsync(string symbolName, string? containingType, string? projectPath, CancellationToken cancellationToken)
+	async Task<(Found? References, object? Failed, string? Failure)> ReferencesOfAsync(string symbolName, string? containingType, string? projectPath, string? filePath, CancellationToken cancellationToken)
 	{
-		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.All, null, cancellationToken);
+		var (resolvedProject, projectError) = await ResolveSymbolProjectArgAsync(projectPath, symbolName, containingType, SymbolSought.All, filePath, cancellationToken);
 		
 		if(projectError is not null)
 			
@@ -169,7 +186,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
-			return (null, error, "compilation not available");
+			return (null, error, error.Error ?? "compilation not available");
 		
 		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
 			
@@ -187,7 +204,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		
 		var (locations, declarations, searched) = await CollectAsync(symbols, solution, rootPath, cancellationToken);
 		
-		return (new(locations, declarations, searched), null, null);
+		return (new(locations, declarations, searched, projectPath), null, null);
 	}
 	
 	/// <summary>

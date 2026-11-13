@@ -83,7 +83,7 @@ static partial class DefaultWorkspaceTests
 					&& Name(1) == "TwiceDeclared" && entries[1]?["definition"] is null && entries[1]?["failed"]?["candidates"]?.AsArray().Count == 2
 					&& Name(2) == "NoSuchName459" && (entries[2]?["failed"]?["error"]?.GetValue<string>() ?? "").Contains("not found")
 					&& Name(3) == "Greeter" && entries[3]?["definition"]?["symbol_kind"] is not null
-					&& data?["found"]?.GetValue<int>() == 2 && data["not_found"]?.GetValue<int>() == 2,
+					&& data?["found"]?.GetValue<int>() == 2 && data["failed"]?.GetValue<int>() == 2,
 					$"expected two definitions and two errors for the four names; got {data?.ToJsonString() ?? "null"}");
 			}),
 			
@@ -92,12 +92,17 @@ static partial class DefaultWorkspaceTests
 			// uses it" took two tools. Greet is declared in Lib and called from App's Consumer.cs:
 			// its entry must name both, the declaration under declarations and not among the
 			// references. The unknown name is an error of its own beside it. A single name must keep
-			// today's answer (references at the top level, paged) and gain the declarations.
+			// today's answer (references at the top level, paged) and gain the declarations; so must
+			// a list that comes to one name, 'Greet|', which was searched as the text 'Greet|' and
+			// not found. A chat prefix is taken off each name of a list, not the first alone, and a
+			// skip sent with a list is answered with a hint, since it is not applied.
 			new("DefaultWorkspace: find_references answers several names, and says where each is declared", async () => {
 				
 				var (ok, data)         = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "Greet|NoSuchName459", containingType = (string?) null });
 				var (singleOk, single1) = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "Greet", containingType = "Greeter" });
-				
+				var (_, trailing)       = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "Greet|", containingType = "Greeter" });
+				var (_, prefixed)       = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "#sym:Greet|#sym:Greeter", skip = 5 });
+
 				var greet    = data?["symbols"]?[0];
 				var declared = greet?["declarations"]?.AsArray().Select(d => d?.GetValue<string>() ?? "").ToArray() ?? [];
 				var used     = greet?["references"]?.AsArray().Select(r => r?.GetValue<string>() ?? "").ToArray() ?? [];
@@ -109,8 +114,11 @@ static partial class DefaultWorkspaceTests
 					&& greet?["total_references"]?.GetValue<int>() == used.Length
 					&& (data["symbols"]?[1]?["failed"]?["error"]?.GetValue<string>() ?? "").Contains("not found")
 					&& singleOk && single1?["references"] is JsonArray && single1["symbols"] is null
-					&& single1["declarations"]?.AsArray().Count > 0,
-					$"expected Greet with its declaration in Lib and its use in Consumer.cs, an error for the unknown name, and a single name in today's shape; got {data?.ToJsonString() ?? "null"} / {single1?.ToJsonString() ?? "null"}");
+					&& single1["declarations"]?.AsArray().Count > 0
+					&& JsonNode.DeepEquals(trailing?["references"], single1["references"])
+					&& prefixed?["found"]?.GetValue<int>() == 2 && prefixed["symbols"]?[1]?["name"]?.GetValue<string>() == "Greeter"
+					&& (prefixed["hint"]?.GetValue<string>() ?? "").Contains("skip"),
+					$"expected Greet with its declaration in Lib and its use in Consumer.cs, an error for the unknown name, a single name in today's shape, 'Greet|' as Greet, and both prefixed names found with a hint about skip; got {data?.ToJsonString() ?? "null"} / {single1?.ToJsonString() ?? "null"} / {trailing?.ToJsonString() ?? "null"} / {prefixed?.ToJsonString() ?? "null"}");
 			}),
 			
 

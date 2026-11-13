@@ -51,6 +51,10 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			
 			found += failure is null ? 1 : 0;
 			entries.Add(failure is null ? new(name, result, null) : new(name, null, result));
+			
+			// The entry's detail counts the names found; which one failed, and why, is this.
+			if(failure is not null)
+				scope.Record($"{name}: {failure}");
 		}
 		
 		var answer = new SymbolDefinitionsResult([..entries], found, names.Length - found);
@@ -76,7 +80,7 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
-			return (error!, "compilation not available");
+			return (error, error.Error ?? "compilation not available");
 		
 		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
 			

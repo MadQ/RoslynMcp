@@ -76,7 +76,7 @@ internal sealed record FindReferencesResult(
 internal sealed record SymbolsReferencesResult(
 	[property: JsonPropertyName("symbols")]   NamedReferences[] Symbols,
 	[property: JsonPropertyName("found")]     int               Found,
-	[property: JsonPropertyName("not_found")] int               NotFound
+	[property: JsonPropertyName("failed")]    int               Failed
 ) : ToolResult;
 
 /// <summary>
@@ -311,7 +311,7 @@ internal sealed record SymbolDefinitionResult(
 internal sealed record SymbolDefinitionsResult(
 	[property: JsonPropertyName("definitions")] NamedDefinition[] Definitions,
 	[property: JsonPropertyName("found")]       int               Found,
-	[property: JsonPropertyName("not_found")]   int               NotFound
+	[property: JsonPropertyName("failed")]      int               Failed
 ) : ToolResult;
 
 /// <summary>One name of a list with its definition, or with its own error in the shape a single-name call fails with.</summary>
