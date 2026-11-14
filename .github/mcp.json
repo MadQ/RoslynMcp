@@ -2,8 +2,8 @@
   "mcpServers": {
     "MadQ.RoslynMcp": {
       "type": "stdio",
-      "command": "madq-roslynmcp",
-      "args": ["--root", "."],
+      "command": "pwsh",
+      "args": ["-NoLogo", "-NoProfile", "-NonInteractive", "-File", "scripts/Start-RoslynMcp.ps1", "--root", "."],
       "tools": ["*"]
     }
   }
