@@ -16,7 +16,9 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		"For text documents Roslyn tracks — .cs source, declared AdditionalFiles items, and .editorconfig/.globalconfig — " +
 		"content is served from the in-memory workspace, always reflecting the latest state of the compilation " +
 		"(including edits not yet written to disk). Every other file (.csproj, an untracked .json, .props, …) is read from disk. " +
-		"Always use startLine/endLine to narrow the range for large files — returning the full file of a large .cs " +
+		"A disk file over 64 MB (a large log, a data file) is read line by line: ask for a line range, total_lines is still reported, " +
+		"and a single line over 1,000,000 characters is refused with line_too_long. " +
+"Always use startLine/endLine to narrow the range for large files — returning the full file of a large .cs " +
 		"file can overflow the context window. Use roslyn_get_file_outline to find the line range of a specific member first. " +
 		"For reading a single method or property body, prefer roslyn_get_member_body — it's more token-efficient. " +
 		"The response is a one-line JSON header (file, source: 'roslyn' or 'disk', total_lines, start_line, end_line) " +
@@ -24,6 +26,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		"Line N of the text is line start_line + N - 1 of the file. Lines are joined with '\\n' and one newline is added after the last.")]
 	public async Task<object> ReadFile(
 		[Description("Relative path to the file, e.g. 'Core/WindowTracker.cs' or 'Directory.Build.props'. Path is relative to the project root.")] string filePath,
+		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("1-based line to start reading from. Default: 1 (start of file). Combine with endLine to read a specific section.")] int startLine = 1,
 		[Description("1-based line to stop reading at (inclusive). Default: end of file. Use roslyn_get_file_outline to find a member's line range.")] int endLine = int.MaxValue)
@@ -38,9 +41,10 @@ internal sealed class ReadFileTool : RoslynMcpTool
 			
 			return scope.Error(resolveError);
 		
-		SourceText sourceText;
-		string     canonicalPath;
-		string     source;
+		SourceText? sourceText = null;
+		Streamed?   streamed   = null;
+		string      canonicalPath;
+string     source;
 		
 		var normalized = NormalizePath(filePath);
 		var fullPath   = ResolveFilePath(filePath, rootPath, boundary);
@@ -80,7 +84,18 @@ internal sealed class ReadFileTool : RoslynMcpTool
 					
 					sourceText = SourceText.From(bytes, bytes.Length);
 				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				catch(FileTooLargeException) {
+					
+					// Past what is read whole (#401): the lines asked for are small whatever the
+					// file holds, so they are streamed out of it and the rest is only counted.
+					try {
+						streamed = ReadStreamed(fullPath, startLine, endLine, cancellationToken);
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						return scope.Error(ReadFailure(ex));
+					}
+				}
+catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					return scope.Error(ReadFailure(ex));
 				}
 				
@@ -114,8 +129,13 @@ internal sealed class ReadFileTool : RoslynMcpTool
 			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		}
 		
-		var lines      = sourceText.Lines;
-		var totalLines = lines.Count;
+		if(streamed is { TooMuch: true })
+			
+			return scope.Failed("range too large", new ErrorResult(
+				$"The lines asked for ({(endLine == int.MaxValue ? $"{Math.Max(startLine, 1)} to the end" : $"{Math.Max(startLine, 1)}-{endLine}")}) hold more than {FileReader.Describe(FileReader.DocumentLimit)} of text.",
+"Ask for fewer lines with startLine and endLine: a file this large is read line by line, and only the lines asked for are kept."));
+		
+		var totalLines = streamed?.Total ?? sourceText!.Lines.Count;
 		
 		// Clamp range to actual file bounds.
 		var first = Math.Clamp(startLine, 1, totalLines)
@@ -126,10 +146,19 @@ internal sealed class ReadFileTool : RoslynMcpTool
 			
 			return scope.Failed("invalid range", new ErrorResult($"startLine ({startLine}) must be ≤ endLine ({endLine})."));
 		
-		var result = new string[last - first + 1];
+		string[] result;
 		
-		for(var i = first; i <= last; i++)
-			result[i - first] = lines[i - 1].ToString();
+		if(streamed is { } range)
+			result = range.Lines;
+		else {
+			
+			var lines = sourceText!.Lines;
+			
+			result = new string[last - first + 1];
+			
+			for(var i = first; i <= last; i++)
+				result[i - first] = lines[i - 1].ToString();
+		}
 		
 		var relative = Path.GetRelativePath(rootPath, canonicalPath);
 		
@@ -148,5 +177,60 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		{
 			Caution = AdhocCaution(projectPath)
 		}, string.Join("\n", result));
+	}
+	
+	// What a streamed read came to: the lines of the range as the clamped range has them, and the
+	// file's line count. TooMuch when the range itself holds more than is returned at once.
+	readonly record struct Streamed(string[] Lines, int Total, bool TooMuch);
+	
+	/// <summary>
+	///     The lines <paramref name="startLine"/> to <paramref name="endLine"/> of a file too large
+	///     to read whole (#401), and its line count: one pass, which keeps the lines of the range
+	///     and counts the rest. The range is clamped to the file as for a file read whole, which
+	///     is only known at the end: a range that lies past the last line, or is reversed and
+	///     ends there, comes to the last line alone, so the line last read is kept as well.
+	/// </summary>
+	static Streamed ReadStreamed(string fullPath, int startLine, int endLine, CancellationToken cancellationToken)
+	{
+		var wantFirst = Math.Max(startLine, 1);
+		var wantLast  = Math.Max(endLine, 1);
+		var kept      = new List<string>();
+		var keptChars = 0L;
+		var tail      = Array.Empty<char>();
+		var tailChars = 0;
+		
+		using var reader = FileReader.OpenLines(fullPath);
+		
+		while(reader.Read(out var line)) {
+			
+			var number = reader.LineNumber;
+			
+			if((number & 0xFFF) == 0)
+				cancellationToken.ThrowIfCancellationRequested();
+			
+			if(number >= wantFirst && number <= wantLast) {
+				
+				keptChars += line.Length + 1;
+				
+				if(keptChars > FileReader.DocumentLimit)
+					
+					return new([], 0, TooMuch: true);
+				
+				kept.Add(line.ToString());
+				
+				continue;
+			}
+			
+			if(tail.Length < line.Length)
+				tail = new char[Math.Max(line.Length, tail.Length * 2)];
+			
+			line.CopyTo(tail);
+			
+			tailChars = line.Length;
+		}
+		
+		// Nothing of the range was in the file, and the clamped range is not reversed: it is the
+		// last line. A reversed one is refused by the caller, which does not look at the lines.
+		return new(kept.Count > 0 ? [..kept] : [new string(tail, 0, tailChars)], reader.LineNumber, TooMuch: false);
 	}
 }

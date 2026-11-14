@@ -1735,7 +1735,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	protected static ErrorResult ReadFailure(Exception ex) => ex switch {
 		
 		FileTooLargeException tooLarge              => new FileTooLargeResult(tooLarge),
-		_ when FileReader.IsHeldByAnotherHandle(ex) => new ErrorResult($"Failed to read file: {ex.Message}", HeldFileHint),
+		LineTooLongException tooLong                => new LineTooLongResult(tooLong),
+_ when FileReader.IsHeldByAnotherHandle(ex) => new ErrorResult($"Failed to read file: {ex.Message}", HeldFileHint),
 		_                                           => new ErrorResult($"Failed to read file: {ex.Message}"),
 	};
 	
