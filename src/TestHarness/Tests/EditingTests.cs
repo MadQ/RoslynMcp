@@ -46,6 +46,8 @@ static class EditingTests
 		
 		fx.Write("several_bad.cs", severalSource.Replace("class Several", "class SeveralBad"));
 		fx.Write("several_enum.cs", "enum Tone\n{\n\tLow,\n\tHigh,\n}\n");
+		fx.Write("several_nested.cs", "class Holder\n{\n\tclass InA\n\t{\n\t\tclass InB { }\n\t}\n}\n");
+		fx.Write("several_top.cs", "class TopOne { }\n");
 
 		// Line-ending fixtures (#268): one CRLF file and one LF file. A multi-line replacement
 		// arrives from MCP clients with LF; the write must adopt the file's style either way.
@@ -637,7 +639,35 @@ static class EditingTests
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
 					new { filePath = "ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } } class Smuggled { void Extra() { }", dryRun = true, projectPath = fx.Csproj },
-					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
+					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("closes the enclosing type") == true)),
+			
+			// The input the "exactly one member" test used to refuse: a constructor and a method on
+			// one line. It is a list of two members now, and a dry run must accept it as one change.
+			new("roslyn_replace_in_code: two members on one line are a list",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } void Extra() { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 1)),
+			
+			// A match inside another match. InA and InB both match, InB sits in InA, and both are
+			// replaced by a list. The outer replacement takes the inner node's place whole, so the
+			// inner list has nowhere to go; looking for its first member in the new tree found
+			// nothing and threw, and the agent got the SDK's bare "An error occurred". The dry run
+			// must answer, with both matches counted.
+			new("roslyn_replace_in_code: a list for a node inside another matched node does not throw",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "several_nested.cs", nodeKind = "ClassDeclaration", textPattern = "In", replacement = "class X { }\n\tclass Y { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 2)),
+			
+			// Outside a type it is still one for one, and a second declaration is refused. It used
+			// to be dropped, with a caution that spoke of a comment or a directive: half of an edit
+			// written, and a message that did not say so.
+			new("roslyn_replace_in_code: two declarations in place of a top-level type are refused",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "class TopOne { }\nclass TopTwo { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one declaration here") == true)),
 
 			// ── Regression: line endings (#268) ──
 			// The replacement node used to be spliced in with the replacement text's own newlines

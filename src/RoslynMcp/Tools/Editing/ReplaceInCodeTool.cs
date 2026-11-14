@@ -36,6 +36,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"The node keeps its place: the blank lines before it and the indentation of the first line of the replacement text come from the file, further lines are written as given. " +
 		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
 		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
+		"In a list of members, what stands between two of them (blank lines, comments, a directive) is written as given. " +
 		"To pick one of several similar nodes, such as the third if statement in a method, pass line (and column for several on one line): where the node starts, as a read of the file or a dry run's changed_nodes shows it. A declaration starts at its first attribute or modifier, not at its name. These narrow nodeKind and textPattern. " +
 		"A position is only as good as the read it came from: after an edit moves lines it can land on a different node of the same kind, so re-read first, or add textPattern so that only a node with that text can match. " +
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern, pass line and column, or set force=true to proceed. " +
@@ -265,8 +266,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				null,                   null
 			);
 			
+			// A first member that is not in the tree was inside another matched node, whose
+			// replacement took its place whole: ReplaceSyntax hands the outer node's replacement out
+			// as it is. Its followers went with it, and there is nothing to insert behind.
 			foreach(var (first, rest) in followers)
-				newRoot = newRoot.InsertNodesAfter(newRoot.GetAnnotatedNodes(first).Single(), rest);
+				if(newRoot.GetAnnotatedNodes(first).FirstOrDefault() is { } anchor)
+					newRoot = newRoot.InsertNodesAfter(anchor, rest);
 		}
 
 		// Validate the text that will be written, parsed as the file is parsed — not the tree it was
@@ -610,9 +615,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     enclosing type, so it reads <c>Widget(int size) { }</c> as a method missing its return
 	///     type, and dispatching on a fixed list of node kinds sent constructors to
 	///     <c>ParseExpression</c> outright (#267). Statements parse as statements, a using directive
-	///     as a compilation unit, everything else as an expression. Exactly one node must come out:
-	///     a replacement that smuggles in a second member, or closes the wrapper type early, is
-	///     refused.
+	///     as a compilation unit, everything else as an expression. Exactly one node must come out,
+	///     except for a member of a class, struct, interface or record, which several members may
+	///     replace (#463). A replacement that closes the wrapper type early is refused, and so is a
+	///     second node anywhere else.
 	///     Returns the node, or null plus the joined parser error messages.
 	/// </summary>
 	private static (ParsedReplacement? Parsed, string? Error) ParseReplacement(SyntaxNode original, string replacement)
@@ -643,13 +649,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 					}
 					: [];
 				
+				// More than the wrapper came out: the text closed it and went on.
+				if(unit.Members.Count != 1)
+					
+					return (null, "Replacement closes the enclosing type: it must hold only members of that type.");
+				
 				// One member may become several (#463): a method and a new overload beside it is one
 				// edit to an agent, and "exactly one" sent that edit to the text tool. Not an enum's:
 				// the commas between its members are the list's, not the members'.
 				if(members.Length == 0)
 					
 					return (null, "Replacement must be a member declaration — parsed none.");
-				
+
 				if(members.Length > 1 && enclosingType is EnumDeclarationSyntax)
 					
 					return (null, $"Replacement must be exactly one enum member — parsed {members.Length}.");
@@ -691,6 +702,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			case MemberDeclarationSyntax:
 				
 				// Top-level: a type, delegate, or namespace member with no enclosing type to borrow.
+				// One for one here. A second declaration used to be dropped with a caution about "a
+				// comment or a directive" below the node; now that a type's members take a list, an
+				// agent will try one here too, and half an edit written is worse than none.
+				if(SyntaxFactory.ParseCompilationUnit(replacement).Members.Count > 1)
+					
+					return (null, "Replacement must be exactly one declaration here: several are accepted only in place of a member of a class, struct, interface or record.");
+				
 				node        = SyntaxFactory.ParseMemberDeclaration(replacement);
 				diagnostics = node?.GetDiagnostics() ?? [];
 				trailing    = node?.GetTrailingTrivia() ?? default;
