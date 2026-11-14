@@ -702,13 +702,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			case MemberDeclarationSyntax:
 				
 				// Top-level: a type, delegate, or namespace member with no enclosing type to borrow.
-				// One for one here. A second declaration used to be dropped with a caution about "a
-				// comment or a directive" below the node; now that a type's members take a list, an
-				// agent will try one here too, and half an edit written is worse than none.
-				if(SyntaxFactory.ParseCompilationUnit(replacement).Members.Count > 1)
+				// One for one here. A second declaration was refused already, as "Unexpected token
+				// 'class'", which does not say that a list is not taken here; now that a type's members
+				// take one, an agent will try. Only for text that parses: one declaration with a typo
+				// in it can come out as two members, and its own error says more than this message.
+				var whole = SyntaxFactory.ParseCompilationUnit(replacement);
+				
+				if(whole.Members.Count > 1 && !whole.GetDiagnostics().Any(d => d.Severity == DiagnosticSeverity.Error))
 					
 					return (null, "Replacement must be exactly one declaration here: several are accepted only in place of a member of a class, struct, interface or record.");
-				
+
 				node        = SyntaxFactory.ParseMemberDeclaration(replacement);
 				diagnostics = node?.GetDiagnostics() ?? [];
 				trailing    = node?.GetTrailingTrivia() ?? default;

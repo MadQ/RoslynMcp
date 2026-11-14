@@ -660,14 +660,21 @@ static class EditingTests
 					new { filePath = "several_nested.cs", nodeKind = "ClassDeclaration", textPattern = "In", replacement = "class X { }\n\tclass Y { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 2)),
 			
-			// Outside a type it is still one for one, and a second declaration is refused. It used
-			// to be dropped, with a caution that spoke of a comment or a directive: half of an edit
-			// written, and a message that did not say so.
+			// Outside a type it is still one for one. A second declaration was refused before too,
+			// as "Unexpected token 'class'"; an agent that has just learned that members take a list
+			// must be told that this place does not. A declaration with a typo in it can also parse
+			// as two members, and must keep its own syntax error, not get this message.
 			new("roslyn_replace_in_code: two declarations in place of a top-level type are refused",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
 					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "class TopOne { }\nclass TopTwo { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one declaration here") == true)),
+			
+			new("roslyn_replace_in_code: a mistyped top-level declaration keeps its own syntax error",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "publc class TopOne { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one declaration here") == false)),
 
 			// ── Regression: line endings (#268) ──
 			// The replacement node used to be spliced in with the replacement text's own newlines
