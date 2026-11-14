@@ -56,6 +56,11 @@ static class EditingTests
 		var tempNsListFile   = fx.Write("ns_list.cs",   "namespace Listed\n{\n\t/// <summary>Old.</summary>\n\tclass InNs { } // tail\n\n\tclass AfterNs { }\n}\n");
 		var tempNamespace    = fx.Write("ns_whole.cs",  "namespace Old.Space\n{\n\tclass Housed { }\n}\n");
 		var tempStatements   = fx.Write("top_statements.cs", "System.Console.WriteLine(1);\nSystem.Console.WriteLine(2);\n");
+		
+		// A method left directly in a namespace by a misplaced brace: no syntax error in the file.
+		var tempStray = fx.Write("ns_stray.cs", "namespace Strayed\n{\n\tvoid Lost() { }\n}\n");
+		
+		fx.Write("ns_two.cs", "namespace First.Space\n{\n}\n\nnamespace Second.Space\n{\n}\n");
 
 		// Line-ending fixtures (#268): one CRLF file and one LF file. A multi-line replacement
 		// arrives from MCP clients with LF; the write must adopt the file's style either way.
@@ -778,6 +783,53 @@ static class EditingTests
 					"roslyn_replace_in_code",
 					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "using System;\nclass TopOne { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["details"]?.GetValue<string>()?.Contains("declarations only") == true)),
+			
+			// A method directly in a namespace is what a misplaced brace leaves, and such a file has
+			// no syntax error. Parsed as a file its text is a top-level statement (a local function),
+			// so it would have been refused as the wrong sort of thing; it keeps the member parser
+			// and is replaced as before.
+			new("roslyn_replace_in_code: a method standing directly in a namespace is still replaced",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "ns_stray.cs", nodeKind = "MethodDeclaration", textPattern = "Lost", replacement = "void Lost() { return; }", projectPath = fx.Csproj },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempStray);
+					
+					return content == "namespace Strayed\n{\n\tvoid Lost() { return; }\n}\n"
+						? (true, "PASS  (the method was written)")
+						: (false, $"FAIL  (file is: {content.Replace("\n", "\\n").Replace("\t", "\\t")})");
+				}),
+			
+			// The two forms of a namespace are one sort of declaration, and 'namespace N;' for a
+			// file's only namespace is a sound edit. For the second namespace of a file it is not,
+			// and no syntax check says so: it parses, compiles to an error, and takes what follows
+			// into itself. Refused, by its own message.
+			new("roslyn_replace_in_code: a file-scoped namespace cannot replace one of two namespaces",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "ns_two.cs", nodeKind = "NamespaceDeclaration", line = 5, replacement = "namespace Second.Space;", dryRun = true, projectPath = fx.Csproj },
+					data => data?["details"]?.GetValue<string>()?.Contains("file's only declaration") == true)),
+			
+			new("roslyn_replace_in_code: a file-scoped namespace replaces a file's only namespace",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "ns_whole.cs", nodeKind = "NamespaceDeclaration", replacement = "namespace New.Space;\n\nclass Housed { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 1)),
+			
+			// A directive without its counterpart around a type outside a type is refused, as it is
+			// around a member of a type: the text does not parse as a file. Before #466 it was
+			// applied without the directive, with a caution; the two places now answer alike.
+			new("roslyn_replace_in_code: an unbalanced directive around a top-level type is refused",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "#region Types\nclass TopOne { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true && data?["details"]?.GetValue<string>()?.Contains("#endregion") == true)),
 			
 			new("roslyn_replace_in_code: a namespace is still replaced by exactly one",
 				() => ctx.RunTestAsync(

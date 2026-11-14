@@ -507,10 +507,6 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	private static IEnumerable<SyntaxTrivia> BelowTheLine(SyntaxTriviaList trailing)
 		=> trailing.SkipWhile(trivia => !trivia.IsKind(SyntaxKind.EndOfLineTrivia)).Skip(1);
 	
-	/// <summary>
-	///     A replacement parsed: the node, the trivia after it up to the end of its line — past the
-	///     comma, for an enum member — and whether the text went on below that line.
-	/// </summary>
 	// What a declaration outside a type is, in the words of a message.
 	private static string Describe(SyntaxNode declaration) => declaration switch {
 		
@@ -520,11 +516,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		_                                                  => "member declaration",
 	};
 	
-	// Whether two declarations outside a type are of one sort: both namespaces, both statements.
-	private static bool SameSort(SyntaxNode original, SyntaxNode replacement)
-		=> Describe(original) == Describe(replacement)
-	;
-	
+	/// <summary>
+	///     A replacement parsed: the node, the trivia after it up to the end of its line — past the
+	///     comma, for an enum member — and whether the text went on below that line.
+	/// </summary>
 	private sealed record ParsedReplacement(SyntaxNode Node, SyntaxTriviaList Trailing, bool HasLeftover)
 	{
 		/// <summary>
@@ -716,6 +711,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				break;
 			}
 			
+			// A method or a field standing directly in a namespace: what a misplaced brace leaves
+			// behind, and a file without one syntax error. Its text is a member's, and as a file it
+			// would read as a top-level statement ('void F() { }' is a local function there), so it
+			// keeps the member parser, one for one.
+			case MemberDeclarationSyntax when original is not (BaseTypeDeclarationSyntax or DelegateDeclarationSyntax or BaseNamespaceDeclarationSyntax or GlobalStatementSyntax):
+				
+				node        = SyntaxFactory.ParseMemberDeclaration(replacement);
+				diagnostics = node?.GetDiagnostics() ?? [];
+				trailing    = node?.GetTrailingTrivia() ?? default;
+				hasLeftover = node is not null && GoesOnBelow(node, replacement);
+				break;
+			
 			case MemberDeclarationSyntax: {
 				
 				// Outside a type: a type, a delegate, a namespace or a top-level statement, in a file
@@ -723,7 +730,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				// gave one member and an "Unexpected token" for a second, null for a namespace, and
 				// a constructor for the statement 'A();' (#466).
 				var whole = SyntaxFactory.ParseCompilationUnit(replacement);
-				
+
 				diagnostics = whole.GetDiagnostics();
 				
 				// Text that does not parse keeps the parser's own words: one declaration with a typo
@@ -752,9 +759,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 					
 					if(declared.FirstOrDefault(member => member is not (BaseTypeDeclarationSyntax or DelegateDeclarationSyntax)) is { } other)
 						
-						return (null, $"A type declaration is replaced by type declarations only (classes, structs, interfaces, records, enums, delegates): the replacement also holds a {Describe(other)}.");
+						return (null, $"A type declaration is replaced by type declarations only (classes, structs, interfaces, records, enums, delegates): the replacement holds a {Describe(other)}.");
 				}
-				else if(declared.Length > 1 || !SameSort(original, declared[0])) {
+				else if(declared.Length > 1 || Describe(original) != Describe(declared[0])) {
 					
 					var wanted = Describe(original);
 					
@@ -763,6 +770,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 						: $"Replacement must be a {wanted} — parsed a {Describe(declared[0])}.");
 				}
 				
+				// 'namespace N;' for a block namespace is a sound edit of a file that holds that one
+				// namespace and nothing else. Anywhere else it is no syntax error either, so nothing
+				// below would stop it: a second namespace of a file, or one inside another, written
+				// file-scoped compiles to an error and takes whatever follows it into itself.
+				else if(declared[0] is FileScopedNamespaceDeclarationSyntax
+					&& original is not FileScopedNamespaceDeclarationSyntax
+					&& original.Parent is not CompilationUnitSyntax { Members.Count: 1 })
+					
+					return (null, "A file-scoped namespace ('namespace N;') can replace a block namespace only where that namespace is the file's only declaration.");
+
 				node        = declared[0];
 				more        = declared[1..];
 				trailing    = declared[^1].GetTrailingTrivia();
