@@ -37,6 +37,15 @@ static class EditingTests
 		var tempCtorFile        = fx.Write("ctor.cs",         "class Widget { int size; Widget(int size) { this.size = size; } }");
 		var tempEscapedCtorFile = fx.Write("escaped_ctor.cs", "class @Widget { int size; @Widget(int size) { this.size = size; } }");
 		var tempMultiCtorFile   = fx.Write("multi_ctor.cs",   "class Widget { int size; Widget(int size) { this.size = size; } } class Gadget { int size; Gadget(int size) { this.size = size; } }");
+		
+		// Several-members fixture (#463): a documented method between two fields, with a comment at
+		// the end of its last line, and an enum. Two copies of the class, one per test that writes.
+		const string severalSource = "class Several\n{\n\tint kept = 1;\n\n\t/// <summary>Old.</summary>\n\tint Twice(int value)\n\t{\n\t\treturn value * 2;\n\t} // end of Twice\n\n\tint after = 2;\n}\n";
+		
+		var tempSeveralFile = fx.Write("several.cs", severalSource);
+		
+		fx.Write("several_bad.cs", severalSource.Replace("class Several", "class SeveralBad"));
+		fx.Write("several_enum.cs", "enum Tone\n{\n\tLow,\n\tHigh,\n}\n");
 
 		// Line-ending fixtures (#268): one CRLF file and one LF file. A multi-line replacement
 		// arrives from MCP clients with LF; the write must adopt the file's style either way.
@@ -578,14 +587,58 @@ static class EditingTests
 					new { filePath = "multi_ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "g", replacement = "Widget(int size) { this.size = size * 2; }", dryRun = true, force = true, projectPath = fx.Csproj },
 					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
 
-			// A replacement that smuggles in a second member (or closes the type early) must be
-			// refused — the tool replaces exactly one node.
-			new("roslyn_replace_in_code: replacement must be exactly one member",
+			// One member of a type may be replaced by several (#463). "Exactly one member" turned
+			// away the commonest edit there is to a type, a method and a new overload beside it, and
+			// the agent took it to the text tool: two of the tool's six failures in a week of logs
+			// were that message, for valid C#. The old method sits between two fields, documented,
+			// with a comment at the end of its last line. After the edit the whole file is compared:
+			// the first member in the old one's place under the new doc comment, the overload behind
+			// it exactly as written, the end-of-line comment behind the last member (it was the end
+			// of what was replaced), and both fields and their blank lines untouched.
+			new("roslyn_replace_in_code: one member is replaced by several, written in order",
+				async () => {
+					
+					const string replacement = "/// <summary>New.</summary>\n\tint Twice(int value)\n\t{\n\t\treturn Twice(value, 2);\n\t}\n\n\t/// <summary>The overload.</summary>\n\tint Twice(int value, int factor)\n\t{\n\t\treturn value * factor;\n\t}";
+					const string expected    = "class Several\n{\n\tint kept = 1;\n\n\t/// <summary>New.</summary>\n\tint Twice(int value)\n\t{\n\t\treturn Twice(value, 2);\n\t}\n\n\t/// <summary>The overload.</summary>\n\tint Twice(int value, int factor)\n\t{\n\t\treturn value * factor;\n\t} // end of Twice\n\n\tint after = 2;\n}\n";
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "several.cs", nodeKind = "MethodDeclaration", textPattern = "Twice", replacement, projectPath = fx.Csproj },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true && data["_caution"] is null);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempSeveralFile);
+					
+					return content == expected
+						? (true, "PASS  (both members written, the rest of the file untouched)")
+						: (false, $"FAIL  (file is: {content.Replace("\n", "\\n").Replace("\t", "\\t")})");
+				}),
+			
+			// Every member of the list is checked as one member is: a syntax error in the second
+			// must refuse the edit, and name what is wrong, not write the first and drop the rest.
+			new("roslyn_replace_in_code: a list with a broken second member is refused",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = "ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } void Extra() { }", dryRun = true, projectPath = fx.Csproj },
-					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one") == true)),
+					new { filePath = "several_bad.cs", nodeKind = "MethodDeclaration", textPattern = "Twice", replacement = "int Twice(int value) { return value; }\n\tint Broken( { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true)),
 			
+			// Still exactly one where a list has separators of its own: the commas between an enum's
+			// members belong to the enum, and a replacement cannot bring them. And a text that closes
+			// the type and opens another is no list of members of this type.
+			new("roslyn_replace_in_code: an enum member is still replaced by exactly one",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "several_enum.cs", nodeKind = "EnumMemberDeclaration", textPattern = "Low", replacement = "Low, Mid", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one enum member") == true)),
+			
+			new("roslyn_replace_in_code: a replacement that closes the type early is refused",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "ctor.cs", nodeKind = "ConstructorDeclaration", textPattern = "Widget", replacement = "Widget() { } } class Smuggled { void Extra() { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>() is { Length: > 0 })),
+
 			// ── Regression: line endings (#268) ──
 			// The replacement node used to be spliced in with the replacement text's own newlines
 			// (LF from MCP clients), leaving a CRLF file mixed. Both directions are checked: the
