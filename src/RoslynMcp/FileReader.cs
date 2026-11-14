@@ -287,7 +287,7 @@ internal static class FileReader
 	internal static string Describe(long bytes) => bytes switch {
 		
 		>= 1024 * 1024 * 1024 when bytes % (1024 * 1024 * 1024) == 0 => $"{bytes / (1024 * 1024 * 1024)} GB",
->= 1024 * 1024 when bytes % (1024 * 1024) == 0 => $"{bytes / (1024 * 1024)} MB",
+		>= 1024 * 1024 when bytes % (1024 * 1024) == 0 => $"{bytes / (1024 * 1024)} MB",
 		>= 1024        when bytes % 1024          == 0 => $"{bytes / 1024} KB",
 		_                                              => $"{bytes} bytes",
 	};

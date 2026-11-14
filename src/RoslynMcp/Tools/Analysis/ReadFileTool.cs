@@ -18,7 +18,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		"(including edits not yet written to disk). Every other file (.csproj, an untracked .json, .props, …) is read from disk. " +
 		"A disk file over 64 MB (a large log, a data file) is read line by line: ask for a line range, total_lines is still reported, " +
 		"and a single line over 1,000,000 characters is refused with line_too_long. " +
-"Always use startLine/endLine to narrow the range for large files — returning the full file of a large .cs " +
+		"Always use startLine/endLine to narrow the range for large files — returning the full file of a large .cs " +
 		"file can overflow the context window. Use roslyn_get_file_outline to find the line range of a specific member first. " +
 		"For reading a single method or property body, prefer roslyn_get_member_body — it's more token-efficient. " +
 		"The response is a one-line JSON header (file, source: 'roslyn' or 'disk', total_lines, start_line, end_line) " +
@@ -44,7 +44,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		SourceText? sourceText = null;
 		Streamed?   streamed   = null;
 		string      canonicalPath;
-string     source;
+		string      source;
 		
 		var normalized = NormalizePath(filePath);
 		var fullPath   = ResolveFilePath(filePath, rootPath, boundary);
@@ -95,7 +95,7 @@ string     source;
 						return scope.Error(ReadFailure(ex));
 					}
 				}
-catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					return scope.Error(ReadFailure(ex));
 				}
 				
@@ -133,7 +133,7 @@ catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 			
 			return scope.Failed("range too large", new ErrorResult(
 				$"The lines asked for ({(endLine == int.MaxValue ? $"{Math.Max(startLine, 1)} to the end" : $"{Math.Max(startLine, 1)}-{endLine}")}) hold more than {FileReader.Describe(FileReader.DocumentLimit)} of text.",
-"Ask for fewer lines with startLine and endLine: a file this large is read line by line, and only the lines asked for are kept."));
+				"Ask for fewer lines with startLine and endLine: a file this large is read line by line, and only the lines asked for are kept."));
 		
 		var totalLines = streamed?.Total ?? sourceText!.Lines.Count;
 		

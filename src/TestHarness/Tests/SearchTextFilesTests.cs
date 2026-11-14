@@ -19,6 +19,7 @@ using System.Text.Json.Nodes;
 ///         <item><c>long.txt</c>: a line of 2,000 characters, the match at 1,500.</item>
 ///         <item><c>breaks.txt</c>: every line break <c>SourceText</c> knows, and a byte that is not UTF-8.</item>
 ///         <item><c>out.link</c>: a symbolic link to a file outside the workspace.</item>
+///         <item><c>slow.txt</c>: a line a nested quantifier backtracks on without end.</item>
 ///     </list>
 /// </remarks>
 static class SearchTextFilesTests
@@ -38,10 +39,12 @@ static class SearchTextFilesTests
 		fx.Write("long.txt", new string('a', 1500) + "needle" + new string('b', 494) + "\n");
 		fx.Write("mini.json", "{\"needle\":\"" + new string('x', LineLimit) + "\"}");
 		
+		fx.Write("slow.txt", new string('a', 5000) + "!\n");
+		
 		File.WriteAllBytes(fx.PathOf("data.bin"), [0x4D, 0x5A, 0x00, 0x00, ..Encoding.UTF8.GetBytes("needle\n")]);
 		
-		// Five breaks, each of another kind, so the file has six lines; StreamReader.ReadLine
-		// would see three. 0xE9 alone is not UTF-8 ('é' in Windows-1252).
+		// Six breaks, each of another kind, so the file has seven lines; StreamReader.ReadLine
+		// would see four. 0xE9 alone is not UTF-8 ('é' in Windows-1252).
 		var nextLine           = (char) 0x0085;
 		var lineSeparator      = (char) 0x2028;
 		var paragraphSeparator = (char) 0x2029;
@@ -180,6 +183,19 @@ static class SearchTextFilesTests
 					(data, texts) => data?["total_lines"]?.GetValue<int>() == 7
 						&& texts is [var text]
 						&& text == $"four needle\n{fifth.Text}\n");
+			}),
+			
+			// The pattern is the agent's and a disk line can be long: '(a+)+$' on a line of a's
+			// that ends otherwise tries every way to split them, which no one waits for and no
+			// cancellation between two lines could stop. The match is given up after two seconds,
+			// and the file counted as not searched; the call answers.
+			new("text search: a pattern that backtracks without end is given up, and the file counted", async () => {
+				
+				var answer = await Search("(a+)+$", "slow.txt");
+				
+				return Files(answer) is [] && answer?["skipped"]?["pattern_timeout"]?.GetValue<int>() == 1
+					? (true, "PASS")
+					: (false, $"FAIL  ({answer?.ToJsonString() ?? "null"})");
 			}),
 			
 			// The walk enters no linked directory, but a file can be a link itself. One that

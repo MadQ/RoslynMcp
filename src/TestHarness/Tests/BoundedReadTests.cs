@@ -117,7 +117,7 @@ static class BoundedReadTests
 			// file was refused or why. Runs after the call it reads about: the entry is written
 			// before the response is sent.
 			new("roslyn_read_file: the log keeps the fields of a line_too_long refusal",
-() => {
+				() => {
 					
 					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var lines, out var failure))
 						
@@ -132,7 +132,7 @@ static class BoundedReadTests
 					return Task.FromResult(logged
 						? (true, "PASS")
 						: (false, "FAIL  (no read_file entry for over-limit.txt whose response peek has limit_chars)"));
-}),
+				}),
 			
 			// The one edit tool that reads a .cs file outside the workspace with its own code. It
 			// was left unbounded in the first version of #230 and loaded any size of file.

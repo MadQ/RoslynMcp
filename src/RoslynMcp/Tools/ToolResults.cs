@@ -647,7 +647,9 @@ internal sealed record SearchSkipped(
 	[property: JsonPropertyName("line_too_long")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int LineTooLong,
 	[property: JsonPropertyName("outside_workspace")]
-	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int OutsideWorkspace
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int OutsideWorkspace,
+	[property: JsonPropertyName("pattern_timeout")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int PatternTimeout
 );
 
 /// <summary>

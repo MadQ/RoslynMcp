@@ -21,7 +21,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		"roslyn_replace_in_code takes), followed by matches[] with line and text. A match on the declaration's own name has " +
 		"declares: true, so a plain name finds its declaration without a keyword in the pattern. Hits outside any declaration " +
 		"(using directives, namespace lines) are in a group without those fields. A line longer than 400 characters is cut around its match, with '…' at each cut. " +
-"Use this when searching file content — finding all lines where a symbol name, pattern, or phrase appears. " +
+		"Use this when searching file content — finding all lines where a symbol name, pattern, or phrase appears. " +
 		"For filename/path matching only (no content), use roslyn_list_files instead. " +
 		"For C#-specific context filtering (find matches only in comments, strings, identifiers, or xmldocs), use roslyn_semantic_search instead. " +
 		"By default searches the C# source files registered in the Roslyn workspace (from the loaded solution/project). " +
@@ -29,8 +29,9 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		"text file under the workspace root — project and props files, config, documentation — the files roslyn_list_files lists, " +
 		"with the same ignored directories (bin, obj, .git, node_modules, …). Such a file's group has source: 'disk' and no declaration fields; " +
 		"its line numbers are the ones roslyn_read_file uses. Files that were not searched are counted in 'skipped': binary files, " +
-		"files that could not be read, files with a line over 1,000,000 characters, and links leading out of the workspace. " +
-"Results are paged; pass page_token from a previous response to retrieve the next page.")]
+		"files that could not be read, files with a line over 1,000,000 characters, links leading out of the workspace, " +
+		"and files on one line of which the pattern ran for more than two seconds (a backtracking regex on a very long line). " +
+		"Results are paged; pass page_token from a previous response to retrieve the next page.")]
 	public async Task<object> SearchFiles(
 		[Description("Pattern to match against the CONTENT of each source line. Interpretation is controlled by 'mode' (default regex). This is not a filename filter — use filePattern to restrict which files are searched.")] string pattern,
 		CancellationToken cancellationToken,
@@ -89,14 +90,11 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		var diskFiles    = 0;
 		var stoppedEarly = false;
 
-		List<MatchResult> allMatches;
+		var (allMatches, collectError) = await TryCollectAsync(regex);
 		
-		try {
-			allMatches = await CollectAsync(regex);
-		}
-		catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
-			return scope.Error(new ErrorResult($"Failed to enumerate files: {ex.Message}"));
-		}
+		if(allMatches is null)
+			
+			return scope.Error(collectError!);
 		
 		// Chat-reference fallback (#228): a 'sym:'-prefixed pattern that matched nothing verbatim
 		// is retried with the prefix stripped — literal 'sym:' searches stay verbatim-first.
@@ -116,7 +114,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				}
 				catch(ArgumentException) { }
 				
-				var retry = strippedRegex is null ? null : await CollectAsync(strippedRegex);
+				// A second pass that fails leaves the first one's answer, which found nothing.
+				var retry = strippedRegex is null ? null : (await TryCollectAsync(strippedRegex)).Matches;
 				
 				if(retry is { Count: > 0 }) {
 					
@@ -133,17 +132,40 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			? $"The search stopped at {MaxDiskHits:N0} matching lines and did not reach every file: narrow the pattern or the filePattern."
 			: null;
 		var shape      = PageShape(ComposeCautions(fallbackCaution, AdhocCaution(projectPath), stopCaution), fallbackHint, skipped.Report());
-var result     = PaginateAndStore(allResults, ref skip, take, shape);
+		var result     = PaginateAndStore(allResults, ref skip, take, shape);
 		
 		scope.Record(GroupingNote(result.Items));
+		scope.Record(RangesNote(result.Items));
 		
 		if(searchesDisk)
 			scope.Record($"disk: {diskFiles} file(s) searched{skipped.Note()}");
 		
 		return scope.Outcome($"{result.Total} match(es)", shape(result));
 		
+		// The walk of the disk can fail as a whole, and so can the pattern on a line of source; the
+		// first pass and the pass for a chat reference answer both the same way.
+		async Task<(List<MatchResult>? Matches, ErrorResult? Error)> TryCollectAsync(Regex rx)
+		{
+			try {
+				return (await CollectAsync(rx), null);
+			}
+			catch(RegexMatchTimeoutException) {
+				return (null, new ErrorResult($"The pattern ran for more than {MatchTimeout.TotalSeconds:N0} seconds on one line of a source file.", "Simplify the pattern: nested quantifiers such as (a+)+ backtrack without end on a line they almost match."));
+			}
+			catch(Exception ex) when(ex is UnauthorizedAccessException or DirectoryNotFoundException or IOException) {
+				return (null, new ErrorResult($"Failed to enumerate files: {ex.Message}"));
+			}
+		}
+		
 		async Task<List<MatchResult>> CollectAsync(Regex rx)
 		{
+			// A line of a disk file may hold a million characters, and the pattern is the agent's: on
+			// a line of source a backtracking pattern costs little, on a minified bundle it can run
+			// for minutes, and nothing between two lines could cancel it. So a search that reads
+			// disk files gives each match a time limit.
+			if(searchesDisk)
+				rx = new Regex(rx.ToString(), rx.Options, MatchTimeout);
+			
 			var matches = new List<MatchResult>();
 			// seenPaths prevents searching the same physical file twice in multi-targeted projects.
 			var seenPaths = new HashSet<string>(SecurityBoundary.PathComparer)
@@ -200,7 +222,7 @@ var result     = PaginateAndStore(allResults, ref skip, take, shape);
 							
 							File        = Path.GetRelativePath(rootPath, document.FilePath),
 							Line        = i + 1,
-							Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), hit.Value.Index, hit.Value.Length),
+							Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), hit.Value.Index),
 							Declaration = declaration,
 							Declares    = declares,
 						});
@@ -242,17 +264,17 @@ var result     = PaginateAndStore(allResults, ref skip, take, shape);
 				// A text document the workspace tracks without it being source (a declared
 				// AdditionalFiles item, an .editorconfig) is searched as the workspace has it, which
 				// is what roslyn_read_file returns for it.
-				if(WorkspaceTextDocumentInfo.Resolve(solution, fullPath).GetDocument(solution) is { } tracked) {
-					
-					var text = await tracked.GetTextAsync(cancellationToken);
-					
-					foreach(var line in text.Lines)
-						AddHit(text.ToString(line.Span), relative, line.LineNumber + 1, disk: false);
-					
-					continue;
-				}
-				
 				try {
+					
+					if(WorkspaceTextDocumentInfo.Resolve(solution, fullPath).GetDocument(solution) is { } tracked) {
+						
+						var text = await tracked.GetTextAsync(cancellationToken);
+						
+						foreach(var line in text.Lines)
+							AddHit(text.ToString(line.Span), relative, line.LineNumber + 1, disk: false);
+						
+						continue;
+					}
 					
 					using var reader = FileReader.OpenLines(fullPath);
 					
@@ -281,7 +303,7 @@ var result     = PaginateAndStore(allResults, ref skip, take, shape);
 					}
 					
 					diskFiles++;
-}
+				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
 					// Hits of a file that was not searched to its end are not reported: the answer
@@ -292,6 +314,12 @@ var result     = PaginateAndStore(allResults, ref skip, take, shape);
 						skipped.LongLine++;
 					else
 						skipped.Unreadable++;
+				}
+				catch(RegexMatchTimeoutException) {
+					
+					matches.RemoveRange(before, matches.Count - before);
+					
+					skipped.PatternTimeout++;
 				}
 			}
 			
@@ -307,7 +335,7 @@ var result     = PaginateAndStore(allResults, ref skip, take, shape);
 					
 					File = file,
 					Line = number,
-					Text = Excerpt(line, hit.Index, hit.Length),
+					Text = Excerpt(line, hit.Index),
 					Disk = disk,
 				});
 			}
@@ -323,11 +351,14 @@ var result     = PaginateAndStore(allResults, ref skip, take, shape);
 		&& patterns.All(pattern => pattern.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
 	;
 	
+	// How long one match of the pattern may run in a search that reads disk files.
+	static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(2);
+	
 	// The most hits a search that reads disk files collects before it stops and says so.
 	const int MaxDiskHits = 100_000;
 	
 	// The most characters of a line a hit shows, and how many of them come before the match.
-const int ExcerptLength = 400;
+	const int ExcerptLength = 400;
 	const int ExcerptLead   = 100;
 	
 	/// <summary>
@@ -336,7 +367,7 @@ const int ExcerptLength = 400;
 	///     ellipsis at each cut. A hit in a minified file is one line of a megabyte, and the
 	///     answer is read by a model.
 	/// </summary>
-	static string Excerpt(ReadOnlySpan<char> line, int matchIndex, int matchLength)
+	static string Excerpt(ReadOnlySpan<char> line, int matchIndex)
 	{
 		var trimmed = line.Trim();
 		
@@ -362,13 +393,14 @@ const int ExcerptLength = 400;
 		public int Unreadable;
 		public int LongLine;
 		public int OutsideWorkspace;
+		public int PatternTimeout;
 		
-		bool Any => Binary + Unreadable + LongLine + OutsideWorkspace > 0;
+		bool Any => Binary + Unreadable + LongLine + OutsideWorkspace + PatternTimeout > 0;
 		
-		public SearchSkipped? Report() => Any ? new(Binary, Unreadable, LongLine, OutsideWorkspace) : null;
+		public SearchSkipped? Report() => Any ? new(Binary, Unreadable, LongLine, OutsideWorkspace, PatternTimeout) : null;
 		
 		public string Note() => Any
-			? $", skipped {Binary} binary, {Unreadable} unreadable, {LongLine} with a line too long, {OutsideWorkspace} linked out of the workspace"
+			? $", skipped {Binary} binary, {Unreadable} unreadable, {LongLine} with a line too long, {OutsideWorkspace} linked out of the workspace, {PatternTimeout} on a pattern timeout"
 			: "";
 	}
 	
@@ -446,7 +478,7 @@ const int ExcerptLength = 400;
 			}
 			
 			files.Add(new(file, source, [..members]));
-}
+		}
 		
 		return [..files];
 	}
@@ -487,6 +519,59 @@ const int ExcerptLength = 400;
 		return $"{hits.Length} hit(s) in {files} file(s), {groups} group(s), {named} in a declaration, {hits.Count(hit => hit.Declares)} declaring; flat ~{flat} chars";
 	}
 	
+	// The most declaration ranges one log entry lists.
+	const int LoggedRanges = 40;
+	
+	/// <summary>
+	///     The declaration ranges one page reported, for the log: <c>ranges: Foo.cs 23-323, 562-689;
+	///     Bar.cs 10-20</c>, by file name. With the <c>lines A-B</c> of the reads that follow it
+	///     says whether a read took up a reported range; the entry's preview of the answer is cut
+	///     after its first group and cannot.
+	/// </summary>
+	static string RangesNote(MatchResult[] hits)
+	{
+		var note   = new System.Text.StringBuilder();
+		var listed = 0;
+		var more   = 0;
+		string? named = null;
+		
+		for(var index = 0; index < hits.Length; index++) {
+			
+			if(hits[index].Declaration is not { } declaration)
+				continue;
+			
+			var newFile = index == 0 || hits[index - 1].File != hits[index].File;
+			
+			if(!newFile && hits[index - 1].Declaration == hits[index].Declaration)
+				continue;
+			
+			if(listed == LoggedRanges) {
+				
+				more++;
+				continue;
+			}
+			
+			// The file is named at its first range, which need not be its first hit.
+			if(hits[index].File != named) {
+				
+				named = hits[index].File;
+				
+				note.Append(note.Length == 0 ? "ranges: " : "; ").Append(Path.GetFileName(named)).Append(' ');
+			}
+			else
+				note.Append(", ");
+			
+			note.Append(declaration.FirstLine).Append('-').Append(declaration.EndLine);
+			
+			listed++;
+		}
+		
+		if(more > 0)
+			note.Append($" (+{more} more)");
+		
+		return note.ToString();
+	}
+	
 	// One hit as it is kept between pages: the line, and the declaration it is in.
 	private sealed class MatchResult
 	{
@@ -496,5 +581,5 @@ const int ExcerptLength = 400;
 		public EnclosingDeclaration? Declaration { get; init; }
 		public bool Declares { get; init; }
 		public bool Disk { get; init; }
-}
+	}
 }
