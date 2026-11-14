@@ -730,7 +730,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				// gave one member and an "Unexpected token" for a second, null for a namespace, and
 				// a constructor for the statement 'A();' (#466).
 				var whole = SyntaxFactory.ParseCompilationUnit(replacement);
-
+				
 				diagnostics = whole.GetDiagnostics();
 				
 				// Text that does not parse keeps the parser's own words: one declaration with a typo
@@ -779,14 +779,14 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 					&& original.Parent is not CompilationUnitSyntax { Members.Count: 1 })
 					
 					return (null, "A file-scoped namespace ('namespace N;') can replace a block namespace only where that namespace is the file's only declaration.");
-
+				
 				node        = declared[0];
 				more        = declared[1..];
 				trailing    = declared[^1].GetTrailingTrivia();
 				hasLeftover = HasText(BelowTheLine(trailing)) || HasText(whole.EndOfFileToken.LeadingTrivia);
 				break;
 			}
-
+			
 			case StatementSyntax:
 				
 				node        = SyntaxFactory.ParseStatement(replacement);
