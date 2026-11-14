@@ -1950,11 +1950,6 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     Literal newlines in the pattern match both <c>\n</c> and <c>\r\n</c> in the file content,
 	///     preventing silent match failures on Windows files.
 	/// </summary>
-	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive = true)
-		=> BuildLiteralRegex(pattern, caseSensitive, Regex.InfiniteMatchTimeout)
-	;
-	
-	/// <inheritdoc cref="BuildLiteralRegex(string, bool)"/>
 	/// <param name="matchTimeout">How long one match may run; <see cref="Regex.InfiniteMatchTimeout"/> for no limit.</param>
 	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive, TimeSpan matchTimeout)
 	{

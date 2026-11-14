@@ -112,7 +112,9 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		string? fallbackCaution = null;
 		string? fallbackHint    = null;
 		
-		if(allMatches.Count == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
+		// Not after a pass that stopped early: it found nothing in the files it reached, and a
+		// second pass would replace its caution and its counts with its own.
+		if(allMatches.Count == 0 && stopCaution is null && HasChatSymbolRefPrefix(pattern, out var stripped)) {
 			
 			if(stripped.Length == 0)
 				fallbackHint = ChatRefTruncatedHint;
@@ -543,55 +545,55 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	const int LoggedRanges = 40;
 	
 	/// <summary>
-///     The declaration ranges one page reported, for the log: <c>ranges: Foo.cs 23-323, 562-689;
-///     Bar.cs 10-20</c>, by file name. With the <c>lines A-B</c> of the reads that follow it
-///     says whether a read took up a reported range; the entry's preview of the answer is cut
-///     after its first group and cannot. Read from the answer itself, so that a page served
-///     from the cache is noted as the first page was.
-/// </summary>
-static string RangesNote(object answer)
-{
-	if(answer is not SearchFilesResult page)
-		
-		return "";
-	
-	var note   = new System.Text.StringBuilder();
-	var listed = 0;
-	var more   = 0;
-	
-	foreach(var file in page.Files) {
-		
-		var named = false;
-		
-		foreach(var group in file.In) {
+	///     The declaration ranges one page reported, for the log: <c>ranges: Foo.cs 23-323, 562-689;
+	///     Bar.cs 10-20</c>, by file name. With the <c>lines A-B</c> of the reads that follow it
+	///     says whether a read took up a reported range; the entry's preview of the answer is cut
+	///     after its first group and cannot. Read from the answer itself, so that a page served
+	///     from the cache is noted as the first page was.
+	/// </summary>
+	static string RangesNote(object answer)
+	{
+		if(answer is not SearchFilesResult page)
 			
-			if(group.Lines is null)
-				continue;
+			return "";
+		
+		var note   = new System.Text.StringBuilder();
+		var listed = 0;
+		var more   = 0;
+		
+		foreach(var file in page.Files) {
 			
-			if(listed == LoggedRanges) {
+			var named = false;
+			
+			foreach(var group in file.In) {
 				
-				more++;
-				continue;
+				if(group.Lines is null)
+					continue;
+				
+				if(listed == LoggedRanges) {
+					
+					more++;
+					continue;
+				}
+				
+				// The file is named at its first range, which need not be its first group.
+				if(named)
+					note.Append(", ");
+				else
+					note.Append(note.Length == 0 ? "ranges: " : "; ").Append(Path.GetFileName(file.File)).Append(' ');
+				
+				note.Append(group.Lines);
+				
+				named = true;
+				listed++;
 			}
-			
-			// The file is named at its first range, which need not be its first group.
-			if(named)
-				note.Append(", ");
-			else
-				note.Append(note.Length == 0 ? "ranges: " : "; ").Append(Path.GetFileName(file.File)).Append(' ');
-			
-			note.Append(group.Lines);
-			
-			named = true;
-			listed++;
 		}
+		
+		if(more > 0)
+			note.Append($" (+{more} more)");
+		
+		return note.ToString();
 	}
-	
-	if(more > 0)
-		note.Append($" (+{more} more)");
-	
-	return note.ToString();
-}
 	
 	// One hit as it is kept between pages: the line, and the declaration it is in.
 	private sealed class MatchResult
