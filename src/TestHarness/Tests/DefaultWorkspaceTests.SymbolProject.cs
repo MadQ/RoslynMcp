@@ -64,6 +64,64 @@ static partial class DefaultWorkspaceTests
 					$"expected the call to ShadowHelper, the type's members, and two candidates for the search; got {graph?.ToJsonString() ?? "null"} / {members?.ToJsonString() ?? "null"} / {refs?.ToJsonString() ?? "null"}");
 			}),
 			
+			// Several names in one call (#459). Agents ask about several symbols at once, and nearly
+			// every symbol lookup in the logs was a text search for names joined by '|', because the
+			// semantic tools took one name a call. Four names, one of each outcome: Greet and Greeter
+			// are declared in Lib, the second project, so each name must find its own project;
+			// TwiceDeclared is declared in both, which is that name's own error, with the candidates;
+			// the last is declared nowhere. Two definitions and two errors, in the order asked, and
+			// neither error may fail the call. A comma separates as well as '|'.
+			new("DefaultWorkspace: get_symbol_definition answers several names, each with its definition or its own error", async () => {
+				
+				var (ok, data) = await Call(rootedCtx, "roslyn_get_symbol_definition", new { symbolName = "Greet|TwiceDeclared, NoSuchName459|Greeter" });
+				var entries    = data?["definitions"]?.AsArray();
+				
+				string Name(int index) => entries?[index]?["name"]?.GetValue<string>() ?? "";
+				
+				return Verdict(ok && data?["error"] is null && entries?.Count == 4
+					&& Name(0) == "Greet" && (entries[0]?["definition"]?["file"]?.GetValue<string>() ?? "").Contains("Lib")
+					&& Name(1) == "TwiceDeclared" && entries[1]?["definition"] is null && entries[1]?["failed"]?["candidates"]?.AsArray().Count == 2
+					&& Name(2) == "NoSuchName459" && (entries[2]?["failed"]?["error"]?.GetValue<string>() ?? "").Contains("not found")
+					&& Name(3) == "Greeter" && entries[3]?["definition"]?["symbol_kind"] is not null
+					&& data?["found"]?.GetValue<int>() == 2 && data["failed"]?.GetValue<int>() == 2,
+					$"expected two definitions and two errors for the four names; got {data?.ToJsonString() ?? "null"}");
+			}),
+			
+			// The same for references, with what a text search gave for free: where each symbol is
+			// declared. Roslyn's reference search leaves the declaration out, so "where is it and who
+			// uses it" took two tools. Greet is declared in Lib and called from App's Consumer.cs:
+			// its entry must name both, the declaration under declarations and not among the
+			// references. The unknown name is an error of its own beside it. A single name must keep
+			// today's answer (references at the top level, paged) and gain the declarations; so must
+			// a list that comes to one name, 'Greet|', which was searched as the text 'Greet|' and
+			// not found. A chat prefix is taken off each name of a list, not the first alone, and a
+			// skip sent with a list is answered with a hint, since it is not applied.
+			new("DefaultWorkspace: find_references answers several names, and says where each is declared", async () => {
+				
+				var (ok, data)         = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "Greet|NoSuchName459", containingType = (string?) null });
+				var (singleOk, single1) = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "Greet", containingType = "Greeter" });
+				var (_, trailing)       = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "Greet|", containingType = "Greeter" });
+				var (_, prefixed)       = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "#sym:Greet|#sym:Greeter", skip = 5 });
+
+				var greet    = data?["symbols"]?[0];
+				var declared = greet?["declarations"]?.AsArray().Select(d => d?.GetValue<string>() ?? "").ToArray() ?? [];
+				var used     = greet?["references"]?.AsArray().Select(r => r?.GetValue<string>() ?? "").ToArray() ?? [];
+				
+				return Verdict(ok && data?["error"] is null && data?["symbols"]?.AsArray().Count == 2
+					&& greet?["name"]?.GetValue<string>() == "Greet"
+					&& declared.Length > 0 && declared.All(d => d.Contains("Lib"))
+					&& used.Any(r => r.Contains("Consumer.cs")) && !used.Intersect(declared).Any()
+					&& greet?["total_references"]?.GetValue<int>() == used.Length
+					&& (data["symbols"]?[1]?["failed"]?["error"]?.GetValue<string>() ?? "").Contains("not found")
+					&& singleOk && single1?["references"] is JsonArray && single1["symbols"] is null
+					&& single1["declarations"]?.AsArray().Count > 0
+					&& JsonNode.DeepEquals(trailing?["references"], single1["references"])
+					&& prefixed?["found"]?.GetValue<int>() == 2 && prefixed["symbols"]?[1]?["name"]?.GetValue<string>() == "Greeter"
+					&& (prefixed["hint"]?.GetValue<string>() ?? "").Contains("skip"),
+					$"expected Greet with its declaration in Lib and its use in Consumer.cs, an error for the unknown name, a single name in today's shape, 'Greet|' as Greet, and both prefixed names found with a hint about skip; got {data?.ToJsonString() ?? "null"} / {single1?.ToJsonString() ?? "null"} / {trailing?.ToJsonString() ?? "null"} / {prefixed?.ToJsonString() ?? "null"}");
+			}),
+			
+
 			// A qualified containing type must narrow. Mark is a member of TwiceDeclared in both
 			// projects; by the type's simple name that is two projects, and qualifying it did not
 			// help, since only the last part was compared. Lib.TwiceDeclared is one of them: the
