@@ -48,6 +48,19 @@ static class EditingTests
 		fx.Write("several_enum.cs", "enum Tone\n{\n\tLow,\n\tHigh,\n}\n");
 		fx.Write("several_nested.cs", "class Holder\n{\n\tclass InA\n\t{\n\t\tclass InB { }\n\t}\n}\n");
 		fx.Write("several_top.cs", "class TopOne { }\n");
+		
+		// Outside a type (#466): a class at file level, a documented class in a namespace with a
+		// comment at the end of its line, a namespace, and two top-level statements. One file per
+		// test that writes.
+		var tempTopListFile  = fx.Write("top_list.cs",  "class TopList { }\n");
+		var tempNsListFile   = fx.Write("ns_list.cs",   "namespace Listed\n{\n\t/// <summary>Old.</summary>\n\tclass InNs { } // tail\n\n\tclass AfterNs { }\n}\n");
+		var tempNamespace    = fx.Write("ns_whole.cs",  "namespace Old.Space\n{\n\tclass Housed { }\n}\n");
+		var tempStatements   = fx.Write("top_statements.cs", "System.Console.WriteLine(1);\nSystem.Console.WriteLine(2);\n");
+		
+		// A method left directly in a namespace by a misplaced brace: no syntax error in the file.
+		var tempStray = fx.Write("ns_stray.cs", "namespace Strayed\n{\n\tvoid Lost() { }\n}\n");
+		
+		fx.Write("ns_two.cs", "namespace First.Space\n{\n}\n\nnamespace Second.Space\n{\n}\n");
 
 		// Line-ending fixtures (#268): one CRLF file and one LF file. A multi-line replacement
 		// arrives from MCP clients with LF; the write must adopt the file's style either way.
@@ -660,21 +673,178 @@ static class EditingTests
 					new { filePath = "several_nested.cs", nodeKind = "ClassDeclaration", textPattern = "In", replacement = "class X { }\n\tclass Y { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 2)),
 			
-			// Outside a type it is still one for one. A second declaration was refused before too,
-			// as "Unexpected token 'class'"; an agent that has just learned that members take a list
-			// must be told that this place does not. A declaration with a typo in it can also parse
-			// as two members, and must keep its own syntax error, not get this message.
-			new("roslyn_replace_in_code: two declarations in place of a top-level type are refused",
+			// A type outside a type takes a list too (#466). It was one for one only because of how
+			// the text was parsed: one declaration, and "Unexpected token 'class'" for a second. Its
+			// parent, a file or a namespace, keeps its declarations in the same kind of list a class
+			// keeps its members in. At file level: the class and a second one, the whole file
+			// compared.
+			new("roslyn_replace_in_code: a type at file level is replaced by several types",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "top_list.cs", nodeKind = "ClassDeclaration", textPattern = "TopList", replacement = "class TopList { }\n\nclass TopAdded { }", projectPath = fx.Csproj },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true && data["_caution"] is null);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempTopListFile);
+					
+					return content == "class TopList { }\n\nclass TopAdded { }\n"
+						? (true, "PASS  (both types written)")
+						: (false, $"FAIL  (file is: {content.Replace("\n", "\\n")})");
+				}),
+			
+			// In a namespace, with everything a member's list has to get right: the new doc comment
+			// in place of the old, the second type behind the first as written, the comment from the
+			// end of the old type's line behind the last, and the type after them untouched.
+			new("roslyn_replace_in_code: a type in a namespace is replaced by several types",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "ns_list.cs", nodeKind = "ClassDeclaration", textPattern = "InNs", replacement = "/// <summary>New.</summary>\n\tclass InNs { }\n\n\tclass AddedNs { }", projectPath = fx.Csproj },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true && data["_caution"] is null);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempNsListFile);
+					
+					return content == "namespace Listed\n{\n\t/// <summary>New.</summary>\n\tclass InNs { }\n\n\tclass AddedNs { } // tail\n\n\tclass AfterNs { }\n}\n"
+						? (true, "PASS  (both types written, the rest of the namespace untouched)")
+						: (false, $"FAIL  (file is: {content.Replace("\n", "\\n").Replace("\t", "\\t")})");
+				}),
+			
+			// A namespace could not be replaced at all: the parser call used for a node outside a
+			// type returns nothing for namespace text, and every attempt failed with "parser
+			// returned null". One namespace for one.
+			new("roslyn_replace_in_code: a namespace is replaced",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "ns_whole.cs", nodeKind = "NamespaceDeclaration", replacement = "namespace New.Space\n{\n\tclass Housed { }\n}", projectPath = fx.Csproj },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempNamespace);
+					
+					return content == "namespace New.Space\n{\n\tclass Housed { }\n}\n"
+						? (true, "PASS  (the namespace was written)")
+						: (false, $"FAIL  (file is: {content.Replace("\n", "\\n").Replace("\t", "\\t")})");
+				}),
+			
+			// A top-level statement was parsed as a member of a type: 'A();' as a constructor. It is
+			// parsed as a statement now and written as one, the first of the file's two, with the
+			// second left alone.
+			new("roslyn_replace_in_code: a top-level statement is replaced by a statement",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "top_statements.cs", nodeKind = "GlobalStatement", line = 1, replacement = "System.Console.WriteLine(3);", projectPath = fx.Csproj },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempStatements);
+					
+					return content == "System.Console.WriteLine(3);\nSystem.Console.WriteLine(2);\n"
+						? (true, "PASS  (the statement was written)")
+						: (false, $"FAIL  (file is: {content.Replace("\n", "\\n")})");
+				}),
+			
+			// What a list outside a type may hold is types. A statement before them parses, and is
+			// refused as no type; a statement after them does not parse (statements stand before the
+			// types of a file, which the parser checks) and keeps the parser's own words. A using
+			// directive is no part of the node; and two namespaces for one are refused, as a
+			// namespace stays one for one.
+			new("roslyn_replace_in_code: a type list holding a statement is refused",
+				async () => {
+					
+					var first = await ctx.CallToolJsonAsync("roslyn_replace_in_code", new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "System.Console.WriteLine(1);\nclass TopOne { }", dryRun = true, projectPath = fx.Csproj });
+					var last  = await ctx.CallToolJsonAsync("roslyn_replace_in_code", new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "class TopOne { }\nSystem.Console.WriteLine(1);", dryRun = true, projectPath = fx.Csproj });
+					
+					var pass = first?["details"]?.GetValue<string>()?.Contains("type declarations only") == true
+						&& last?["details"]?.GetValue<string>()?.Contains("must precede") == true;
+					
+					return pass
+						? (true, "PASS  (refused as no type, and as a syntax error)")
+						: (false, $"FAIL  (statement first: {first?.ToJsonString() ?? "null"} | statement last: {last?.ToJsonString() ?? "null"})");
+				}),
+
+			new("roslyn_replace_in_code: a using directive in a top-level replacement is refused",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
-					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "class TopOne { }\nclass TopTwo { }", dryRun = true, projectPath = fx.Csproj },
-					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one declaration here") == true)),
+					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "using System;\nclass TopOne { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["details"]?.GetValue<string>()?.Contains("declarations only") == true)),
 			
+			// A method directly in a namespace is what a misplaced brace leaves, and such a file has
+			// no syntax error. Parsed as a file its text is a top-level statement (a local function),
+			// so it would have been refused as the wrong sort of thing; it keeps the member parser
+			// and is replaced as before.
+			new("roslyn_replace_in_code: a method standing directly in a namespace is still replaced",
+				async () => {
+					
+					var (pass, msg) = await ctx.RunTestAsync(
+						"roslyn_replace_in_code",
+						new { filePath = "ns_stray.cs", nodeKind = "MethodDeclaration", textPattern = "Lost", replacement = "void Lost() { return; }", projectPath = fx.Csproj },
+						data => data?["error"] is null && data?["applied"]?.GetValue<bool>() == true);
+					
+					if(!pass)
+						return (false, msg);
+					
+					var content = File.ReadAllText(tempStray);
+					
+					return content == "namespace Strayed\n{\n\tvoid Lost() { return; }\n}\n"
+						? (true, "PASS  (the method was written)")
+						: (false, $"FAIL  (file is: {content.Replace("\n", "\\n").Replace("\t", "\\t")})");
+				}),
+			
+			// The two forms of a namespace are one sort of declaration, and 'namespace N;' for a
+			// file's only namespace is a sound edit. For the second namespace of a file it is not,
+			// and no syntax check says so: it parses, compiles to an error, and takes what follows
+			// into itself. Refused, by its own message.
+			new("roslyn_replace_in_code: a file-scoped namespace cannot replace one of two namespaces",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "ns_two.cs", nodeKind = "NamespaceDeclaration", line = 5, replacement = "namespace Second.Space;", dryRun = true, projectPath = fx.Csproj },
+					data => data?["details"]?.GetValue<string>()?.Contains("file's only declaration") == true)),
+			
+			new("roslyn_replace_in_code: a file-scoped namespace replaces a file's only namespace",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "ns_whole.cs", nodeKind = "NamespaceDeclaration", replacement = "namespace New.Space;\n\nclass Housed { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"] is null && data?["change_count"]?.GetValue<int>() == 1)),
+			
+			// A directive without its counterpart around a type outside a type is refused, as it is
+			// around a member of a type: the text does not parse as a file. Before #466 it was
+			// applied without the directive, with a caution; the two places now answer alike.
+			new("roslyn_replace_in_code: an unbalanced directive around a top-level type is refused",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "#region Types\nclass TopOne { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["error"]?.GetValue<string>()?.Contains("syntax errors") == true && data?["details"]?.GetValue<string>()?.Contains("#endregion") == true)),
+			
+			new("roslyn_replace_in_code: a namespace is still replaced by exactly one",
+				() => ctx.RunTestAsync(
+					"roslyn_replace_in_code",
+					new { filePath = "ns_list.cs", nodeKind = "NamespaceDeclaration", replacement = "namespace One { }\nnamespace Two { }", dryRun = true, projectPath = fx.Csproj },
+					data => data?["details"]?.GetValue<string>()?.Contains("exactly one namespace declaration") == true)),
+			
+			// A declaration with a typo in it parses as two members. It must keep the parser's own
+			// error and not be answered as a list of the wrong things.
 			new("roslyn_replace_in_code: a mistyped top-level declaration keeps its own syntax error",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
 					new { filePath = "several_top.cs", nodeKind = "ClassDeclaration", textPattern = "TopOne", replacement = "publc class TopOne { }", dryRun = true, projectPath = fx.Csproj },
-					data => data?["error"]?.GetValue<string>() is { Length: > 0 } && data?["details"]?.GetValue<string>()?.Contains("exactly one declaration here") == false)),
+					data => data?["error"]?.GetValue<string>() is { Length: > 0 }
+						&& data?["details"]?.GetValue<string>() is { } details && !details.Contains("type declarations only") && !details.Contains("exactly one"))),
 
 			// ── Regression: line endings (#268) ──
 			// The replacement node used to be spliced in with the replacement text's own newlines
