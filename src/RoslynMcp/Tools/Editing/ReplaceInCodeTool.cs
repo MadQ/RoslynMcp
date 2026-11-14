@@ -31,9 +31,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"that filters by the declared name of the node — not body content. " +
 		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors. " +
 		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
+		"One exception: a member of a class, struct, interface or record may be replaced by several members, written one after another " +
+		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow as written. " +
 		"The node keeps its place: the blank lines before it and the indentation of the first line of the replacement text come from the file, further lines are written as given. " +
 		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
 		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
+		"In a list of members, what stands between two of them (blank lines, comments, a directive) is written as given. " +
 		"To pick one of several similar nodes, such as the third if statement in a method, pass line (and column for several on one line): where the node starts, as a read of the file or a dry run's changed_nodes shows it. A declaration starts at its first attribute or modifier, not at its name. These narrow nodeKind and textPattern. " +
 		"A position is only as good as the read it came from: after an edit moves lines it can land on a different node of the same kind, so re-read first, or add textPattern so that only a node with that text can match. " +
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern, pass line and column, or set force=true to proceed. " +
@@ -216,6 +219,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			var replacementNodes  = new Dictionary<SyntaxNode, SyntaxNode>(matchedNodes.Length);
 			var replacementTokens = new Dictionary<SyntaxToken, SyntaxToken>();
 			
+			// The members that follow the first, where one member is replaced by several (#463), by
+			// the annotation their first member carries: ReplaceSyntax puts one node in a node's
+			// place, so the others are inserted behind it afterwards.
+			var followers = new List<(SyntaxAnnotation First, SyntaxNode[] Others)>();
+
 			foreach(var matchedNode in matchedNodes) {
 				
 				var (parsed, parseError) = ParseReplacement(matchedNode, effectiveReplacement);
@@ -229,8 +237,19 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				var notes = new List<string>();
 				
-				replacementNodes[matchedNode] = WithTriviaOf(matchedNode, parsed, replacementTokens, notes);
+				var placed = WithTriviaOf(matchedNode, parsed, replacementTokens, notes);
 				
+				if(placed.Length > 1) {
+					
+					var mark = new SyntaxAnnotation();
+					
+					followers.Add((mark, placed[1..]));
+					placed[0] = placed[0].WithAdditionalAnnotations(mark);
+					scope.Record($"1 member replaced by {placed.Length}");
+				}
+				
+				replacementNodes[matchedNode] = placed[0];
+
 				foreach(var note in notes) {
 					
 					if(!unapplied.TryGetValue(note, out var lines))
@@ -246,8 +265,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				replacementTokens.Keys, (originalToken, _) => replacementTokens[originalToken],
 				null,                   null
 			);
+			
+			// A first member that is not in the tree was inside another matched node, whose
+			// replacement took its place whole: ReplaceSyntax hands the outer node's replacement out
+			// as it is. Its followers went with it, and there is nothing to insert behind.
+			foreach(var (first, rest) in followers)
+				if(newRoot.GetAnnotatedNodes(first).FirstOrDefault() is { } anchor)
+					newRoot = newRoot.InsertNodesAfter(anchor, rest);
 		}
-		
+
 		// Validate the text that will be written, parsed as the file is parsed — not the tree it was
 		// put together from. The two can differ: a tree built from parts carries the diagnostics of
 		// its parts, and what the parts amount to once they are text again (a directive that now
@@ -339,22 +365,37 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     </para>
 	///     What is not put into the file is said in <paramref name="notes"/>: a comment that cannot
 	///     be placed safely, a preprocessor directive, and anything written below the node.
+	///     <para>
+	///         Several members in place of one (#463) are the old node spread over a list: the first
+	///         has its place and its comments, as a single replacement would; the end of the old
+	///         node's last line, with whatever stood there, comes behind the last; and everything
+	///         between the two is written as the replacement text has it.
+	///     </para>
 	/// </summary>
-	private static SyntaxNode WithTriviaOf(SyntaxNode original, ParsedReplacement parsed, Dictionary<SyntaxToken, SyntaxToken> tokens, List<string> notes)
+	private static SyntaxNode[] WithTriviaOf(SyntaxNode original, ParsedReplacement parsed, Dictionary<SyntaxToken, SyntaxToken> tokens, List<string> notes)
 	{
 		var node = parsed.Node.WithLeadingTrivia(LeadingTrivia(original.GetLeadingTrivia(), parsed.Node.GetLeadingTrivia(), notes));
 		
 		if(parsed.HasLeftover)
 			notes.Add("What the replacement text holds below its node (a comment or a directive on a line after it) was not applied: it is not part of the node.");
 		
+		if(parsed.More is [.. var between, var last]) {
+			
+			// Only where no separator stands between members, so the old node's own trailing trivia
+			// is the end of its line.
+			var closing = TrailingTrivia(original.GetTrailingTrivia(), parsed.Trailing, EndsFile(original.GetLastToken()), notes);
+			
+			return [node, ..between, last.WithTrailingTrivia(closing)];
+		}
+		
 		var separator = SeparatorAfter(original);
 		
 		if(separator.RawKind == 0)
-			return node.WithTrailingTrivia(TrailingTrivia(original.GetTrailingTrivia(), parsed.Trailing, EndsFile(original.GetLastToken()), notes));
+			return [node.WithTrailingTrivia(TrailingTrivia(original.GetTrailingTrivia(), parsed.Trailing, EndsFile(original.GetLastToken()), notes))];
 		
 		tokens[separator] = separator.WithTrailingTrivia(TrailingTrivia(separator.TrailingTrivia, parsed.Trailing, EndsFile(separator), notes));
 		
-		return node.WithTrailingTrivia(original.GetTrailingTrivia());
+		return [node.WithTrailingTrivia(original.GetTrailingTrivia())];
 	}
 	
 	// The comma after an enum member, when the file has one there; otherwise no token.
@@ -469,7 +510,14 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     A replacement parsed: the node, the trivia after it up to the end of its line — past the
 	///     comma, for an enum member — and whether the text went on below that line.
 	/// </summary>
-	private sealed record ParsedReplacement(SyntaxNode Node, SyntaxTriviaList Trailing, bool HasLeftover);
+	private sealed record ParsedReplacement(SyntaxNode Node, SyntaxTriviaList Trailing, bool HasLeftover)
+	{
+		/// <summary>
+		///     The members after <see cref="Node"/>, where the text replaces one member of a type by
+		///     several (#463). <see cref="Trailing"/> is then what follows the last of them.
+		/// </summary>
+		public SyntaxNode[] More { get; init; } = [];
+	}
 	
 	/// <summary>
 	///     Where the comment that belongs to a node begins in its leading trivia: the first comment of
@@ -567,9 +615,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     enclosing type, so it reads <c>Widget(int size) { }</c> as a method missing its return
 	///     type, and dispatching on a fixed list of node kinds sent constructors to
 	///     <c>ParseExpression</c> outright (#267). Statements parse as statements, a using directive
-	///     as a compilation unit, everything else as an expression. Exactly one node must come out:
-	///     a replacement that smuggles in a second member, or closes the wrapper type early, is
-	///     refused.
+	///     as a compilation unit, everything else as an expression. Exactly one node must come out,
+	///     except for a member of a class, struct, interface or record, which several members may
+	///     replace (#463). A replacement that closes the wrapper type early is refused, and so is a
+	///     second node anywhere else.
 	///     Returns the node, or null plus the joined parser error messages.
 	/// </summary>
 	private static (ParsedReplacement? Parsed, string? Error) ParseReplacement(SyntaxNode original, string replacement)
@@ -582,7 +631,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// closing brace — so each case reads them where they are.
 		SyntaxTriviaList trailing;
 		bool             hasLeftover;
-		
+		SyntaxNode[]     more = [];
+
 		switch(original) {
 			
 			case MemberDeclarationSyntax { Parent: BaseTypeDeclarationSyntax enclosingType }: {
@@ -599,41 +649,69 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 					}
 					: [];
 				
-				if(members.Length != 1)
+				// More than the wrapper came out: the text closed it and went on.
+				if(unit.Members.Count != 1)
 					
-					return (null, $"Replacement must be exactly one member declaration — parsed {members.Length}.");
+					return (null, "Replacement closes the enclosing type: it must hold only members of that type.");
+				
+				// One member may become several (#463): a method and a new overload beside it is one
+				// edit to an agent, and "exactly one" sent that edit to the text tool. Not an enum's:
+				// the commas between its members are the list's, not the members'.
+				if(members.Length == 0)
+					
+					return (null, "Replacement must be a member declaration — parsed none.");
+
+				if(members.Length > 1 && enclosingType is EnumDeclarationSyntax)
+					
+					return (null, $"Replacement must be exactly one enum member — parsed {members.Length}.");
 				
 				node        = members[0];
+				more        = members[1..];
 				diagnostics = unit.GetDiagnostics();
 				
 				var wrapper   = (BaseTypeDeclarationSyntax) unit.Members[0];
 				var separator = wrapper is EnumDeclarationSyntax { Members.SeparatorCount: > 0 } wrapperEnum ? wrapperEnum.Members.GetSeparator(0) : default;
 				
-				trailing    = node.GetTrailingTrivia().AddRange(separator.TrailingTrivia);
+				// What follows the text's last member: of one member, that member.
+				trailing    = members[^1].GetTrailingTrivia().AddRange(separator.TrailingTrivia);
 				hasLeftover = HasText(BelowTheLine(trailing)) || HasText(wrapper.CloseBraceToken.LeadingTrivia);
-				
+
 				// The parser accepts any Identifier(...) { } inside a type as a constructor; only the
 				// compiler objects later (CS1520) when the name differs from the type. Catch it here,
 				// or a forced batch across differently named types writes a Widget constructor into
 				// Gadget with a clean syntax check.
-				var declaredTypeName = node switch {
-					
-					ConstructorDeclarationSyntax c => c.Identifier.ValueText,
-					DestructorDeclarationSyntax  d => d.Identifier.ValueText,
-					_                              => null,
-				};
-				
 				var enclosingTypeName = enclosingType.Identifier.ValueText;
 				
-				if(declaredTypeName is not null && declaredTypeName != enclosingTypeName)
+				foreach(var member in members) {
 					
-					return (null, $"Constructor or destructor name '{declaredTypeName}' must match the enclosing type '{enclosingTypeName}'.");
+					var declaredTypeName = member switch {
+						
+						ConstructorDeclarationSyntax c => c.Identifier.ValueText,
+						DestructorDeclarationSyntax  d => d.Identifier.ValueText,
+						_                              => null,
+					};
+					
+					if(declaredTypeName is not null && declaredTypeName != enclosingTypeName)
+						
+						return (null, $"Constructor or destructor name '{declaredTypeName}' must match the enclosing type '{enclosingTypeName}'.");
+				}
+				
 				break;
 			}
 			
 			case MemberDeclarationSyntax:
 				
 				// Top-level: a type, delegate, or namespace member with no enclosing type to borrow.
+				// One for one here. A second declaration was refused already, as "Unexpected token
+				// 'class'", which does not say that a list is not taken here; now that a type's members
+				// take one, an agent will try. Only for text that parses: one declaration with a typo
+				// in it can come out as two members, and its own error says more than this message.
+				var whole = SyntaxFactory.ParseCompilationUnit(replacement);
+				
+				if(whole.Members.Count > 1 && !whole.GetDiagnostics().Any(d => d.Severity == DiagnosticSeverity.Error))
+					
+					return (null, "Replacement must be exactly one declaration here: several are accepted only in place of a member of a class, struct, interface or record.");
+
 				node        = SyntaxFactory.ParseMemberDeclaration(replacement);
 				diagnostics = node?.GetDiagnostics() ?? [];
 				trailing    = node?.GetTrailingTrivia() ?? default;
@@ -684,7 +762,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		return errors.Length > 0
 			? (null, string.Join("; ", errors))
-			: (new ParsedReplacement(node, trailing, hasLeftover), null)
+			: (new ParsedReplacement(node, trailing, hasLeftover) { More = more }, null)
 		;
 	}
 	
