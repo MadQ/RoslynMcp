@@ -1951,6 +1951,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     preventing silent match failures on Windows files.
 	/// </summary>
 	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive = true)
+		=> BuildLiteralRegex(pattern, caseSensitive, Regex.InfiniteMatchTimeout)
+	;
+	
+	/// <inheritdoc cref="BuildLiteralRegex(string, bool)"/>
+	/// <param name="matchTimeout">How long one match may run; <see cref="Regex.InfiniteMatchTimeout"/> for no limit.</param>
+	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive, TimeSpan matchTimeout)
 	{
 		// Split on real newlines before escaping: Regex.Escape renders a newline as \n but a literal
 		// backslash-n as \\n, and a post-escape Replace cannot tell the two apart (#292).
@@ -1960,7 +1966,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		if(!caseSensitive)
 			options |= RegexOptions.IgnoreCase;
 		
-		return new Regex(escaped, options);
+		return new Regex(escaped, options, matchTimeout);
 	}
 	
 	/// <summary>
@@ -1971,10 +1977,19 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     <see cref="ArgumentException"/> on a malformed pattern — callers wrap this call and surface a structured error.
 	/// </summary>
 	protected static Regex BuildContentRegex(string pattern, MatchMode mode, bool caseSensitive)
+		=> BuildContentRegex(pattern, mode, caseSensitive, Regex.InfiniteMatchTimeout)
+	;
+	
+	/// <inheritdoc cref="BuildContentRegex(string, MatchMode, bool)"/>
+	/// <param name="matchTimeout">
+	///     How long one match may run before it ends in <see cref="RegexMatchTimeoutException"/>, for a
+	///     caller whose lines are not source: a backtracking pattern on a line of a megabyte.
+	/// </param>
+	protected static Regex BuildContentRegex(string pattern, MatchMode mode, bool caseSensitive, TimeSpan matchTimeout)
 	{
 		if(mode is MatchMode.Literal)
 			
-			return BuildLiteralRegex(pattern, caseSensitive);
+			return BuildLiteralRegex(pattern, caseSensitive, matchTimeout);
 		
 		var options = RegexOptions.Compiled;
 		
@@ -1983,7 +1998,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		
 		var effective = mode is MatchMode.Glob ? BuildSimpleGlobRegex(pattern) : pattern;
 		
-		return new Regex(effective, options);
+		return new Regex(effective, options, matchTimeout);
 	}
 	
 	/// <summary>

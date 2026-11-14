@@ -52,9 +52,23 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		
 		filePattern ??= "*.cs";
 		
-		if(scope.TryServeCachedPage<MatchResult>(page_token, ref skip, ref take, 50, 200, out var cached))
+		if(scope.TryServeCachedPage<MatchResult>(page_token, ref skip, ref take, 50, 200, out var cached)) {
+			
+			// A later page reports ranges as the first did, and a read can take up any of them.
+			scope.Record(RangesNote(cached));
 			
 			return scope.Outcome("cached page", cached);
+		}
+		
+		// The default, and every pattern that can only name a .cs file, is the search it always
+		// was: the workspace's documents, and no walk of the disk (#327).
+		var searchesDisk = !NamesOnlyCSharp(filePattern);
+		
+		// A line of a disk file may hold a million characters, and the pattern is the agent's: on a
+		// line of source a backtracking pattern costs little, on a minified bundle it can run for
+		// minutes, and nothing between two lines could cancel it. So a search that reads disk
+		// files gives each match a time limit.
+		var matchTimeout = searchesDisk ? MatchTimeout : Regex.InfiniteMatchTimeout;
 		
 		var matchMode = MatchMode.Regex;
 		
@@ -65,7 +79,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		Regex regex;
 		
 		try {
-			regex = BuildContentRegex(pattern, matchMode, caseSensitive);
+			regex = BuildContentRegex(pattern, matchMode, caseSensitive, matchTimeout);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
@@ -83,12 +97,9 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			
 			return scope.Error(new ErrorResult(globError));
 		
-		// The default, and every pattern that can only name a .cs file, is the search it always
-		// was: the workspace's documents, and no walk of the disk (#327).
-		var searchesDisk = !NamesOnlyCSharp(filePattern);
-		var skipped      = new SkippedFiles();
-		var diskFiles    = 0;
-		var stoppedEarly = false;
+		var     skipped     = new SkippedFiles();
+		var     diskFiles   = 0;
+		string? stopCaution = null;
 
 		var (allMatches, collectError) = await TryCollectAsync(regex);
 		
@@ -110,12 +121,17 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				Regex? strippedRegex = null;
 				
 				try {
-					strippedRegex = BuildContentRegex(stripped, matchMode, caseSensitive);
+					strippedRegex = BuildContentRegex(stripped, matchMode, caseSensitive, matchTimeout);
 				}
 				catch(ArgumentException) { }
 				
-				// A second pass that fails leaves the first one's answer, which found nothing.
-				var retry = strippedRegex is null ? null : (await TryCollectAsync(strippedRegex)).Matches;
+				var (retry, retryError) = strippedRegex is null ? (null, null) : await TryCollectAsync(strippedRegex);
+				
+				// A second pass that failed says so. Answered as "both tried, nothing found", the
+				// answer would carry the counts of a pass that did not finish.
+				if(retryError is not null)
+					
+					return scope.Error(retryError);
 				
 				if(retry is { Count: > 0 }) {
 					
@@ -128,19 +144,18 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		}
 		
 		var allResults = allMatches.ToArray();
-		var stopCaution = stoppedEarly
-			? $"The search stopped at {MaxDiskHits:N0} matching lines and did not reach every file: narrow the pattern or the filePattern."
-			: null;
 		var shape      = PageShape(ComposeCautions(fallbackCaution, AdhocCaution(projectPath), stopCaution), fallbackHint, skipped.Report());
 		var result     = PaginateAndStore(allResults, ref skip, take, shape);
 		
+		var answer     = shape(result);
+		
 		scope.Record(GroupingNote(result.Items));
-		scope.Record(RangesNote(result.Items));
+		scope.Record(RangesNote(answer));
 		
 		if(searchesDisk)
 			scope.Record($"disk: {diskFiles} file(s) searched{skipped.Note()}");
 		
-		return scope.Outcome($"{result.Total} match(es)", shape(result));
+		return scope.Outcome($"{result.Total} match(es)", answer);
 		
 		// The walk of the disk can fail as a whole, and so can the pattern on a line of source; the
 		// first pass and the pass for a chat reference answer both the same way.
@@ -159,22 +174,15 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		
 		async Task<List<MatchResult>> CollectAsync(Regex rx)
 		{
-			// A line of a disk file may hold a million characters, and the pattern is the agent's: on
-			// a line of source a backtracking pattern costs little, on a minified bundle it can run
-			// for minutes, and nothing between two lines could cancel it. So a search that reads
-			// disk files gives each match a time limit.
-			if(searchesDisk)
-				rx = new Regex(rx.ToString(), rx.Options, MatchTimeout);
-			
 			var matches = new List<MatchResult>();
 			// seenPaths prevents searching the same physical file twice in multi-targeted projects.
 			var seenPaths = new HashSet<string>(SecurityBoundary.PathComparer)
 			;
 			
 			// A second pass, for a chat reference tried without its prefix, counts from zero.
-			skipped      = new SkippedFiles();
-			diskFiles    = 0;
-			stoppedEarly = false;
+			skipped     = new SkippedFiles();
+			diskFiles   = 0;
+			stopCaution = null;
 			
 			foreach(var project in solution.Projects)
 				foreach(var document in project.Documents) {
@@ -296,7 +304,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 						// a gigabyte is millions of lines.
 						if(matches.Count >= MaxDiskHits) {
 							
-							stoppedEarly = true;
+							stopCaution = $"The search stopped at {MaxDiskHits:N0} matching lines and did not reach every file: narrow the pattern or the filePattern.";
 							
 							return matches;
 						}
@@ -320,6 +328,15 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 					matches.RemoveRange(before, matches.Count - before);
 					
 					skipped.PatternTimeout++;
+					
+					// The limit is for one match, and a pattern that runs out on one long line runs
+					// out on the next: a tree of two hundred such files would be minutes all the same.
+					if(skipped.PatternTimeout == MaxPatternTimeouts) {
+						
+						stopCaution = $"The search stopped after the pattern ran for more than {MatchTimeout.TotalSeconds:N0} seconds on a line of {MaxPatternTimeouts} files, and did not reach every file: simplify the pattern (nested quantifiers such as (a+)+ backtrack without end) or narrow the filePattern.";
+						
+						return matches;
+					}
 				}
 			}
 			
@@ -353,6 +370,9 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	
 	// How long one match of the pattern may run in a search that reads disk files.
 	static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(2);
+	
+	// The most files the pattern may time out on before the search stops and says so.
+	const int MaxPatternTimeouts = 5;
 	
 	// The most hits a search that reads disk files collects before it stops and says so.
 	const int MaxDiskHits = 100_000;
@@ -523,26 +543,29 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	const int LoggedRanges = 40;
 	
 	/// <summary>
-	///     The declaration ranges one page reported, for the log: <c>ranges: Foo.cs 23-323, 562-689;
-	///     Bar.cs 10-20</c>, by file name. With the <c>lines A-B</c> of the reads that follow it
-	///     says whether a read took up a reported range; the entry's preview of the answer is cut
-	///     after its first group and cannot.
-	/// </summary>
-	static string RangesNote(MatchResult[] hits)
-	{
-		var note   = new System.Text.StringBuilder();
-		var listed = 0;
-		var more   = 0;
-		string? named = null;
+///     The declaration ranges one page reported, for the log: <c>ranges: Foo.cs 23-323, 562-689;
+///     Bar.cs 10-20</c>, by file name. With the <c>lines A-B</c> of the reads that follow it
+///     says whether a read took up a reported range; the entry's preview of the answer is cut
+///     after its first group and cannot. Read from the answer itself, so that a page served
+///     from the cache is noted as the first page was.
+/// </summary>
+static string RangesNote(object answer)
+{
+	if(answer is not SearchFilesResult page)
 		
-		for(var index = 0; index < hits.Length; index++) {
+		return "";
+	
+	var note   = new System.Text.StringBuilder();
+	var listed = 0;
+	var more   = 0;
+	
+	foreach(var file in page.Files) {
+		
+		var named = false;
+		
+		foreach(var group in file.In) {
 			
-			if(hits[index].Declaration is not { } declaration)
-				continue;
-			
-			var newFile = index == 0 || hits[index - 1].File != hits[index].File;
-			
-			if(!newFile && hits[index - 1].Declaration == hits[index].Declaration)
+			if(group.Lines is null)
 				continue;
 			
 			if(listed == LoggedRanges) {
@@ -551,26 +574,24 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				continue;
 			}
 			
-			// The file is named at its first range, which need not be its first hit.
-			if(hits[index].File != named) {
-				
-				named = hits[index].File;
-				
-				note.Append(note.Length == 0 ? "ranges: " : "; ").Append(Path.GetFileName(named)).Append(' ');
-			}
-			else
+			// The file is named at its first range, which need not be its first group.
+			if(named)
 				note.Append(", ");
+			else
+				note.Append(note.Length == 0 ? "ranges: " : "; ").Append(Path.GetFileName(file.File)).Append(' ');
 			
-			note.Append(declaration.FirstLine).Append('-').Append(declaration.EndLine);
+			note.Append(group.Lines);
 			
+			named = true;
 			listed++;
 		}
-		
-		if(more > 0)
-			note.Append($" (+{more} more)");
-		
-		return note.ToString();
 	}
+	
+	if(more > 0)
+		note.Append($" (+{more} more)");
+	
+	return note.ToString();
+}
 	
 	// One hit as it is kept between pages: the line, and the declaration it is in.
 	private sealed class MatchResult
