@@ -33,6 +33,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
 		"One exception: a member of a class, struct, interface or record may be replaced by several members, written one after another " +
 		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow as written. " +
+		"The same holds for a type or delegate declared in a namespace or at file level, which several type declarations may replace. " +
 		"The node keeps its place: the blank lines before it and the indentation of the first line of the replacement text come from the file, further lines are written as given. " +
 		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
 		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
@@ -510,11 +511,26 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     A replacement parsed: the node, the trivia after it up to the end of its line — past the
 	///     comma, for an enum member — and whether the text went on below that line.
 	/// </summary>
+	// What a declaration outside a type is, in the words of a message.
+	private static string Describe(SyntaxNode declaration) => declaration switch {
+		
+		BaseNamespaceDeclarationSyntax                     => "namespace declaration",
+		GlobalStatementSyntax                              => "top-level statement",
+		BaseTypeDeclarationSyntax or DelegateDeclarationSyntax => "type declaration",
+		_                                                  => "member declaration",
+	};
+	
+	// Whether two declarations outside a type are of one sort: both namespaces, both statements.
+	private static bool SameSort(SyntaxNode original, SyntaxNode replacement)
+		=> Describe(original) == Describe(replacement)
+	;
+	
 	private sealed record ParsedReplacement(SyntaxNode Node, SyntaxTriviaList Trailing, bool HasLeftover)
 	{
 		/// <summary>
-		///     The members after <see cref="Node"/>, where the text replaces one member of a type by
-		///     several (#463). <see cref="Trailing"/> is then what follows the last of them.
+		///     The declarations after <see cref="Node"/>, where the text replaces one member of a
+		///     type by several (#463) or one type outside a type by several (#466).
+		///     <see cref="Trailing"/> is then what follows the last of them.
 		/// </summary>
 		public SyntaxNode[] More { get; init; } = [];
 	}
@@ -617,8 +633,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     <c>ParseExpression</c> outright (#267). Statements parse as statements, a using directive
 	///     as a compilation unit, everything else as an expression. Exactly one node must come out,
 	///     except for a member of a class, struct, interface or record, which several members may
-	///     replace (#463). A replacement that closes the wrapper type early is refused, and so is a
-	///     second node anywhere else.
+	///     replace (#463), and for a type outside a type, which several types may replace (#466).
+	///     A replacement that closes the wrapper type early is refused, and so is a second node
+	///     anywhere else.
 	///     Returns the node, or null plus the joined parser error messages.
 	/// </summary>
 	private static (ParsedReplacement? Parsed, string? Error) ParseReplacement(SyntaxNode original, string replacement)
@@ -699,25 +716,60 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				break;
 			}
 			
-			case MemberDeclarationSyntax:
+			case MemberDeclarationSyntax: {
 				
-				// Top-level: a type, delegate, or namespace member with no enclosing type to borrow.
-				// One for one here. A second declaration was refused already, as "Unexpected token
-				// 'class'", which does not say that a list is not taken here; now that a type's members
-				// take one, an agent will try. Only for text that parses: one declaration with a typo
-				// in it can come out as two members, and its own error says more than this message.
+				// Outside a type: a type, a delegate, a namespace or a top-level statement, in a file
+				// or a namespace. Parsed as a file, which is what such text is. ParseMemberDeclaration
+				// gave one member and an "Unexpected token" for a second, null for a namespace, and
+				// a constructor for the statement 'A();' (#466).
 				var whole = SyntaxFactory.ParseCompilationUnit(replacement);
 				
-				if(whole.Members.Count > 1 && !whole.GetDiagnostics().Any(d => d.Severity == DiagnosticSeverity.Error))
+				diagnostics = whole.GetDiagnostics();
+				
+				// Text that does not parse keeps the parser's own words: one declaration with a typo
+				// in it can come out as two members, and its error says more than a count would.
+				if(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.GetMessage()).ToArray() is { Length: > 0 } parseErrors)
 					
-					return (null, "Replacement must be exactly one declaration here: several are accepted only in place of a member of a class, struct, interface or record.");
-
-				node        = SyntaxFactory.ParseMemberDeclaration(replacement);
-				diagnostics = node?.GetDiagnostics() ?? [];
-				trailing    = node?.GetTrailingTrivia() ?? default;
-				hasLeftover = node is not null && GoesOnBelow(node, replacement);
+					return (null, string.Join("; ", parseErrors));
+				
+				if(whole.Usings.Count > 0 || whole.Externs.Count > 0 || whole.AttributeLists.Count > 0)
+					
+					return (null, "Replacement must hold declarations only: a using directive, an extern alias or an assembly attribute is not part of the node it replaces.");
+				
+				var declared = whole.Members.ToArray();
+				
+				if(declared.Length == 0)
+					
+					return (null, "Replacement must be a declaration — parsed none.");
+				
+				// A type takes a list, as a member of a type does (#463): its parent keeps its
+				// declarations in the same kind of list. Of types only: types beside a type is the
+				// edit a list is for. A namespace and a top-level statement stay one for one, and are
+				// refused in a type's list. A file-scoped namespace takes every type after it into
+				// itself, and a statement has its own place in a file, before the types (which the
+				// parser checks: such a list written the other way round keeps the parser's error).
+				if(original is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax) {
+					
+					if(declared.FirstOrDefault(member => member is not (BaseTypeDeclarationSyntax or DelegateDeclarationSyntax)) is { } other)
+						
+						return (null, $"A type declaration is replaced by type declarations only (classes, structs, interfaces, records, enums, delegates): the replacement also holds a {Describe(other)}.");
+				}
+				else if(declared.Length > 1 || !SameSort(original, declared[0])) {
+					
+					var wanted = Describe(original);
+					
+					return (null, declared.Length > 1
+						? $"Replacement must be exactly one {wanted} — parsed {declared.Length} declarations."
+						: $"Replacement must be a {wanted} — parsed a {Describe(declared[0])}.");
+				}
+				
+				node        = declared[0];
+				more        = declared[1..];
+				trailing    = declared[^1].GetTrailingTrivia();
+				hasLeftover = HasText(BelowTheLine(trailing)) || HasText(whole.EndOfFileToken.LeadingTrivia);
 				break;
-			
+			}
+
 			case StatementSyntax:
 				
 				node        = SyntaxFactory.ParseStatement(replacement);
