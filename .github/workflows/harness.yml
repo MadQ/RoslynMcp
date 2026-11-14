@@ -3,12 +3,13 @@ permissions:
   contents: read
 
 # The TestHarness, in full. It is the release gate: publish.yml calls this workflow and will not
-# publish unless it passes on all three operating systems (#330). It also runs on pull requests, on
-# Windows and Linux (#367), so a local run may be filtered to the groups a change touches
-# (--only / --test): every pull request still gets the whole suite here. macOS is left out of pull
-# requests because its runners queue for up to an hour; it runs at publish and by hand.
+# publish unless it passes on all three operating systems (#330). nightly.yml calls it too, every
+# night, on all three (#469). And it runs on pull requests, on Linux only: every pull request still
+# gets the whole suite, on the platform no local run covers by default, in about eight minutes.
+# Windows took twelve and found nothing a local run had not; it is run locally before a push and
+# here every night. macOS runs at night, at publish and by hand.
 on:
-  # Called by publish.yml.
+  # Called by publish.yml and by nightly.yml.
   workflow_call:
 
   # Run by hand, on any branch: Actions -> Test Harness -> Run workflow.
@@ -34,10 +35,11 @@ jobs:
       # One operating system failing must not hide the result of the others.
       fail-fast: false
       # Called through workflow_call, event_name is the caller's: publish.yml runs on
-      # workflow_dispatch only, so the release gate keeps all three. Giving publish.yml a
-      # pull_request trigger would drop macOS from the gate.
+      # workflow_dispatch only and nightly.yml on schedule or workflow_dispatch, so the release
+      # gate and the night keep all three. Giving either a pull_request trigger would cut it to
+      # Linux.
       matrix:
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["windows-latest", "ubuntu-latest"]') || fromJSON('["windows-latest", "ubuntu-latest", "macos-latest"]') }}
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["windows-latest", "ubuntu-latest", "macos-latest"]') }}
 
     # A full run takes a few minutes. The limit only stops a hung run from holding a runner.
     timeout-minutes: 30

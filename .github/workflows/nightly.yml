@@ -1,0 +1,60 @@
+name: Nightly Harness
+permissions:
+  contents: read
+
+# The TestHarness in full, once a night, on all three operating systems (#469). Pull requests run
+# it on Linux only, so this is where Windows and macOS are run by CI between releases: a pull
+# request's own Windows run is the one made locally before the push, and macOS has no local run at
+# all.
+#
+# A workflow of its own, not a trigger of harness.yml, for the step that reports a failure: it
+# needs to write issues, and publish.yml calls harness.yml with contents: read. A reusable workflow
+# that asks for more than its caller grants fails before it starts, so the permission cannot be
+# in harness.yml.
+on:
+  # 07:00 UTC, the small hours in the Americas: after a day's merges, before the next day's work.
+  # A scheduled run uses the workflow and the code of the default branch, which is dev.
+  schedule:
+    - cron: '0 7 * * *'
+
+  # By hand, to try the reporting or to get a full run without waiting for the night.
+  workflow_dispatch:
+
+jobs:
+  harness:
+    # Called from a scheduled run, harness.yml sees the event name 'schedule', which is not
+    # 'pull_request', and so runs all three operating systems.
+    uses: ./.github/workflows/harness.yml
+    permissions:
+      contents: read
+
+  # A red scheduled run that nobody looks at is worse than none: it reads as coverage. So a failure
+  # opens an issue, or adds to the one still open from an earlier night.
+  report:
+    name: Report a failed night
+    needs: harness
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+
+    steps:
+    - name: Open or update the issue
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        COMMIT: ${{ github.sha }}
+      run: |
+        title="The nightly harness run failed"
+        body="The nightly TestHarness run failed on \`${COMMIT:0:7}\`: ${RUN_URL}
+
+        The job list of that run says which operating system failed, and each job's log ends with the failing tests and the harness's summary line. Pull requests run the harness on Linux only (#469), so a failure on Windows or macOS shows here first; it came in with one of the pull requests merged since the last green night."
+
+        existing=$(gh issue list --state open --search "\"$title\" in:title" --json number --jq '.[0].number // empty')
+
+        if [ -n "$existing" ]; then
+          gh issue comment "$existing" --body "$body"
+        else
+          gh issue create --title "$title" --label bug --body "$body"
+        fi
