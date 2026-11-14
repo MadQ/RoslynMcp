@@ -629,7 +629,27 @@ internal sealed record ListFilesEmptyResult(
 /// </summary>
 internal sealed record SearchFileGroup(
 	[property: JsonPropertyName("file")] string                   File,
+	// "disk" for a file read from disk (#327); absent for a document of the workspace, the usual case.
+	[property: JsonPropertyName("source")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Source,
 	[property: JsonPropertyName("in")]   SearchDeclarationGroup[] In
+);
+
+/// <summary>
+///     The files a search over disk files did not search (#327), by reason. A count that is zero is
+///     left out, and the whole object when every file was searched.
+/// </summary>
+internal sealed record SearchSkipped(
+	[property: JsonPropertyName("binary")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int Binary,
+	[property: JsonPropertyName("unreadable")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int Unreadable,
+	[property: JsonPropertyName("line_too_long")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int LineTooLong,
+	[property: JsonPropertyName("outside_workspace")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int OutsideWorkspace,
+	[property: JsonPropertyName("pattern_timeout")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int PatternTimeout
 );
 
 /// <summary>
@@ -662,7 +682,12 @@ internal sealed record SearchFilesResult(
 	[property: JsonPropertyName("returned")]      int      Returned,
 	[property: JsonPropertyName("page_token")]    string?  PageToken,
 	[property: JsonPropertyName("has_more")]      bool     HasMore
-) : ToolResult;
+) : ToolResult
+{
+	[JsonPropertyName("skipped")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public SearchSkipped? Skipped { get; init; }
+}
 
 internal sealed record SemanticSearchResult(
 	[property: JsonPropertyName("matches")]       object[] Matches,

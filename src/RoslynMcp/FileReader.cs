@@ -60,12 +60,31 @@ internal static class FileReader
 	internal const long DocumentLimit = 64 * 1024 * 1024;
 	
 	/// <summary>
+	///     The limit for a file read line by line and never held whole
+	///     (<see cref="OpenLines"/>). Memory is not what it guards: it ends the read of a file
+	///     without an end, a link to a device that never stops producing bytes.
+	/// </summary>
+	internal const long StreamLimit = 2L * 1024 * 1024 * 1024;
+	
+	/// <summary>
 	///     Opens <paramref name="path"/> for a streaming read that throws
 	///     <see cref="FileTooLargeException"/> once more than <paramref name="maxBytes"/> bytes have
 	///     come out of it. For readers that stop early (the first lines of a project file) or parse
 	///     straight from a stream.
 	/// </summary>
 	internal static Stream OpenRead(string path, long maxBytes) => BoundedStream.Open(path, maxBytes, FileOptions.None, ReadSharing);
+	
+	/// <summary>
+	///     Opens <paramref name="path"/> to read its lines one at a time (#327, #401), up to
+	///     <see cref="StreamLimit"/> bytes and <see cref="TextLineReader.LineLimit"/> characters a
+	///     line. Decoded as <see cref="ReadLines"/> decodes, which is also how
+	///     <c>roslyn_read_file</c> decodes a file it reads whole: a byte order mark selects the
+	///     encoding, a file without one is UTF-8, and a byte that is not valid becomes U+FFFD.
+	///     Shared like every read whose content comes out (<see cref="ReadSharing"/>).
+	/// </summary>
+	internal static TextLineReader OpenLines(string path) =>
+		new(path, new StreamReader(BoundedStream.OpenStreaming(path, StreamLimit, FileOptions.SequentialScan, ReadSharing), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+	;
 	
 	/// <summary>
 	///     Opens <paramref name="path"/> for a read with no limit, shared like every other read
@@ -264,9 +283,10 @@ internal static class FileReader
 			yield return line;
 	}
 	
-	/// <summary>A limit as a reader would say it: <c>64 MB</c>, <c>1 MB</c>, <c>64 KB</c>, or bytes.</summary>
+	/// <summary>A limit as a reader would say it: <c>2 GB</c>, <c>64 MB</c>, <c>64 KB</c>, or bytes.</summary>
 	internal static string Describe(long bytes) => bytes switch {
 		
+		>= 1024 * 1024 * 1024 when bytes % (1024 * 1024 * 1024) == 0 => $"{bytes / (1024 * 1024 * 1024)} GB",
 		>= 1024 * 1024 when bytes % (1024 * 1024) == 0 => $"{bytes / (1024 * 1024)} MB",
 		>= 1024        when bytes % 1024          == 0 => $"{bytes / 1024} KB",
 		_                                              => $"{bytes} bytes",
@@ -302,8 +322,20 @@ internal static class FileReader
 		/// </summary>
 		internal static BoundedStream Open(string path, long maxBytes, FileOptions options, FileShare sharing)
 		{
-			ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
+			// A read into one array: the limit has to be a length an array can have.
 			ArgumentOutOfRangeException.ThrowIfGreaterThan(maxBytes, Array.MaxLength - 1L);
+			
+			return OpenStreaming(path, maxBytes, options, sharing);
+		}
+		
+		/// <summary>
+		///     <see cref="Open"/> for a reader that never holds the file whole, whose limit may
+		///     therefore be past what an array can hold. <see cref="KnownLength"/> is not for
+		///     such a stream.
+		/// </summary>
+		internal static BoundedStream OpenStreaming(string path, long maxBytes, FileOptions options, FileShare sharing)
+		{
+			ArgumentOutOfRangeException.ThrowIfNegative(maxBytes);
 			
 			var inner = OpenFile(path, options, sharing);
 			

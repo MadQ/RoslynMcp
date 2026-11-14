@@ -130,9 +130,12 @@ static class LogFieldTests
 						
 						return (false, failure);
 					
-					return Verdict(search.Any(detail => detail.Contains("3 hit(s) in 1 file(s), 3 group(s), 3 in a declaration, 3 declaring; flat ~"))
+					// The ranges are in the entry too: its preview of the answer is cut after the first
+					// group, so without them a read could be matched to the first declaration only.
+					return Verdict(search.Any(detail => detail.Contains("3 hit(s) in 1 file(s), 3 group(s), 3 in a declaration, 3 declaring; flat ~")
+							&& System.Text.RegularExpressions.Regex.IsMatch(detail, @"ranges: LogFieldProbe\.cs \d+-\d+, \d+-\d+, \d+-\d+"))
 						&& read.Any(detail => detail.Contains("lines 3-5")),
-						$"expected the grouping note and 'lines 3-5'; got search [{string.Join(" | ", search)}] and read [{string.Join(" | ", read)}]");
+						$"expected the grouping note, three ranges and 'lines 3-5'; got search [{string.Join(" | ", search)}] and read [{string.Join(" | ", read)}]");
 				}),
 			
 			// A project that loads with only part of its references is healthy to the health check,

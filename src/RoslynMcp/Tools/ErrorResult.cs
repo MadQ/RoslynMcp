@@ -103,6 +103,34 @@ internal sealed record FileTooLargeResult : ErrorResult
 }
 
 /// <summary>
+///     A file read line by line that has a line longer than <see cref="TextLineReader.LineLimit"/>
+///     (#401): a file without line breaks, which a line range cannot cut. <c>error</c> is the
+///     stable code <c>line_too_long</c>.
+///     Serializes to: <c>{ "error": "line_too_long", "message": "...", "line": N, "limit_chars": N, "hint": "..." }</c>
+/// </summary>
+internal sealed record LineTooLongResult : ErrorResult
+{
+	public LineTooLongResult(LineTooLongException ex)
+		: base("line_too_long", "A file this large is read line by line, and this line is too long to return; use a tool outside RoslynMcp for this one.")
+	{
+		Message = ex.Message;
+		Line    = ex.Line;
+	}
+	
+	[JsonPropertyName("message")]
+	[JsonPropertyOrder(-8)]
+	public string Message { get; init; }
+	
+	[JsonPropertyName("line")]
+	[JsonPropertyOrder(-7)]
+	public int Line { get; init; }
+	
+	[JsonPropertyName("limit_chars")]
+	[JsonPropertyOrder(-6)]
+	public int LimitChars { get; init; } = TextLineReader.LineLimit;
+}
+
+/// <summary>
 ///     One candidate in an <see cref="AmbiguousSymbolResult"/>. <see cref="ContainingType"/> and
 ///     <see cref="FilePath"/>+<see cref="Line"/> are the exact values an agent copies into the
 ///     retry call's disambiguation parameters.
