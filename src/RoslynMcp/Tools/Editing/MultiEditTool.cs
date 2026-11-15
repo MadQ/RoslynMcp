@@ -43,6 +43,9 @@ internal sealed class MultiEditTool : RoslynMcpTool
 	{
 		public required string Relative    { get; init; }
 		public required string FullPath    { get; init; }
+		
+		// The file the name leads to: what the file is goes by it, whichever name the batch gave.
+		public required string Physical    { get; init; }
 		public required string ProjectPath { get; init; }
 		public required string Content     { get; init; }
 		
@@ -71,6 +74,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		"Nothing is written when any edit cannot be made: a pattern or a node that is not found, a literal pattern that matches several times without replaceAll, a replacement that does not parse, an overlap. " +
 		"The answer names each edit's outcome (edits[], by its 1-based position in the call), so the one to correct is known. " +
 		"A C# file is parsed as the batch leaves it: a batch that adds a syntax error is refused, quoting the parser — the check is on the result of all edits together, so two edits that are each half of a change pass. allowSyntaxErrors: true writes anyway. The replacement text of a roslyn_replace_in_code edit must itself parse, whatever the rest of the batch does. " +
+		"A project's XML files (.csproj, .props, .targets, .slnx and the like) are checked the same way for being well-formed XML as the batch leaves them. " +
 		"A roslyn_replace_in_code edit lays claim to its whole node: another edit inside that node is an overlap, also where the two would not change the same characters. " +
 		"On success, files[] lists each file with the line ranges that changed, in the file as it is now, and the backup token that restores it with roslyn_local_history. " +
 		"Supports dryRun=true: everything is resolved and checked, nothing is written. " +
@@ -167,6 +171,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 					
 					Relative    = edit.FilePath,
 					FullPath    = fullPath,
+					Physical    = physical,
 					ProjectPath = fileProject,
 					Content     = content,
 					Text        = text,
@@ -243,7 +248,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			
 			file.NewContent = EditPlan.Apply(file.Content, file.Changes.Select(change => change.Change));
 			
-			if(file.Tree is null || ReplaceInFileTool.AddedSyntaxErrors(file.Tree, file.NewContent) is not { Length: > 0 } added)
+			if(EditChecks.AddedErrors(file.Physical, file.Tree, file.Content, file.NewContent) is not { Length: > 0 } added)
 				continue;
 			
 			var quoted = $"{added.Length} syntax error(s) in {file.Relative} as the batch leaves it: {ReplaceInFileTool.Quoted(added)}.";
