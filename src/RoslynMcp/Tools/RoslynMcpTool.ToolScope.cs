@@ -325,7 +325,7 @@ internal abstract partial class RoslynMcpTool
 		
 		// The runtime type, not the declared one: a header typed as ToolResult would otherwise
 		// serialize only the base record's properties.
-		static string ToJson(object value) => JsonSerializer.Serialize(value, value.GetType(), RoslynMcpJson.Compact);
+		static string ToJson(object value) => JsonSerializer.Serialize(value, value.GetType(), RoslynMcpJson.Header);
 		
 		/// <summary>Characters of the response kept for the log viewer — enough to show meaningful content.</summary>
 		const int PeekLength = 600;

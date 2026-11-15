@@ -443,15 +443,19 @@ internal static class RefactoringTests
 						addParameters  = """[{"name":"toLower","type":"bool","defaultValue":"false"}]""",
 						projectPath    = ctx.TargetPath
 					},
-					data => data?["token"] is not null
-						&& data?["diff"]?.GetValue<string>().Contains("Obsolete") == true
+					// The diff follows the JSON header as raw text (#491).
+					(data, later) => later is [var diff, ..]
+						&& data?["token"] is not null
+						&& data?["diff"] is null
+						&& diff.Contains("Obsolete")
 						&& data?["parameters_added"]?.AsArray().Count == 1
 						&& data?["deprecation_message"]?.GetValue<string>().Contains("NormalizePath") == true
 						// Well-formedness of the synthesized code — regression guard for the
 						// unformatted-SyntaxFactory bugs (returnFoo, comma/equals spacing) and
 						// for the diff builder swallowing inserted lines as context.
-						&& data?["diff"]?.GetValue<string>().Contains("bool toLower = false") == true
-						&& data?["diff"]?.GetValue<string>().Contains("(string filePath) => NormalizePath(filePath, false);") == true)),
+						&& diff.Contains("bool toLower = false")
+						&& diff.Contains("(string filePath) => NormalizePath(filePath, false);"),
+					expectJson: true)),
 			
 			new("roslyn_apply_signature_change: cancel with 'n' succeeds, writes nothing",
 				async () => {

@@ -30,6 +30,15 @@ internal static class RoslynMcpJson
 	};
 	
 	/// <summary>
+	///     For the JSON header a tool writes itself, before raw text (#328, #491): the naming of
+	///     the serializer the SDK writes every other answer with (<c>Program.cs</c>), so a record
+	///     without explicit property names reads the same in a header as in an answer of its own.
+	/// </summary>
+	internal static readonly JsonSerializerOptions Header = new(JsonSerializerDefaults.Web) {
+		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+	};
+	
+	/// <summary>
 	///     For <see cref="BackupStore"/> meta.json files — indented, camelCase, omits nulls.
 	/// </summary>
 	internal static readonly JsonSerializerOptions Backup = new() {

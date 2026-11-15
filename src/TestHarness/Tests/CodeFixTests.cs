@@ -136,7 +136,7 @@ internal static class CodeFixTests
 				var (invalid, _) = await PreviewAdhoc(workspacePath, "TestMultipleActions", 9);
 				var (selected, selectedText) = await PreviewAdhoc(workspacePath, "TestMultipleActions", 1);
 				var token = selected?["token"]?.GetValue<string>();
-				var diff = selected?["diff"]?.GetValue<string>() ?? string.Empty;
+				var diff = PreviewAnswer.Diff(selectedText);
 				var pass = invalid?["error"]?.GetValue<string>() == "invalid action index"
 					&& token is not null
 					&& diff.Contains("string", StringComparison.Ordinal)
@@ -709,7 +709,7 @@ internal static class CodeFixTests
 					return (false, $"FAIL  ({marker} preview: {previewText})");
 
 				// The preview diff is what the user approves, so a non-C# write missing from it is a failure.
-				var diff = preview?["diff"]?.GetValue<string>() ?? string.Empty;
+				var diff = PreviewAnswer.Diff(previewText);
 				var expectedChangedLine = expectedText.Split('\n', StringSplitOptions.RemoveEmptyEntries)[^1];
 
 				if(!diff.Contains(documentPath, StringComparison.OrdinalIgnoreCase)

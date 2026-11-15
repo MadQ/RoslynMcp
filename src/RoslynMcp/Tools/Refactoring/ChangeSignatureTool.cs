@@ -119,12 +119,13 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			
 			return scope.Failed("change failed", new ErrorResult(result.Error!));
 		
+		var newSolution = await SolutionDiff.KeepBlankLinesAsync(result.BaseSolution, result.NewSolution, cancellationToken);
 		IReadOnlyDictionary<string, PreviewFileState> fileStates
 		;
 		
 		try {
 			
-			fileStates = await PreviewFileStateBuilder.BuildAsync(result.BaseSolution, result.NewSolution, cancellationToken);
+			fileStates = await PreviewFileStateBuilder.BuildAsync(result.BaseSolution, newSolution, cancellationToken);
 		}
 		catch(Exception ex) when(ex is UnsupportedFileEncodingException or DecoderFallbackException or EncoderFallbackException) {
 			
@@ -139,7 +140,7 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		
 		// A change that proposes different contents for two documents that are one file on disk
 		// can never be applied, so it gets no token (#338).
-		if(await PhysicalSolutionApplier.FindTargetConflictAsync(result.BaseSolution, result.NewSolution, fileStates, workspace.GetSecurityBoundary(projectPath), cancellationToken) is { } conflict)
+		if(await PhysicalSolutionApplier.FindTargetConflictAsync(result.BaseSolution, newSolution, fileStates, workspace.GetSecurityBoundary(projectPath), cancellationToken) is { } conflict)
 			
 			return scope.Failed("conflicting link contents", new ErrorResult(
 				$"This signature change cannot be applied: {conflict} No approval token was created."));
@@ -149,7 +150,8 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 			return scope.Error(wsInfoError);
 		
 		var workspaceBinding = WorkspaceBinding.Create(workspaceRoot, isMSBuild, csprojPath);
-		var token = approvals.Register(result.BaseSolution, result.NewSolution, result.Diff!,
+		var diff  = await SolutionDiff.BuildAsync(result.BaseSolution, newSolution, workspaceRoot, cancellationToken);
+		var token = approvals.Register(result.BaseSolution, newSolution, diff,
 			$"{method.ContainingType?.ToDisplayString()}::{method.Name}({string.Join(",", method.Parameters.Select(p => p.Type.ToDisplayString()))})",
 			ApprovalWorkflow.SignatureChange,
 			null,
@@ -159,14 +161,14 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		;
 		
 		return scope.Outcome($"+{result.ParametersAdded.Length} param ({string.Join(", ", result.ParametersAdded)})", new ChangeSignatureResult(
-			Diff:               result.Diff!,
+			Diff:               null,
 			Token:              token,
-			Message:            $"Review the diff, then call roslyn_apply_signature_change with token '{token}' and approval 'y' or 'session'.",
+			Message:            $"Review the diff below, then call roslyn_apply_signature_change with token '{token}' and approval 'y' or 'session'.",
 			ParametersAdded:    result.ParametersAdded,
 			DeprecationMessage: result.DeprecationMessage,
 			FilesAffected:      result.FilesAffected)
 		{
 			Caution = AdhocCaution(projectPath)
-		});
+		}, diff);
 	}
 }
