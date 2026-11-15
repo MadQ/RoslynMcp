@@ -898,7 +898,9 @@ internal sealed class BackupStore
 			.Select(meta => meta.AbsolutePath)
 			.Distinct(StringComparer.Ordinal)) {
 			
-			if(IsOrphan(path, entries.Where(meta => meta.AbsolutePath == path).Select(meta => meta.ProjectPath), livingTrees))
+			// Every spelling of the path: on Windows and macOS one directory holds them all, and a
+			// project recorded under another spelling is as much a reason to keep.
+			if(IsOrphan(path, entries.Where(meta => meta.AbsolutePath is not null && SecurityBoundary.PathComparer.Equals(meta.AbsolutePath, path)).Select(meta => meta.ProjectPath), livingTrees))
 				orphans.Add(path);
 		}
 		

@@ -201,6 +201,17 @@ static class BackupPruneTests
 			// the pass opened a meta file in every one of them, also in those of the first kind.
 			new("backup prune: orphans go after a week, a deleted file in a live folder stays, and a recent directory is not opened", async () => {
 				
+				// The orphan below is one only where nothing above the fixture root is a repository, a
+				// solution or a project: under a home directory that is a repository, say, the server
+				// keeps it, rightly, and this test would report that as a failure.
+				for(var above = TestFixtures.TempRoot; above is { Length: > 0 }; above = Path.GetDirectoryName(above)) {
+					
+					if(Directory.Exists(Path.Combine(above, ".git")) || File.Exists(Path.Combine(above, ".git"))
+						|| Directory.EnumerateFiles(above, "*.sln*").Any() || Directory.EnumerateFiles(above, "*.csproj").Any())
+						
+						return Skip.SetupUnavailable($"'{above}', above the fixture root, holds a repository, a solution or a project, so nothing under it is an orphan");
+				}
+				
 				var orphans = TestFixtures.NewAdhocDir("BackupPruneOrphans");
 				var name    = $"backuporphans-{Guid.NewGuid():N}";
 				var gone    = Path.Combine(TestFixtures.TempRoot, $"gone-{Guid.NewGuid():N}");
@@ -279,7 +290,7 @@ static class BackupPruneTests
 					
 					await DefaultWorkspaceTests.StopServerAsync(process, server);
 					orphans.Dispose();
-					Directory.Delete(repository, recursive: true);
+					TestFixtures.DeleteTree(repository);
 				}
 			}),
 			
