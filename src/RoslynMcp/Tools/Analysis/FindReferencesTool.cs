@@ -21,11 +21,14 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		"Without containingType, searches ALL symbols matching the name in the project and returns the union of their references, " +
 		"ensuring no call sites are missed when multiple types share a member name. " +
 		"Provide containingType to search only the symbol declared on that specific type. " +
-		"Returns references as project-relative file:line strings (e.g. 'src/Foo.cs:42'). " +
+		"Returns the references grouped by file and, within a file, by the declaration each is in, as roslyn_search_files lists its hits: " +
+		"references[].in[] names the declaration ('method Enqueue'), its lines ('108-158': pass them to roslyn_read_file to read the whole member) " +
+		"and where its node starts ('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with the line and its text. " +
+		"So a reference can be judged, read in full or edited without another lookup. Two references on one line are listed once. " +
 		"Use roslyn_find_implementations instead to discover subtypes or method overrides. " +
 		"Pass filePath+line (and optional column) to resolve the symbol at an exact source position instead of " +
 		"by name — the precise way to target one specific overload, local, or parameter. " +
-		"The answer also says where the symbol is declared (declarations, as file:line), so one call answers both where it is " +
+		"The answer also says where the symbol is declared (declarations: file, line, and for a member or type its declaration, lines and at), so one call answers both where it is " +
 		"and who uses it. " +
 		"Several names can be asked in one call (symbolName 'A|B|C'): the answer is then symbols[], one entry per name with its " +
 		"declarations, its total and its first references (take applies per name, and there is no page token: ask a name alone " +
@@ -49,7 +52,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
+		if(scope.TryServeCachedPage<SourcePlace>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -85,7 +88,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 					Declarations    = references.Declarations,
 					SymbolsSearched = references.Searched,
 					TotalReferences = references.Locations.Length,
-					References      = references.Locations.Length > take ? references.Locations[..take] : references.Locations,
+					References      = SourcePlace.Group(references.Locations.Length > take ? references.Locations[..take] : references.Locations),
 					HasMore         = references.Locations.Length > take ? true : null,
 				});
 			}
@@ -101,7 +104,9 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 				: scope.Failed($"none of {names.Length} name(s) found", answer);
 		}
 		
-		string[] allResults, declarations, symbolsSearched;
+		SourcePlace[] allResults;
+		DeclaredAt[]  declarations;
+		string[]      symbolsSearched;
 		
 		// By name: when containingType is specified, one symbol; without it ALL symbols matching the
 		// name, which prevents silently incomplete results when multiple types share a member name.
@@ -158,16 +163,19 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		
 		if(allResults.Length == 0)
 			
-			return scope.Outcome("no references", new FindReferencesResult(0, [], skip, take, [$"No references found for '{symbolName}'."], null, false) { Declarations = declarations, Caution = AdhocCaution(projectPath) });
+			return scope.Outcome("no references", new FindReferencesResult(0, symbolsSearched, skip, take, [], null, false) { Declarations = declarations, Caution = AdhocCaution(projectPath) });
 		
 		var shape  = PageShape(symbolsSearched, declarations, AdhocCaution(projectPath));
 		var result = PaginateAndStore(allResults, ref skip, take, shape);
+		
+		// How the page grouped, and what the same places took as file:line strings (#487).
+		scope.Record(SourcePlace.GroupingNote(result.Items, "reference(s)"));
 		
 		return scope.Outcome($"{result.Items.Length}/{result.Total} reference(s) across {symbolsSearched.Length} symbol(s)", shape(result));
 	}
 	
 	/// <summary>What the search for one name found: every reference, where the symbols are declared, which symbols they were, and the project they were found in.</summary>
-	sealed record Found(string[] Locations, string[] Declarations, string[] Searched, string Project);
+	sealed record Found(SourcePlace[] Locations, DeclaredAt[] Declarations, string[] Searched, string Project);
 	
 	/// <summary>
 	///     The references of one name, for a single-name call and for each name of a list alike: the
@@ -208,49 +216,41 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 	}
 	
 	/// <summary>
-	///     Every reference to the symbols, as sorted <c>file:line</c> strings, with where the symbols
+	///     Every reference to the symbols, as places sorted by file and line, with where the symbols
 	///     are declared in source and what they are called. The declarations are their own list:
 	///     Roslyn's reference search leaves a symbol's declaration out, so "where is it and who uses
 	///     it" took a second tool, where a text search for the name answers both at once (#459).
 	/// </summary>
-	static async Task<(string[] Locations, string[] Declarations, string[] Searched)> CollectAsync(ISymbol[] symbols, Solution solution, string rootPath, CancellationToken cancellationToken)
+	static async Task<(SourcePlace[] Locations, DeclaredAt[] Declarations, string[] Searched)> CollectAsync(ISymbol[] symbols, Solution solution, string rootPath, CancellationToken cancellationToken)
 	{
-		var allLocations = new List<string>();
+		var allLocations = new List<SourcePlace>();
 		
 		foreach(var sym in symbols) {
 			
 			var refs = await RoslynSymbolFinder.FindReferencesAsync(sym, solution, cancellationToken: cancellationToken);
 			
-			allLocations.AddRange(refs.SelectMany(r => r.Locations).Select(l => Place(l.Location, rootPath)));
+			allLocations.AddRange(refs.SelectMany(r => r.Locations).Select(l => SourcePlace.Of(l.Location, rootPath, cancellationToken)));
 		}
 		
-		string[] declarations = [..
-			symbols.SelectMany(symbol => symbol.Locations)
-				.Where(location => location.IsInSource)
-				.Select(location => Place(location, rootPath))
-				.Distinct()
-				.Order()
+		DeclaredAt[] declarations = [..
+			SourcePlace.Sorted(
+				symbols.SelectMany(symbol => symbol.Locations)
+					.Where(location => location.IsInSource)
+					.Select(location => SourcePlace.Of(location, rootPath, cancellationToken)))
+				.Select(place => place.AsDeclared())
 		];
 		
-		return ([.. allLocations.Distinct().Order()], declarations, [.. symbols.Select(s => FormatSymbolName(s)).Distinct()]);
-	}
-	
-	static string Place(Location location, string rootPath)
-	{
-		var span = location.GetLineSpan();
-		var file = span.Path is { Length: > 0 } path ? Path.GetRelativePath(rootPath, path) : "?";
-		
-		return $"{file}:{span.StartLinePosition.Line + 1}";
+		return (SourcePlace.Sorted(allLocations), declarations, [.. symbols.Select(s => FormatSymbolName(s)).Distinct()]);
 	}
 
 	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
 	// the function the pagination cache holds never captures a symbol, the compilation, or the solution.
-	static Func<PaginatedResult<string>, object> PageShape(string[] symbolsSearched, string[] declarations, string? caution)
+	static Func<PaginatedResult<SourcePlace>, object> PageShape(string[] symbolsSearched, DeclaredAt[] declarations, string? caution)
 		=> page => new FindReferencesResult(
 			TotalReferences: page.Total,
 			SymbolsSearched: symbolsSearched,
 			Skip: page.Skip, Take: page.Take,
-			References: page.Items,
+			References: SourcePlace.Group(page.Items),
 			PageToken: page.PageToken,
 			HasMore:   page.HasMore)
 		{

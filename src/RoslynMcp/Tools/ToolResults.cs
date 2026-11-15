@@ -54,19 +54,45 @@ internal sealed record FindReferencesResult(
 	[property: JsonPropertyName("symbols_searched")] string[] SymbolsSearched,
 	[property: JsonPropertyName("skip")]             int      Skip,
 	[property: JsonPropertyName("take")]             int      Take,
-	[property: JsonPropertyName("references")]       string[] References,
+	// By file, and within a file by the declaration each reference is in, as a text search
+	// lists its hits (#487).
+	[property: JsonPropertyName("references")]       SearchFileGroup[] References,
 	[property: JsonPropertyName("page_token")]       string?  PageToken,
 	[property: JsonPropertyName("has_more")]         bool     HasMore
 ) : ToolResult
 {
 	/// <summary>
-	///     Where the symbols searched are declared in source, as <c>file:line</c> (#459). Roslyn's
-	///     reference search leaves the declaration out, and "where is it and who uses it" is one
-	///     question to an agent.
+	///     Where the symbols searched are declared in source (#459), each with the lines it takes
+	///     and where its node starts (#487). Roslyn's reference search leaves the declaration out,
+	///     and "where is it and who uses it" is one question to an agent.
 	/// </summary>
 	[JsonPropertyName("declarations")]
 	[JsonPropertyOrder(-1)]
-	public string[] Declarations { get; init; } = [];
+	public DeclaredAt[] Declarations { get; init; } = [];
+}
+
+/// <summary>
+///     Where a symbol is declared: the file and the line of its name, what is declared there
+///     (<c>method Read</c>), the lines it takes from its attached comment to its end, and where
+///     its node starts, as <c>roslyn_replace_in_code</c> takes it. The last three are absent for
+///     a declaration that is no member or type of its own: a local, a parameter.
+/// </summary>
+internal sealed record DeclaredAt(
+	[property: JsonPropertyName("file")] string File,
+	[property: JsonPropertyName("line")] int    Line
+)
+{
+	[JsonPropertyName("declaration")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Declaration { get; init; }
+	
+	[JsonPropertyName("lines")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Lines { get; init; }
+	
+	[JsonPropertyName("at")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? At { get; init; }
 }
 
 /// <summary>
@@ -88,7 +114,7 @@ internal sealed record NamedReferences([property: JsonPropertyName("name")] stri
 {
 	[JsonPropertyName("declarations")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	public string[]? Declarations { get; init; }
+	public DeclaredAt[]? Declarations { get; init; }
 	
 	[JsonPropertyName("symbols_searched")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -100,7 +126,7 @@ internal sealed record NamedReferences([property: JsonPropertyName("name")] stri
 	
 	[JsonPropertyName("references")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	public string[]? References { get; init; }
+	public SearchFileGroup[]? References { get; init; }
 	
 	[JsonPropertyName("has_more")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

@@ -104,14 +104,24 @@ static partial class DefaultWorkspaceTests
 				var (_, prefixed)       = await Call(rootedCtx, "roslyn_find_references", new { symbolName = "#sym:Greet|#sym:Greeter", skip = 5 });
 
 				var greet    = data?["symbols"]?[0];
-				var declared = greet?["declarations"]?.AsArray().Select(d => d?.GetValue<string>() ?? "").ToArray() ?? [];
-				var used     = greet?["references"]?.AsArray().Select(r => r?.GetValue<string>() ?? "").ToArray() ?? [];
+				
+				// Since #487 a reference is listed under the declaration it is in, with the line's
+				// text, as a search hit is, and a declaration says what it is, the lines it takes and
+				// where it starts: the read that followed every reference search is in the answer.
+				var declaredAt = greet?["declarations"]?.AsArray() ?? [];
+				var hits       = SearchHits.In(greet?["references"]) ?? [];
+				var declared   = declaredAt.Select(d => $"{d?["file"]?.GetValue<string>()}:{d?["line"]?.GetValue<int>()}").ToArray();
+				var used       = hits.Select(hit => $"{hit.File}:{hit.Line}").ToArray();
+				var inConsumer = hits.FirstOrDefault(hit => hit.File.Contains("Consumer.cs"));
 				
 				return Verdict(ok && data?["error"] is null && data?["symbols"]?.AsArray().Count == 2
 					&& greet?["name"]?.GetValue<string>() == "Greet"
 					&& declared.Length > 0 && declared.All(d => d.Contains("Lib"))
 					&& used.Any(r => r.Contains("Consumer.cs")) && !used.Intersect(declared).Any()
 					&& greet?["total_references"]?.GetValue<int>() == used.Length
+					&& inConsumer is { Declaration: not null, Lines: not null, At: not null } && inConsumer.Text.Contains("Greet")
+					&& (declaredAt[0]?["declaration"]?.GetValue<string>() ?? "").Contains("Greet")
+					&& declaredAt[0]?["lines"] is not null && declaredAt[0]?["at"] is not null
 					&& (data["symbols"]?[1]?["failed"]?["error"]?.GetValue<string>() ?? "").Contains("not found")
 					&& singleOk && single1?["references"] is JsonArray && single1["symbols"] is null
 					&& single1["declarations"]?.AsArray().Count > 0
