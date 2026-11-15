@@ -111,9 +111,10 @@ internal static class SolutionDiff
 			
 			foreach(var docId in projectChange.GetChangedDocuments()) {
 				
-				var oldText  = await before.GetDocument(docId)!.GetTextAsync(cancellationToken);
-				var newText  = await after.GetDocument(docId)!.GetTextAsync(cancellationToken);
-				var restored = RestoreBlankLines(oldText, newText);
+				var newDocument = after.GetDocument(docId)!;
+				var oldText     = await before.GetDocument(docId)!.GetTextAsync(cancellationToken);
+				var newText     = await newDocument.GetTextAsync(cancellationToken);
+				var restored    = RestoreBlankLines(oldText, newText, await newDocument.GetSyntaxRootAsync(cancellationToken));
 				
 				changeRemains |= !(restored ?? newText).ContentEquals(oldText);
 				
@@ -129,20 +130,48 @@ internal static class SolutionDiff
 	///     <paramref name="newText"/> with the blank lines of <paramref name="oldText"/> where the two
 	///     texts have a blank line in the same place, or null when there is none to put back. The
 	///     place is decided by matching the lines of both texts with every blank line counted as the
-	///     same line; a matched pair that differs is then a pair of blank lines by construction. Only
-	///     the line's own text is replaced, never its line break.
+	///     same line; a matched pair that differs is then a pair of blank lines by construction. An
+	///     action that moves a block (inverting an <c>if</c> swaps its branches) leaves blank lines
+	///     the matching cannot pair; when as many are left over on one side as on the other, they
+	///     are the same lines in another order and are paired as they come. Only the line's own text
+	///     is replaced, never its line break, and never a line inside a token: a blank line of a
+	///     verbatim or raw string is part of the string's value (<paramref name="newRoot"/> is the
+	///     new text's syntax root, null for a document that has none).
 	/// </summary>
-	internal static SourceText? RestoreBlankLines(SourceText oldText, SourceText newText)
+	internal static SourceText? RestoreBlankLines(SourceText oldText, SourceText newText, SyntaxNode? newRoot)
 	{
 		var oldLines = LinesOf(oldText);
 		var newLines = LinesOf(newText);
+		var pairs    = MatchLines(BlankAsEmpty(oldLines), BlankAsEmpty(newLines));
 		var changes  = new List<TextChange>();
 		
-		foreach(var (oldIndex, newIndex) in MatchLines(BlankAsEmpty(oldLines), BlankAsEmpty(newLines)))
-			if(oldLines[oldIndex] != newLines[newIndex])
-				changes.Add(new(newText.Lines[newIndex].Span, oldLines[oldIndex]));
+		// In the order of the new text, which is the order the changes must be in.
+		foreach(var (oldIndex, newIndex) in pairs.Concat(MovedBlankLines(oldLines, newLines, pairs)).OrderBy(pair => pair.NewIdx)) {
+			
+			if(oldLines[oldIndex] == newLines[newIndex])
+				continue;
+			
+			var span = newText.Lines[newIndex].Span;
+			
+			if(newRoot is not null && span.Start < newRoot.FullSpan.End && newRoot.FindToken(span.Start).Span.Contains(span.Start))
+				continue;
+			
+			changes.Add(new(span, oldLines[oldIndex]));
+		}
 		
 		return changes.Count == 0 ? null : newText.WithChanges(changes);
+	}
+	
+	// The blank lines no pair holds, old with new in order, when both texts have the same number
+	// left: none otherwise, since a blank line that was added or removed has no partner to take.
+	static IEnumerable<(int OldIdx, int NewIdx)> MovedBlankLines(string[] oldLines, string[] newLines, List<(int OldIdx, int NewIdx)> pairs)
+	{
+		var pairedOld = new HashSet<int>(pairs.Select(pair => pair.OldIdx));
+		var pairedNew = new HashSet<int>(pairs.Select(pair => pair.NewIdx));
+		int[] oldLeft = [..Enumerable.Range(0, oldLines.Length).Where(index => !pairedOld.Contains(index) && string.IsNullOrWhiteSpace(oldLines[index]))];
+		int[] newLeft = [..Enumerable.Range(0, newLines.Length).Where(index => !pairedNew.Contains(index) && string.IsNullOrWhiteSpace(newLines[index]))];
+		
+		return oldLeft.Length == newLeft.Length ? oldLeft.Zip(newLeft) : [];
 	}
 	
 	static string[] LinesOf(SourceText text)
