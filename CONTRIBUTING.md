@@ -119,15 +119,17 @@ Publish a Release build and configure your MCP client to use it:
 
 ## Code Style Guidelines
 
-**See [AGENTS.md § Code Style](AGENTS.md#code-style) for the canonical style rules.**
+**Respect each other's style.** See [AGENTS.md § Code Style](AGENTS.md#code-style); in short:
 
-This document intentionally does **not** duplicate those rules. AGENTS.md is the source of truth for formatting, naming, blank-line rules, the "Right Code" principle, and RoslynMcp-specific tool conventions.
+- In a small change, keep the style of the code around it.
+- In new code (a method, a type, a file), use your own.
+- Never restyle code that is not otherwise being changed.
+
+There is no project-wide formatting standard, and no style script or linter enforces one. AGENTS.md lists the owner's habits for reference only; it is also where the "Right Code" principle and the RoslynMcp-specific tool conventions are.
 
 ### Code Quality Tools
 
-**Code style enforcement is custom, not generic.** RoslynMcp uses `scripts/Test-CodeStyle.ps1` for style auditing and `RoslynMcp.Analyzers` for compile-time rules instead of a repository-wide `.editorconfig` linter setup.
-
-**PRs that add `.editorconfig` files will not be approved.** These create the same conflicts with the project's intentional style choices.
+**PRs that add `.editorconfig` files will not be approved.** A committed one would impose one person's preferences on everyone. The file is gitignored: keep a private one if you like.
 
 **Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal, RMCP005: `BeginTool` name mismatch, RMCP007: missing `[Description]` on tool method, RMCP008: missing `[Description]` on tool parameter, RMCP009: `string projectPath` must use `[Description(ProjectPathDescription)]`) and warning-severity rules (RMCP001/RMCP002: prefer `nint`/`nuint` over `IntPtr`/`UIntPtr`, RMCP006: `TODO` placeholder in `scope.Outcome`/`scope.Failed` detail strings). New analyzer contributions follow the same pattern.
 
