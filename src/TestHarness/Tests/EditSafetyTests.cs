@@ -31,7 +31,7 @@ static class EditSafetyTests
 		
 		fx.Write("broken.cs", brokenSource);
 		// Members whose signatures are not 'type Name(parameters)'.
-		fx.Write("names.cs", "class Names : System.IDisposable\n{\n\t(int, string) Pair() { return (0, \"\"); }\n\tvoid System.IDisposable.Dispose() { }\n\tint this[int i] { get { return 0; } }\n}\n");
+		fx.Write("names.cs", "class Names : System.IDisposable\n{\n\t(int, string) Pair() { return (0, \"\"); }\n\tvoid System.IDisposable.Dispose() { }\n\tint this[int i] { get { return 0; } }\n\tint Total => Pair().Item1;\n}\n");
 		
 		// An unterminated comment, and behind it a statement without its semicolon.
 		fx.Write("uncover.cs", "class Uncover\n{\n\tint a = 1; /* open\n\tint b = 2\n}\n");
@@ -225,6 +225,15 @@ static class EditSafetyTests
 				var explicit_ = await Replace(new { filePath = "names.cs", pattern = "{ }", replacement = "{ return; }", inMember = "void IDisposable.Dispose()", dryRun = true, projectPath = fx.Csproj });
 				var indexer  = await Replace(new { filePath = "names.cs", pattern = "return 0;", replacement = "return 1;", inMember = "this[int i]", dryRun = true, projectPath = fx.Csproj });
 				var inType   = await Replace(new { filePath = "names.cs", pattern = "{ }", replacement = "{ return; }", inMember = "Names.IDisposable.Dispose", dryRun = true, projectPath = fx.Csproj });
+				
+				// With a modifier in front the tuple follows a word, as a parameter list does; and
+				// a property's expression holds a call, whose bracket is no parameter list.
+				var modified = await Replace(new { filePath = "names.cs", pattern = "return (0", replacement = "return (1", inMember = "public (int, string) Pair()", dryRun = true, projectPath = fx.Csproj });
+				var property = await Replace(new { filePath = "names.cs", pattern = "Pair()", replacement = "Pair( )", inMember = "int Total => Pair().Item1;", dryRun = true, projectPath = fx.Csproj });
+				
+				if(modified?["match_count"]?.GetValue<int>() != 1 || property?["match_count"]?.GetValue<int>() != 1)
+					
+					return Verdict(false, new JsonArray(modified?.DeepClone(), property?.DeepClone()), null);
 				
 				return Verdict(tuple?["match_count"]?.GetValue<int>() == 1
 					&& inType?["match_count"]?.GetValue<int>() == 1

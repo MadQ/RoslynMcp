@@ -244,7 +244,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		if(matchedNodes.Length > 1 && readAsName is not null && (force || !dryRun))
 			
 			return scope.Outcome("multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo,
-				$"textPattern matched nothing as written and was read as the name '{readAsName}', which {matchedNodes.Length} nodes have; its parameter list was not compared. Nothing {(dryRun ? "would be" : "was")} replaced: pass line and column to target one, or the plain name as textPattern with force=true to replace all."));
+				$"textPattern matched nothing as written and was read as the name '{readAsName}', which {matchedNodes.Length} nodes have; its parameter list was not compared. Nothing {(dryRun ? "would be" : "was")} replaced: pass line and column to target one, as changed_nodes lists them."));
 		
 		if(matchedNodes.Length > 1 && !force && !dryRun) {
 			

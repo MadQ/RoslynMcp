@@ -157,14 +157,33 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			else if(c == '>')
 				angles = Math.Max(0, angles - 1);
 			
-			if(c is not ('(' or '[') || angles > 0)
+			if(angles > 0)
+				continue;
+			
+			// A member without a parameter list ends at its initializer, its expression or its
+			// accessors: the first bracket of 'int Total => Sum(items)' is a call, not a list.
+			if(c is '=' or '{' or ';') {
+				
+				text = text[..i];
+				break;
+			}
+			
+			if(c is not ('(' or '['))
 				continue;
 			
 			var before = text[..i].TrimEnd();
 			var close  = MatchingClose(text, i);
 			var rank   = c == '[' && close >= 0 && text[(i + 1)..close].Trim().Trim(',').Trim().IsEmpty;
 			
-			if(!rank && before.Length > 0 && (char.IsLetterOrDigit(before[^1]) || before[^1] is '_' or '>')) {
+			// A tuple type behind a modifier: 'public (int, string) Pair()'. What tells it from a
+			// parameter list is that a name follows it, where a list is followed by nothing, a
+			// body, an arrow, a colon or constraints.
+			var after = close >= 0 ? text[(close + 1)..].TrimStart() : default;
+			var tuple = c == '(' && after.Length > 0
+				&& (char.IsLetter(after[0]) || after[0] is '_' or '@' or '[' or '?')
+				&& !(after.StartsWith("where") && (after.Length == 5 || char.IsWhiteSpace(after[5])));
+			
+			if(!rank && !tuple && before.Length > 0 && (char.IsLetterOrDigit(before[^1]) || before[^1] is '_' or '>')) {
 				
 				text = before;
 				break;
