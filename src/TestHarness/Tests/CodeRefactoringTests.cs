@@ -39,6 +39,8 @@ internal static class CodeRefactoringTests
 			fixture.Write("Caller.cs", CallerSource);
 		}
 		
+		styled.Write("Blank.cs", BlankSource);
+		
 		async Task<(JsonNode? Data, string Text)> Call(string tool, object args)
 		{
 			await ctx.SendAsync(new {
@@ -49,10 +51,14 @@ internal static class CodeRefactoringTests
 			});
 			
 			var response = await ctx.ReceiveAsync();
-			var text     = response?["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? string.Empty;
+			
+			// Text is the whole answer, Data its first block: a preview with a token is a JSON header
+			// and then the diff as raw text (#491).
+			var blocks = response?["result"]?["content"]?.AsArray().Select(block => block?["text"]?.GetValue<string>() ?? string.Empty).ToArray() ?? [];
+			var text   = string.Concat(blocks);
 			JsonNode? data = null;
 			
-			try { data = JsonNode.Parse(text); }
+			try { data = JsonNode.Parse(blocks.FirstOrDefault() ?? string.Empty); }
 			catch { }
 			
 			return (data, text);
@@ -425,9 +431,9 @@ internal static class CodeRefactoringTests
 				return (false, $"FAIL  (no extract-method action: {listText}) [{sw.ElapsedMilliseconds}ms]");
 			
 			var (preview, previewText) = await Preview(fx.Csproj!, "Wide.cs", 7, 1, index, 7);
-			var diff = preview?["diff"]?.GetValue<string>();
+			var diff = PreviewAnswer.Diff(previewText);
 			
-			if(diff is null)
+			if(preview?["token"] is null || diff.Length == 0)
 				return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
 			
 			var lines     = diff.Split('\n').Select(line => line.TrimEnd('\r')).Where(line => !line.StartsWith("---", StringComparison.Ordinal) && !line.StartsWith("+++", StringComparison.Ordinal)).ToArray();
@@ -550,7 +556,7 @@ internal static class CodeRefactoringTests
 				return (false, $"FAIL  (write: {writtenText}) [{sw.ElapsedMilliseconds}ms]");
 			
 			var (preview, previewText) = await Call("roslyn_preview_code_fix", new { projectPath = late.Dir, filePath = "Caller.cs", line = 7, column = 10, diagnosticId = "CS0117" });
-			var diff = preview?["diff"]?.GetValue<string>().Replace("\r\n", "\n", StringComparison.Ordinal) ?? string.Empty;
+			var diff = PreviewAnswer.Diff(previewText).Replace("\r\n", "\n", StringComparison.Ordinal);
 			
 			if(!diff.Contains("+  internal static void Missing()\n+  {\n", StringComparison.Ordinal))
 				return (false, $"FAIL  (preview after the config: {previewText}) [{sw.ElapsedMilliseconds}ms]");
@@ -568,11 +574,55 @@ internal static class CodeRefactoringTests
 				
 				(var gone, goneText) = await Call("roslyn_preview_code_fix", new { projectPath = late.Dir, filePath = "Caller.cs", line = 7, column = 10, diagnosticId = "CS0117" });
 				
-				if(gone?["diff"]?.GetValue<string>() is { } unstyled && !unstyled.Contains("+  internal static", StringComparison.Ordinal))
+				if(gone?["token"] is not null && !PreviewAnswer.Diff(goneText).Contains("+  internal static", StringComparison.Ordinal))
 					return (true, $"PASS  [{sw.ElapsedMilliseconds}ms]");
 			}
 			
 			return (false, $"FAIL  (the deleted config still applies: {goneText}) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
+		// A blank line that was indented stays indented (#491). Roslyn's formatter empties such
+		// lines over the whole region it formats, so inverting one `if` came back as a change to
+		// every blank line around it: the diff showed them, and the apply wrote them. The fixture
+		// has five indented blank lines, in and around the `if`; the diff must change none of
+		// them, and the file must still have five after the apply, which is also what shows that
+		// the apply writes what the preview showed. The same test pins the answer's shape: the
+		// header carries no diff, and the diff follows as raw text naming the file relative to the
+		// workspace root.
+		async Task<(bool pass, string msg)> RunBlankLinesKept()
+		{
+			var sw = Stopwatch.StartNew();
+			var (list, listText) = await List(styled.Csproj!, "Blank.cs", 9, 3);
+			var index = IndexOf(list, ".CSharpInvertIfCodeRefactoringProvider");
+			
+			if(index < 0)
+				return (false, $"FAIL  (no invert-if action: {listText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (preview, previewText) = await Preview(styled.Csproj!, "Blank.cs", 9, 3, index);
+			var token = preview?["token"]?.GetValue<string>();
+			var diff  = PreviewAnswer.Diff(previewText);
+			var lines = diff.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+			
+			// Inverting the `if` swaps its branches, so a blank line that moved with its block is in
+			// the diff as removed in one place and added in another. What must not be there is a
+			// blank line that changed: the removed blank lines and the added ones are the same lines.
+			string[] BlankLines(char sign) => [..lines.Where(line => line.Length > 0 && line[0] == sign && string.IsNullOrWhiteSpace(line[1..])).Select(line => line[1..]).Order(StringComparer.Ordinal)];
+			
+			if(token is null
+				|| preview?["diff"] is not null
+				|| lines is not ["--- Blank.cs", "+++ Blank.cs", ..]
+				|| !lines.Any(line => line.StartsWith('+') && line.Contains("value <= 0", StringComparison.Ordinal))
+				|| !BlankLines('-').SequenceEqual(BlankLines('+')))
+				return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (apply, applyText) = await Apply(styled.Csproj!, token);
+			var written  = await File.ReadAllTextAsync(styled.PathOf("Blank.cs"));
+			var indented = written.Split('\n').Count(line => line.Length > 0 && string.IsNullOrWhiteSpace(line));
+			var pass     = apply?["error"] is null && indented == 5 && written.Contains("value <= 0", StringComparison.Ordinal);
+			
+			return (pass, pass
+				? $"PASS  [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  ({indented} indented blank line(s) of 5 | apply: {applyText} | file: {written}) [{sw.ElapsedMilliseconds}ms]");
 		}
 		
 		List<TestCase> tests = [
@@ -588,6 +638,7 @@ internal static class CodeRefactoringTests
 			new("a refactoring token is refused by the code-fix apply and dropped by 'n'", RunTokenDiscipline),
 			new("a file edited after the preview is stale, and the token survives", RunStalePreview),
 			new("invert if round-trips", RunInvertIf),
+			new("indented blank lines stay as they were, in the diff and in the file; the diff is raw text", RunBlankLinesKept),
 			new("the same workflow on an AdhocWorkspace", RunAdhoc),
 			new("codeActions.enabled false turns the tools off", RunDisabled),
 			new("a private .editorconfig shapes extract method (MSBuild)", () => RunStyledExtract(styled)),
@@ -614,6 +665,9 @@ internal static class CodeRefactoringTests
 	
 	// Lines 9 to 14 are the loop Extract method moves.
 	const string StyledSource = "namespace Fixture;\n\npublic static class Styled\n{\n\tpublic static int Sum(int[] items)\n\t{\n\t\tvar total = 0;\n\n\t\tforeach(var item in items) {\n\t\t\tif(item > 0) {\n\t\t\t\ttotal += item;\n\t\t\t\ttotal += 1;\n\t\t\t}\n\t\t}\n\n\t\treturn total;\n\t}\n}\n";
+	
+	// The `if` to invert is on line 9. Five blank lines are indented: lines 8, 10, 12, 16 and 19.
+	const string BlankSource = "namespace Fixture;\n\npublic static class Blank\n{\n\tpublic static int Run(int value)\n\t{\n\t\tvar total = 0;\n\t\t\n\t\tif(value > 0) {\n\t\t\t\n\t\t\ttotal += value;\n\t\t\t\n\t\t\ttotal *= 2;\n\t\t}\n\t\telse {\n\t\t\t\n\t\t\ttotal -= value;\n\t\t}\n\t\t\n\t\treturn total;\n\t}\n}\n";
 	
 	// CS0117 on line 7: Target has no method named Missing.
 	const string CallerSource = "namespace Fixture;\n\npublic static class Caller\n{\n\tpublic static void Run()\n\t{\n\t\tTarget.Missing();\n\t}\n}\n\npublic static class Target\n{\n}\n";

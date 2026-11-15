@@ -67,7 +67,7 @@ internal sealed class PreviewRefactoringTool : RefactoringToolBase
 		
 		try {
 			
-			newSolution = await CodeActionOperations.GetChangedSolutionAsync(selected.Action, cancellationToken);
+			newSolution = await SolutionDiff.KeepBlankLinesAsync(baseSolution, await CodeActionOperations.GetChangedSolutionAsync(selected.Action, cancellationToken), cancellationToken);
 		}
 		catch(UnsupportedCodeActionOperationException ex) {
 			
@@ -94,7 +94,7 @@ internal sealed class PreviewRefactoringTool : RefactoringToolBase
 				null, null, choice, ex.Message, "unsupported refactoring change"));
 		}
 		
-		var diff = await SolutionDiff.BuildAsync(baseSolution, newSolution, cancellationToken);
+		var diff = await SolutionDiff.BuildAsync(baseSolution, newSolution, target.RootPath, cancellationToken);
 		
 		if(diff == "(no changes)")
 			return scope.Failed("no changes", new PreviewRefactoringResult(
@@ -136,14 +136,14 @@ internal sealed class PreviewRefactoringTool : RefactoringToolBase
 		
 		return scope.Outcome($"preview ready: {choice.Title}", new PreviewRefactoringResult(
 			token,
-			diff,
+			null,
 			choice,
-			$"Review the diff, then call roslyn_apply_refactoring with token '{token}' and approval 'y' or 'n'.",
+			$"Review the diff below, then call roslyn_apply_refactoring with token '{token}' and approval 'y' or 'n'.",
 			null)
 		{
 			CreatedFiles = changes.CreatedFiles.IsEmpty ? null : [..changes.CreatedFiles.Select(path => TryMakeRelative(path, target.RootPath) ?? path)],
 			DeletedFiles = changes.DeletedFiles.IsEmpty ? null : [..changes.DeletedFiles.Select(path => TryMakeRelative(path, target.RootPath) ?? path)],
 			Caution      = AdhocCaution(projectPath),
-		});
+		}, diff);
 	}
 }

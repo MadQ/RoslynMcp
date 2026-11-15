@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 using System.Text;
 
 namespace RoslynMcp;
@@ -14,7 +15,14 @@ internal static class SolutionDiff
 	///     Returns a unified diff string comparing the changed documents between
 	///     <paramref name="before"/> and <paramref name="after"/>.
 	/// </summary>
-	public static async Task<string> BuildAsync(Solution before, Solution after, CancellationToken cancellationToken)
+	public static Task<string> BuildAsync(Solution before, Solution after, CancellationToken cancellationToken)
+		=> BuildAsync(before, after, null, cancellationToken);
+	
+	/// <summary>
+	///     The same diff with the paths under <paramref name="rootPath"/> written relative to it: the
+	///     form a tool's answer uses (#491). A path outside the root stays absolute.
+	/// </summary>
+	public static async Task<string> BuildAsync(Solution before, Solution after, string? rootPath, CancellationToken cancellationToken)
 	{
 		var sb = new System.Text.StringBuilder();
 		
@@ -22,15 +30,15 @@ internal static class SolutionDiff
 			
 			// Changed documents: both files exist, content differs.
 			foreach(var docId in projectChange.GetChangedDocuments())
-				await AppendChangedAsync(sb, before.GetDocument(docId)!, after.GetDocument(docId)!, cancellationToken);
+				await AppendChangedAsync(sb, before.GetDocument(docId)!, after.GetDocument(docId)!, rootPath, cancellationToken);
 			
 			// Changed AdditionalFiles and analyzer-config documents are written by
 			// PhysicalSolutionApplier exactly like C# documents, so the preview must show them too.
 			foreach(var docId in projectChange.GetChangedAdditionalDocuments())
-				await AppendChangedAsync(sb, before.GetAdditionalDocument(docId)!, after.GetAdditionalDocument(docId)!, cancellationToken);
+				await AppendChangedAsync(sb, before.GetAdditionalDocument(docId)!, after.GetAdditionalDocument(docId)!, rootPath, cancellationToken);
 			
 			foreach(var docId in projectChange.GetChangedAnalyzerConfigDocuments())
-				await AppendChangedAsync(sb, before.GetAnalyzerConfigDocument(docId)!, after.GetAnalyzerConfigDocument(docId)!, cancellationToken);
+				await AppendChangedAsync(sb, before.GetAnalyzerConfigDocument(docId)!, after.GetAnalyzerConfigDocument(docId)!, rootPath, cancellationToken);
 			
 			// Added documents: new file, e.g., a type renamed to Bar.cs.
 			foreach(var docId in projectChange.GetAddedDocuments()) {
@@ -43,7 +51,7 @@ internal static class SolutionDiff
 				var newText = (await newDoc.GetTextAsync(cancellationToken)).ToString();
 				
 				sb.AppendLine($"--- /dev/null");
-				sb.AppendLine($"+++ {newDoc.FilePath}");
+				sb.AppendLine($"+++ {Shown(newDoc.FilePath, rootPath)}");
 				sb.Append(BuildAllAdded(newText));
 			}
 			
@@ -59,7 +67,7 @@ internal static class SolutionDiff
 				
 				var oldText = (await oldDoc.GetTextAsync(cancellationToken)).ToString();
 				
-				sb.AppendLine($"--- {oldDoc.FilePath}");
+				sb.AppendLine($"--- {Shown(oldDoc.FilePath, rootPath)}");
 				sb.AppendLine($"+++ /dev/null");
 				sb.Append(BuildAllRemoved(oldText));
 			}
@@ -68,7 +76,125 @@ internal static class SolutionDiff
 		return sb.Length > 0 ? sb.ToString() : "(no changes)";
 	}
 	
-	private static async Task AppendChangedAsync(System.Text.StringBuilder sb, TextDocument oldDoc, TextDocument newDoc, CancellationToken cancellationToken)
+	// A path as the diff names it: relative to the root when it is under it.
+	static string Shown(string path, string? rootPath)
+	{
+		if(rootPath is null)
+			return path;
+		
+		var relative = Path.GetRelativePath(rootPath, path);
+		
+		return Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+			? path
+			: relative;
+	}
+	
+	/// <summary>
+	///     <paramref name="after"/> with every blank line that was blank before put back as it was
+	///     (#491). Roslyn's formatter empties an indented blank line over the whole region it formats,
+	///     so an action that changes five lines came back as a hunk of hundreds: a preview too large
+	///     to read, and an apply that restyled lines the action was not about. Run on the solution an
+	///     action proposes before the diff and the file states are built from it, so the preview shows
+	///     what the apply writes. A blank line the action adds has no original and stays as it came.
+	///     An action that changes nothing but blank lines is returned as it is: those lines are then
+	///     what it is about (a formatting fix), and putting them back would leave it without a change.
+	/// </summary>
+	public static async Task<Solution> KeepBlankLinesAsync(Solution before, Solution after, CancellationToken cancellationToken)
+	{
+		var result        = after;
+		var changeRemains = false;
+		
+		foreach(var projectChange in after.GetChanges(before).GetProjectChanges()) {
+			
+			changeRemains |= projectChange.GetAddedDocuments().Any() || projectChange.GetRemovedDocuments().Any()
+				|| projectChange.GetChangedAdditionalDocuments().Any() || projectChange.GetChangedAnalyzerConfigDocuments().Any();
+			
+			foreach(var docId in projectChange.GetChangedDocuments()) {
+				
+				var newDocument = after.GetDocument(docId)!;
+				var oldText     = await before.GetDocument(docId)!.GetTextAsync(cancellationToken);
+				var newText     = await newDocument.GetTextAsync(cancellationToken);
+				var restored    = RestoreBlankLines(oldText, newText, await newDocument.GetSyntaxRootAsync(cancellationToken));
+				
+				changeRemains |= !(restored ?? newText).ContentEquals(oldText);
+				
+				if(restored is not null)
+					result = result.WithDocumentText(docId, restored);
+			}
+		}
+		
+		return changeRemains ? result : after;
+	}
+	
+	/// <summary>
+	///     <paramref name="newText"/> with the blank lines of <paramref name="oldText"/> where the two
+	///     texts have a blank line in the same place, or null when there is none to put back. The
+	///     place is decided by matching the lines of both texts with every blank line counted as the
+	///     same line; a matched pair that differs is then a pair of blank lines by construction. An
+	///     action that moves a block (inverting an <c>if</c> swaps its branches) leaves blank lines
+	///     the matching cannot pair; when as many are left over on one side as on the other, they
+	///     are the same lines in another order and are paired as they come. Only the line's own text
+	///     is replaced, never its line break, and never a line inside a token: a blank line of a
+	///     verbatim or raw string is part of the string's value (<paramref name="newRoot"/> is the
+	///     new text's syntax root, null for a document that has none).
+	/// </summary>
+	internal static SourceText? RestoreBlankLines(SourceText oldText, SourceText newText, SyntaxNode? newRoot)
+	{
+		var oldLines = LinesOf(oldText);
+		var newLines = LinesOf(newText);
+		var pairs    = MatchLines(BlankAsEmpty(oldLines), BlankAsEmpty(newLines));
+		var changes  = new List<TextChange>();
+		
+		// In the order of the new text, which is the order the changes must be in.
+		foreach(var (oldIndex, newIndex) in pairs.Concat(MovedBlankLines(oldLines, newLines, pairs)).OrderBy(pair => pair.NewIdx)) {
+			
+			if(oldLines[oldIndex] == newLines[newIndex])
+				continue;
+			
+			var span = newText.Lines[newIndex].Span;
+			
+			if(newRoot is not null && span.Start < newRoot.FullSpan.End && newRoot.FindToken(span.Start).Span.Contains(span.Start))
+				continue;
+			
+			changes.Add(new(span, oldLines[oldIndex]));
+		}
+		
+		return changes.Count == 0 ? null : newText.WithChanges(changes);
+	}
+	
+	// The blank lines no pair holds, old with new in order, when both texts have the same number
+	// left: none otherwise, since a blank line that was added or removed has no partner to take.
+	static IEnumerable<(int OldIdx, int NewIdx)> MovedBlankLines(string[] oldLines, string[] newLines, List<(int OldIdx, int NewIdx)> pairs)
+	{
+		var pairedOld = new HashSet<int>(pairs.Select(pair => pair.OldIdx));
+		var pairedNew = new HashSet<int>(pairs.Select(pair => pair.NewIdx));
+		int[] oldLeft = [..Enumerable.Range(0, oldLines.Length).Where(index => !pairedOld.Contains(index) && string.IsNullOrWhiteSpace(oldLines[index]))];
+		int[] newLeft = [..Enumerable.Range(0, newLines.Length).Where(index => !pairedNew.Contains(index) && string.IsNullOrWhiteSpace(newLines[index]))];
+		
+		return oldLeft.Length == newLeft.Length ? oldLeft.Zip(newLeft) : [];
+	}
+	
+	static string[] LinesOf(SourceText text)
+	{
+		var lines = new string[text.Lines.Count];
+		
+		for(var i = 0; i < lines.Length; i++)
+			lines[i] = text.ToString(text.Lines[i].Span);
+		
+		return lines;
+	}
+	
+	static string[] BlankAsEmpty(string[] lines)
+	{
+		var keys = new string[lines.Length];
+		
+		for(var i = 0; i < lines.Length; i++)
+			keys[i] = string.IsNullOrWhiteSpace(lines[i]) ? "" : lines[i];
+		
+		return keys;
+	}
+	
+	private static async Task AppendChangedAsync(System.Text.StringBuilder sb, TextDocument oldDoc, TextDocument newDoc, string? rootPath, CancellationToken cancellationToken)
 	{
 		var oldText = (await oldDoc.GetTextAsync(cancellationToken)).ToString();
 		var newText = (await newDoc.GetTextAsync(cancellationToken)).ToString();
@@ -76,7 +202,7 @@ internal static class SolutionDiff
 		if(oldText == newText)
 			return;
 		
-		var path = oldDoc.FilePath ?? oldDoc.Name;
+		var path = oldDoc.FilePath is { } filePath ? Shown(filePath, rootPath) : oldDoc.Name;
 		sb.AppendLine($"--- {path}");
 		sb.AppendLine($"+++ {path}");
 		sb.Append(BuildHunks(oldText, newText));

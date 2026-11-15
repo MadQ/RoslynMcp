@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using RoslynMcp;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Rename;
@@ -136,8 +137,8 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		var symbolKey  = SymbolKey(symbol);
 		var fileRename = ComputeFileRename(symbol, newName);
 		
-		var newSolution = await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions { RenameFile = false }, newName, cancellationToken);
-		var diff        = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
+		var newSolution = await SolutionDiff.KeepBlankLinesAsync(solution,
+			await Renamer.RenameSymbolAsync(solution, symbol, new SymbolRenameOptions { RenameFile = false }, newName, cancellationToken), cancellationToken);
 		
 		IReadOnlyDictionary<string, PreviewFileState> fileStates
 		;
@@ -170,16 +171,17 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 			
 			return scope.Error(wsInfoError);
 		
+		var diff             = await SolutionDiff.BuildAsync(solution, newSolution, workspaceRoot, cancellationToken);
 		var workspaceBinding = WorkspaceBinding.Create(workspaceRoot, isMSBuild, csprojPath);
 		var token        = approvals.Register(solution, newSolution, diff, symbolKey, ApprovalWorkflow.Rename, fileRename, fileStates, workspaceBinding);
 		var preConfirmed = approvals.IsSessionApproved(symbolKey);
 		
-		return scope.Outcome("preview ready", new PreviewRenameResult(token, diff,
+		return scope.Outcome("preview ready", new PreviewRenameResult(token, null,
 			preConfirmed
 				? $"Pre-confirmed. Call roslyn_apply_rename with token '{token}' and approval 'y' or 'session'."
-				: $"Review the diff, then call roslyn_apply_rename with token '{token}' and approval 'y' or 'session'.",
+				: $"Review the diff below, then call roslyn_apply_rename with token '{token}' and approval 'y' or 'session'.",
 			preConfirmed
-		));
+		), diff);
 	}
 	
 	/// <summary>
@@ -242,9 +244,11 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 	}
 }
 
+// Diff is never set: the diff follows this record as raw text, where it is not escaped (#491).
+// The property stays so that an answer without a preview reads as it did.
 internal sealed record PreviewRenameResult(
 	string? Token,
-	string? Diff,
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Diff,
 	string  Message,
 	bool    PreConfirmed
-);
+) : ToolResult;

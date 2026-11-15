@@ -165,14 +165,12 @@ internal sealed class AddParameterEditor : SignatureEditor
 			return SignatureChangeResult.Failed(solution, "Could not resolve document in solution.");
 		
 		var newSolution = solution.WithDocumentSyntaxRoot(docId, newRoot);
-		var diff        = await SolutionDiff.BuildAsync(solution, newSolution, cancellationToken);
 		
 		return new SignatureChangeResult {
 			
 			Success            = true,
 			BaseSolution       = solution,
 			NewSolution        = newSolution,
-			Diff               = diff,
 			ParametersAdded    = [.. request.AddParameters.Select(p => $"{p.Type} {p.Name}")],
 			DeprecationMessage = deprecationMessage,
 			FilesAffected      = 1

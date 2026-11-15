@@ -1017,7 +1017,9 @@ internal sealed record InsertLinesResult : ToolResult
 // ── Refactoring tools ────────────────────────────────────────────────────────
 
 internal sealed record ChangeSignatureResult(
-	[property: JsonPropertyName("diff")]                string   Diff,
+	// Never set: the diff follows the record as raw text, where it is not escaped (#491).
+	[property: JsonPropertyName("diff")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string?  Diff,
 	[property: JsonPropertyName("token")]               string   Token,
 	[property: JsonPropertyName("message")]             string   Message,
 	[property: JsonPropertyName("parameters_added")]    string[] ParametersAdded,

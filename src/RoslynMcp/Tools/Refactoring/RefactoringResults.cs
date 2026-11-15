@@ -118,7 +118,14 @@ internal sealed record PreviewRefactoringResult : ToolResult, IToolError
 	}
 	
 	public string?                  Token   { get; }
+	
+	/// <summary>
+	///     The diff of a preview that got no token. A preview that did sends it as raw text behind
+	///     this record, where it is not escaped (#491).
+	/// </summary>
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public string?                  Diff    { get; }
+	
 	public RefactoringActionChoice? Action  { get; }
 	public string                   Message { get; }
 	

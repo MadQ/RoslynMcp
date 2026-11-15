@@ -4,7 +4,8 @@ namespace RoslynMcp.Tools.SignatureChange;
 
 /// <summary>
 ///     The output of a signature change preparation. Contains the new solution,
-///     diff, diagnostics, and summary — regardless of which editor produced it.
+///     diagnostics, and summary — regardless of which editor produced it. The diff is the
+///     tool's to build, from the solution it goes on to register (#491).
 /// </summary>
 internal sealed record SignatureChangeResult
 {
@@ -12,7 +13,6 @@ internal sealed record SignatureChangeResult
 	public required Solution BaseSolution		{ get; init; }
 	public required Solution NewSolution		{ get; init; }
 	public string?           Error				{ get; init; }
-	public string?           Diff				{ get; init; }
 	public string[]          Warnings			{ get; init; } = [];
 	public string[]          ParametersAdded	{ get; init; } = [];
 	public string[]          ParametersRemoved	{ get; init; } = [];

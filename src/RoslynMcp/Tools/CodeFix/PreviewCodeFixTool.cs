@@ -205,7 +205,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		
 		try {
 			
-			newSolution = await CodeActionOperations.GetChangedSolutionAsync(selected.Action, cancellationToken);
+			newSolution = await SolutionDiff.KeepBlankLinesAsync(document.Project.Solution, await CodeActionOperations.GetChangedSolutionAsync(selected.Action, cancellationToken), cancellationToken);
 		}
 		catch(UnsupportedCodeActionOperationException ex) {
 			
@@ -240,7 +240,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 				"unsupported code-fix change"));
 		}
 		
-		var diff = await SolutionDiff.BuildAsync(document.Project.Solution, newSolution, cancellationToken);
+		var diff = await SolutionDiff.BuildAsync(document.Project.Solution, newSolution, rootPath, cancellationToken);
 		
 		if(diff == "(no changes)")
 			return scope.Failed("no changes", new PreviewCodeFixResult(
@@ -292,14 +292,14 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		return scope.Outcome("preview ready", new PreviewCodeFixResult(
 			token,
 			diagnostic.Id,
-			diff,
+			null,
 			[selectedAction],
-			$"Review the diff, then call roslyn_apply_code_fix with token '{token}' and approval 'y' or 'n'.",
+			$"Review the diff below, then call roslyn_apply_code_fix with token '{token}' and approval 'y' or 'n'.",
 			null)
 		{
 			CreatedFiles = changes.CreatedFiles.IsEmpty ? null : [..changes.CreatedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
 			DeletedFiles = changes.DeletedFiles.IsEmpty ? null : [..changes.DeletedFiles.Select(path => TryMakeRelative(path, rootPath) ?? path)],
-		});
+		}, diff);
 	}
 	
 	// A fixer that threw for a companion of the diagnostic asked for, named as that: the answer is
@@ -461,7 +461,12 @@ internal sealed record PreviewCodeFixResult : ToolResult, IToolError
 	
 	public string?               Token        { get; }
 	public string?               DiagnosticId { get; }
+	
+	// Set only without a token: the diff of a preview that got one follows this record as raw
+	// text, where it is not escaped (#491).
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public string?               Diff         { get; }
+	
 	public CodeFixActionChoice[] Actions      { get; }
 	public string                Message      { get; }
 	
