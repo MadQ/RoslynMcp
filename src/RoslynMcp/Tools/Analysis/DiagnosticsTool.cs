@@ -23,12 +23,17 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 	[Description(
 		"Check your code for compiler errors and warnings — fast, in-process, no build needed. " +
 		"Use this after editing code to verify correctness before committing or continuing work. " +
-		"Returns a structured summary (error count, warning count) plus paginated individual items " +
-		"with code, file, line, and message. A solution — a .sln/.slnx projectPath, or projectPath omitted with a solution as default workspace — checks every project in it, and each item then names its project " +
+		"Returns a structured summary (error count, warning count) plus the findings, paged, grouped as roslyn_search_files groups its hits: " +
+		"files[] by file, in[] by the declaration the findings are in — its name ('method Enqueue'), its lines ('108-158': pass them to roslyn_read_file to read the whole member) " +
+		"and where its node starts ('112:2': the line and column roslyn_replace_in_code takes) — and findings[], one entry per code and message with places[]: " +
+		"the line, the column and the text of the line for each place it was found, so a finding can often be fixed without reading the file. " +
+		"Findings with no place in a file (a missing reference, an analyzer that did not load) are under general. " +
+		"The file with the most severe finding comes first; take counts places. " +
+		"A solution — a .sln/.slnx projectPath, or projectPath omitted with a solution as default workspace — checks every project in it, and each file then names its project " +
 		"(with filePath: the project or projects that compile that file). " +
 		"Pass take: 0 for a lightweight error-count-only check " +
-		"with no items returned. When take: 0, the response includes full counts but items is null — " +
-		"not an empty array. An empty array means items were requested but none matched; null means items were not requested. " +
+		"with no findings returned. When take: 0, the response includes full counts but files is absent — " +
+		"not an empty array. An empty array means findings were requested but none matched; absent means they were not requested. " +
 		"Covers C# type/symbol errors by default; set includeAnalyzers: true to also run the project's " +
 		"analyzer references and Roslyn's IDE analyzers (IDE0xxx: unnecessary usings, unused values, code style) and include " +
 		"their diagnostics — slower; analyzer assemblies are shadow-copied before loading, so the originals are never locked. " +
@@ -42,7 +47,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		[Description("Optional relative file path to scope results, e.g. 'Core/Foo.cs'. Omit to check all files in the project. A path that names no file in the compilation is an error, never an empty (clean) result.")] string? filePath = null,
 		[Description("Filter by severity: 'errors', 'warnings', 'all' (errors and warnings — the default), 'info' (info and above), or 'hidden' (everything, the IDE analyzers' hidden findings included).")] string? severity = null,
 		[Description("Number of items to skip. Default: 0.")] int skip = 0,
-		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving individual items. When take: 0, items in the response is null (not an empty array).")] int take = 50,
+		[Description("Maximum items to return (default 50, max 200). Pass 0 to return only the summary counts — a fast way to check if there are any errors without retrieving the findings. When take: 0, files is absent from the response (not an empty array).")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null,
 		[Description("When true, also runs the project's analyzer references (NuGet + project analyzers) and Roslyn's IDE analyzers via CompilationWithAnalyzers and includes their diagnostics. Slower than compiler-only; assemblies are shadow-copied so the originals are never locked. IDE findings are mostly info or hidden: see severity. Default: false.")] bool includeAnalyzers = false)
 	{
@@ -58,7 +63,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		// brought into 1..200 here, and not again below.
 		var countOnly = take <= 0;
 		
-		if(!countOnly && scope.TryServeCachedPage<DiagnosticItem>(page_token, ref skip, ref take, 50, 200, out var cached))
+		if(!countOnly && scope.TryServeCachedPage<DiagnosticPlace>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			// With the counts of the run the page comes from, as a computed page logs them.
 			return scope.Outcome(cached is DiagnosticsResult page ? $"{page.Summary} (cached page)" : "cached page", cached);
@@ -308,7 +313,8 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				0,
 				total > 0,
 				PageToken: null,
-				Items: null,
+				Files: null,
+				General: null,
 				possibleLoadIssue,
 				loadWarnings) {
 					Hint = hint
@@ -322,7 +328,7 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		// thousands of small records; the cache holds fifty sets at most and lets one go a
 		// minute after its last page was asked for. The shape below keeps strings and counts,
 		// never a compilation.
-		object Shape(PaginatedResult<DiagnosticItem> page)
+		object Shape(PaginatedResult<DiagnosticPlace> page)
 			=> new DiagnosticsResult(
 				summary,
 				"roslyn",
@@ -332,20 +338,28 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 				page.Items.Length,
 				page.HasMore,
 				page.PageToken,
-				page.Items,
+				DiagnosticPlace.Group(page.Items),
+				DiagnosticPlace.General(page.Items),
 				possibleLoadIssue,
 				loadWarnings) {
 					Hint = hint
 				}
 		;
 		
-		DiagnosticItem[] items = [..filtered.Select(d => ToItem(d, rootPath) with {
-			Project = d.Location.SourceTree is { } tree
-				? projectOf?.GetValueOrDefault(tree)
-				: unlocated.GetValueOrDefault(d)
-		})];
+		// By file, with the line's text and the declaration each finding is in (#487): what
+		// the read that followed a finding used to fetch.
+		var items = DiagnosticPlace.Sorted(filtered.Select(d => DiagnosticPlace.Of(
+			d,
+			rootPath,
+			d.Location.SourceTree is { } tree ? projectOf?.GetValueOrDefault(tree) : unlocated.GetValueOrDefault(d),
+			TryMakeRelative(d.Location.GetLineSpan().Path, rootPath),
+			cancellationToken)));
 		
-		return scope.Outcome(summary, Shape(PaginateAndStore(items, ref skip, take, Shape)));
+		var served = PaginateAndStore(items, ref skip, take, Shape);
+		
+		scope.Record(DiagnosticPlace.GroupingNote(served.Items));
+		
+		return scope.Outcome(summary, Shape(served));
 	}
 	
 	/// <summary>
@@ -439,20 +453,5 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 					projects.TryAdd(tree, Path.GetFileNameWithoutExtension(file));
 		
 		return projects;
-	}
-	
-	// Both tools now return project-relative paths via TryMakeRelative on the base class.
-	private static DiagnosticItem ToItem(Diagnostic d, string rootPath)
-	{
-		var span = d.Location.GetLineSpan();
-		
-		return new DiagnosticItem(
-			Code:     d.Id,
-			Severity: d.Severity.ToString().ToLowerInvariant(),
-			File:     TryMakeRelative(span.Path, rootPath),
-			Line:     span.StartLinePosition.Line + 1,
-			Column:   span.StartLinePosition.Character + 1,
-			Message:  d.GetMessage()
-		);
 	}
 }

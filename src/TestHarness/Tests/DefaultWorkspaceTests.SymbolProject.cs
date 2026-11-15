@@ -230,7 +230,7 @@ static partial class DefaultWorkspaceTests
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { severity = "warnings", take = 200 });
 				
-				var inLib = data?["items"]?.AsArray().FirstOrDefault(item =>
+				var inLib = DiagnosticItems.Of(data)?.AsArray().FirstOrDefault(item =>
 					item?["code"]?.GetValue<string>() == "CS0168" && (item["file"]?.GetValue<string>() ?? "").Contains("Warn.cs"));
 				
 				return Verdict(ok && inLib?["project"]?.GetValue<string>() == "Lib",
