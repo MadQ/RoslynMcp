@@ -189,4 +189,3 @@ If `syntaxKind` matches no nodes in the selected range, the tool returns:
 ## See also
 
 - [roslyn_get_trivia_quickref.md](roslyn_get_trivia_quickref.md)
-- [docs/development/CODE_STYLE_ENFORCEMENT.md](../development/CODE_STYLE_ENFORCEMENT.md)

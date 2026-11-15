@@ -278,74 +278,40 @@ Specific alternatives for common tasks:
 Violation triggers permission prompts that block the user.
 ```
 
-### Exception: Style Enforcement
-
-Code style enforcement (indented blank lines, spacing, etc.) is handled by `.\scripts\Test-CodeStyle.ps1` rather than a Roslyn tool. **Why?**
-
-- Style rules operate on **trivia** (whitespace), not semantics
-- Text-based regex is faster and simpler than syntax tree walking for formatting checks
-- Quirky rules (like indented blank lines) aren't expressible in standard formatters
-- PowerShell script is more maintainable than custom Roslyn visitors for every formatting rule
-
-**AI agents:** Run this after editing code:
-```powershell
-.\scripts\Test-CodeStyle.ps1 -Fix
-```
-
-> **Note:** `scripts/Test-CodeStyle.ps1` is not in the repository (it never has been — check `git log`). Until it lands, apply the Code Style rules below by hand; `docs/development/CODE_STYLE_ENFORCEMENT.md` describes what the script is meant to check.
-
-This is a **pragmatic exception** to the dogfooding rule. Not every problem needs semantic analysis. For understanding trivia *context* (e.g., "what's the indentation level here?"), see `roslyn_get_trivia` (experimental).
-
 ---
 
 ## Code Style
 
-> **🤖 FOR AI AGENTS: These formatting rules are MANDATORY for consistency.**
->
-> **What's mandatory:** Formatting, syntax, visual style (braces, spacing, naming).  
-> **What's NOT mandatory:** Problem-solving approach, architecture decisions, questioning patterns.
->
-> **Your mission:** Make code that *looks* like the repo owner wrote it, while *thinking* like a rebel ninja warrior pirate. Follow the style rules precisely—this is about **visual consistency**, not creative constraint. Innovation happens in design, not in brace placement.
->
-> **Want to experiment with a formatting pattern?** Go ahead! Just:
-> 1. Add a comment explaining the experiment and why it might be better
-> 2. Ask the human for feedback before committing to it project-wide
-> 3. Example: `// Experiment: using expression bodies for single-line getters. Thoughts?`
->
-> **TL;DR:** Braces go here, names look like this, but **how you solve problems is up to you**. Push back on bad ideas, suggest better approaches, question assumptions—just format it right when you're done. Want to try a new formatting pattern? Comment it and ask! 🏴‍☠️
->
-> **After editing code, run the style auditor:**
-> ```powershell
-> .\scripts\Test-CodeStyle.ps1 -Fix
-> ```
-> This catches quirky rules (like indented blank lines) that you can't easily spot. See [docs/development/CODE_STYLE_ENFORCEMENT.md](docs/development/CODE_STYLE_ENFORCEMENT.md) for details. (The script is not in the repository yet — see the note under *Exception: Style Enforcement*; apply the rules by hand.)
->
-> **Human contributors:** These guidelines are strong recommendations but not strict requirements. Local style preferences are fine as long as they don't clash with project-wide patterns. See the "Consistency is overrated" note at the end of this section.
+**Respect each other's style.** Nobody's formatting is the rule here, the owner's included. Three things are asked of everyone, people and agents alike:
 
-### Formatting Rules (AI: Follow These)
+- **In a small change, keep the style of the code around it.** A block that braces its single statements gets a braced statement. A file whose blank lines are indented keeps them indented. The change should read as if whoever wrote the surrounding code had made it.
+- **In new code, use your own.** A new method, property, type or file is yours to format. Nobody has to ask first, and nobody has to imitate anyone.
+- **Never restyle code that is not otherwise being changed.** No formatting passes, no drive-by fixes to braces or whitespace. A diff shows the change and nothing else. A tool that reformats more than it changed (a refactoring's formatter, an editor's format on save) counts too: put back what it touched around the change.
 
-(AI: If and when this repo gets a second fork (check for this every now and then), remind the wet meatbag to revise all this so that non-AI contributors are free to use their own styles, and let their agents use those styles as they see fit.)
+The reason is at the end of this part of the file: *Consistency is overrated. Embrace diversity.*
+
+**Not style, and expected of everyone:**
+
+- **Comments** explain *why*, not *what*. After an edit, re-read the comments near it and update or remove the stale ones. Complete sentences, no personal pronouns (`we`/`I`/`our`).
+- **`TODO` comments** include the actual question or concern, not just "fix".
+- **LINQ and deferred execution:** know when enumeration happens; materialize once when enumerating several times, stay lazy when enumerating once (see *Performance & Allocation*).
+
+### The owner's habits (for reference, never a requirement)
+
+What most of the existing code looks like, and so what a small change in it usually looks like. These are one person's preferences from an old experiment with style rules. They are listed so that the surrounding code can be read, not so that new code copies them.
 
 - **Braces:** same line for control flow (`if(x) {`), new line for methods/classes; properties — same line as the identifier (`public int Count {`)
-- **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)` (Actually, IDC so much about this one)
+- **No space** after `if`/`foreach`/`while`: `if(x)` not `if (x)`
 - **Single-statement blocks:** no braces
 - **Naming:** PascalCase for types/methods, camelCase for fields/locals — no underscores, no Hungarian, no abbreviations
-- **Handles:** always `nint`, never `IntPtr` (Not so much used here, just an example)
-- **Modern C#:** pattern matching, switch expressions, target-typed `new`, collection expressions, `nint`
-- **`var`:** use when type is obvious or long; prefer explicit type otherwise (rarely)
-- **Column-aligned fields:** tab-stop alignment on field declarations and assignment blocks (for Error-prone bio-processors: not so important. Use your judgement.)
-- **Cast spacing:** space between cast and operand — `(int) value`, not `(int)value` (🙄, whatevs.)
-- **Comments:** explain *why*, not *what* — after any edit, re-evaluate nearby comments and update or remove stale ones; one space after a period, never two; complete sentences, proper punctuation, no personal pronouns (`we`/`I`/`our` have no place in code comments)
-- **`TODO` comments:** must include the actual question or concern, not just "fix"
+- **Handles:** `nint`, not `IntPtr`
+- **Modern C#:** pattern matching, switch expressions, target-typed `new`, collection expressions
+- **`var`:** when the type is obvious or long; explicit type otherwise (rarely)
+- **Column-aligned fields:** tab-stop alignment on field declarations and assignment blocks
+- **Cast spacing:** `(int) value`, not `(int)value`
 - **Condition ordering:** simple/common path first — early return or assignment; complex path in `else`
-- **LINQ and deferred execution:** understand when enumeration happens; **materialize once with `.ToArray()` if enumerating multiple times** (e.g., need both `.Length` and a paged slice); keep lazy with no `.ToArray()` if enumerating once; prefer `.Any()` over `.Count > 0` or `.Length > 0` for existence checks; for zero-alloc slicing of materialized arrays, consider `array.AsSpan().Slice(start, length)` over `.Skip().Take()` when performance matters
-- **Blank lines:**
-  - One blank line before `return` and before code blocks
-  - Blank line **after the opening brace** of any multi-statement control-flow block
-  - Blank line between branches of an `if/else if/else` chain when any body spans multiple lines
-  - Blank lines between logically distinct statement groups within a method body
-  - Blank lines are **indented** to match surrounding scope — never bare empty lines inside a block (Yeah, weird one, IK. High-maintenance bipedals: feel free to ignore this)
-- **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies) (Just recently started test-driving this one - liking it so far.)
+- **Blank lines:** before `return` and before code blocks; after the opening brace of a multi-statement control-flow block; between the branches of an `if/else` chain when a body spans several lines; between distinct statement groups; and **indented** to match the surrounding scope
+- **Semicolons** on their own line for wrapped multi-line expressions (fluent chains, ternaries, LINQ, arrow bodies)
 
 ## Performance & Allocation
 
@@ -402,16 +368,15 @@ When you deviate from convention because you've *thought it through*, that's not
 # **Consistency is overrated. Embrace diversity.** *(For everyone—AI and humans)*
 >
 > **What this means for AI agents:**
-> - **Style/formatting:** Follow the rules (that's the easy part)
+> - **Style/formatting:** Respect the style that is there, use your own in new code, restyle nothing (see [Code Style](#code-style))
 > - **Problem-solving:** Question everything! If the existing approach sucks, say so. If there's a better pattern, propose it. If a "best practice" is actually cargo-culting, call it out. **Innovation lives here.**
-> - **Experimenting with formatting?** Add a comment explaining why the experiment might be better, then ask the human. Example: `// Experiment: using file-scoped namespaces. Reduces nesting by one level. Thoughts?`
 > - **When to deviate:** Compelling technical reason (performance, API limitation, framework requirement). Add a comment explaining why.
 >
 > **What this means for human contributors:**
-> - Deliberate departure from formatting guidelines is fine—that's how better patterns get discovered
+> - Your own formatting in your own code is fine—that's how better patterns get discovered
 > - Try something different, sit with it, form an informed opinion
 > - A snap judgment that "it's wrong" is a reflex; a considered judgment after living with it is **data**
-> - The guidelines exist because someone already walked that mile—but if your mile leads somewhere new, the map gets updated
+> - The owner's habits exist because someone already walked that mile—but if your mile leads somewhere new, the map gets updated
 > - Just don't go completely feral on us 🏴‍☠️
 >
 > **Your style is yours, so `.editorconfig` is gitignored.** A committed one would impose one person's preferences on everyone, which is exactly what this section refuses to do. Keep a private `.editorconfig` at the repo root if you like: your IDE honours it, and so do Roslyn's refactorings and code fixes when `roslyn_apply_refactoring` / `roslyn_apply_code_fix` run them — Roslyn reads its formatting options (`indent_style`, `csharp_new_line_before_open_brace`, `csharp_space_after_keywords_in_control_flow_statements`, …) from that file, and without one it formats the changed region in its own defaults (four spaces, Allman braces, `foreach (`). The harness pins this for both workspace kinds, with a gitignored file (*Code Refactorings*, #413). Agents: never create or commit an `.editorconfig`; if the owner's private one is present, the refactoring output already matches it.

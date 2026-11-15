@@ -25,7 +25,7 @@ this summary manually. (The issues sweep is a separate command: `/issue-sweep`.)
 | C | CHANGELOG.md + ROADMAP.md | git log, GitHub issues/milestones |
 | D | CONTRIBUTING.md + SECURITY.md + CODE_OF_CONDUCT.md | CONTRIBUTING conventions |
 | E | WORKSPACE_MODES.md + TROUBLESHOOTING.md + DISCOVERY_PATTERN.md | WorkspaceManager*, MSBuildBootstrap |
-| F | CODE_STYLE_ENFORCEMENT.md + DOC_REVIEW_CHECKLIST.md + RELEASE_CHECKLIST.md | scripts/Test-CodeStyle.ps1 |
+| F | DOC_REVIEW_CHECKLIST.md + RELEASE_CHECKLIST.md | AGENTS.md § Development Workflow, .github/workflows |
 | G | docs/tools/*.md + docs/reference/tools-assessment.md | Relevant tool .cs files |
 | H | docs/sessions/HANDOFF.md + .github/copilot-instructions.md + docs/AGENT-INSTRUCTIONS.md | Current state of everything |
 | I | docs/plans/*.md + battle-test-results.md + MSBUILD_API_ANALYSIS.md | Historical; flag stale claims |
@@ -38,7 +38,6 @@ MANDATORY TOOL CONSTRAINTS — do NOT violate these:
 - Use roslyn_* MCP tools for ALL C# file operations.
 - Do NOT use cd — the CWD is already correct.
 - Do NOT use roslyn_read_file on non-.cs files — use the host's plain file reader (Read/view) instead.
-- Do NOT run Test-CodeStyle.ps1 — style passes are suspended. Violators get the dunce cap. 🎓
 - Do NOT reformat, reorder, or restyle any code while fixing docs — you are a doc editor, not a formatter.
 - Do NOT commit without being explicitly asked.
 - Build check: roslyn_get_diagnostics (severity: errors) only — never dotnet build.
