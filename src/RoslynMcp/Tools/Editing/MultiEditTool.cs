@@ -404,9 +404,12 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			var length = change.NewText?.Length ?? 0;
 			var start  = Math.Clamp(change.Span.Start + shift, 0, newText.Length);
 			
-			// An insertion that begins with a line break (one behind a last line that had none)
-			// has written the lines after the break, not the line the break now ends.
-			var lead = change.Span.Length > 0 || change.NewText is not { Length: > 1 } written ? 0
+			// An insertion behind a last line that had no line break begins with one: it has
+			// written the lines after that break, not the line the break now ends. Only there: a
+			// text that opens with a blank line anywhere else has written that blank line.
+			var behindLastLine = change.Span.Start == file.Content.Length && file.Content.Length > 0 && file.Content[^1] != '\n';
+			
+			var lead = !behindLastLine || change.Span.Length > 0 || change.NewText is not { Length: > 1 } written ? 0
 				: written.StartsWith("\r\n", StringComparison.Ordinal) && written.Length > 2 ? 2
 				: written[0] == '\n' ? 1
 				: 0

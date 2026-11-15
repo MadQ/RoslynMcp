@@ -312,6 +312,16 @@ static class MultiEditTests
 					&& Read("real_A.cs") == CodeOf("real").Replace("return 1;", "return 10;").Replace("return 3;", "return 30;"), answer, Read("real_A.cs"));
 			}),
 			
+			// A text that opens with a blank line, as a new member after another does: the blank
+			// line is a line the batch wrote, and is reported.
+			new("multi edit: an inserted text that begins with a blank line reports that line too", async () => {
+				
+				var answer = await DryBatch(new { op = "insert_lines", filePath = "dry_A.cs", atLine = 8, text = "\n\t// two" });
+				var range  = answer?["files"]?[0]?["changed_line_ranges"]?.AsArray() is [var only] ? only : null;
+				
+				return Verdict(range?["start"]?.GetValue<int>() == 8 && range?["end"]?.GetValue<int>() == 9, answer, null);
+			}),
+			
 			new("multi edit: an unknown op fails its edit and names the three there are", async () => {
 				
 				var answer = await Batch(new { op = "write_file", filePath = "op_A.cs", text = "x" });
