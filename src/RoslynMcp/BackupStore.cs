@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 
 namespace RoslynMcp;
@@ -561,6 +562,8 @@ internal sealed class BackupStore
 		
 		var directories = 0;
 		var removed     = 0;
+		var orphaned    = 0;
+		var skipped     = 0;
 		var owned       = false;
 		Mutex? mutex    = null;
 		
@@ -601,15 +604,32 @@ internal sealed class BackupStore
 			var started = Stopwatch.GetTimestamp();
 			var cutoff  = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays);
 			
+			// The later of the two, the orphan age being the shorter: a snapshot newer than this
+			// is kept whatever became of its file.
+			var orphanCutoff = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupOrphanMaxAgeDays);
+			
 			try {
 				
 				foreach(var dir in Directory.EnumerateDirectories(backupRoot)) {
 					
 					directories++;
+					
+					// Before the lock and without opening a file: most directories hold nothing
+					// old enough to ask about.
+					if(!MayHoldExpired(dir, orphanCutoff)) {
+						
+						skipped++;
+						continue;
+					}
+					
 					asyncLock.Wait();
 					
 					try {
-						removed += PruneExpiredInDir(dir, cutoff);
+						
+						var (expired, orphans) = PruneExpiredInDir(dir, cutoff, orphanCutoff);
+						
+						removed  += expired;
+						orphaned += orphans;
 					}
 					catch(Exception ex) {
 						FilePruner.RecordPruneError(ex);
@@ -624,7 +644,7 @@ internal sealed class BackupStore
 				FilePruner.RecordPruneError(ex);
 			}
 			
-			logger.LogInfo("Backups", $"pruned in {(long) Stopwatch.GetElapsedTime(started).TotalMilliseconds} ms: {directories} directories read, {removed} expired snapshot(s) removed");
+			logger.LogInfo("Backups", $"pruned in {(long) Stopwatch.GetElapsedTime(started).TotalMilliseconds} ms: {directories} directories, {skipped} skipped unread, {removed} expired snapshot(s) removed, {orphaned} of them orphaned");
 		}
 		catch(Exception ex) {
 			
@@ -641,17 +661,23 @@ internal sealed class BackupStore
 		}
 	}
 	
-	// The number of expired snapshots removed from the directory's meta file.
-	int PruneExpiredInDir(string dir, DateTime cutoff)
+	// The snapshots removed from the directory's meta file, and how many of them had not reached
+	// the retention and went because nothing is left to restore them into.
+	(int Removed, int Orphaned) PruneExpiredInDir(string dir, DateTime cutoff, DateTime orphanCutoff)
 	{
 		var metaFile = Path.Combine(dir, MetaFileName);
 		var entries  = ReadAllMetaEntries(metaFile);
 		
 		if(entries.Count == 0)
 			
-			return 0;
+			return (0, 0);
 		
-		var removed = 0;
+		var removed  = 0;
+		var orphaned = 0;
+		
+		// One directory holds the snapshots of one path, so the question is asked once, and only
+		// when a snapshot is old enough for the answer to matter.
+		bool? orphan = null;
 		
 		foreach(var (token, meta) in entries.ToArray()) {
 			
@@ -662,8 +688,16 @@ internal sealed class BackupStore
 				out var ts))
 				continue;
 			
-			if(ts >= cutoff)
+			if(ts >= orphanCutoff)
 				continue;
+			
+			if(ts >= cutoff) {
+				
+				if(!(orphan ??= IsOrphan(meta.AbsolutePath)))
+					continue;
+				
+				orphaned++;
+			}
 			
 			entries.Remove(token);
 			removed++;
@@ -677,19 +711,90 @@ internal sealed class BackupStore
 		
 		if(removed == 0)
 			
-			return 0;
+			return (0, 0);
 		
 		if(entries.Count == 0) {
 			
 			try { File.Delete(metaFile); } catch { }
 			try { Directory.Delete(dir); } catch { }
 			
-			return removed;
+			return (removed, orphaned);
 		}
 		
 		WriteMetaAtomic(metaFile, entries);
 		
-		return removed;
+		return (removed, orphaned);
+	}
+	
+	/// <summary>
+	///     Whether a snapshot's file is gone together with the folder it was in (#474): there is
+	///     nothing to restore it into, and it expires after
+	///     <see cref="ServerArgs.BackupOrphanMaxAgeDays"/> days instead of the retention. On one
+	///     machine 7,318 of 7,646 backup directories were snapshots of test fixtures whose folders
+	///     had been deleted minutes after they were made, kept for ninety days.
+	///     <para>
+	///         The folder is part of the rule on purpose. A file deleted from a project that is
+	///         still there is what local history is for, and keeps the retention. And the folder
+	///         counts as gone only where its drive is there: a removable or network drive that is
+	///         not mounted says nothing about the folder.
+	///     </para>
+	/// </summary>
+	static bool IsOrphan(string absolutePath)
+	{
+		try {
+			
+			if(File.Exists(absolutePath))
+				
+				return false;
+			
+			if(Path.GetDirectoryName(absolutePath) is not { Length: > 0 } folder || Directory.Exists(folder))
+				
+				return false;
+			
+			return Path.GetPathRoot(absolutePath) is { Length: > 0 } root && Directory.Exists(root);
+		}
+		catch {
+			
+			// A path that cannot be asked about is not known to be gone.
+			return false;
+		}
+	}
+	
+	// The time in a snapshot's file name: {file}_{unixMs}[_{nonce}][.pre|.post].bak, in every
+	// format the store has written.
+	static readonly Regex SnapshotTime = new(@"_(\d{11,14})(?:_[0-9a-fA-F]+)?(?:\.(?:pre|post))?\.bak$", RegexOptions.CultureInvariant);
+	
+	/// <summary>
+	///     Whether a directory may hold a snapshot from before <paramref name="cutoff"/>, told from
+	///     its file names alone (#474): each snapshot's name carries the time it was made, so a
+	///     directory whose snapshots are all newer needs no meta file opened. The pass opened and
+	///     parsed one in every directory, 7,646 of them in 73 to 81 seconds on a cold disk. True
+	///     for anything that is not understood: a name without a time, an empty directory, a
+	///     listing that fails.
+	/// </summary>
+	static bool MayHoldExpired(string dir, DateTime cutoff)
+	{
+		try {
+			
+			var limit = new DateTimeOffset(cutoff).ToUnixTimeMilliseconds();
+			var any   = false;
+			
+			foreach(var file in Directory.EnumerateFiles(dir, "*.bak")) {
+				
+				any = true;
+				
+				if(SnapshotTime.Match(Path.GetFileName(file)) is not { Success: true } match
+					|| !long.TryParse(match.Groups[1].ValueSpan, out var made)
+					|| made < limit)
+					
+					return true;
+			}
+			
+			return !any;
+		}
+		catch {
+			return true;
+		}
 	}
 	
 	void PruneOldBackups(string dir, string absolutePath)

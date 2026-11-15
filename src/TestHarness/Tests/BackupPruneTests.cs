@@ -175,6 +175,84 @@ static class BackupPruneTests
 					await DefaultWorkspaceTests.StopServerAsync(process, server);
 				}
 			}),
+			
+			// What the pass keeps and what it takes, with one directory for each case (#474):
+			//
+			//   recent   a snapshot of today, its file's folder gone   skipped: its name says it is newer than
+			//                                                          anything the pass could remove, so
+			//                                                          its meta file is not opened
+			//   orphan   30 days old, its file's folder gone           removed: nothing to restore it into
+			//   deleted  30 days old, the file gone, the folder there  kept: a file deleted from a project
+			//                                                          that is still there is what local
+			//                                                          history is for
+			//   live     30 days old, the file there                   kept
+			//   expired  100 days old, the file there                  removed: past the retention of 90
+			//
+			// On the machine this came from, 7,318 of 7,646 backup directories were of the second
+			// kind (snapshots of test fixtures deleted minutes later) and waited ninety days, and
+			// the pass opened a meta file in every one of them, also in those of the first kind.
+			new("backup prune: orphans go after a week, a deleted file in a live folder stays, and a recent directory is not opened", async () => {
+				
+				var orphans = TestFixtures.NewAdhocDir("BackupPruneOrphans");
+				var name    = $"backuporphans-{Guid.NewGuid():N}";
+				var gone    = Path.Combine(TestFixtures.TempRoot, $"gone-{Guid.NewGuid():N}");
+				
+				void Seed(string hash, int ageDays, string absolutePath)
+				{
+					var made   = DateTimeOffset.UtcNow.AddDays(-ageDays);
+					var millis = made.ToUnixTimeMilliseconds();
+					var path   = absolutePath.Replace("\\", "\\\\");
+					
+					orphans.Write($"{hash}/meta.json",
+						$"{{ \"{hash}_{millis}_ab12_pre\": {{ \"absolutePath\": \"{path}\", \"projectPath\": \"{path}\", \"operation\": \"seed\", \"timestamp\": \"{made.UtcDateTime:yyyy-MM-ddTHH:mm:ss.fffZ}\", \"fileSizeBytes\": 3, \"phase\": \"pre\" }} }}\n");
+					orphans.Write($"{hash}/{Path.GetFileName(absolutePath)}_{millis}_ab12.pre.bak", "old");
+				}
+				
+				Seed("recent",  0,   Path.Combine(gone, "Recent.cs"));
+				Seed("orphan",  30,  Path.Combine(gone, "Orphan.cs"));
+				Seed("deleted", 30,  fx.PathOf("Deleted.cs"));
+				Seed("live",    30,  fx.PathOf("Probe.cs"));
+				Seed("expired", 100, fx.PathOf("Probe.cs"));
+				
+				var (process, server) = await DefaultWorkspaceTests.StartServerLoggingToAsync(ctx, fx.Dir, Path.Combine(logs, $"{name}.log"),
+					new Dictionary<string, string> { ["ROSLYNMCP_BACKUP_PATH"] = orphans.Dir, ["ROSLYNMCP_PRUNE_MIN_RUNS"] = "1" });
+				
+				try {
+					
+					if(server is null)
+						return (false, "FAIL  (server did not answer initialize)");
+					
+					var    sw   = Stopwatch.StartNew();
+					string line = "";
+					
+					while(sw.Elapsed < TimeSpan.FromSeconds(90) && line.Length == 0) {
+						
+						await Task.Delay(250);
+						
+						if(ServerLog.TryRead(logs, $"{name}*", 1, out var lines, out _))
+							line = lines.FirstOrDefault(entry => entry.Contains("Backups") && entry.Contains("pruned in")) ?? "";
+					}
+					
+					if(line.Length == 0)
+						return (false, "FAIL  (no backup prune was logged within 90 s)");
+					
+					string[] left     = [..Directory.EnumerateDirectories(orphans.Dir).Select(dir => Path.GetFileName(dir)!).Order()];
+					string[] expected = ["deleted", "live", "recent"];
+					
+					if(!left.SequenceEqual(expected))
+						return (false, $"FAIL  (directories left: [{string.Join(", ", left)}], expected [{string.Join(", ", expected)}])");
+					
+					return line.Contains("5 directories, 1 skipped unread, 2 expired snapshot(s) removed, 1 of them orphaned")
+						? (true, "PASS")
+						: (false, $"FAIL  (the pass did the right thing and logged another: {line})");
+				}
+				finally {
+					
+					await DefaultWorkspaceTests.StopServerAsync(process, server);
+					orphans.Dispose();
+				}
+			}),
+			
 		};
 		
 		return new TestGroup($"Backup Prune ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); store.Dispose(); return Task.CompletedTask; });
