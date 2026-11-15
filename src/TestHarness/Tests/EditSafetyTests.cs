@@ -23,13 +23,18 @@ static class EditSafetyTests
 	{
 		var fx = TestFixtures.NewMsBuildProject("EditSafety");
 		
-		foreach(var name in new[] { "brace", "brace_dry", "allowed", "several", "member", "overload", "unknown", "all", "code_name", "code_missing", "code_stale", "code_syntax" })
+		foreach(var name in new[] { "brace", "brace_dry", "allowed", "several", "member", "overload", "unknown", "all", "code_name", "code_missing", "code_stale", "code_syntax", "code_force", "cross" })
 			fx.Write($"{name}.cs", Source.Replace("class Safe", $"class Safe_{name}"));
 		
 		// A file that does not parse before the edit: the class is never closed.
 		var brokenSource = Source.Replace("class Safe", "class Safe_broken")[..^2];
 		
 		fx.Write("broken.cs", brokenSource);
+		// Members whose signatures are not 'type Name(parameters)'.
+		fx.Write("names.cs", "class Names : System.IDisposable\n{\n\t(int, string) Pair() { return (0, \"\"); }\n\tvoid System.IDisposable.Dispose() { }\n\tint this[int i] { get { return 0; } }\n\tint Total => Pair().Item1;\n}\n");
+		
+		// An unterminated comment, and behind it a statement without its semicolon.
+		fx.Write("uncover.cs", "class Uncover\n{\n\tint a = 1; /* open\n\tint b = 2\n}\n");
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
 		fx.Write("twice_regex.txt", "same\nother\nsame\n");
@@ -208,6 +213,79 @@ static class EditSafetyTests
 				return Verdict(candidates.Count == 1
 					&& candidates[0]?["line"]?.GetValue<int>() == 3
 					&& Read("code_stale.cs") == SourceOf("code_stale"), answer, Read("code_stale.cs"));
+			}),
+			
+			// A signature is copied as it stands: a tuple return type has the text's first
+			// parenthesis, an explicit implementation is named by its interface, an indexer has
+			// no name but 'this'. Each must find its member; cut at the first parenthesis, the
+			// first named nothing and the other two the wrong thing.
+			new("edit safety: inMember finds a tuple-returning method, an explicit implementation and an indexer", async () => {
+				
+				var tuple    = await Replace(new { filePath = "names.cs", pattern = "return (0", replacement = "return (1", inMember = "(int, string) Pair()", dryRun = true, projectPath = fx.Csproj });
+				var explicit_ = await Replace(new { filePath = "names.cs", pattern = "{ }", replacement = "{ return; }", inMember = "void IDisposable.Dispose()", dryRun = true, projectPath = fx.Csproj });
+				var indexer  = await Replace(new { filePath = "names.cs", pattern = "return 0;", replacement = "return 1;", inMember = "this[int i]", dryRun = true, projectPath = fx.Csproj });
+				var inType   = await Replace(new { filePath = "names.cs", pattern = "{ }", replacement = "{ return; }", inMember = "Names.IDisposable.Dispose", dryRun = true, projectPath = fx.Csproj });
+				
+				// With a modifier in front the tuple follows a word, as a parameter list does; and
+				// a property's expression holds a call, whose bracket is no parameter list.
+				var modified = await Replace(new { filePath = "names.cs", pattern = "return (0", replacement = "return (1", inMember = "/// <summary>A pair; never null.</summary>\n\t// total = a + b\n\tpublic (int, string) Pair()", dryRun = true, projectPath = fx.Csproj });
+				var property = await Replace(new { filePath = "names.cs", pattern = "Pair()", replacement = "Pair( )", inMember = "int Total => Pair().Item1;", dryRun = true, projectPath = fx.Csproj });
+				
+				if(modified?["match_count"]?.GetValue<int>() != 1 || property?["match_count"]?.GetValue<int>() != 1)
+					
+					return Verdict(false, new JsonArray(modified?.DeepClone(), property?.DeepClone()), null);
+				
+				return Verdict(tuple?["match_count"]?.GetValue<int>() == 1
+					&& inType?["match_count"]?.GetValue<int>() == 1
+					&& explicit_?["match_count"]?.GetValue<int>() == 1
+					&& indexer?["match_count"]?.GetValue<int>() == 1, new JsonArray(tuple?.DeepClone(), explicit_?.DeepClone(), indexer?.DeepClone()), null);
+			}),
+			
+			// A snippet that quotes a member's end takes the line break after its brace along,
+			// one character past the member. It is a match in that member, not one "elsewhere".
+			new("edit safety: a match that reaches over the end of the inMember declaration counts", async () => {
+				
+				var answer = await Replace(new { filePath = "cross.cs", pattern = "\t\treturn 0;\n\t}\n", replacement = "\t\treturn 1;\n\t}\n", inMember = "First", projectPath = fx.Csproj });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true
+					&& Read("cross.cs") == SourceOf("cross").Replace("int First()\n\t{\n\t\treturn 0;", "int First()\n\t{\n\t\treturn 1;"), answer, Read("cross.cs"));
+			}),
+			
+			// Closing an unterminated comment shows the parser what was behind it: here a
+			// missing semicolon, which is a new error by its id but not one the edit made. The
+			// file has fewer errors afterwards, so the repair must go through.
+			new("edit safety: a repair that uncovers an error the file already had is not refused", async () => {
+				
+				var answer = await Replace(new { filePath = "uncover.cs", pattern = "/* open", replacement = "/* open */", projectPath = fx.Csproj });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true && Read("uncover.cs").Contains("/* open */"), answer, Read("uncover.cs"));
+			}),
+			
+			// A pattern read as a name has lost its parameter list: 'First(string s)' finds the
+			// only First, which takes none. The answer must say which node was taken, and with
+			// force a signature must not reach every overload of its name.
+			new("edit safety: roslyn_replace_in_code says so when a signature was read as a name, and force does not spread it", async () => {
+				
+				var taken  = await InCode(new { filePath = "code_name.cs", nodeKind = "method", textPattern = "First(string s)", dryRun = true, projectPath = fx.Csproj });
+				var forced = await InCode(new { filePath = "code_force.cs", nodeKind = "method", textPattern = "Second(int a)", replacement = "int Second() => 0;", force = true, projectPath = fx.Csproj });
+				
+				// What follows a parameter list is not the name either: an expression body's call,
+				// a constructor initializer, a constraint. Each of these named another member, or none.
+				var bodied   = await InCode(new { filePath = "code_name.cs", nodeKind = "method", textPattern = "int First() => Second(1)", dryRun = true, projectPath = fx.Csproj });
+				var arrayed  = await InCode(new { filePath = "code_name.cs", nodeKind = "method", textPattern = "int[] First(int[] a) where T : new()", dryRun = true, projectPath = fx.Csproj });
+				var unforced = await InCode(new { filePath = "code_force.cs", nodeKind = "method", textPattern = "Second(int a)", replacement = "int Second() => 0;", projectPath = fx.Csproj });
+				var dryForce = await InCode(new { filePath = "code_force.cs", nodeKind = "method", textPattern = "Second(int a)", replacement = "int Second() => 0;", force = true, dryRun = true, projectPath = fx.Csproj });
+				
+				return Verdict(taken?["change_count"]?.GetValue<int>() == 1
+					&& bodied?["change_count"]?.GetValue<int>() == 1
+					&& (bodied?["_caution"]?.GetValue<string>() ?? "").Contains("read as the name 'First'")
+					&& arrayed?["change_count"]?.GetValue<int>() == 1
+					&& (unforced?["message"]?.GetValue<string>() ?? "").Contains("read as the name 'Second'")
+					&& (dryForce?["message"]?.GetValue<string>() ?? "").Contains("Nothing would be replaced")
+					&& (taken?["_caution"]?.GetValue<string>() ?? "").Contains("read as the name 'First'")
+					&& forced?["applied"]?.GetValue<bool>() == false
+					&& forced?["change_count"]?.GetValue<int>() == 2
+					&& Read("code_force.cs") == SourceOf("code_force"), new JsonArray(taken?.DeepClone(), forced?.DeepClone()), Read("code_force.cs"));
 			}),
 			
 			// Five of the eight failures said "Replacement text contains syntax errors". The parser

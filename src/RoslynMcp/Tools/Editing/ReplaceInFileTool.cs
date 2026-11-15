@@ -230,7 +230,13 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 						: $"The file declares: {string.Join(", ", declared.Take(MaxListed))}{(declared.Length > MaxListed ? $", and {declared.Length - MaxListed} more" : "")}. Write a name as 'Member' or 'Type.Member'."));
 			}
 			
-			matches = [..matches.Where(match => named.Any(declaration => declaration.Span.Start <= match.Index && match.Index + match.Length <= declaration.Span.End))];
+			// A match that reaches over the edge of the declaration is one of it: a snippet that
+			// ends in the line break after the closing brace, or starts on the line above, is how
+			// an agent quotes a member's end or its start. Left out, it was reported as a match
+			// "elsewhere in the file".
+			matches = [..matches.Where(match => named.Any(declaration => match.Length == 0
+				? declaration.Span.Start <= match.Index && match.Index <= declaration.Span.End
+				: match.Index < declaration.Span.End && match.Index + match.Length > declaration.Span.Start))];
 		}
 		
 		int[] changedLines = [..
@@ -295,24 +301,42 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	
 	/// <summary>
 	///     The syntax errors <paramref name="newContent"/> has that the file did not have before the
-	///     edit, each as <c>line N: message (id)</c> with the line of the new text. A file that
-	///     already has errors must stay editable, also by an edit that repairs only one of them, so
-	///     the errors are compared and not counted: by id and message, which hold no position and so
-	///     survive the lines an edit moves.
+	///     edit, each as <c>line N: message (id)</c> with the line of the new text; empty when the
+	///     edit leaves the file with no more errors than it had.
+	///     <para>
+	///         A file that already has errors must stay editable, also by an edit that repairs
+	///         only one of them, and a repair can uncover an error the parser did not get to
+	///         before (closing an unterminated comment shows the missing semicolon below it). So
+	///         an edit is at fault only when the file has more errors afterwards; which ones to
+	///         quote is then found by id and message, which hold no position and so survive the
+	///         lines an edit moves. An edit that trades one error for another in a file that was
+	///         already broken passes: the file is no worse, and nothing here can tell that
+	///         from a repair.
+	///     </para>
 	/// </summary>
 	internal static string[] AddedSyntaxErrors(SyntaxTree before, string newContent)
 	{
 		static string Key(Diagnostic error) => $"{error.Id}: {error.GetMessage()}";
 		
-		var known = new Dictionary<string, int>(StringComparer.Ordinal);
+		var known  = new Dictionary<string, int>(StringComparer.Ordinal);
+		var had    = 0;
 		
-		foreach(var error in before.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error))
+		foreach(var error in before.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error)) {
+			
 			known[Key(error)] = known.GetValueOrDefault(Key(error)) + 1;
+			had++;
+		}
 		
 		var after = CSharpSyntaxTree.ParseText(newContent, (CSharpParseOptions) before.Options, before.FilePath);
+		var has   = after.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+		
+		if(has.Length <= had)
+			
+			return [];
+		
 		var added = new List<string>();
 		
-		foreach(var error in after.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error)) {
+		foreach(var error in has) {
 			
 			if(known.GetValueOrDefault(Key(error)) > 0) {
 				

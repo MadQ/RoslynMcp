@@ -86,19 +86,32 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			// The types around it, innermost first, against the segments before the last.
 			var types = member.Ancestors().OfType<BaseTypeDeclarationSyntax>().Select(type => type.Identifier.Text).ToArray();
 			
-			if(types.Length < segments.Length - 1)
-				continue;
+			// 'IDisposable.Dispose' is the explicit implementation, whatever type it is in, and
+			// 'Names.IDisposable.Dispose' the one in Names: the interface is then a segment of
+			// its own before the types.
+			var qualifiers = segments.AsSpan(0, segments.Length - 1);
 			
-			var inTypes = true;
-			
-			for(var i = 0; i < segments.Length - 1 && inTypes; i++)
-				inTypes = types[i] == segments[segments.Length - 2 - i];
-			
-			if(inTypes)
+			if(In(types, qualifiers) || qualifiers.Length > 0 && ExplicitInterface(member) == qualifiers[^1] && In(types, qualifiers[..^1]))
 				found.Add((described.Declaration, described.Span));
 		}
 		
 		return [..found];
+	}
+	
+	// Whether the types around a member, innermost first, are the ones a name's qualifiers say,
+	// outermost first. Fewer qualifiers than types is a match: 'Inner.Foo' names Outer.Inner.Foo.
+	static bool In(string[] types, ReadOnlySpan<string> qualifiers)
+	{
+		if(types.Length < qualifiers.Length)
+			
+			return false;
+		
+		for(var i = 0; i < qualifiers.Length; i++)
+			if(types[i] != qualifiers[qualifiers.Length - 1 - i])
+				
+				return false;
+		
+		return true;
 	}
 	
 	/// <summary>The names of every declaration in the file, for an answer that says what is there.</summary>
@@ -111,22 +124,94 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 	
 	/// <summary>
 	///     A name as an agent writes it, in its segments: <c>void Type.Foo&lt;T&gt;(int a)</c> is
-	///     <c>Type</c>, <c>Foo</c>. What stands before the name (a return type, modifiers) and from
-	///     the first parenthesis on is dropped, and so are type arguments.
+	///     <c>Type</c>, <c>Foo</c>. Attributes before it, what stands before the name (a return
+	///     type, modifiers), its parameter list (or an indexer's) and type arguments are dropped.
+	///     <para>
+	///         The parameter list is the first bracket that follows a name, and everything from
+	///         it on is dropped with it: an expression body, a constructor initializer, constraints.
+	///         The first parenthesis of <c>(int, string) Pair()</c> and of
+	///         <c>Task&lt;(int, int)&gt; Foo()</c> follows no name and belongs to the return type.
+	///     </para>
 	/// </summary>
 	public static string[] NameSegments(string name)
 	{
-		var paren = name.IndexOf('(');
+		var text = name.AsSpan().Trim();
 		
-		if(paren >= 0)
-			name = name[..paren];
+		// Comment lines copied along with the signature, as a search reports a member from its
+		// attached comment on: what a comment says is no part of the name, and its punctuation
+		// would end the text below.
+		while(text.StartsWith("//")) {
+			
+			var lineEnd = text.IndexOfAny('\r', '\n');
+			
+			text = lineEnd < 0 ? default : text[lineEnd..].TrimStart();
+		}
+		
+		// Attribute lists in front: '[Obsolete("x")] void Foo()'.
+		while(text.Length > 0 && text[0] == '[' && MatchingClose(text, 0) is var close and >= 0)
+			text = text[(close + 1)..].TrimStart();
+		
+		// The parameter list (or an indexer's): the first bracket that follows a name. From it on
+		// nothing is the name: not the list, not what comes after it ('=> Add(a, a)', ': base(a)',
+		// 'where T : new()', a body). A bracket that follows no name is part of a type and is
+		// stepped over whole: the tuple of '(int, string) Pair()', and the rank of 'int[] All()',
+		// which follows a name but holds nothing.
+		var angles = 0;
+		
+		for(var i = 0; i < text.Length; i++) {
+			
+			var c = text[i];
+			
+			if(c == '<')
+				angles++;
+			else if(c == '>')
+				angles = Math.Max(0, angles - 1);
+			
+			if(angles > 0)
+				continue;
+			
+			// A member without a parameter list ends at its initializer, its expression or its
+			// accessors: the first bracket of 'int Total => Sum(items)' is a call, not a list.
+			if(c is '=' or '{' or ';') {
+				
+				text = text[..i];
+				break;
+			}
+			
+			if(c is not ('(' or '['))
+				continue;
+			
+			var before = text[..i].TrimEnd();
+			var close  = MatchingClose(text, i);
+			var rank   = c == '[' && close >= 0 && text[(i + 1)..close].Trim().Trim(',').Trim().IsEmpty;
+			
+			// A tuple type behind a modifier: 'public (int, string) Pair()'. What tells it from a
+			// parameter list is that a name follows it, where a list is followed by nothing, a
+			// body, an arrow, a colon or constraints.
+			var after = close >= 0 ? text[(close + 1)..].TrimStart() : default;
+			var tuple = c == '(' && after.Length > 0
+				&& (char.IsLetter(after[0]) || after[0] is '_' or '@' or '[' or '?')
+				&& !(after.StartsWith("where") && (after.Length == 5 || char.IsWhiteSpace(after[5])));
+			
+			if(!rank && !tuple && before.Length > 0 && (char.IsLetterOrDigit(before[^1]) || before[^1] is '_' or '>')) {
+				
+				text = before;
+				break;
+			}
+			
+			// Not closed and after no name: nothing behind it can be told apart.
+			if(close < 0)
+				break;
+			
+			i = close;
+		}
 		
 		// Type arguments out, at any depth, before the split: 'Map<string, int>.Add' has a dot-free
 		// argument list, 'Outer<A.B>.Add' has not.
-		var plain = new System.Text.StringBuilder(name.Length);
+		var plain = new System.Text.StringBuilder(text.Length);
 		var depth = 0;
 		
-		foreach(var c in name) {
+		foreach(var c in text) {
 			
 			if(c == '<')
 				depth++;
@@ -143,6 +228,41 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			? []
 			: words[^1].Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
 		;
+	}
+	
+	// The index of the bracket that closes the one at 'open', or -1. Round and square brackets
+	// nest; what is in a string literal is not looked at, a name holds none.
+	static int MatchingClose(ReadOnlySpan<char> text, int open)
+	{
+		var depth = 0;
+		
+		for(var i = open; i < text.Length; i++) {
+			
+			if(text[i] is '(' or '[')
+				depth++;
+			else if(text[i] is ')' or ']' && --depth == 0)
+				
+				return i;
+		}
+		
+		return -1;
+	}
+	
+	/// <summary>
+	///     The interface an explicit implementation names (<c>IDisposable</c> in
+	///     <c>void IDisposable.Dispose()</c>), without its type arguments, or null. A name written
+	///     as <c>IDisposable.Dispose</c> means that member, though the type it is in is another.
+	/// </summary>
+	public static string? ExplicitInterface(SyntaxNode member)
+	{
+		var specifier = member switch {
+			
+			MethodDeclarationSyntax method         => method.ExplicitInterfaceSpecifier,
+			BasePropertyDeclarationSyntax property => property.ExplicitInterfaceSpecifier,
+			_                                      => null,
+		};
+		
+		return specifier is null ? null : NameSegments(specifier.Name.ToString()) is [.., var last] ? last : null;
 	}
 	
 	// A member as a declaration, where its name is written, and the span from the start of its first

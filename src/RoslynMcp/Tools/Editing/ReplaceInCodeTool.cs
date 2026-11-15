@@ -209,6 +209,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// This prevents "ParseDocumentation" from matching every method that *calls* it.
 		var ofKind = matchedNodes;
 		
+		// Set when textPattern matched nothing as written and was read as the name in it.
+		string? readAsName = null;
+		
 		if(!string.IsNullOrWhiteSpace(textPattern)) {
 			
 			matchedNodes = matchedNodes
@@ -231,12 +234,17 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				matchedNodes = ofKind
 					.Where(n => DeclaredName(n) is { } name
 						&& name.Equals(segments[^1], StringComparison.OrdinalIgnoreCase)
-						&& (segments.Length == 1 || n.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault()?.Identifier.Text.Equals(segments[^2], StringComparison.OrdinalIgnoreCase) == true))
+						&& (segments.Length == 1
+							|| n.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault()?.Identifier.Text.Equals(segments[^2], StringComparison.OrdinalIgnoreCase) == true
+							|| string.Equals(EnclosingDeclaration.ExplicitInterface(n), segments[^2], StringComparison.OrdinalIgnoreCase)))
 					.ToArray()
 				;
 				
-				if(matchedNodes.Length > 0)
-					logNotes.Add($"textPattern read as the name '{string.Join('.', segments)}'");
+				if(matchedNodes.Length > 0) {
+					
+					readAsName = string.Join('.', segments);
+					logNotes.Add($"textPattern read as the name '{readAsName}'");
+				}
 			}
 		}
 		
@@ -306,6 +314,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// exempt — its job is to show what would match.
 		// Nodes of one kind can start at the same place, as in 'a.b.c', and asking for a position
 		// again would never end.
+		// A pattern read as a name has lost its parameter list, so 'Foo(int a)' names every
+		// overload of Foo. Several such nodes are never replaced, with force or without: one
+		// signature would replace them all. A dry run with force is told the same, since its
+		// verdict is the write's; one without lists the nodes, as every dry run does.
+		if(matchedNodes.Length > 1 && readAsName is not null && (force || !dryRun))
+			
+			return Stopped(EditStopKind.NotApplied, "multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo,
+				$"textPattern matched nothing as written and was read as the name '{readAsName}', which {matchedNodes.Length} nodes have; its parameter list was not compared. Nothing {(dryRun ? "would be" : "was")} replaced: pass line and column to target one, as changed_nodes lists them."), logNotes);
+		
 		if(matchedNodes.Length > 1 && !force && !dryRun) {
 			
 			var narrowing = (line, column) switch {
@@ -429,6 +446,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			? string.Join(" ", unapplied.Select(entry => $"{entry.Key} (Node at line {string.Join(", ", entry.Value)}.)"))
 			: null
 		;
+		
+		// The answer says which node was taken, since the pattern did not: a signature's
+		// parameter list is not compared, so 'Foo(string s)' finds a lone 'Foo(int a)'.
+		if(readAsName is not null) {
+			
+			var taken = $"textPattern matched nothing as written and was read as the name '{readAsName}': the node at line {string.Join(", ", matchedNodes.Select(n => StartOf(n).Line + 1))} was taken, and a parameter list or return type in the pattern was not compared.";
+			
+			caution = caution is null ? taken : $"{taken} {caution}";
+		}
 		
 		return new() {
 			
