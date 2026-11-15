@@ -194,7 +194,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_check_syntax` | Validate a C# snippet for syntax (and optionally semantic) errors without writing to disk |
 | `roslyn_replace_in_code` | Semantic C# editing -- replaces syntax nodes by kind, name or position, validates syntax |
-| `roslyn_replace_in_file` | Text-level find-and-replace with regex (any file type) |
+| `roslyn_replace_in_file` | Text-level find-and-replace with regex (any file type); on C# it checks the syntax of the result and can be limited to one member |
 | `roslyn_insert_lines` | Insert lines at a position or anchor pattern |
 | `roslyn_write_file` | Atomically write or create a file; returns a backup token for undo |
 | `roslyn_local_history` | Browse, preview, and restore crash-safe file backups (list/preview/apply) |
@@ -254,7 +254,7 @@ ALWAYS prefer roslyn_* MCP tools over built-in tools when working with C#:
 - Use `roslyn_get_member_body` to read methods -- not Read on the whole file
 - Use `roslyn_find_references` to find usages -- not Grep
 - Use `roslyn_build_project` to build -- never run `dotnet build` directly
-- Use `roslyn_replace_in_code` for C# edits -- it validates syntax
+- Use `roslyn_replace_in_file` (a few lines) or `roslyn_replace_in_code` (a whole member) for C# edits -- both validate syntax
 - Use `roslyn_search_files` or `roslyn_semantic_search` for code search -- not Grep
 - Use `roslyn_preview_rename` + `roslyn_apply_rename` for renames -- semantic, cross-project
 - Use `roslyn_list_refactorings` -> `roslyn_preview_refactoring` -> `roslyn_apply_refactoring` for structural changes (move a type to its own file, extract a method, introduce a local) -- not retyping code
@@ -271,7 +271,7 @@ When working with C# code, prefer roslyn_* MCP tools:
 - `roslyn_get_member_body` to read a single method/property (don't read entire files)
 - `roslyn_find_references` for semantic symbol search (not grep)
 - `roslyn_build_project` for builds (never `dotnet build` in terminal)
-- `roslyn_replace_in_code` for C# edits (validates syntax, preserves formatting)
+- `roslyn_replace_in_file` (a few lines) or `roslyn_replace_in_code` (a whole member) for C# edits (both validate syntax)
 - `roslyn_search_files` / `roslyn_semantic_search` for code discovery
 - `roslyn_preview_rename` + `roslyn_apply_rename` for semantic renames
 - `roslyn_list_refactorings` → `roslyn_preview_refactoring` → `roslyn_apply_refactoring` for structural changes (move type to file, extract method, …) instead of retyping code

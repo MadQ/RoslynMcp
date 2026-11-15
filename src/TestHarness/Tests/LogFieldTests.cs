@@ -65,8 +65,10 @@ static class LogFieldTests
 						
 						return (false, failure);
 					
-					return Verdict(details.Length == 2 && details[0].Contains("literal") && details[1].Contains("regex"),
-						$"expected a literal entry and a regex entry; got [{string.Join(" | ", details)}]");
+					// And the size of what is written (#476): the pattern says how an edit finds its
+					// place, only the replacement how large the edit is.
+					return Verdict(details.Length == 2 && details[0].Contains("literal") && details[1].Contains("regex") && details.All(detail => detail.Contains("replacement 6 chars, 1 line(s)")),
+						$"expected a literal entry and a regex entry, each with the size of the replacement; got [{string.Join(" | ", details)}]");
 				}),
 			
 			// A failed call must be traceable to the project it was resolved against. Seven "type not

@@ -529,14 +529,18 @@ static class EditingTests
 					data => data?["change_count"]?.GetValue<int>() == 1)),
 			
 			// Column 4 is inside the first statement on line 8. A column must name a start exactly,
-			// not the nearest one, and the message must name what was asked for.
+			// not the nearest one, and the message must name what was asked for. Where the five
+			// statements do start is in the answer itself (#476), the last at column 26 of line 8;
+			// it used to take a second call, a dry run without the position.
 			new("roslyn_replace_in_code: a column that holds no node start matches nothing",
 				() => ctx.RunTestAsync(
 					"roslyn_replace_in_code",
 					new { filePath = "pick_all.cs", nodeKind = "IfStatement", line = 8, column = 4, replacement = "if(a == 4) { }", dryRun = true, projectPath = fx.Csproj },
 					data => data?["change_count"]?.GetValue<int>() == 0
 						&& data?["message"]?.GetValue<string>().Contains("line 8, column 4") == true
-						&& data?["message"]?.GetValue<string>().Contains("without line and column") == true)),
+						&& data?["candidates"]?.AsArray() is { Count: 5 } candidates
+						&& candidates[4]?["line"]?.GetValue<int>() == 8
+						&& candidates[4]?["column"]?.GetValue<int>() == 26)),
 			
 			// Telling an agent that already passed a position to pass one would loop forever.
 			new("roslyn_replace_in_code: nodes sharing a start get advice other than a position",

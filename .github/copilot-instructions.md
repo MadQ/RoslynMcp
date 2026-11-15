@@ -37,7 +37,7 @@ This file contains Copilot-specific overrides and notes only.
 ### GitHub Copilot Chat Integration
 - When suggesting code, prefer using RoslynMcp tools to understand the codebase semantically
 - Always dogfood the tools — use `roslyn_search_files`, `roslyn_get_type_members`, `roslyn_find_references`, etc.
-- For C# edits, strongly prefer `roslyn_replace_in_code` over text-based replacements
+- For C# edits, use `roslyn_replace_in_file` for a few lines and `roslyn_replace_in_code` for a whole member; both check the syntax of what they write
 - **Performance:** Default to modern zero-allocation patterns (`Span<T>`, `ReadOnlySpan<T>`, `stackalloc`) when equally readable — see AGENTS.md § Performance & Allocation
 
 ### ⚠️ Zero-Byte File Check — Required Before Every Commit

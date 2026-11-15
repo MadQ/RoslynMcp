@@ -491,8 +491,8 @@ more memory than small Adhoc workspaces.
 **Cause:** Replacement text doesn't produce valid C# syntax.
 
 **Solution:**
-1. **Validate replacement syntax** — ensure it's valid C# for the node kind
-2. **Use `roslyn_replace_in_file`** instead if you need literal text replacement
+1. **Read the parser's message** — the error quotes it with the line in the replacement text (`line 3: ; expected (CS1002)`)
+2. **Use `roslyn_replace_in_file`** instead if you need literal text replacement; on a C# file it checks the syntax of the result too
 3. **Check node kind** — ensure you're matching the right syntax node type
 
 ---
