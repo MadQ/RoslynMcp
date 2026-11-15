@@ -338,7 +338,7 @@ internal abstract partial class RoslynMcpTool
 			"  • Reading files  → roslyn_read_file, roslyn_get_member_body\n" +
 			"  • Searching code → roslyn_search_files, roslyn_semantic_search\n" +
 			"  • Listing files  → roslyn_list_files\n" +
-			"  • Editing C#     → roslyn_replace_in_code, roslyn_replace_in_file\n" +
+			"  • Editing C#     → roslyn_replace_in_file, roslyn_replace_in_code; several edits in one call → roslyn_multi_edit\n" +
 			"  • Refactoring    → roslyn_list_refactorings, roslyn_preview_refactoring, roslyn_apply_refactoring (move type to file, extract method, …) instead of retyping code\n" +
 			"  • Fixing a diagnostic → roslyn_preview_code_fix, roslyn_apply_code_fix (Roslyn's own fixers)\n" +
 			"  • Diagnostics    → roslyn_get_diagnostics (includeAnalyzers + severity hidden for IDE0xxx)\n" +

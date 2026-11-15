@@ -750,7 +750,20 @@ internal sealed record ReplaceInCodeResult(
 	[property: JsonPropertyName("changed_nodes")] object[] ChangedNodes,
 	[property: JsonPropertyName("message")]       string?  Message     = null,
 	[property: JsonPropertyName("syntax_valid")]  bool     SyntaxValid = true
-) : ToolResult;
+) : ToolResult
+{
+	// What the file holds instead, when nothing matched (#476).
+	[JsonPropertyName("candidates")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public ReplaceInCodeCandidate[]? Candidates { get; init; }
+}
+
+/// <summary>A node <c>roslyn_replace_in_code</c> could have been pointed at: its declared name, or the start of its text, and where it starts.</summary>
+internal sealed record ReplaceInCodeCandidate(
+	[property: JsonPropertyName("name")]   string Name,
+	[property: JsonPropertyName("line")]   int    Line,
+	[property: JsonPropertyName("column")] int    Column
+);
 
 internal sealed record ReplaceInCodeNodeInfo(
 	[property: JsonPropertyName("original_text")]
@@ -833,6 +846,68 @@ internal sealed record ReplaceInFileResult : ToolResult
 	[property: JsonPropertyName("match_count")]         public int         MatchCount        { get; }
 	[property: JsonPropertyName("changed_line_ranges")] public LineRange[] ChangedLineRanges { get; }
 	[property: JsonPropertyName("message")]             public string?     Message           { get; }
+	
+	// The places a literal pattern matched, when it matched several and none was replaced (#476):
+	// grouped as a text search groups its hits, so the answer shows which one to narrow to.
+	[JsonPropertyName("matches")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public SearchDeclarationGroup[]? Matches { get; init; }
+}
+
+/// <summary>
+///     The answer of <c>roslyn_multi_edit</c> (#475): whether the batch was written, each edit's
+///     outcome by its place in the call, and the files with what changed in them.
+/// </summary>
+internal sealed record MultiEditResult(
+	[property: JsonPropertyName("applied")] bool               Applied,
+	[property: JsonPropertyName("edits")]   MultiEditOutcome[] Edits,
+	[property: JsonPropertyName("files")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MultiEditFile[]? Files,
+	[property: JsonPropertyName("message")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string?          Message
+) : ToolResult
+{
+	internal static LineRange[] Ranges(IEnumerable<int> sortedDistinctLines) => CompactLineRanges(sortedDistinctLines);
+}
+
+/// <summary>
+///     One edit of a batch: which it was (1-based), whether it can be made, and what it does or
+///     why not. <see cref="Error"/> is the answer the edit's own tool would have given, whole.
+/// </summary>
+internal sealed record MultiEditOutcome(
+	[property: JsonPropertyName("edit")]   int    Edit,
+	[property: JsonPropertyName("op")]     string Op,
+	[property: JsonPropertyName("file")]   string File,
+	[property: JsonPropertyName("ok")]     bool   Ok,
+	[property: JsonPropertyName("detail")] string Detail
+)
+{
+	[JsonPropertyName("error")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public object? Error { get; init; }
+}
+
+/// <summary>
+///     One file of a batch: the line ranges the batch changed, in the file as it is afterwards, and
+///     the token that restores it. <see cref="State"/> is absent for a file that was written, and
+///     says <c>failed</c> or <c>not_written</c> otherwise.
+/// </summary>
+internal sealed record MultiEditFile(
+	[property: JsonPropertyName("file")]                string      File,
+	[property: JsonPropertyName("changed_line_ranges")] LineRange[] ChangedLineRanges
+)
+{
+	[JsonPropertyName("backup_token")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? BackupToken { get; init; }
+	
+	[JsonPropertyName("state")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? State { get; init; }
+	
+	[JsonPropertyName("error")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Error { get; init; }
 }
 
 internal sealed record InsertLinesResult : ToolResult

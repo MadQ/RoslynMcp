@@ -121,6 +121,8 @@ static int PrintHelp()
           ROSLYNMCP_HEARTBEAT_PATH        Directory of the server heartbeats the tool-use hook reads
           ROSLYNMCP_LOG_MAX_AGE_DAYS      Log retention in days (default: 30)
           ROSLYNMCP_BACKUP_MAX_AGE_DAYS   Backup retention in days (default: 90)
+          ROSLYNMCP_BACKUP_ORPHAN_MAX_AGE_DAYS
+                                          Retention in days for a backup whose file and folder are gone (default: 7)
           ROSLYNMCP_PRUNE_MIN_RUNS        Server starts before pruning runs (default: 3)
           ROSLYNMCP_MAX_CACHED_WORKSPACES LRU workspace cache size (default: 5)
           ROSLYNMCP_LOAD_TIMEOUT_SECONDS  MSBuild load timeout (default: 300; 0 = no timeout)

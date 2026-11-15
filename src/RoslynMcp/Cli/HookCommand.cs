@@ -43,7 +43,7 @@ internal static class HookCommand
 	const string ReadSuggestion   = "roslyn_read_file or roslyn_get_file_outline (projectPath optional), or roslyn_get_member_body for one member";
 	const string SearchSuggestion = "roslyn_search_files or roslyn_semantic_search (projectPath optional), or roslyn_find_references for a symbol's usages";
 	const string ListSuggestion   = "roslyn_list_files (projectPath optional)";
-	const string EditSuggestion   = "roslyn_replace_in_code, roslyn_replace_in_file, roslyn_insert_lines or roslyn_write_file (projectPath optional), then roslyn_get_diagnostics to verify. "
+	const string EditSuggestion   = "roslyn_replace_in_code, roslyn_replace_in_file, roslyn_insert_lines or roslyn_write_file (projectPath optional), or roslyn_multi_edit for several edits in one call, then roslyn_get_diagnostics to verify. "
 		+ "For a structural change Roslyn has a refactoring for (move a type to its own file, extract a method, introduce a local, invert an if) use "
 		+ "roslyn_list_refactorings, roslyn_preview_refactoring and roslyn_apply_refactoring instead of retyping code; for a diagnostic, roslyn_preview_code_fix and roslyn_apply_code_fix";
 

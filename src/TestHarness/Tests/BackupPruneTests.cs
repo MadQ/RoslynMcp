@@ -175,6 +175,139 @@ static class BackupPruneTests
 					await DefaultWorkspaceTests.StopServerAsync(process, server);
 				}
 			}),
+			
+			// What the pass keeps and what it takes, with one directory for each case (#474):
+			//
+			//   recent   a snapshot of today, its file's folder gone   skipped: its name says it is newer than
+			//                                                          anything the pass could remove, so
+			//                                                          its meta file is not opened
+			//   orphan   30 days old, file, folder and project gone    removed: nothing to restore it into
+			//   deleted  30 days old, the file gone, the folder there  kept: a file deleted from a project
+			//                                                          that is still there is what local
+			//                                                          history is for
+			//   emptied  30 days old, file and folder gone,            kept: the last file of a folder takes
+			//            the project there                             the folder with it, in a project
+			//                                                          that is still there
+			//   renamed  30 days old, file, folder and project gone,   kept: a project's folder renamed, or a
+			//            in a repository that is there                 branch without it checked out, takes
+			//                                                          all three away at once
+			//   shared   30 days old, file and folder gone, saved for  kept: one project still there is
+			//            a project that is gone and one that is there  enough, whichever is listed first
+			//   live     30 days old, the file there                   kept
+			//   expired  100 days old, the file there                  removed: past the retention of 90
+			//
+			// On the machine this came from, 7,318 of 7,646 backup directories were of the second
+			// kind (snapshots of test fixtures deleted minutes later) and waited ninety days, and
+			// the pass opened a meta file in every one of them, also in those of the first kind.
+			new("backup prune: orphans go after a week, a deleted file in a live folder stays, and a recent directory is not opened", async () => {
+				
+				// The orphan below is one only where nothing above the fixture root is a repository, a
+				// solution or a project: under a home directory that is a repository, say, the server
+				// keeps it, rightly, and this test would report that as a failure.
+				for(var above = TestFixtures.TempRoot; above is { Length: > 0 }; above = Path.GetDirectoryName(above)) {
+					
+					// What the server takes for a marker, and no more: a file that only starts like a
+					// solution is none. A directory that cannot be listed is one the server cannot
+					// ask either, and it keeps the snapshot then.
+					bool marked;
+					
+					try {
+						
+						marked = Directory.Exists(Path.Combine(above, ".git")) || File.Exists(Path.Combine(above, ".git"))
+							|| Directory.EnumerateFiles(above, "*.sln*").Any(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+							|| Directory.EnumerateFiles(above, "*.csproj").Any();
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						return Skip.SetupUnavailable($"'{above}', above the fixture root, cannot be listed ({ex.GetType().Name}), so the server cannot tell an orphan under it");
+					}
+					
+					if(marked)
+						
+						return Skip.SetupUnavailable($"'{above}', above the fixture root, holds a repository, a solution or a project, so nothing under it is an orphan");
+				}
+				
+				var orphans = TestFixtures.NewAdhocDir("BackupPruneOrphans");
+				var name    = $"backuporphans-{Guid.NewGuid():N}";
+				var gone    = Path.Combine(TestFixtures.TempRoot, $"gone-{Guid.NewGuid():N}");
+				
+				// A repository that is still there, for the case of a folder renamed inside one.
+				var repository = Path.Combine(TestFixtures.TempRoot, $"repository-{Guid.NewGuid():N}");
+				
+				Directory.CreateDirectory(Path.Combine(repository, ".git"));
+				
+				// One directory with one snapshot per project path given, all of one file and one age.
+				void Seed(string hash, int ageDays, string absolutePath, params string[] projectPaths)
+				{
+					var made    = DateTimeOffset.UtcNow.AddDays(-ageDays);
+					var millis  = made.ToUnixTimeMilliseconds();
+					var path    = absolutePath.Replace("\\", "\\\\");
+					var entries = new List<string>();
+					
+					for(var index = 0; index < projectPaths.Length; index++) {
+						
+						entries.Add($"\"{hash}_{millis + index}_ab12_pre\": {{ \"absolutePath\": \"{path}\", \"projectPath\": \"{projectPaths[index].Replace("\\", "\\\\")}\", \"operation\": \"seed\", \"timestamp\": \"{made.UtcDateTime:yyyy-MM-ddTHH:mm:ss.fffZ}\", \"fileSizeBytes\": 3, \"phase\": \"pre\" }}");
+						orphans.Write($"{hash}/{Path.GetFileName(absolutePath)}_{millis + index}_ab12.pre.bak", "old");
+					}
+					
+					orphans.Write($"{hash}/meta.json", $"{{ {string.Join(", ", entries)} }}\n");
+				}
+				
+				Seed("recent",   0,   Path.Combine(gone, "Recent.cs"),               Path.Combine(gone, "Gone.csproj"));
+				Seed("orphan",   30,  Path.Combine(gone, "Orphan.cs"),               Path.Combine(gone, "Gone.csproj"));
+				Seed("deleted",  30,  fx.PathOf("Deleted.cs"),                       fx.Dir);
+				Seed("emptied",  30,  Path.Combine(fx.Dir, "Removed", "Last.cs"),    fx.Dir);
+				Seed("renamed",  30,  Path.Combine(repository, "Old", "File.cs"),    Path.Combine(repository, "Old", "Old.csproj"));
+				Seed("shared",   30,  Path.Combine(gone, "Shared.cs"),               Path.Combine(gone, "Gone.sln"), fx.Dir);
+				Seed("live",     30,  fx.PathOf("Probe.cs"),                         fx.Dir);
+				Seed("expired",  100, fx.PathOf("Probe.cs"),                         fx.Dir);
+				
+				// The two ages are pinned: the server takes the rest of its environment from the
+				// machine, and a developer's own retention would move the lines this test draws.
+				var (process, server) = await DefaultWorkspaceTests.StartServerLoggingToAsync(ctx, fx.Dir, Path.Combine(logs, $"{name}.log"),
+					new Dictionary<string, string> {
+						["ROSLYNMCP_BACKUP_PATH"]                = orphans.Dir,
+						["ROSLYNMCP_PRUNE_MIN_RUNS"]             = "1",
+						["ROSLYNMCP_BACKUP_MAX_AGE_DAYS"]        = "90",
+						["ROSLYNMCP_BACKUP_ORPHAN_MAX_AGE_DAYS"] = "7",
+					});
+				
+				try {
+					
+					if(server is null)
+						return (false, "FAIL  (server did not answer initialize)");
+					
+					var    sw   = Stopwatch.StartNew();
+					string line = "";
+					
+					while(sw.Elapsed < TimeSpan.FromSeconds(90) && line.Length == 0) {
+						
+						await Task.Delay(250);
+						
+						if(ServerLog.TryRead(logs, $"{name}*", 1, out var lines, out _))
+							line = lines.FirstOrDefault(entry => entry.Contains("Backups") && entry.Contains("pruned in")) ?? "";
+					}
+					
+					if(line.Length == 0)
+						return (false, "FAIL  (no backup prune was logged within 90 s)");
+					
+					string[] left     = [..Directory.EnumerateDirectories(orphans.Dir).Select(dir => Path.GetFileName(dir)!).Order()];
+					string[] expected = ["deleted", "emptied", "live", "recent", "renamed", "shared"];
+					
+					if(!left.SequenceEqual(expected))
+						return (false, $"FAIL  (directories left: [{string.Join(", ", left)}], expected [{string.Join(", ", expected)}])");
+					
+					return line.Contains("8 directories, 1 skipped unread, 2 expired snapshot(s) removed, 1 of them orphaned")
+						? (true, "PASS")
+						: (false, $"FAIL  (the pass did the right thing and logged another: {line})");
+				}
+				finally {
+					
+					await DefaultWorkspaceTests.StopServerAsync(process, server);
+					orphans.Dispose();
+					TestFixtures.DeleteTree(repository);
+				}
+			}),
+			
 		};
 		
 		return new TestGroup($"Backup Prune ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); store.Dispose(); return Task.CompletedTask; });

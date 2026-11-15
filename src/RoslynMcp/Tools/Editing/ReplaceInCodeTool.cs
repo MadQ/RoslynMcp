@@ -22,14 +22,17 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	
 	[McpServerTool(Name = "roslyn_replace_in_code", Destructive = true, Title = "Replace In Code", OpenWorld = false)]
 		[Description(
-		"Prefer this tool for all C# edits — uses Roslyn syntax tree parsing to find, validate, and replace " +
+		"Replaces a whole C# syntax node — a method, a property, a type, a statement — named by its kind and its name, with no text of the old node to quote: " +
+		"the tool for rewriting a member, replacing one member by several, or deleting one. For a change of a few lines inside a member, roslyn_replace_in_file costs less and checks the syntax of a C# file as well. " +
+		"Uses Roslyn syntax tree parsing to find, validate, and replace " +
 		"C# syntax nodes by kind, preserving surrounding formatting trivia and the file's line-ending style " +
 		"(replacement text is normalized to CRLF or LF to match the file — normalizeLineEndings=true by default). " +
 		"Works on C# files only; for non-C# files or literal text replacement, use roslyn_replace_in_file instead; " +
 		"for inserting new lines without replacing existing content, use roslyn_insert_lines instead. " +
 		"Specify nodeKind (e.g., MethodDeclaration, ConstructorDeclaration, PropertyDeclaration, ClassDeclaration) and an optional textPattern " +
-		"that filters by the declared name of the node — not body content. " +
-		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors. " +
+		"that filters by the declared name of the node — not body content. A name written with its return type, its parameter list or its type ('void Foo', 'Foo(int a)', 'Type.Foo') is read as the name. " +
+		"When nothing matches, candidates lists the nodes of that kind in the file with their names and positions. " +
+		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors, quoting the parser's message and its line in the replacement text. " +
 		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
 		"One exception: a member of a class, struct, interface or record may be replaced by several members, written one after another " +
 		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow as written. " +
@@ -49,7 +52,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'ConstructorDeclaration', 'FieldDeclaration', 'IdentifierName'). Common aliases accepted: 'method', 'constructor', 'ctor', 'field', 'property', 'class', 'interface', 'struct', 'enum', 'identifier'.")] string nodeKind,
 		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Constructor/Property/Field/Class etc.) matches the DECLARED NAME. For other nodes matches full text.")] string? textPattern = null,
+		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Constructor/Property/Field/Class etc.) matches the DECLARED NAME ('Foo'; 'void Foo', 'Foo(int a)' and 'Type.Foo' are read as that name). For other nodes matches full text.")] string? textPattern = null,
 		[Description("Replacement text for the matched node. Must be valid C# syntax for the target node kind. Default: empty string — omitting this deletes the matched node.")] string replacement = "",
 		[Description("Preview changes without writing. Returns what would change, after the same parse and validation a real write performs. Default: false.")] bool dryRun = false,
 		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false,
@@ -118,7 +121,87 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
 		}
 		
-		var root		 = await syntaxTree.GetRootAsync(cancellationToken);
+		var plan = Plan(await syntaxTree.GetRootAsync(cancellationToken), sourceText, fullPath, kind, textPattern, replacement, dryRun, force, verbose, normalizeLineEndings, line, column, validateFile: true);
+		
+		foreach(var note in plan.Notes)
+			scope.Record(note);
+		
+		if(plan.Stop is { } stop)
+			
+			return stop.Kind is EditStopKind.Failed ? scope.Failed(stop.Detail, stop.Answer)
+				: stop.Kind is EditStopKind.Error   ? scope.Error(stop.Answer)
+				: scope.Outcome(stop.Detail, stop.Answer)
+			;
+		
+		var newRoot = plan.NewRoot!;
+		var newText = plan.NewText!;
+		
+		if(dryRun)
+			
+			return scope.Outcome("dry run", new ReplaceInCodeResult(false, plan.Count, plan.Nodes, $"Dry run: {plan.Count} node(s) would be {plan.Verb}.") { Caution = plan.Caution });
+		
+		var newBytes = FileWriter.Utf8NoBom.GetBytes(newText);
+		
+		var (_, backupErr) = await SaveBackupsAsync(
+			backups, fullPath, projectPath, "roslyn_replace_in_code", newBytes);
+		
+		if(backupErr is not null)
+			
+			return scope.Error(backupErr);
+		
+		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
+		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
+		// for untracked files (e.g. AdhocWorkspace or files outside the project).
+		if(docIds.Length > 0) {
+			
+			var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(newRoot);
+			var newSolution = newDoc.Project.Solution;
+			
+			if(!TryApplyEdit(projectPath, newSolution, out var applyError))
+				
+				return scope.Error(applyError);
+			
+			if(await TryRecoverTruncation(filePath, fullPath, projectPath, newBytes) is { } truncErr)
+				
+				return scope.Error(truncErr);
+		}
+		else {
+			
+			try {
+				
+				await workspace.WriteAndInvalidate(projectPath, fullPath,
+					() => FileWriter.WriteAllTextAsync(fullPath, newText));
+				
+				if(CheckForTruncation(filePath, fullPath, newText.Length) is { } truncErr)
+					
+					return scope.Error(truncErr);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
+			}
+		}
+		
+		return scope.Outcome(plan.Detail, new ReplaceInCodeResult(true, plan.Count, plan.Nodes) { Caution = plan.Caution });
+	}
+	
+	/// <summary>
+	///     The core of the tool (#475): which nodes of <paramref name="root"/> the arguments name,
+	///     and the tree and text with them replaced or deleted, validated as the text that would
+	///     be written. Nothing is read or written. The tool calls it for its one edit, and
+	///     <c>roslyn_multi_edit</c> for each such edit of a batch, against the file as it was; for
+	///     the batch the result is also given as the one change to the text it amounts to.
+	///     <paramref name="validateFile"/> is the tool's own check that the file as this edit
+	///     leaves it has no syntax error; a batch checks the file as all its edits leave it
+	///     instead, and so passes false. The replacement text itself must parse either way.
+	/// </summary>
+	internal static CodeReplacePlan Plan(
+		SyntaxNode root, SourceText sourceText, string fullPath, SyntaxKind kind, string? textPattern, string replacement,
+		bool dryRun, bool force, bool verbose, bool normalizeLineEndings, int line, int column, bool validateFile)
+	{
+		static CodeReplacePlan Stopped(EditStopKind stopKind, string detail, ToolResult answer, List<string> notes) => new() { Stop = new(stopKind, detail, answer), Notes = notes };
+		
+		var syntaxTree   = root.SyntaxTree;
+		var logNotes     = new List<string>();
 		var matchedNodes = root.DescendantNodes()
 			.Where(n => n.IsKind(kind))
 			.ToArray()
@@ -127,6 +210,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// Filter by text pattern if provided.
 		// For declaration nodes, match against the declared name only — not the full body.
 		// This prevents "ParseDocumentation" from matching every method that *calls* it.
+		var ofKind = matchedNodes;
+		
+		// Set when textPattern matched nothing as written and was read as the name in it.
+		string? readAsName = null;
+		
 		if(!string.IsNullOrWhiteSpace(textPattern)) {
 			
 			matchedNodes = matchedNodes
@@ -138,7 +226,32 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				})
 				.ToArray()
 			;
+			
+			// A declaration is found by its name, and an agent writes the name as it read it: with
+			// the return type before it, the parameter list behind it, or its type in front
+			// ('void Foo', 'Foo(int a)', 'Type.Foo'). Taken as written first, so nothing that
+			// matched before matches differently; only a pattern that found nothing is read again
+			// as the name it holds (#476).
+			if(matchedNodes.Length == 0 && EnclosingDeclaration.NameSegments(textPattern) is { Length: > 0 } segments) {
+				
+				matchedNodes = ofKind
+					.Where(n => DeclaredName(n) is { } name
+						&& name.Equals(segments[^1], StringComparison.OrdinalIgnoreCase)
+						&& (segments.Length == 1
+							|| n.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault()?.Identifier.Text.Equals(segments[^2], StringComparison.OrdinalIgnoreCase) == true
+							|| string.Equals(EnclosingDeclaration.ExplicitInterface(n), segments[^2], StringComparison.OrdinalIgnoreCase)))
+					.ToArray()
+				;
+				
+				if(matchedNodes.Length > 0) {
+					
+					readAsName = string.Join('.', segments);
+					logNotes.Add($"textPattern read as the name '{readAsName}'");
+				}
+			}
 		}
+		
+		var named = matchedNodes;
 		
 		// One calculation for filtering and for changed_nodes, because the tool promises that a
 		// position it reports can be passed back.
@@ -152,11 +265,38 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			;
 		}
 		
-		if(matchedNodes.Length == 0)
+		if(matchedNodes.Length == 0) {
 			
-			return scope.Failed("No matching nodes found.", new ReplaceInCodeResult(false, 0, [], line > 0
-				? $"No matching nodes found at line {line}{(column > 0 ? $", column {column}" : "")}. Check nodeKind, textPattern and the position: a dry run without line and column lists where the matches start."
-				: "No matching nodes found."));
+			// What is there instead (#476): the server knows every node of the kind in the file,
+			// and "no matching nodes" alone sent the agent to the text tool for the rest of its
+			// session. With a position that missed, the nodes the kind and the pattern do match;
+			// otherwise every node of the kind.
+			var missedByPosition = line > 0 && named.Length > 0;
+			var there            = missedByPosition ? named : ofKind;
+			
+			ReplaceInCodeCandidate[] candidates = [..there.Take(MaxCandidates).Select(n => {
+				
+				var start = StartOf(n);
+				var name  = DeclaredName(n) ?? Brief(n.ToString());
+				
+				return new ReplaceInCodeCandidate(name, start.Line + 1, start.Character + 1);
+			})];
+			
+			var position = line > 0 ? $" at line {line}{(column > 0 ? $", column {column}" : "")}" : "";
+			var rest     = there.Length > candidates.Length ? $" (the first {candidates.Length} of {there.Length})" : "";
+			
+			var message = (there.Length, missedByPosition) switch {
+				
+				(0, _)    => $"No matching nodes found{position}: the file holds no {kind}.",
+				(_, true) => $"No matching nodes found{position}. The nodes that match nodeKind and textPattern start where candidates says{rest}: a position is only as good as the read it came from.",
+				_         => $"No matching nodes found{position}. candidates lists the {kind} nodes of the file{rest}."
+					+ (!string.IsNullOrWhiteSpace(textPattern) && ofKind.Any(n => DeclaredName(n) is not null)
+						? " textPattern is compared with the declared name only, not with the signature or the body."
+						: ""),
+			};
+			
+			return Stopped(EditStopKind.Failed, "No matching nodes found.", new ReplaceInCodeResult(false, 0, [], message) { Candidates = candidates.Length > 0 ? candidates : null }, logNotes);
+		}
 		
 		// Local helper so error paths can always include the matched text (diagnostic info the agent needs),
 		// while success paths omit it unless verbose=true to save tokens.
@@ -177,6 +317,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// exempt — its job is to show what would match.
 		// Nodes of one kind can start at the same place, as in 'a.b.c', and asking for a position
 		// again would never end.
+		// A pattern read as a name has lost its parameter list, so 'Foo(int a)' names every
+		// overload of Foo. Several such nodes are never replaced, with force or without: one
+		// signature would replace them all. A dry run with force is told the same, since its
+		// verdict is the write's; one without lists the nodes, as every dry run does.
+		if(matchedNodes.Length > 1 && readAsName is not null && (force || !dryRun))
+			
+			return Stopped(EditStopKind.NotApplied, "multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo,
+				$"textPattern matched nothing as written and was read as the name '{readAsName}', which {matchedNodes.Length} nodes have; its parameter list was not compared. Nothing {(dryRun ? "would be" : "was")} replaced: pass line and column to target one, as changed_nodes lists them."), logNotes);
+		
 		if(matchedNodes.Length > 1 && !force && !dryRun) {
 			
 			var narrowing = (line, column) switch {
@@ -186,7 +335,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				_      => "narrow textPattern: these nodes start at the same position. If the text cannot tell them apart, replace the enclosing node or use roslyn_replace_in_file"
 			};
 			
-			return scope.Outcome("multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or {narrowing}."));
+			return Stopped(EditStopKind.NotApplied, "multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Matched {matchedNodes.Length} nodes — set force=true to replace all, or {narrowing}."), logNotes);
 		}
 		
 		// Build the edited tree — deletion or replacement — and validate it BEFORE the dry-run
@@ -231,10 +380,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				if(parsed is null)
 					
-					return scope.Error(new ReplaceInCodeSyntaxError(parseError ?? "Failed to parse replacement text — parser returned null", BuildNodeInfo(true))
+					return Stopped(EditStopKind.Error, "", new ReplaceInCodeSyntaxError(parseError ?? "Failed to parse replacement text — parser returned null", BuildNodeInfo(true))
 					{
 						Error = "Replacement text contains syntax errors"
-					});
+					}, logNotes);
 				
 				var notes = new List<string>();
 				
@@ -246,7 +395,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 					
 					followers.Add((mark, placed[1..]));
 					placed[0] = placed[0].WithAdditionalAnnotations(mark);
-					scope.Record($"1 member replaced by {placed.Length}");
+					logNotes.Add($"1 member replaced by {placed.Length}");
 				}
 				
 				replacementNodes[matchedNode] = placed[0];
@@ -286,14 +435,14 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		if(newDiagnostics.Length > 0)
+		if(validateFile && newDiagnostics.Length > 0)
 			
-			return scope.Error(new ReplaceInCodeSyntaxError(
-				string.Join("; ", newDiagnostics.Select(d => d.GetMessage())),
+			return Stopped(EditStopKind.Error, "", new ReplaceInCodeSyntaxError(
+				"In the file as it would be: " + string.Join("; ", newDiagnostics.Select(d => $"line {d.Location.GetLineSpan().StartLinePosition.Line + 1}: {d.GetMessage()} ({d.Id})")),
 				BuildNodeInfo(true))
 			{
 				Error = isDeletion ? "Deletion would introduce syntax errors" : "Replacement would introduce syntax errors"
-			});
+			}, logNotes);
 		
 		var verb    = isDeletion ? "deleted" : "replaced";
 		var caution = unapplied.Count > 0
@@ -301,52 +450,36 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			: null
 		;
 		
-		if(dryRun)
+		// The answer says which node was taken, since the pattern did not: a signature's
+		// parameter list is not compared, so 'Foo(string s)' finds a lone 'Foo(int a)'.
+		if(readAsName is not null) {
 			
-			return scope.Outcome("dry run", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo, $"Dry run: {matchedNodes.Length} node(s) would be {verb}.") { Caution = caution });
-		
-		var newBytes = FileWriter.Utf8NoBom.GetBytes(newText);
-		
-		var (_, backupErr) = await SaveBackupsAsync(
-			backups, fullPath, projectPath, "roslyn_replace_in_code", newBytes);
-		
-		if(backupErr is not null)
+			var taken = $"textPattern matched nothing as written and was read as the name '{readAsName}': the node at line {string.Join(", ", matchedNodes.Select(n => StartOf(n).Line + 1))} was taken, and a parameter list or return type in the pattern was not compared.";
 			
-			return scope.Error(backupErr);
-		
-		// When the document is workspace-tracked, let Roslyn write it via TryApplyChanges
-		// (MSBuild only — handles FSW suppression and encoding). Fall back to direct I/O
-		// for untracked files (e.g. AdhocWorkspace or files outside the project).
-		if(docIds.Length > 0) {
-			
-			var newDoc      = solution.GetDocument(docIds[0])!.WithSyntaxRoot(newRoot);
-			var newSolution = newDoc.Project.Solution;
-			
-			if(!TryApplyEdit(projectPath, newSolution, out var applyError))
-				
-				return scope.Error(applyError);
-			
-			if(await TryRecoverTruncation(filePath, fullPath, projectPath, newBytes) is { } truncErr)
-				
-				return scope.Error(truncErr);
-		}
-		else {
-			
-			try {
-				
-				await workspace.WriteAndInvalidate(projectPath, fullPath,
-					() => FileWriter.WriteAllTextAsync(fullPath, newText));
-				
-				if(CheckForTruncation(filePath, fullPath, newText.Length) is { } truncErr)
-					
-					return scope.Error(truncErr);
-			}
-			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
-			}
+			caution = caution is null ? taken : $"{taken} {caution}";
 		}
 		
-		return scope.Outcome($"{verb} {matchedNodes.Length} node(s)", new ReplaceInCodeResult(true, matchedNodes.Length, changedNodeInfo) { Caution = caution });
+		// One change, from the first character that differs to the last. What the edit claims is
+		// more: its nodes whole, so that a text edit inside a replaced node is seen as touching
+		// it, also where the replacement differs from the node in one character only.
+		var change = EditPlan.Between(sourceText.ToString(), newText);
+		var claim  = TextSpan.FromBounds(
+			Math.Min(change.Span.Start, matchedNodes.Min(n => n.SpanStart)),
+			Math.Max(change.Span.End,   matchedNodes.Max(n => n.Span.End)));
+		
+		return new() {
+			
+			Changes = [change],
+			Claims  = [claim],
+			Detail  = $"{verb} {matchedNodes.Length} node(s)",
+			Caution = caution,
+			Notes   = logNotes,
+			NewRoot = newRoot,
+			NewText = newText,
+			Count   = matchedNodes.Length,
+			Nodes   = changedNodeInfo,
+			Verb    = verb,
+		};
 	}
 	
 	/// <summary>
@@ -599,7 +732,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	}
 	
 	
-	private static string GetDeclaredName(SyntaxNode node) => node switch {
+	private static string GetDeclaredName(SyntaxNode node) => DeclaredName(node) ?? node.ToString();
+	
+	// The name a declaration is found by, or null for a node that declares nothing and is found by
+	// its text.
+	private static string? DeclaredName(SyntaxNode node) => node switch {
 		
 		MethodDeclarationSyntax      m  => m.Identifier.Text,
 		ConstructorDeclarationSyntax c  => c.Identifier.Text,
@@ -615,8 +752,44 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		StructDeclarationSyntax      s  => s.Identifier.Text,
 		EnumDeclarationSyntax        e  => e.Identifier.Text,
 		RecordDeclarationSyntax      r  => r.Identifier.Text,
-		_                               => node.ToString()
+		_                               => null
 	};
+	
+	// How many nodes an answer that found none lists, and how much of a node without a name.
+	const int MaxCandidates = 30;
+	const int MaxBrief      = 60;
+	
+	// The start of a node's text on one line, for a node that has no name to be listed by.
+	private static string Brief(string text)
+	{
+		var firstLine = text.AsSpan();
+		var end       = firstLine.IndexOfAny('\r', '\n');
+		
+		if(end >= 0)
+			firstLine = firstLine[..end];
+		
+		return firstLine.Length > MaxBrief ? $"{firstLine[..MaxBrief]}..." : firstLine.ToString();
+	}
+	
+	/// <summary>
+	///     The parser's errors as an answer quotes them (#476): <c>line N: message (id)</c>, the line
+	///     counted in the replacement text as the agent wrote it. <paramref name="prefixLength"/> is
+	///     what a wrapper put before that text, so that a position in the parsed text becomes one in
+	///     the replacement.
+	/// </summary>
+	private static string QuoteErrors(IEnumerable<Diagnostic> errors, string replacement, int prefixLength)
+		=> string.Join("; ", errors.Select(error => {
+			
+			if(error.Location.Kind == LocationKind.None)
+				
+				return $"{error.GetMessage()} ({error.Id})";
+			
+			var position = Math.Clamp(error.Location.SourceSpan.Start - prefixLength, 0, replacement.Length);
+			var line     = 1 + replacement.AsSpan(0, position).Count('\n');
+			
+			return $"line {line}: {error.GetMessage()} ({error.Id})";
+		}))
+	;
 	
 	/// <summary>
 	///     Parses <paramref name="replacement"/> in the grammatical position of
@@ -644,13 +817,19 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		SyntaxTriviaList trailing;
 		bool             hasLeftover;
 		SyntaxNode[]     more = [];
+		
+		// The characters a wrapper puts before the replacement text, which the parser's positions count.
+		var prefix = 0;
 
 		switch(original) {
 			
 			case MemberDeclarationSyntax { Parent: BaseTypeDeclarationSyntax enclosingType }: {
 				
 				var keyword = enclosingType is EnumDeclarationSyntax ? "enum" : "class";
-				var unit    = SyntaxFactory.ParseCompilationUnit($"{keyword} {enclosingType.Identifier.Text}\n{{\n{replacement}\n}}");
+				var header  = $"{keyword} {enclosingType.Identifier.Text}\n{{\n";
+				var unit    = SyntaxFactory.ParseCompilationUnit($"{header}{replacement}\n}}");
+				
+				prefix = header.Length;
 				
 				var members = unit.Members.Count == 1
 					? unit.Members[0] switch {
@@ -735,9 +914,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				// Text that does not parse keeps the parser's own words: one declaration with a typo
 				// in it can come out as two members, and its error says more than a count would.
-				if(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.GetMessage()).ToArray() is { Length: > 0 } parseErrors)
+				if(diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).ToArray() is { Length: > 0 } parseErrors)
 					
-					return (null, string.Join("; ", parseErrors));
+					return (null, QuoteErrors(parseErrors, replacement, 0));
 				
 				if(whole.Usings.Count > 0 || whole.Externs.Count > 0 || whole.AttributeLists.Count > 0)
 					
@@ -825,12 +1004,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		var errors = diagnostics
 			.Where(d => d.Severity == DiagnosticSeverity.Error)
-			.Select(d => d.GetMessage())
 			.ToArray()
 		;
 		
 		return errors.Length > 0
-			? (null, string.Join("; ", errors))
+			? (null, QuoteErrors(errors, replacement, prefix))
 			: (new ParsedReplacement(node, trailing, hasLeftover) { More = more }, null)
 		;
 	}
@@ -843,7 +1021,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			|| node.FullSpan.End < replacement.Length && !string.IsNullOrWhiteSpace(replacement[node.FullSpan.End..])
 	;
 	
-	private static bool TryParseSyntaxKind(string kindName, out SyntaxKind kind)
+	internal static bool TryParseSyntaxKind(string kindName, out SyntaxKind kind)
 	{
 		// Try exact match first
 		if(Enum.TryParse<SyntaxKind>(kindName, ignoreCase: true, out kind))
@@ -868,4 +1046,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		return kind != SyntaxKind.None;
 	}
+}
+
+/// <summary>
+///     The plan of one <c>roslyn_replace_in_code</c> edit: the tree and the text with the nodes
+///     replaced or deleted, and what its answer reports. <see cref="EditPlan.Changes"/> holds the one
+///     change to the original text the edit amounts to.
+/// </summary>
+internal sealed record CodeReplacePlan : EditPlan
+{
+	public SyntaxNode?             NewRoot { get; init; }
+	public string?                 NewText { get; init; }
+	public int                     Count   { get; init; }
+	public ReplaceInCodeNodeInfo[] Nodes   { get; init; } = [];
+	public string                  Verb    { get; init; } = "replaced";
 }

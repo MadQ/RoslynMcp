@@ -79,7 +79,7 @@ static class HookHintTests
 			Hint(ctx, "Claude Code Edit suggests the editing tools, the diagnostics check, the refactorings and the code fixes",
 				new { hook_event_name = "PreToolUse", tool_name = "Edit", tool_input = new { file_path = "src/Foo.cs", old_string = "a", new_string = "b" } },
 				claudeFormat: true,
-				expected: ["roslyn_replace_in_code", "roslyn_replace_in_file", "roslyn_insert_lines", "roslyn_write_file", "roslyn_get_diagnostics", "roslyn_list_refactorings", "roslyn_preview_refactoring", "roslyn_apply_refactoring", "roslyn_preview_code_fix"],
+				expected: ["roslyn_replace_in_code", "roslyn_replace_in_file", "roslyn_insert_lines", "roslyn_write_file", "roslyn_multi_edit", "roslyn_get_diagnostics", "roslyn_list_refactorings", "roslyn_preview_refactoring", "roslyn_apply_refactoring", "roslyn_preview_code_fix"],
 				absent:   ["roslyn_read_file", "roslyn_search_files", "roslyn_list_files"]),
 			
 			Hint(ctx, "Copilot create is recognised as an edit, after the tool ran",

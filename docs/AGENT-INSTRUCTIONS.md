@@ -106,10 +106,13 @@ built-in tools only if a roslyn tool fails.
   against project-defined types and all referenced assemblies.
 - `roslyn_replace_in_code` — Syntax-aware find-and-replace. Targets specific
   node kinds (MethodDeclaration, IdentifierName, etc.) so replacements are
-  precise. Use INSTEAD OF Edit for C# files when you need structural awareness.
+  precise. Use INSTEAD OF Edit for C# files when replacing a whole member or
+  statement.
 - `roslyn_replace_in_file` — Text-level find-and-replace with regex support.
-  Use for non-C# files or when you need regex. Use INSTEAD OF Edit when
-  replacing patterns across a file.
+  Use INSTEAD OF Edit, for any file type. A literal snippet must match once
+  (`replaceAll: true` replaces every match). On a C# file it refuses an edit
+  that adds a syntax error, and `inMember: "Type.Member"` limits the matches
+  to one declaration.
 - `roslyn_insert_lines` — Insert lines at a specific location (by line number
   or anchor pattern). Use when ADDING new lines rather than replacing existing
   content -- no need to construct surrounding-context patterns.
@@ -229,6 +232,7 @@ Specific alternatives for common tasks:
 - Read method:    roslyn_get_member_body (not Read on the whole file)
 - Find usages:    roslyn_find_references (not Grep)
 - Edit C#:        roslyn_replace_in_code or roslyn_replace_in_file (not Edit)
+- Several edits:  roslyn_multi_edit (one call, positions from the files as last read)
 - Insert lines:   roslyn_insert_lines (not Edit)
 - Refactor:       roslyn_list_refactorings → roslyn_preview_refactoring → roslyn_apply_refactoring (not retyping code: move type to file, extract method, …)
 - Fix diagnostic: roslyn_preview_code_fix → roslyn_apply_code_fix (not hand edits)

@@ -72,6 +72,14 @@ internal sealed class ServerArgs
     /// <summary>Maximum age for backup snapshots in days. Env: <c>ROSLYNMCP_BACKUP_MAX_AGE_DAYS</c>. Default: 90.</summary>
     public int BackupMaxAgeDays { get; }
 
+    /// <summary>
+    ///     Maximum age in days for a backup snapshot whose file, folder and project are all gone
+    ///     (#474): nothing is left to restore it into. Env:
+    ///     <c>ROSLYNMCP_BACKUP_ORPHAN_MAX_AGE_DAYS</c>. Default: 7, and never more than
+    ///     <see cref="BackupMaxAgeDays"/>.
+    /// </summary>
+    public int BackupOrphanMaxAgeDays { get; }
+
     /// <summary>Maximum age for per-PID log files in days. Env: <c>ROSLYNMCP_LOG_MAX_AGE_DAYS</c>. Default: 30.</summary>
     public int LogMaxAgeDays { get; }
 
@@ -415,6 +423,8 @@ internal sealed class ServerArgs
         BackupPath = Env("ROSLYNMCP_BACKUP_PATH");
 
         BackupMaxAgeDays = EnvInt("ROSLYNMCP_BACKUP_MAX_AGE_DAYS", 1, FilePruner.DefaultBackupAgeDays);
+
+        BackupOrphanMaxAgeDays = Math.Min(BackupMaxAgeDays, EnvInt("ROSLYNMCP_BACKUP_ORPHAN_MAX_AGE_DAYS", 1, FilePruner.DefaultBackupOrphanAgeDays));
         LogMaxAgeDays    = EnvInt("ROSLYNMCP_LOG_MAX_AGE_DAYS",    1, FilePruner.DefaultLogAgeDays);
         PruneMinRuns     = EnvInt("ROSLYNMCP_PRUNE_MIN_RUNS",      1, FilePruner.DefaultMinRuns);
 
