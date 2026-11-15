@@ -776,11 +776,12 @@ internal static class PhysicalApplyResultMapper
 	
 	/// <summary>
 	///     How to undo the written files of an apply that succeeded, said once (#490); null for an
-	///     apply that did not, whose files each carry their own guidance.
+	///     apply that did not, whose files each carry their own guidance, and for one that wrote no
+	///     existing file (it only created or deleted, and those files say what undoes them).
 	/// </summary>
-	public static string? UndoHint(PhysicalApplyReport report, bool backupsEnabled)
+	public static string? UndoHint(PhysicalApplyReport report, PhysicalSolutionApplyPlan plan, bool backupsEnabled)
 	{
-		if(!report.Succeeded)
+		if(!report.Succeeded || !plan.Files.Any(file => file.Operation == PhysicalFileOperation.Write))
 			
 			return null;
 		

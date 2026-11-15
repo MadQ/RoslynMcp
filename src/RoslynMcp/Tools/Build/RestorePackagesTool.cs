@@ -75,18 +75,23 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 		return scope.Outcome(message, new RestoreResult(success, message, success ? Warnings(output) : output));
 	}
 	
-	// The warning lines of a dotnet output, each once: the same warning comes once per project,
-	// with the project's path in brackets at its end. Null when there is none.
+	// The warning lines of a dotnet output, without lines that are the same but for the project
+	// named in brackets at their end: a warning from a shared targets file comes once per
+	// project. A warning that names its project at its start stays once per project. A line is
+	// a warning by MSBuild's format ("… : warning NU1701: …", "… warning : …"), not by the
+	// word, which a project's path can hold. Null when there is none.
 	static string? Warnings(string output)
 	{
 		string[] warnings = [..output.Split('\n')
 			.Select(line => line.Trim())
-			.Where(line => line.Contains("warning", StringComparison.OrdinalIgnoreCase))
+			.Where(line => WarningLine.IsMatch(line))
 			.Select(line => line.EndsWith(']') && line.LastIndexOf(" [", StringComparison.Ordinal) is > 0 and var bracket ? line[..bracket] : line)
 			.Distinct(StringComparer.Ordinal)];
 		
 		return warnings.Length > 0 ? string.Join("\n", warnings) : null;
 	}
+	
+	static readonly System.Text.RegularExpressions.Regex WarningLine = new(@": warning( [A-Za-z]+\d+)?\s*:|\bwarning [A-Za-z]+\d+:", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 }
 
 internal sealed record RestoreResult(

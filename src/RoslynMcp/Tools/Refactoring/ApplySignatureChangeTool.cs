@@ -174,7 +174,7 @@ internal sealed class ApplySignatureChangeTool : RoslynMcpTool
 				
 				return scope.Outcome($"{report.FilesWritten} file(s) written", new ApplySignatureChangeResult(
 					$"Signature change applied.{sessionNote} Files written to disk.",
-					report.FilesWritten, null, files) { Caution = linkCaution, Hint = PhysicalApplyResultMapper.UndoHint(report, backups.IsEnabled) });
+					report.FilesWritten, null, files) { Caution = linkCaution, Hint = PhysicalApplyResultMapper.UndoHint(report, plan, backups.IsEnabled) });
 			}
 			
 			var error = report.AllFilesReachedIntendedState
