@@ -608,6 +608,10 @@ internal sealed class BackupStore
 			// is kept whatever became of its file.
 			var orphanCutoff = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupOrphanMaxAgeDays);
 			
+			// Which directories hold a repository, a solution or a project, as far as this pass
+			// has asked: see InLivingTree.
+			var livingTrees = new Dictionary<string, bool>(StringComparer.Ordinal);
+			
 			try {
 				
 				foreach(var dir in Directory.EnumerateDirectories(backupRoot)) {
@@ -626,7 +630,7 @@ internal sealed class BackupStore
 					HashSet<string> orphans;
 					
 					try {
-						orphans = OrphanedPaths(dir, cutoff, orphanCutoff);
+						orphans = OrphanedPaths(dir, cutoff, orphanCutoff, livingTrees);
 					}
 					catch(Exception ex) {
 						
@@ -731,26 +735,33 @@ internal sealed class BackupStore
 	}
 	
 	/// <summary>
-	///     Whether a snapshot has nothing left to be restored into (#474): its file is gone, the
-	///     folder it was in is gone, and so is the project it was written for. It then expires
-	///     after <see cref="ServerArgs.BackupOrphanMaxAgeDays"/> days instead of the retention. On
-	///     one machine 7,318 of 7,646 backup directories were snapshots of test fixtures whose
-	///     folders had been deleted minutes after they were made, kept for ninety days.
+	///     Whether the snapshots of a path have nothing left to be restored into (#474). They then
+	///     expire after <see cref="ServerArgs.BackupOrphanMaxAgeDays"/> days instead of the
+	///     retention. On one machine 7,318 of 7,646 backup directories were snapshots of test
+	///     fixtures whose folders had been deleted minutes after they were made, kept for ninety
+	///     days.
 	///     <para>
-	///         All three, because each alone is an ordinary state of a project that is still
-	///         there. A deleted file is what local history is for. A deleted file can take its
-	///         folder with it, when it was the last one in it or the folder was renamed. Only a
-	///         project that is gone as well says that nobody will ask for the file back.
+	///         The question is whether the place the file was in is still part of something
+	///         alive, and no single fact answers it. A deleted file is what local history is for.
+	///         A file takes its folder with it when it was the last one in it. A project is
+	///         renamed, folder and project file together, or is absent on the branch that is
+	///         checked out. So all of these must hold: the file is gone; its folder is gone;
+	///         every project a snapshot of it was written for is gone
+	///         (<paramref name="projectPaths"/>: the same file is saved for the solution before
+	///         it is in a project, and for its project after); and nothing above where the
+	///         folder was is a repository, a solution or a project (<see cref="InLivingTree"/>).
+	///         What is left is a tree that was removed whole: a deleted checkout, a temporary
+	///         directory.
 	///     </para>
 	///     <para>
 	///         And never where the place itself may only be away: a drive that is not there, on
-	///         Windows, and on the other systems a folder that would sit at or just below one of
-	///         the directories volumes are mounted under (<see cref="LooksUnmounted"/>). A share
-	///         or a stick that is not attached reads exactly like a deleted checkout.
+	///         Windows, and on the other systems a folder near one of the directories volumes are
+	///         mounted under (<see cref="LooksUnmounted"/>). A share or a stick that is not
+	///         attached reads exactly like a deleted checkout.
 	///     </para>
 	///     The drive is asked first, so that a share that does not answer costs one question.
 	/// </summary>
-	static bool IsOrphan(string absolutePath, string projectPath)
+	static bool IsOrphan(string absolutePath, IEnumerable<string> projectPaths, Dictionary<string, bool> livingTrees)
 	{
 		try {
 			
@@ -767,11 +778,12 @@ internal sealed class BackupStore
 				return false;
 			
 			// A project path that says nothing (empty, relative) is not known to be gone.
-			if(!Path.IsPathFullyQualified(projectPath) || File.Exists(projectPath) || Directory.Exists(projectPath))
-				
-				return false;
+			foreach(var projectPath in projectPaths)
+				if(!Path.IsPathFullyQualified(projectPath) || File.Exists(projectPath) || Directory.Exists(projectPath))
+					
+					return false;
 			
-			return !LooksUnmounted(folder);
+			return !LooksUnmounted(folder) && !InLivingTree(folder, livingTrees);
 		}
 		catch {
 			
@@ -780,8 +792,47 @@ internal sealed class BackupStore
 		}
 	}
 	
-	// Where volumes are mounted on Linux and macOS: a missing folder up to two levels below one of
-	// these (/mnt/d, /media/user/stick, /Volumes/Share) may be a volume that is not attached.
+	/// <summary>
+	///     Whether a folder that is gone was inside a repository, a solution or a project that is
+	///     still there: some directory above it that exists holds a <c>.git</c>, a <c>.sln</c>, a
+	///     <c>.slnx</c> or a <c>.csproj</c>. This is what outlives a rename of a project's folder
+	///     and a switch of branches, which take file, folder and project file away together.
+	///     Errs towards keeping: a worktree deleted from inside a repository, and everything
+	///     below a home directory that is itself a repository, wait out the retention.
+	///     <paramref name="known"/> keeps the answer per directory for one pass: thousands of
+	///     orphans share the few directories above a temporary root.
+	/// </summary>
+	static bool InLivingTree(string missingFolder, Dictionary<string, bool> known)
+	{
+		var above = Path.GetDirectoryName(missingFolder);
+		
+		while(above is { Length: > 0 } && !Directory.Exists(above))
+			above = Path.GetDirectoryName(above);
+		
+		for(; above is { Length: > 0 }; above = Path.GetDirectoryName(above)) {
+			
+			if(!known.TryGetValue(above, out var marked)) {
+				
+				marked = Directory.Exists(Path.Combine(above, ".git"))
+					|| File.Exists(Path.Combine(above, ".git"))
+					|| Directory.EnumerateFiles(above, "*.sln*").Any(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+					|| Directory.EnumerateFiles(above, "*.csproj").Any();
+				
+				known[above] = marked;
+			}
+			
+			if(marked)
+				
+				return true;
+		}
+		
+		return false;
+	}
+	
+	// Where volumes are mounted on Linux and macOS. A folder is taken for one on a volume that may
+	// not be attached when the nearest directory above it that exists is one of these or at most
+	// two levels below one: /mnt/d, /media/user/stick and /Volumes/Share, with the mount point
+	// left behind empty or not.
 	static readonly string[] MountParents = ["/mnt", "/media", "/run/media", "/Volumes", "/net"];
 	
 	/// <summary>
@@ -808,11 +859,13 @@ internal sealed class BackupStore
 		
 		foreach(var parent in MountParents) {
 			
-			if(above == parent)
+			// Without regard to case: a macOS volume usually has none, and taking /volumes for a
+			// mount directory only keeps a snapshot longer.
+			if(above.Equals(parent, StringComparison.OrdinalIgnoreCase))
 				
 				return true;
 			
-			if(above.StartsWith(parent + "/", StringComparison.Ordinal) && above.AsSpan(parent.Length + 1).Count('/') <= 1)
+			if(above.StartsWith(parent + "/", StringComparison.OrdinalIgnoreCase) && above.AsSpan(parent.Length + 1).Count('/') <= 1)
 				
 				return true;
 		}
@@ -826,26 +879,27 @@ internal sealed class BackupStore
 	;
 	
 	/// <summary>
-	///     The paths of a directory's snapshots that are orphans, asked only for a snapshot old
-	///     enough for the answer to matter. Per path and not once for the directory: the
-	///     directory's name is 32 bits of a hash, and two paths can share one. Called without the
-	///     store's lock, since it asks the file system of the user's machine, which can take as
-	///     long as a share takes to say it is not there, and every writing tool waits for that
-	///     lock; the meta file is replaced whole when it is written, so a read beside a writer
-	///     sees one version or the other.
+	///     The paths of a directory's snapshots that are orphans, asked only for a path that has
+	///     a snapshot old enough for the answer to matter. Per path and not once for the
+	///     directory: the directory's name is 32 bits of a hash, and two paths can share one. And
+	///     for a path with every project its snapshots name, whatever their age: one of them still
+	///     there is enough to keep the path. Called without the store's lock, since it asks the
+	///     file system of the user's machine, which can take as long as a share takes to say it
+	///     is not there, and every writing tool waits for that lock; the meta file is replaced
+	///     whole when it is written, so a read beside a writer sees one version or the other.
 	/// </summary>
-	HashSet<string> OrphanedPaths(string dir, DateTime cutoff, DateTime orphanCutoff)
+	HashSet<string> OrphanedPaths(string dir, DateTime cutoff, DateTime orphanCutoff, Dictionary<string, bool> livingTrees)
 	{
 		var orphans = new HashSet<string>(StringComparer.Ordinal);
-		var asked   = new HashSet<string>(StringComparer.Ordinal);
+		var entries = ReadAllMetaEntries(Path.Combine(dir, MetaFileName)).Values;
 		
-		foreach(var meta in ReadAllMetaEntries(Path.Combine(dir, MetaFileName)).Values) {
+		foreach(var path in entries
+			.Where(meta => meta.AbsolutePath is not null && TryTime(meta, out var made) && made < orphanCutoff && made >= cutoff)
+			.Select(meta => meta.AbsolutePath)
+			.Distinct(StringComparer.Ordinal)) {
 			
-			if(!TryTime(meta, out var made) || made >= orphanCutoff || made < cutoff || !asked.Add(meta.AbsolutePath))
-				continue;
-			
-			if(IsOrphan(meta.AbsolutePath, meta.ProjectPath))
-				orphans.Add(meta.AbsolutePath);
+			if(IsOrphan(path, entries.Where(meta => meta.AbsolutePath == path).Select(meta => meta.ProjectPath), livingTrees))
+				orphans.Add(path);
 		}
 		
 		return orphans;
