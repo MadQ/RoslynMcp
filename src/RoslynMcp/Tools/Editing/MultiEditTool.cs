@@ -63,15 +63,15 @@ internal sealed class MultiEditTool : RoslynMcpTool
 	[Description(
 		"Makes several edits in one call — in one file or several, of mixed kinds — and writes all of them or none. " +
 		"Use it whenever a change is more than one edit: it saves a call per edit, and line numbers do not go stale between them. " +
-		"Each entry of edits names its op ('replace_in_file', 'insert_lines' or 'replace_in_code'), its filePath, and the parameters of that tool, with the meaning they have there. " +
+		"Each entry of edits names its op ('roslyn_replace_in_file', 'roslyn_insert_lines' or 'roslyn_replace_in_code'), its filePath, and the parameters of that tool, with the meaning they have there. " +
 		"Every position in a batch — a line, a column, an anchor, a pattern — refers to the file as it is BEFORE the batch, the file as last read: " +
 		"the server resolves all edits first and applies them from the bottom of each file up, so no edit moves the place another one names, and the entries can be given in any order. " +
 		"The price: one edit cannot build on another of the same batch (insert a method, then edit it — put the final text in the insert), and two edits that change the same text are an error. " +
 		"An insertion at the edge of a replaced span is fine, and two insertions at one place are written in the order given. " +
 		"Nothing is written when any edit cannot be made: a pattern or a node that is not found, a literal pattern that matches several times without replaceAll, a replacement that does not parse, an overlap. " +
 		"The answer names each edit's outcome (edits[], by its 1-based position in the call), so the one to correct is known. " +
-		"A C# file is parsed as the batch leaves it: a batch that adds a syntax error is refused, quoting the parser — the check is on the result of all edits together, so two edits that are each half of a change pass. allowSyntaxErrors: true writes anyway. The replacement text of a replace_in_code edit must itself parse, whatever the rest of the batch does. " +
-		"A replace_in_code edit lays claim to its whole node: another edit inside that node is an overlap, also where the two would not change the same characters. " +
+		"A C# file is parsed as the batch leaves it: a batch that adds a syntax error is refused, quoting the parser — the check is on the result of all edits together, so two edits that are each half of a change pass. allowSyntaxErrors: true writes anyway. The replacement text of a roslyn_replace_in_code edit must itself parse, whatever the rest of the batch does. " +
+		"A roslyn_replace_in_code edit lays claim to its whole node: another edit inside that node is an overlap, also where the two would not change the same characters. " +
 		"On success, files[] lists each file with the line ranges that changed, in the file as it is now, and the backup token that restores it with roslyn_local_history. " +
 		"Supports dryRun=true: everything is resolved and checked, nothing is written. " +
 		"For a single edit, the tool of that kind is simpler; for a whole new file, roslyn_write_file."
@@ -108,7 +108,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			
 			if(edit is null || op is null) {
 				
-				outcomes[index] = Failed($"Unknown op '{edit?.Op}'. An op is one of: replace_in_file, insert_lines, replace_in_code.", null);
+				outcomes[index] = Failed($"Unknown op '{edit?.Op}'. An op is one of: roslyn_replace_in_file, roslyn_insert_lines, roslyn_replace_in_code.", null);
 				continue;
 			}
 			
@@ -176,8 +176,8 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			
 			var plan = op switch {
 				
-				"replace_in_file" => PlanTextReplace(edit, file),
-				"insert_lines"    => PlanInsert(edit, file),
+				"roslyn_replace_in_file" => PlanTextReplace(edit, file),
+				"roslyn_insert_lines"    => PlanInsert(edit, file),
 				_                 => PlanCodeReplace(edit, file),
 			};
 			
@@ -321,16 +321,20 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		return scope.Outcome($"{edits.Length} edit(s) in {files.Count} file(s)", new MultiEditResult(true, outcomes, [..written], null) { Caution = caution });
 	}
 	
-	// An op as the cores are named, with or without the tools' prefix; null for anything else.
+	// An op is the name of the tool it stands for, and is reported under that name. The name
+	// without the tools' prefix is taken too, since a batch written that way says what it means;
+	// it is named nowhere, because a short name an agent has read is one it will call (#326).
 	static string? NormalizeOp(string? op)
 	{
 		var name = op?.Trim().ToLowerInvariant() ?? "";
 		
-		if(name.StartsWith("roslyn_", StringComparison.Ordinal))
-			name = name["roslyn_".Length..];
+		if(!name.StartsWith(ToolPrefix, StringComparison.Ordinal))
+			name = ToolPrefix + name;
 		
-		return name is "replace_in_file" or "insert_lines" or "replace_in_code" ? name : null;
+		return name is "roslyn_replace_in_file" or "roslyn_insert_lines" or "roslyn_replace_in_code" ? name : null;
 	}
+	
+	const string ToolPrefix = "roslyn_";
 	
 	// An edit that cannot be planned for a reason of the batch's own: an argument its op needs.
 	sealed record NoPlan : EditPlan;
@@ -343,7 +347,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 	{
 		if(edit.Pattern is null || edit.Replacement is null)
 			
-			return Refused("replace_in_file needs pattern and replacement.", null);
+			return Refused("roslyn_replace_in_file needs pattern and replacement.", null);
 		
 		if(!TryResolveMatchMode(edit.Mode, false, "useRegex", MatchMode.Regex, MatchMode.Literal, out var matchMode, out _, out var modeError))
 			
@@ -365,7 +369,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 	
 	static EditPlan PlanInsert(MultiEditEntry edit, BatchFile file)
 		=> edit.Text is null
-			? Refused("insert_lines needs text.", null)
+			? Refused("roslyn_insert_lines needs text.", null)
 			: InsertLinesTool.Plan(file.Content, edit.Text, edit.AtLine, edit.InsertAfter, edit.InsertBefore)
 	;
 	
@@ -373,7 +377,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 	{
 		if(file.Tree is null || file.Text is null)
 			
-			return Refused("replace_in_code needs a C# source file (.cs).", "Use op replace_in_file for this file.");
+			return Refused("roslyn_replace_in_code needs a C# source file (.cs).", "Use op roslyn_replace_in_file for this file.");
 		
 		if(edit.NodeKind is null || !ReplaceInCodeTool.TryParseSyntaxKind(edit.NodeKind, out var kind))
 			
@@ -440,54 +444,54 @@ internal sealed class MultiEditTool : RoslynMcpTool
 /// </summary>
 internal sealed class MultiEditEntry
 {
-	[Description("The kind of edit: 'replace_in_file' (pattern, replacement; optional mode, caseSensitive, inMember, replaceAll), 'insert_lines' (text, and one of atLine, insertAfter, insertBefore) or 'replace_in_code' (nodeKind; optional textPattern, replacement, line, column, force). Each takes the parameters of the tool of that name.")]
+	[Description("The kind of edit: 'roslyn_replace_in_file' (pattern, replacement; optional mode, caseSensitive, inMember, replaceAll), 'roslyn_insert_lines' (text, and one of atLine, insertAfter, insertBefore) or 'roslyn_replace_in_code' (nodeKind; optional textPattern, replacement, line, column, force). Each takes the parameters of the tool of that name.")]
 	public string Op { get; set; } = "";
 	
 	[Description("Relative path to the file from the workspace root.")]
 	public string FilePath { get; set; } = "";
 	
-	[Description("replace_in_file: the pattern to find; literal unless mode says otherwise. A literal pattern must match once, or pass replaceAll.")]
+	[Description("roslyn_replace_in_file: the pattern to find; literal unless mode says otherwise. A literal pattern must match once, or pass replaceAll.")]
 	public string? Pattern { get; set; }
 	
-	[Description("replace_in_file: the replacement text. replace_in_code: the new text of the node; empty or omitted deletes the node.")]
+	[Description("roslyn_replace_in_file: the replacement text. roslyn_replace_in_code: the new text of the node; empty or omitted deletes the node.")]
 	public string? Replacement { get; set; }
 	
-	[Description("replace_in_file: 'literal' (default), 'regex' or 'glob'.")]
+	[Description("roslyn_replace_in_file: 'literal' (default), 'regex' or 'glob'.")]
 	public string? Mode { get; set; }
 	
-	[Description("replace_in_file: case-sensitive matching. Default: true.")]
+	[Description("roslyn_replace_in_file: case-sensitive matching. Default: true.")]
 	public bool? CaseSensitive { get; set; }
 	
-	[Description("replace_in_file, C# files: count only the matches inside this declaration, e.g. 'Foo' or 'Type.Foo'.")]
+	[Description("roslyn_replace_in_file, C# files: count only the matches inside this declaration, e.g. 'Foo' or 'Type.Foo'.")]
 	public string? InMember { get; set; }
 	
-	[Description("replace_in_file: replace every match of a literal pattern. Default: false.")]
+	[Description("roslyn_replace_in_file: replace every match of a literal pattern. Default: false.")]
 	public bool ReplaceAll { get; set; }
 	
-	[Description("insert_lines: the text to insert; may hold several lines.")]
+	[Description("roslyn_insert_lines: the text to insert; may hold several lines.")]
 	public string? Text { get; set; }
 	
-	[Description("insert_lines: the 1-based line to insert before, in the file as it is before the batch.")]
+	[Description("roslyn_insert_lines: the 1-based line to insert before, in the file as it is before the batch.")]
 	public int? AtLine { get; set; }
 	
-	[Description("insert_lines: insert after the first line that contains this literal text.")]
+	[Description("roslyn_insert_lines: insert after the first line that contains this literal text.")]
 	public string? InsertAfter { get; set; }
 	
-	[Description("insert_lines: insert before the first line that contains this literal text.")]
+	[Description("roslyn_insert_lines: insert before the first line that contains this literal text.")]
 	public string? InsertBefore { get; set; }
 	
-	[Description("replace_in_code: the syntax node kind, e.g. 'method', 'property', 'class', 'IfStatement'.")]
+	[Description("roslyn_replace_in_code: the syntax node kind, e.g. 'method', 'property', 'class', 'IfStatement'.")]
 	public string? NodeKind { get; set; }
 	
-	[Description("replace_in_code: the declared name of the node (for other nodes, text it contains).")]
+	[Description("roslyn_replace_in_code: the declared name of the node (for other nodes, text it contains).")]
 	public string? TextPattern { get; set; }
 	
-	[Description("replace_in_code: the 1-based line the node starts on, in the file as it is before the batch. Default: 0 — any line.")]
+	[Description("roslyn_replace_in_code: the 1-based line the node starts on, in the file as it is before the batch. Default: 0 — any line.")]
 	public int Line { get; set; }
 	
-	[Description("replace_in_code: the 1-based column the node starts at. Requires line. Default: 0 — any column.")]
+	[Description("roslyn_replace_in_code: the 1-based column the node starts at. Requires line. Default: 0 — any column.")]
 	public int Column { get; set; }
 	
-	[Description("replace_in_code: replace every matching node. Default: false.")]
+	[Description("roslyn_replace_in_code: replace every matching node. Default: false.")]
 	public bool Force { get; set; }
 }
