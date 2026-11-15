@@ -584,7 +584,7 @@ internal static class CodeRefactoringTests
 		// A blank line that was indented stays indented (#491). Roslyn's formatter empties such
 		// lines over the whole region it formats, so inverting one `if` came back as a change to
 		// every blank line around it: the diff showed them, and the apply wrote them. The fixture
-		// has five indented blank lines, in and around the `if`; the diff must remove none of
+		// has five indented blank lines, in and around the `if`; the diff must change none of
 		// them, and the file must still have five after the apply, which is also what shows that
 		// the apply writes what the preview showed. The same test pins the answer's shape: the
 		// header carries no diff, and the diff follows as raw text naming the file relative to the
@@ -603,11 +603,16 @@ internal static class CodeRefactoringTests
 			var diff  = PreviewAnswer.Diff(previewText);
 			var lines = diff.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
 			
+			// Inverting the `if` swaps its branches, so a blank line that moved with its block is in
+			// the diff as removed in one place and added in another. What must not be there is a
+			// blank line that changed: the removed blank lines and the added ones are the same lines.
+			string[] BlankLines(char sign) => [..lines.Where(line => line.Length > 0 && line[0] == sign && string.IsNullOrWhiteSpace(line[1..])).Select(line => line[1..]).Order(StringComparer.Ordinal)];
+			
 			if(token is null
 				|| preview?["diff"] is not null
 				|| lines is not ["--- Blank.cs", "+++ Blank.cs", ..]
 				|| !lines.Any(line => line.StartsWith('+') && line.Contains("value <= 0", StringComparison.Ordinal))
-				|| lines.Any(line => line.Length > 1 && line[0] is '-' or '+' && string.IsNullOrWhiteSpace(line[1..])))
+				|| !BlankLines('-').SequenceEqual(BlankLines('+')))
 				return (false, $"FAIL  (preview: {previewText}) [{sw.ElapsedMilliseconds}ms]");
 			
 			var (apply, applyText) = await Apply(styled.Csproj!, token);
