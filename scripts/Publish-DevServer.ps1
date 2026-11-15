@@ -116,21 +116,26 @@ if($InstallHost) {
     Write-Host "Point the MCP client's ""command"" at it and keep the server's arguments (""--root"", ""."")."
 }
 
-# The tool-style publish rewrites the server's lock file without its per-RID entries. That is noise in
-# the working tree, so a lock file that was clean before is put back; one with changes is left alone.
-$lockFile     = 'src/RoslynMcp/packages.lock.json'
-$lockWasClean = -not (git -C $repoRoot status --porcelain -- $lockFile)
-
-$sha    = (git -C $repoRoot rev-parse --short HEAD).Trim()
+$sha= (git -C $repoRoot rev-parse --short HEAD).Trim()
 $dirty  = if(git -C $repoRoot status --porcelain --untracked-files=no) { '-dirty' } else { '' }
 $name   = '{0}-{1}{2}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'), $sha, $dirty
 $target = Join-Path $builds $name
 
-# PackDebug is the configuration the locally installed tool is packed from: loose assemblies, DEBUG defined.
-dotnet publish (Join-Path $repoRoot 'src/RoslynMcp/RoslynMcp.csproj') -c PackDebug -f net10.0 -o $target --nologo -v q
+$project = Join-Path $repoRoot 'src/RoslynMcp/RoslynMcp.csproj'
+
+# Restored the ordinary way and published without a restore of its own, as the release workflow packs
+# (#482). The pack configurations declare no runtime identifiers, so a restore under one resolves
+# another graph and rewrites src/RoslynMcp/packages.lock.json without its per-RID entries, and the next
+# ordinary restore writes them back. Each rewrite reloaded the workspace of every server that has the
+# repository open, and the publish in between replaced obj/project.assets.json under them.
+dotnet restore $project --nologo -v q
 $published = $LASTEXITCODE
 
-if($lockWasClean) { git -C $repoRoot checkout -- $lockFile }
+# PackDebug is the configuration the locally installed tool is packed from: loose assemblies, DEBUG defined.
+if($published -eq 0) {
+    dotnet publish $project -c PackDebug -f net10.0 --no-restore -o $target --nologo -v q
+    $published = $LASTEXITCODE
+}
 
 if($published -ne 0) {
     Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
