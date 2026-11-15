@@ -86,17 +86,32 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			// The types around it, innermost first, against the segments before the last.
 			var types = member.Ancestors().OfType<BaseTypeDeclarationSyntax>().Select(type => type.Identifier.Text).ToArray();
 			
-			var inTypes = types.Length >= segments.Length - 1;
+			// 'IDisposable.Dispose' is the explicit implementation, whatever type it is in, and
+			// 'Names.IDisposable.Dispose' the one in Names: the interface is then a segment of
+			// its own before the types.
+			var qualifiers = segments.AsSpan(0, segments.Length - 1);
 			
-			for(var i = 0; i < segments.Length - 1 && inTypes; i++)
-				inTypes = types[i] == segments[segments.Length - 2 - i];
-			
-			// 'IDisposable.Dispose' is the explicit implementation, whatever type it is in.
-			if(inTypes || segments.Length == 2 && ExplicitInterface(member) == segments[0])
+			if(In(types, qualifiers) || qualifiers.Length > 0 && ExplicitInterface(member) == qualifiers[^1] && In(types, qualifiers[..^1]))
 				found.Add((described.Declaration, described.Span));
 		}
 		
 		return [..found];
+	}
+	
+	// Whether the types around a member, innermost first, are the ones a name's qualifiers say,
+	// outermost first. Fewer qualifiers than types is a match: 'Inner.Foo' names Outer.Inner.Foo.
+	static bool In(string[] types, ReadOnlySpan<string> qualifiers)
+	{
+		if(types.Length < qualifiers.Length)
+			
+			return false;
+		
+		for(var i = 0; i < qualifiers.Length; i++)
+			if(types[i] != qualifiers[qualifiers.Length - 1 - i])
+				
+				return false;
+		
+		return true;
 	}
 	
 	/// <summary>The names of every declaration in the file, for an answer that says what is there.</summary>
@@ -112,9 +127,10 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 	///     <c>Type</c>, <c>Foo</c>. Attributes before it, what stands before the name (a return
 	///     type, modifiers), its parameter list (or an indexer's) and type arguments are dropped.
 	///     <para>
-	///         The parameter list is the bracket the text ends in, found from its end: the first
-	///         parenthesis of <c>(int, string) Pair()</c> and of <c>Task&lt;(int, int)&gt; Foo()</c>
-	///         belongs to the return type.
+	///         The parameter list is the first bracket that follows a name, and everything from
+	///         it on is dropped with it: an expression body, a constructor initializer, constraints.
+	///         The first parenthesis of <c>(int, string) Pair()</c> and of
+	///         <c>Task&lt;(int, int)&gt; Foo()</c> follows no name and belongs to the return type.
 	///     </para>
 	/// </summary>
 	public static string[] NameSegments(string name)
@@ -125,14 +141,41 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 		while(text.Length > 0 && text[0] == '[' && MatchingClose(text, 0) is var close and >= 0)
 			text = text[(close + 1)..].TrimStart();
 		
-		// The parameter list: the bracket the text ends in, or one that was never closed ('Foo(').
-		if(text.Length > 0 && text[^1] is ')' or ']') {
+		// The parameter list (or an indexer's): the first bracket that follows a name. From it on
+		// nothing is the name: not the list, not what comes after it ('=> Add(a, a)', ': base(a)',
+		// 'where T : new()', a body). A bracket that follows no name is part of a type and is
+		// stepped over whole: the tuple of '(int, string) Pair()', and the rank of 'int[] All()',
+		// which follows a name but holds nothing.
+		var angles = 0;
+		
+		for(var i = 0; i < text.Length; i++) {
 			
-			if(MatchingOpen(text, text.Length - 1) is var open and >= 0)
-				text = text[..open];
+			var c = text[i];
+			
+			if(c == '<')
+				angles++;
+			else if(c == '>')
+				angles = Math.Max(0, angles - 1);
+			
+			if(c is not ('(' or '[') || angles > 0)
+				continue;
+			
+			var before = text[..i].TrimEnd();
+			var close  = MatchingClose(text, i);
+			var rank   = c == '[' && close >= 0 && text[(i + 1)..close].Trim().Trim(',').Trim().IsEmpty;
+			
+			if(!rank && before.Length > 0 && (char.IsLetterOrDigit(before[^1]) || before[^1] is '_' or '>')) {
+				
+				text = before;
+				break;
+			}
+			
+			// Not closed and after no name: nothing behind it can be told apart.
+			if(close < 0)
+				break;
+			
+			i = close;
 		}
-		else if(text.LastIndexOfAny('(', '[') is var unclosed and >= 0 && text[unclosed..].IndexOfAny(')', ']') < 0)
-			text = text[..unclosed];
 		
 		// Type arguments out, at any depth, before the split: 'Map<string, int>.Add' has a dot-free
 		// argument list, 'Outer<A.B>.Add' has not.
@@ -158,8 +201,8 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 		;
 	}
 	
-	// The index of the bracket that closes the one at 'open', or -1. Round, square and angle
-	// brackets nest; what is in a string literal is not looked at, a name holds none.
+	// The index of the bracket that closes the one at 'open', or -1. Round and square brackets
+	// nest; what is in a string literal is not looked at, a name holds none.
 	static int MatchingClose(ReadOnlySpan<char> text, int open)
 	{
 		var depth = 0;
@@ -169,23 +212,6 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			if(text[i] is '(' or '[')
 				depth++;
 			else if(text[i] is ')' or ']' && --depth == 0)
-				
-				return i;
-		}
-		
-		return -1;
-	}
-	
-	// The index of the bracket that opens the one at 'close', or -1.
-	static int MatchingOpen(ReadOnlySpan<char> text, int close)
-	{
-		var depth = 0;
-		
-		for(var i = close; i >= 0; i--) {
-			
-			if(text[i] is ')' or ']')
-				depth++;
-			else if(text[i] is '(' or '[' && --depth == 0)
 				
 				return i;
 		}

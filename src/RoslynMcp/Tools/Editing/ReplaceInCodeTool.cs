@@ -238,11 +238,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// Nodes of one kind can start at the same place, as in 'a.b.c', and asking for a position
 		// again would never end.
 		// A pattern read as a name has lost its parameter list, so 'Foo(int a)' names every
-		// overload of Foo: force does not reach those, or one signature would replace them all.
-		if(matchedNodes.Length > 1 && readAsName is not null && force && !dryRun)
+		// overload of Foo. Several such nodes are never replaced, with force or without: one
+		// signature would replace them all. A dry run with force is told the same, since its
+		// verdict is the write's; one without lists the nodes, as every dry run does.
+		if(matchedNodes.Length > 1 && readAsName is not null && (force || !dryRun))
 			
 			return scope.Outcome("multiple matches", new ReplaceInCodeResult(false, matchedNodes.Length, changedNodeInfo,
-				$"textPattern matched nothing as written and was read as the name '{readAsName}', which {matchedNodes.Length} nodes have; its parameter list was not compared. Nothing was replaced, and force does not apply to a name read this way: pass line and column to target one, or the plain name as textPattern to replace all."));
+				$"textPattern matched nothing as written and was read as the name '{readAsName}', which {matchedNodes.Length} nodes have; its parameter list was not compared. Nothing {(dryRun ? "would be" : "was")} replaced: pass line and column to target one, or the plain name as textPattern with force=true to replace all."));
 		
 		if(matchedNodes.Length > 1 && !force && !dryRun) {
 			
@@ -372,7 +374,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		// parameter list is not compared, so 'Foo(string s)' finds a lone 'Foo(int a)'.
 		if(readAsName is not null) {
 			
-			var taken = $"textPattern matched nothing as written and was read as the name '{readAsName}': the node at line {StartOf(matchedNodes[0]).Line + 1} was taken, and a parameter list or return type in the pattern was not compared.";
+			var taken = $"textPattern matched nothing as written and was read as the name '{readAsName}': the node at line {string.Join(", ", matchedNodes.Select(n => StartOf(n).Line + 1))} was taken, and a parameter list or return type in the pattern was not compared.";
 			
 			caution = caution is null ? taken : $"{taken} {caution}";
 		}

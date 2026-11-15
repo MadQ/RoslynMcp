@@ -224,8 +224,10 @@ static class EditSafetyTests
 				var tuple    = await Replace(new { filePath = "names.cs", pattern = "return (0", replacement = "return (1", inMember = "(int, string) Pair()", dryRun = true, projectPath = fx.Csproj });
 				var explicit_ = await Replace(new { filePath = "names.cs", pattern = "{ }", replacement = "{ return; }", inMember = "void IDisposable.Dispose()", dryRun = true, projectPath = fx.Csproj });
 				var indexer  = await Replace(new { filePath = "names.cs", pattern = "return 0;", replacement = "return 1;", inMember = "this[int i]", dryRun = true, projectPath = fx.Csproj });
+				var inType   = await Replace(new { filePath = "names.cs", pattern = "{ }", replacement = "{ return; }", inMember = "Names.IDisposable.Dispose", dryRun = true, projectPath = fx.Csproj });
 				
 				return Verdict(tuple?["match_count"]?.GetValue<int>() == 1
+					&& inType?["match_count"]?.GetValue<int>() == 1
 					&& explicit_?["match_count"]?.GetValue<int>() == 1
 					&& indexer?["match_count"]?.GetValue<int>() == 1, new JsonArray(tuple?.DeepClone(), explicit_?.DeepClone(), indexer?.DeepClone()), null);
 			}),
@@ -258,7 +260,19 @@ static class EditSafetyTests
 				var taken  = await InCode(new { filePath = "code_name.cs", nodeKind = "method", textPattern = "First(string s)", dryRun = true, projectPath = fx.Csproj });
 				var forced = await InCode(new { filePath = "code_force.cs", nodeKind = "method", textPattern = "Second(int a)", replacement = "int Second() => 0;", force = true, projectPath = fx.Csproj });
 				
+				// What follows a parameter list is not the name either: an expression body's call,
+				// a constructor initializer, a constraint. Each of these named another member, or none.
+				var bodied   = await InCode(new { filePath = "code_name.cs", nodeKind = "method", textPattern = "int First() => Second(1)", dryRun = true, projectPath = fx.Csproj });
+				var arrayed  = await InCode(new { filePath = "code_name.cs", nodeKind = "method", textPattern = "int[] First(int[] a) where T : new()", dryRun = true, projectPath = fx.Csproj });
+				var unforced = await InCode(new { filePath = "code_force.cs", nodeKind = "method", textPattern = "Second(int a)", replacement = "int Second() => 0;", projectPath = fx.Csproj });
+				var dryForce = await InCode(new { filePath = "code_force.cs", nodeKind = "method", textPattern = "Second(int a)", replacement = "int Second() => 0;", force = true, dryRun = true, projectPath = fx.Csproj });
+				
 				return Verdict(taken?["change_count"]?.GetValue<int>() == 1
+					&& bodied?["change_count"]?.GetValue<int>() == 1
+					&& (bodied?["_caution"]?.GetValue<string>() ?? "").Contains("read as the name 'First'")
+					&& arrayed?["change_count"]?.GetValue<int>() == 1
+					&& (unforced?["message"]?.GetValue<string>() ?? "").Contains("read as the name 'Second'")
+					&& (dryForce?["message"]?.GetValue<string>() ?? "").Contains("Nothing would be replaced")
 					&& (taken?["_caution"]?.GetValue<string>() ?? "").Contains("read as the name 'First'")
 					&& forced?["applied"]?.GetValue<bool>() == false
 					&& forced?["change_count"]?.GetValue<int>() == 2
