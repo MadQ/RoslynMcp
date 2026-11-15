@@ -386,14 +386,15 @@ internal abstract partial class RoslynMcpTool
 			return returnValue;
 		}
 		
+		// The notes of this call, each kept once.
+		readonly HashSet<string> recorded = new(StringComparer.Ordinal);
+		
 		/// <summary>
 		///     Appends a neutral annotation without changing the outcome. Notes are kept apart from the
 		///     terminal detail and joined after it on dispose — they used to be appended to the detail
 		///     itself, where the terminal call (Outcome/Failed/Error), which always runs last, overwrote
 		///     them, so no note recorded on a normal return path ever reached the log (#306).
 		/// </summary>
-		readonly HashSet<string> recorded = new(StringComparer.Ordinal);
-		
 		public void Record(string? note)
 		{
 			// Callers pass null for "nothing worth noting" (e.g. the resolution-kind switch in

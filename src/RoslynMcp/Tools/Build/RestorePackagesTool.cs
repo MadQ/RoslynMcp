@@ -91,7 +91,7 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 		return warnings.Length > 0 ? string.Join("\n", warnings) : null;
 	}
 	
-	static readonly System.Text.RegularExpressions.Regex WarningLine = new(@": warning( [A-Za-z]+\d+)?\s*:|\bwarning [A-Za-z]+\d+:", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+	static readonly System.Text.RegularExpressions.Regex WarningLine = new(@": warning( [A-Za-z]+\d+)?\s*:|^warning( [A-Za-z]+\d+)?\s*:|\bwarning [A-Za-z]+\d+:", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
 }
 
 internal sealed record RestoreResult(
