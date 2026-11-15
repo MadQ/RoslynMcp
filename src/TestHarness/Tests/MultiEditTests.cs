@@ -19,6 +19,9 @@ static class MultiEditTests
 	const string Other = "class B\n{\n\tint value = 1;\n}\n";
 	const string Notes = "alpha\nbeta\ngamma\n";
 	
+	// A props file no project imports (#245).
+	const string Props = "<Project>\n  <PropertyGroup>\n    <Foo>1</Foo>\n  </PropertyGroup>\n</Project>\n";
+	
 	internal static TestGroup Build(TestContext ctx)
 	{
 		var fx = TestFixtures.NewMsBuildProject("MultiEdit");
@@ -30,6 +33,8 @@ static class MultiEditTests
 			fx.Write($"{name}_A.cs", CodeOf(name));
 		
 		fx.Write("tail.txt", "alpha");
+		fx.Write("halves.props", Props);
+		fx.Write("lost.props", Props);
 		fx.Write("adjacent.cs", "class Adjacent\n{\n\tint One() => 1;\n\tint Two() => 2;\n}\n");
 		
 		var real   = fx.Write("real_A.cs", CodeOf("real"));
@@ -323,6 +328,25 @@ static class MultiEditTests
 				var range  = answer?["files"]?[0]?["changed_line_ranges"]?.AsArray() is [var only] ? only : null;
 				
 				return Verdict(range?["start"]?.GetValue<int>() == 8 && range?["end"]?.GetValue<int>() == 9, answer, null);
+			}),
+			
+			// #245: a project's XML is checked as the batch leaves it. An element opened by one
+			// edit and closed by another is sound; each alone is refused by the single tool.
+			new("multi edit: two edits that open and close an XML element pass together, and a lost closing tag is refused", async () => {
+				
+				var halves = await Batch(
+					new { op = "roslyn_insert_lines", filePath = "halves.props", atLine = 2, text = "  <ItemGroup>" },
+					new { op = "roslyn_insert_lines", filePath = "halves.props", atLine = 5, text = "  </ItemGroup>" });
+				
+				var lost = await Batch(
+					new { op = "roslyn_replace_in_file", filePath = "lost.props", pattern = "<Foo>1</Foo>", replacement = "<Foo>2</Foo>" },
+					new { op = "roslyn_replace_in_file", filePath = "lost.props", pattern = "  </PropertyGroup>\n", replacement = "" });
+				
+				return Verdict(halves?["applied"]?.GetValue<bool>() == true
+					&& Read("halves.props") == "<Project>\n  <ItemGroup>\n  <PropertyGroup>\n    <Foo>1</Foo>\n  </PropertyGroup>\n  </ItemGroup>\n</Project>\n"
+					&& lost?["applied"]?.GetValue<bool>() == false
+					&& (lost?["files"]?[0]?["error"]?.GetValue<string>() ?? "").Contains("PropertyGroup")
+					&& Read("lost.props") == Props, new JsonArray(halves?.DeepClone(), lost?.DeepClone()), Read("halves.props"));
 			}),
 			
 			new("multi edit: an unknown op fails its edit and names the three there are", async () => {

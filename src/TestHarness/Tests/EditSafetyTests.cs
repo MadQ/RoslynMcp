@@ -19,6 +19,9 @@ static class EditSafetyTests
 	// Three methods that end in the same line, two of them overloads of one name.
 	const string Source = "class Safe\n{\n\tint First()\n\t{\n\t\treturn 0;\n\t}\n\n\tint Second()\n\t{\n\t\treturn 0;\n\t}\n\n\tint Second(int a)\n\t{\n\t\treturn 0;\n\t}\n}\n";
 	
+	// A props file no project imports: editing it must not change what the fixture project is.
+	const string Props = "<Project>\n  <PropertyGroup>\n    <Foo>1</Foo>\n  </PropertyGroup>\n</Project>\n";
+	
 	internal static TestGroup Build(TestContext ctx)
 	{
 		var fx = TestFixtures.NewMsBuildProject("EditSafety");
@@ -35,6 +38,11 @@ static class EditSafetyTests
 		
 		// An unterminated comment, and behind it a statement without its semicolon.
 		fx.Write("uncover.cs", "class Uncover\n{\n\tint a = 1; /* open\n\tint b = 2\n}\n");
+		// Project XML (#245): three sound copies, and one whose PropertyGroup is never closed.
+		foreach(var name in new[] { "closing", "allowed", "sound" })
+			fx.Write($"{name}.props", Props);
+		
+		fx.Write("broken.props", Props.Replace("  </PropertyGroup>\n", ""));
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
 		fx.Write("twice_regex.txt", "same\nother\nsame\n");
@@ -286,6 +294,38 @@ static class EditSafetyTests
 					&& forced?["applied"]?.GetValue<bool>() == false
 					&& forced?["change_count"]?.GetValue<int>() == 2
 					&& Read("code_force.cs") == SourceOf("code_force"), new JsonArray(taken?.DeepClone(), forced?.DeepClone()), Read("code_force.cs"));
+			}),
+			
+			// #245: the XML files a project is evaluated from are checked as C# is. A closing tag
+			// goes missing: the file would fail the next workspace load, far from this edit, so
+			// the edit is refused with the XML parser's message and the file is as it was.
+			new("edit safety: a text edit that leaves a .props file as malformed XML is refused", async () => {
+				
+				var answer = await Replace(new { filePath = "closing.props", pattern = "  </PropertyGroup>\n", replacement = "", projectPath = fx.Csproj });
+				var error  = answer?["error"]?.GetValue<string>() ?? "";
+				
+				return Verdict(error.Contains("syntax error") && error.Contains("line ") && error.Contains("PropertyGroup") && Read("closing.props") == Props, answer, Read("closing.props"));
+			}),
+			
+			new("edit safety: allowSyntaxErrors writes the malformed XML and names the error in _caution", async () => {
+				
+				var answer = await Replace(new { filePath = "allowed.props", pattern = "  </PropertyGroup>\n", replacement = "", allowSyntaxErrors = true, projectPath = fx.Csproj });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true
+					&& (answer?["_caution"]?.GetValue<string>() ?? "").Contains("PropertyGroup")
+					&& Read("allowed.props") == Props.Replace("  </PropertyGroup>\n", ""), answer, Read("allowed.props"));
+			}),
+			
+			// A project file that is already malformed must stay editable, or the tool that could
+			// repair it refuses to; and an ordinary edit of a sound one passes without a word.
+			new("edit safety: a malformed project file stays editable, and a sound edit of a sound one passes", async () => {
+				
+				var broken = await Replace(new { filePath = "broken.props", pattern = "<Foo>1</Foo>", replacement = "<Foo>2</Foo>", projectPath = fx.Csproj });
+				var sound  = await Replace(new { filePath = "sound.props", pattern = "<Foo>1</Foo>", replacement = "<Foo>2</Foo>", projectPath = fx.Csproj });
+				
+				return Verdict(broken?["applied"]?.GetValue<bool>() == true && broken?["_caution"] is null
+					&& sound?["applied"]?.GetValue<bool>() == true && sound?["_caution"] is null
+					&& Read("sound.props") == Props.Replace("<Foo>1</Foo>", "<Foo>2</Foo>"), new JsonArray(broken?.DeepClone(), sound?.DeepClone()), Read("sound.props"));
 			}),
 			
 			// Five of the eight failures said "Replacement text contains syntax errors". The parser

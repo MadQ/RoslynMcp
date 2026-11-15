@@ -26,6 +26,8 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		"In a C# file the result is parsed before it is written: an edit that adds a syntax error (an unbalanced brace, a missing semicolon) " +
 		"is refused with the parser's message and its line, and nothing is written. Errors the file already had do not count, " +
 		"and allowSyntaxErrors: true writes anyway, for an edit that is one half of a change the next edit completes. " +
+		"The XML files a project is evaluated from (.csproj, .props, .targets, .slnx, .ruleset, .resx, nuget.config, packages.config) are checked the same way: " +
+		"an edit that leaves a well-formed file as malformed XML is refused, quoting the XML parser, since such a file fails the next workspace load, not the edit. " +
 		"To replace a whole member or statement by its kind and name, use roslyn_replace_in_code; " +
 		"for inserting new lines without replacing existing content, use roslyn_insert_lines. " +
 		"Returns the number of replacements made and changed_line_ranges as inclusive { start, end } 1-based line ranges; start equals end for a single changed line. " +
@@ -144,7 +146,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var newContent = EditPlan.Apply(originalContent, plan.Changes);
 		
 		// Before the dry-run exit, so that a dry run's verdict is the write's (#267).
-		if(tree is not null && AddedSyntaxErrors(tree, newContent) is { Length: > 0 } added) {
+		if(EditChecks.AddedErrors(fullPath, tree, originalContent, newContent) is { Length: > 0 } added) {
 			
 			var quoted = Quoted(added);
 			
