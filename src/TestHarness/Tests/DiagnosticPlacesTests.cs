@@ -72,6 +72,26 @@ static class DiagnosticPlacesTests
 					&& last["line"]?.GetValue<int>() == 7, new JsonArray(first?.DeepClone(), second?.DeepClone()));
 			}),
 			
+			// A declaration says what it is, the lines it takes and where it starts only when it
+			// is a member or type of its own. A parameter is declared in a method: with the
+			// method's range and position beside it, an edit made from the answer replaced the
+			// method. Its uses are still listed under the method they are in.
+			new("diagnostic places: a parameter's declaration does not borrow the enclosing method's range", async () => {
+				
+				var parameter = await ctx.CallToolJsonAsync("roslyn_find_references", new { symbolName = "a", filePath = "Places.cs", line = 3, column = 15, projectPath = fx.Csproj });
+				var method    = await ctx.CallToolJsonAsync("roslyn_find_references", new { symbolName = "One", projectPath = fx.Csproj });
+				
+				var declared = parameter?["declarations"]?.AsArray() is [var only] ? only : null;
+				var uses     = SearchHits.In(parameter?["references"]) ?? [];
+				
+				return Verdict(declared?["line"]?.GetValue<int>() == 3
+					&& declared["declaration"] is null && declared["lines"] is null && declared["at"] is null
+					&& uses.Select(use => use.Line).SequenceEqual(new[] { 5, 6 })
+					&& uses.All(use => use.Declaration == "method One")
+					&& method?["declarations"]?[0]?["declaration"]?.GetValue<string>() == "method One"
+					&& method["declarations"]?[0]?["at"]?.GetValue<string>() == "3:2", new JsonArray(parameter?.DeepClone(), method?.DeepClone()));
+			}),
+			
 			// The count-only call lists nothing: no files, as it had no items.
 			new("diagnostic places: take 0 answers the counts without the findings", async () => {
 				

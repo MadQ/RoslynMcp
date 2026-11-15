@@ -350,7 +350,6 @@ internal sealed class DiagnosticsTool(WorkspaceResolver workspace, CodeActionHos
 		// the read that followed a finding used to fetch.
 		var items = DiagnosticPlace.Sorted(filtered.Select(d => DiagnosticPlace.Of(
 			d,
-			rootPath,
 			d.Location.SourceTree is { } tree ? projectOf?.GetValueOrDefault(tree) : unlocated.GetValueOrDefault(d),
 			TryMakeRelative(d.Location.GetLineSpan().Path, rootPath),
 			cancellationToken)));

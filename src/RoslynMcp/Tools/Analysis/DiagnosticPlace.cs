@@ -17,8 +17,8 @@ internal sealed record DiagnosticPlace(
 	string Code, string Severity, int Rank, string Message,
 	string? File, string? Project, int Line, int Column, string? Text, EnclosingDeclaration? Declaration)
 {
-	/// <summary>The finding at the place a diagnostic reports, with its path relative to <paramref name="rootPath"/>.</summary>
-	public static DiagnosticPlace Of(Diagnostic diagnostic, string rootPath, string? project, string? relativeFile, CancellationToken cancellationToken)
+	/// <summary>The finding at the place a diagnostic reports. <paramref name="relativeFile"/> is its file as the answer names it, or null for a finding with no place in a file.</summary>
+	public static DiagnosticPlace Of(Diagnostic diagnostic, string? project, string? relativeFile, CancellationToken cancellationToken)
 	{
 		var span = diagnostic.Location.GetLineSpan();
 		
