@@ -35,7 +35,9 @@ internal static class RoslynMcpJson
 	///     without explicit property names reads the same in a header as in an answer of its own.
 	/// </summary>
 	internal static readonly JsonSerializerOptions Header = new(JsonSerializerDefaults.Web) {
-		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+		
+		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+		Encoder                = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
 	
 	/// <summary>

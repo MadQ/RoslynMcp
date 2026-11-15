@@ -265,7 +265,7 @@ internal sealed record TypeMembersResult(
 	[property: JsonPropertyName("total_members")] int       TotalMembers,
 	[property: JsonPropertyName("skip")]          int       Skip,
 	[property: JsonPropertyName("take")]          int       Take,
-	[property: JsonPropertyName("members")]       object?[] Members,
+	[property: JsonPropertyName("members")]       object    Members,
 	[property: JsonPropertyName("page_token")]    string?   PageToken,
 	[property: JsonPropertyName("has_more")]      bool      HasMore
 ) : ToolResult;
@@ -939,12 +939,17 @@ internal sealed record ReplaceInFileResult : ToolResult
 }
 
 /// <summary>
-///     The answer of <c>roslyn_multi_edit</c> (#475): whether the batch was written, each edit's
-///     outcome by its place in the call, and the files with what changed in them.
+///     The answer of <c>roslyn_multi_edit</c> (#475): whether the batch was written, how many
+///     edits it had, and the files with what changed in them. <see cref="Edits"/> has every edit's
+///     outcome when the batch could not be made or was written in part. For a batch that can be
+///     made it has only the edits that changed another number of places than one, and is absent
+///     when there is none (#490).
 /// </summary>
 internal sealed record MultiEditResult(
-	[property: JsonPropertyName("applied")] bool               Applied,
-	[property: JsonPropertyName("edits")]   MultiEditOutcome[] Edits,
+	[property: JsonPropertyName("applied")]    bool                Applied,
+	[property: JsonPropertyName("edit_count")] int                 EditCount,
+	[property: JsonPropertyName("edits")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MultiEditOutcome[]? Edits,
 	[property: JsonPropertyName("files")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MultiEditFile[]? Files,
 	[property: JsonPropertyName("message")]

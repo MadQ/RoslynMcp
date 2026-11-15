@@ -288,6 +288,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			
 			Changes      = [..matches.Select(match => new TextChange(new TextSpan(match.Index, match.Length), matchMode is MatchMode.Regex ? match.Result(effectiveReplacement) : effectiveReplacement))],
 			Detail       = $"{matches.Length} replacement(s)",
+			Places       = matches.Length,
 			MatchCount   = matches.Length,
 			ChangedLines = changedLines,
 		};

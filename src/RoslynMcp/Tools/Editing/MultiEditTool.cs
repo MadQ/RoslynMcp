@@ -72,7 +72,8 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		"The price: one edit cannot build on another of the same batch (insert a method, then edit it — put the final text in the insert), and two edits that change the same text are an error. " +
 		"An insertion at the edge of a replaced span is fine, and two insertions at one place are written in the order given. " +
 		"Nothing is written when any edit cannot be made: a pattern or a node that is not found, a literal pattern that matches several times without replaceAll, a replacement that does not parse, an overlap. " +
-		"The answer names each edit's outcome (edits[], by its 1-based position in the call), so the one to correct is known. " +
+		"When an edit cannot be made, the answer names each edit's outcome (edits[], by its 1-based position in the call), so the one to correct is known. " +
+		"A batch that was written answers edit_count and the files with their changed lines, and names only the edits that changed another number of places than one. " +
 		"A C# file is parsed as the batch leaves it: a batch that adds a syntax error is refused, quoting the parser — the check is on the result of all edits together, so two edits that are each half of a change pass. allowSyntaxErrors: true writes anyway. The replacement text of a roslyn_replace_in_code edit must itself parse, whatever the rest of the batch does. " +
 		"A project's XML files (.csproj, .props, .targets, .slnx and the like) are checked the same way for being well-formed XML as the batch leaves them. " +
 		"A roslyn_replace_in_code edit lays claim to its whole node: another edit inside that node is an overlap, also where the two would not change the same characters. " +
@@ -98,6 +99,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"{edits.Length} edits in one call; the most is {MaxEdits}.", "Split the batch by file."));
 		
 		var outcomes = new MultiEditOutcome[edits.Length];
+		var places   = new int[edits.Length];
 		var files    = new Dictionary<string, BatchFile>(SecurityBoundary.PathComparer);
 		var cautions = new List<string>();
 		
@@ -204,6 +206,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 				file.Claims.Add((index, claim));
 			
 			outcomes[index] = new(index + 1, op, edit.FilePath, true, plan.Detail);
+			places[index]   = plan.Places;
 			
 			if(plan.Caution is not null)
 				cautions.Add($"Edit {index + 1}: {plan.Caution}");
@@ -237,7 +240,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		
 		if(failed > 0)
 			
-			return scope.Failed($"{failed} of {edits.Length} edit(s) cannot be made", new MultiEditResult(false, outcomes, null,
+			return scope.Failed($"{failed} of {edits.Length} edit(s) cannot be made", new MultiEditResult(false, edits.Length, outcomes, null,
 				$"Nothing was written: {failed} of {edits.Length} edit(s) cannot be made. Correct the ones with ok: false and send the batch again."));
 		
 		// The syntax check is on each file as the whole batch leaves it, which is what lets two
@@ -261,7 +264,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		
 		if(broken.Count > 0)
 			
-			return scope.Failed("would add syntax errors", new MultiEditResult(false, outcomes, [..broken],
+			return scope.Failed("would add syntax errors", new MultiEditResult(false, edits.Length, outcomes, [..broken],
 				$"Nothing was written: the batch would add syntax errors to {broken.Count} file(s), named in files[]. The line numbers there are those of the file as the batch would leave it.")
 			{
 				Hint = "Correct the edits of those files. When the batch is one half of a change that a later one completes, pass allowSyntaxErrors: true.",
@@ -269,9 +272,15 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		
 		var caution = cautions.Count > 0 ? string.Join(" ", cautions) : null;
 		
+		// Every edit can be made, so the answer names only the ones that changed another number of
+		// places than one (a regex, replaceAll, several nodes): the rest it would repeat from the
+		// call, at thirty tokens an edit (#490). A caution names its edit by number itself.
+		MultiEditOutcome[] telling = [..outcomes.Where((_, index) => places[index] != 1)];
+		var named = telling.Length > 0 ? telling : null;
+		
 		if(dryRun)
 			
-			return scope.Outcome("dry run", new MultiEditResult(false, outcomes, [..files.Values.Select(file => new MultiEditFile(file.Relative, ChangedLines(file)))],
+			return scope.Outcome("dry run", new MultiEditResult(false, edits.Length, named, [..files.Values.Select(file => new MultiEditFile(file.Relative, ChangedLines(file)))],
 				$"Dry run: {edits.Length} edit(s) in {files.Count} file(s) would be made.") { Caution = caution });
 		
 		// Every backup before the first write: a batch whose backups cannot all be saved has
@@ -317,13 +326,13 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		
 		if(writeError is not null)
 			
-			return scope.Failed("write failed", new MultiEditResult(false, outcomes, [..written],
+			return scope.Failed("write failed", new MultiEditResult(false, edits.Length, outcomes, [..written],
 				$"The batch was written in part: {writeError} files[] says which files were written, which failed and which were left alone.")
 			{
 				Hint = "Undo a written file with roslyn_local_history (action: apply) and its backup_token, or send the edits of the other files again.",
 			});
 		
-		return scope.Outcome($"{edits.Length} edit(s) in {files.Count} file(s)", new MultiEditResult(true, outcomes, [..written], null) { Caution = caution });
+		return scope.Outcome($"{edits.Length} edit(s) in {files.Count} file(s)", new MultiEditResult(true, edits.Length, named, [..written], null) { Caution = caution });
 	}
 	
 	// An op is the name of the tool it stands for, and is reported under that name. The name

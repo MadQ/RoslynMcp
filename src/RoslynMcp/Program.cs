@@ -227,6 +227,9 @@ builder.Services
 	.WithToolsFromAssembly(serializerOptions: new JsonSerializerOptions(JsonSerializerDefaults.Web) {
 		
 		  Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+		// A property without a value is left out (#490): "message": null told an agent nothing and
+		// was up to a fifth of a small answer. RoslynMcpJson.Header does the same.
+		, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
 		, TypeInfoResolver = JsonSerializerOptions.Default.TypeInfoResolver
 		, WriteIndented = false
 	})

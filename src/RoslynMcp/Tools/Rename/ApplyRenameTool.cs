@@ -215,7 +215,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 						new ApplyRenameResult(
 							$"Symbol renamed, but file rename failed: '{Path.GetFileName(newFilePath)}' already exists. " +
 							"Rename the file manually.",
-							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename conflict", null, files) { Caution = linkCaution });
+							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename conflict", null, files) { Caution = linkCaution, Hint = PhysicalApplyResultMapper.UndoHint(report, backups.IsEnabled) });
 				
 				try {
 					
@@ -242,7 +242,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 					return scope.Failed("file rename failed",
 						new ApplyRenameResult(
 							$"Symbol renamed, but file rename failed: {ex.Message}. Rename the file manually.",
-							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename failed", null, files) { Caution = linkCaution });
+							report.FilesWritten, report.FilesDeleted > 0 ? report.FilesDeleted : null, "file rename failed", null, files) { Caution = linkCaution, Hint = PhysicalApplyResultMapper.UndoHint(report, backups.IsEnabled) });
 				}
 			}
 			
@@ -254,7 +254,7 @@ internal sealed class ApplyRenameTool : RoslynMcpTool
 				report.FilesDeleted > 0 ? report.FilesDeleted : null,
 				null,
 				filesRenamed > 0 ? filesRenamed : null,
-				files) { Caution = linkCaution });
+				files) { Caution = linkCaution, Hint = PhysicalApplyResultMapper.UndoHint(report, backups.IsEnabled) });
 		}
 		finally {
 			

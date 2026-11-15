@@ -457,10 +457,22 @@ internal sealed record PreviewCodeFixResult : ToolResult, IToolError
 		Actions      = actions;
 		Message      = message;
 		Error        = error;
+		
+		// The fixes of one diagnostic all carried its id and its whole message (#490). Said once
+		// here; the choices keep theirs only when they are choices between diagnostics.
+		if(actions is [{ DiagnosticMessage: { } shared }, ..] && actions.All(action => action.DiagnosticId == diagnosticId && action.DiagnosticMessage == shared)) {
+			
+			DiagnosticMessage = shared;
+			Actions           = [..actions.Select(action => action with { DiagnosticId = null, DiagnosticMessage = null })];
+		}
 	}
 	
 	public string?               Token        { get; }
 	public string?               DiagnosticId { get; }
+	
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string?               DiagnosticMessage { get; }
+	
 	
 	// Set only without a token: the diff of a preview that got one follows this record as raw
 	// text, where it is not escaped (#491).
@@ -486,8 +498,8 @@ internal sealed record PreviewCodeFixResult : ToolResult, IToolError
 
 internal sealed record CodeFixActionChoice(
 	int     Index,
-	string  DiagnosticId,
-	string  DiagnosticMessage,
+	string? DiagnosticId,
+	string? DiagnosticMessage,
 	string? Title,
 	string? Provider,
 	string? EquivalenceKey

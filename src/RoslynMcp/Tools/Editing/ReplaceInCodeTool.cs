@@ -472,6 +472,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			Changes = [change],
 			Claims  = [claim],
 			Detail  = $"{verb} {matchedNodes.Length} node(s)",
+			Places  = matchedNodes.Length,
 			Caution = caution,
 			Notes   = logNotes,
 			NewRoot = newRoot,

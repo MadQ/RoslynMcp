@@ -83,7 +83,9 @@ static class MultiEditTests
 				var expected = CodeOf("mixed").Replace("return 1;", "return 10;").Replace("return 2;", "return 20;").Replace("\tint Three()", "\t// before Three\n\tint Three()");
 				
 				return Verdict(answer?["applied"]?.GetValue<bool>() == true
-					&& Ok(answer) is [true, true, true, true, true]
+					// Each edit changed one place, so the answer names none of them (#490).
+					&& answer?["edit_count"]?.GetValue<int>() == 5
+					&& answer?["edits"] is null
 					&& files.Count == 3
 					&& files.All(file => file?["backup_token"]?.GetValue<string>() is { Length: > 0 })
 					&& Read("mixed_A.cs") == expected
@@ -165,16 +167,22 @@ static class MultiEditTests
 					&& Read("halves_A.cs") == CodeOf("halves").Replace("int One()\n\t{\n\t\treturn 1;\n\t}", "int One()\n\t{\n\t\tif(true) {\n\t\t\treturn 1;\n\t\t}\n\n\t\treturn 0;\n\t}"), answer, Read("halves_A.cs"));
 			}),
 			
-			// The first op is written without the tools' prefix: it is taken, and reported under
-			// the tool's name, the only one an answer or a description ever shows (#326).
+			// The ops written without the tools' prefix are taken, and one is reported under the
+			// tool's name, the only one an answer or a description ever shows (#326). Of a batch
+			// that can be made, the answer names only the edit that changed another number of
+			// places than one (#490): the third, which replaces all three `int `.
 			new("multi edit: a dry run resolves and checks everything and writes nothing", async () => {
 				
 				var answer = await DryBatch(
 					new { op = "replace_in_file", filePath = "dry_A.cs", pattern = "return 1;", replacement = "return 10;" },
-					new { op = "roslyn_insert_lines", filePath = "dry_A.cs", atLine = 8, text = "\t// two" });
+					new { op = "roslyn_insert_lines", filePath = "dry_A.cs", atLine = 8, text = "\t// two" },
+					new { op = "replace_in_file", filePath = "dry_A.cs", pattern = "int ", replacement = "long ", replaceAll = true });
 				
 				return Verdict(answer?["applied"]?.GetValue<bool>() == false
-					&& Ok(answer) is [true, true]
+					&& answer?["edit_count"]?.GetValue<int>() == 3
+					&& answer?["edits"]?.AsArray() is { Count: 1 }
+					&& answer?["edits"]?[0]?["edit"]?.GetValue<int>() == 3
+					&& (answer?["edits"]?[0]?["detail"]?.GetValue<string>() ?? "").StartsWith("3 replacement")
 					&& answer?["files"]?[0]?["backup_token"] is null
 					&& answer?["edits"]?[0]?["op"]?.GetValue<string>() == "roslyn_replace_in_file"
 					&& (answer?["message"]?.GetValue<string>() ?? "").StartsWith("Dry run")

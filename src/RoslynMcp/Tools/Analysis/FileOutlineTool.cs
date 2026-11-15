@@ -13,7 +13,7 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_get_file_outline", ReadOnly = true, Title = "Get File Outline", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns a structured outline of a C# file: all types with their kind (class, struct, interface, enum, record), " +
-		"name, and member signatures — without body content. " +
+		"name, and member signatures listed by kind (members.method, members.property, members.field, …) — without body content. " +
 		"Use this to understand a file's structure at a glance before deciding which members to read in full with " +
 		"roslyn_get_member_body, or to enumerate a type's API without fetching the whole file with roslyn_read_file. " +
 		"Significantly more token-efficient than a full file read when you only need signatures. " +
@@ -100,9 +100,12 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 		return [.. results];
 	}
 	
-	private static MemberOutline[] ExtractMembers(INamedTypeSymbol type)
+	// The members' signatures by kind ("method", "property", "field", …), each kind in the order
+	// of declaration (#490). One object per member with its kind beside the signature was a
+	// quarter of an outline, and the signature says what kind it is.
+	private static SortedDictionary<string, List<string>> ExtractMembers(INamedTypeSymbol type)
 	{
-		var results = new List<MemberOutline>();
+		var results = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
 		
 		foreach(var member in type.GetMembers()) {
 			
@@ -125,10 +128,13 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 				_ => member.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)
 			};
 			
-			results.Add(new MemberOutline(kind, signature));
+			if(!results.TryGetValue(kind, out var signatures))
+				results[kind] = signatures = [];
+			
+			signatures.Add(signature);
 		}
 		
-		return [.. results];
+		return results;
 	}
 	
 	
@@ -136,6 +142,5 @@ internal sealed class FileOutlineTool : RoslynMcpTool
 	
 	
 	
-	private sealed record TypeOutline(string Kind, string Name, MemberOutline[] Members);
-	private sealed record MemberOutline(string Kind, string Signature);
+	private sealed record TypeOutline(string Kind, string Name, SortedDictionary<string, List<string>> Members);
 }

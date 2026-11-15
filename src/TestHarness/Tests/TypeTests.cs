@@ -74,7 +74,10 @@ static class TypeTests
 				() => ctx.RunTestAsync(
 					"roslyn_get_type_members",
 					new { typeName = "WorkspaceManager", projectPath = ctx.TargetPath },
-					data => data?["members"]?.AsArray().Count > 0 && data["members"]?[0]?["signature"] is not null)),
+					// The members are listed by kind, each with its signature (#490).
+					data => data?["members"]?["method"]?.AsArray() is { Count: > 0 } methods
+						&& methods[0]?["signature"]?.GetValue<string>() is { Length: > 0 }
+						&& methods[0]?["kind"] is null && methods[0]?["name"] is null)),
 			
 			new("roslyn_get_type_hierarchy: WorkspaceManager inheritance",
 				() => ctx.RunTestAsync(

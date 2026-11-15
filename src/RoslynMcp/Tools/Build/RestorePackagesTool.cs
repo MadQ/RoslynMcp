@@ -70,7 +70,22 @@ internal sealed class RestorePackagesTool : RoslynMcpTool
 			scope.Record($"workspace reload not flagged: {ex.GetType().Name}");
 		}
 		
-		return scope.Outcome(message, new RestoreResult(success, message, output));
+		// A restore that succeeded has nothing to say but its warnings (#490); one that failed
+		// keeps the whole output, which is where the reason is.
+		return scope.Outcome(message, new RestoreResult(success, message, success ? Warnings(output) : output));
+	}
+	
+	// The warning lines of a dotnet output, each once: the same warning comes once per project,
+	// with the project's path in brackets at its end. Null when there is none.
+	static string? Warnings(string output)
+	{
+		string[] warnings = [..output.Split('\n')
+			.Select(line => line.Trim())
+			.Where(line => line.Contains("warning", StringComparison.OrdinalIgnoreCase))
+			.Select(line => line.EndsWith(']') && line.LastIndexOf(" [", StringComparison.Ordinal) is > 0 and var bracket ? line[..bracket] : line)
+			.Distinct(StringComparer.Ordinal)];
+		
+		return warnings.Length > 0 ? string.Join("\n", warnings) : null;
 	}
 }
 

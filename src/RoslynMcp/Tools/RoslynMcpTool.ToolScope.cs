@@ -400,6 +400,11 @@ internal abstract partial class RoslynMcpTool
 				
 				return;
 			
+			// Said once: a batch resolves a project per edit and used to note it per edit (#490).
+			if(notes is not null && $"; {notes}; ".Contains($"; {note}; ", StringComparison.Ordinal))
+				
+				return;
+			
 			notes = notes is null ? note : $"{notes}; {note}";
 		}
 		
