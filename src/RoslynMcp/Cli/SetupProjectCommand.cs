@@ -5,8 +5,8 @@ namespace RoslynMcp.Cli;
 
 /// <summary>
 ///     Implements the <c>madq-roslynmcp setup-project</c> subcommand. Writes committable
-///     per-project files to the nearest git repository root: a hook file under <c>.github/</c>
-///     enabling per-agent tool guidance for .cs file operations, and (opt-in) a
+///     per-project files to the nearest git repository root: a hook file under <c>.github/hooks/</c>,
+///     where Copilot CLI loads hook files from, enabling tool guidance for .cs file operations, and (opt-in) a
 ///     <c>.madq_roslynmcp.json</c> server config holding commit-worthy server settings
 ///     (<c>elicit</c>, <c>workspace</c>, <c>vsVersion</c>, <c>codeActions</c>) that the server folds in where no
 ///     CLI arg or env var was given — see <see cref="ProjectConfig"/>.
@@ -30,10 +30,14 @@ internal class SetupProjectCommand : CliCommand
 		}
 		
 		var githubDir = Path.Combine(repoRoot, ".github");
+		var hooksDir  = Path.Combine(githubDir, "hooks");
 		
-		Directory.CreateDirectory(githubDir);
+		Directory.CreateDirectory(hooksDir);
 		
-		var hookFile = Path.Combine(githubDir, "roslynmcp.json");
+		// Copilot CLI loads the hook files of .github/hooks. Up to #310 the file was written one
+		// directory up, where nothing reads it.
+		var hookFile   = Path.Combine(hooksDir, "roslynmcp.json");
+		var legacyFile = Path.Combine(githubDir, "roslynmcp.json");
 		
 		// The hook reads tool event JSON from stdin and writes guidance for .cs file operations.
 		// See ToolCommand.HookCommand for why this is the bare command name (not `dotnet …`
@@ -68,12 +72,15 @@ internal class SetupProjectCommand : CliCommand
 		if(backupPath is not null)
 			Console.WriteLine($"      Backup: {Path.GetRelativePath(Environment.CurrentDirectory, backupPath)}");
 		
+		if(RetireLegacyHookFile(legacyFile) is { } retired)
+			Console.WriteLine($"  ✓ {retired} {Path.GetRelativePath(Environment.CurrentDirectory, legacyFile)}: Copilot CLI reads hook files from .github/hooks/ only.");
+		
 		var wroteConfig = ConfigureServerConfig(repoRoot);
 		
 		Console.WriteLine();
 		Console.WriteLine(wroteConfig
-			? "  Commit .github/roslynmcp.json and " + ProjectConfig.FileName + " so all project contributors benefit."
-			: "  Commit .github/roslynmcp.json so all project contributors benefit.");
+			? "  Commit .github/hooks/roslynmcp.json and " + ProjectConfig.FileName + " so all project contributors benefit."
+			: "  Commit .github/hooks/roslynmcp.json so all project contributors benefit.");
 		Console.WriteLine("  The hook guides agents to prefer roslyn_* tools for .cs files —");
 		Console.WriteLine("  no file operations are blocked.");
 		
@@ -445,33 +452,32 @@ internal class SetupProjectCommand : CliCommand
 	// Builds a fresh hook config JSON string.
 	static string BuildFreshJson(string hookCommand)
 	{
-		var hookConfig = new {
+		var root = new JsonObject {
 			
-			version = 1,
-			hooks = new {
-				
-				preToolUse = new[] {
-					
-					new {
-						
-						type       = "command",
-						powershell = hookCommand,
-						bash       = hookCommand,
-						timeoutSec = 5
-					}
-				}
-			}
+			["version"] = 1,
+			["hooks"]   = new JsonObject { [HookEvent] = new JsonArray { HookEntry(hookCommand) } },
 		};
 		
-		return JsonSerializer.Serialize(hookConfig, new JsonSerializerOptions {
-			
-			WriteIndented        = true,
-			PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-		});
+		return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 	}
 	
-	// Reads the existing hook file, upserts our hook entry in preToolUse, and returns the
-	// merged JSON. Returns null on parse failure — caller falls back to BuildFreshJson.
+	// The event the hook is registered for (#310). Copilot CLI takes guidance from a postToolUse
+	// hook, as additionalContext appended to the tool's result; a preToolUse hook can only decide
+	// a permission there. Up to #310 the entry was written under preToolUse.
+	const string HookEvent       = "postToolUse";
+	const string LegacyHookEvent = "preToolUse";
+	
+	static JsonObject HookEntry(string hookCommand) => new() {
+		
+		["type"]       = "command",
+		["powershell"] = hookCommand,
+		["bash"]       = hookCommand,
+		["timeoutSec"] = 5,
+	};
+	
+	// Reads the existing hook file, upserts our hook entry under postToolUse, removes one a
+	// version before #310 left under preToolUse, and returns the merged JSON. Returns null on
+	// parse failure — caller falls back to BuildFreshJson.
 	static string? MergeHookEntry(string hookFile, string hookCommand)
 	{
 		try {
@@ -487,37 +493,90 @@ internal class SetupProjectCommand : CliCommand
 				root["hooks"] = hooksObj;
 			}
 			
-			if(hooksObj["preToolUse"] is not JsonArray preToolUse) {
-				
-				preToolUse             = new JsonArray();
-				hooksObj["preToolUse"] = preToolUse;
-			}
-			
-			var ourEntry = new JsonObject {
-				
-				["type"]       = "command",
-				["powershell"] = hookCommand,
-				["bash"]       = hookCommand,
-				["timeoutSec"] = 5
-			};
-			
 			// Remove any existing RoslynMcp entries (current or legacy command forms), then add
 			// one fresh. Matching by the whole invocation — not exact string equality — so a
 			// renamed command doesn't leave a stale duplicate behind.
-			for(var i = preToolUse.Count - 1; i >= 0; i--) {
+			RemoveOurEntries(hooksObj, LegacyHookEvent);
+			RemoveOurEntries(hooksObj, HookEvent);
+			
+			if(hooksObj[HookEvent] is not JsonArray entries) {
 				
-				if(preToolUse[i] is not JsonObject entry)
-					continue;
-				
-				if(ToolCommand.IsOurCommandInvocation(entry["powershell"]?.GetValue<string>()) ||
-				   ToolCommand.IsOurCommandInvocation(entry["bash"]?.GetValue<string>()))
-					
-					preToolUse.RemoveAt(i);
+				entries             = new JsonArray();
+				hooksObj[HookEvent] = entries;
 			}
 			
-			preToolUse.Add(ourEntry);
+			entries.Add(HookEntry(hookCommand));
 			
 			return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+		}
+		catch {
+			
+			return null;
+		}
+	}
+	
+	// Removes RoslynMcp's entries from one event's list, and the list when that leaves it empty.
+	// True when an entry was removed. A value of another shape is someone else's and is left alone.
+	static bool RemoveOurEntries(JsonObject hooksObj, string eventName)
+	{
+		if(hooksObj[eventName] is not JsonArray entries)
+			return false;
+		
+		var removed = false;
+		
+		for(var i = entries.Count - 1; i >= 0; i--) {
+			
+			if(entries[i] is not JsonObject entry)
+				continue;
+			
+			if(ToolCommand.IsOurCommandInvocation(entry["powershell"]?.GetValue<string>()) ||
+			   ToolCommand.IsOurCommandInvocation(entry["bash"]?.GetValue<string>())) {
+				
+				entries.RemoveAt(i);
+				removed = true;
+			}
+		}
+		
+		if(entries.Count == 0)
+			hooksObj.Remove(eventName);
+		
+		return removed;
+	}
+	
+	/// <summary>
+	///     Takes RoslynMcp's hook out of the file a version before #310 wrote,
+	///     <c>.github/roslynmcp.json</c>: Copilot CLI loads hook files from <c>.github/hooks/</c>,
+	///     so the hook there was never run, and left in place it would read as if it were. The
+	///     file is deleted when the hook was all it held, and rewritten without it otherwise.
+	///     Returns what was done, for the report, or null when there was nothing to do: no file,
+	///     a file that is not understood, or one without a hook of RoslynMcp's.
+	/// </summary>
+	static string? RetireLegacyHookFile(string legacyFile)
+	{
+		try {
+			
+			if(!File.Exists(legacyFile) || JsonNode.Parse(FileReader.ReadAllText(legacyFile, FileReader.ConfigLimit)) is not JsonObject root || root["hooks"] is not JsonObject hooksObj)
+				return null;
+			
+			// Both events: one call, so that neither is skipped once the other has removed something.
+			var removedLegacy  = RemoveOurEntries(hooksObj, LegacyHookEvent);
+			var removedCurrent = RemoveOurEntries(hooksObj, HookEvent);
+			
+			if(!removedLegacy && !removedCurrent)
+				return null;
+			
+			var onlyOurs = hooksObj.Count == 0 && root.All(property => property.Key is "version" or "hooks");
+			
+			if(onlyOurs) {
+				
+				File.Delete(legacyFile);
+				
+				return "Removed";
+			}
+			
+			File.WriteAllText(legacyFile, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+			
+			return "Removed the RoslynMcp hook from";
 		}
 		catch {
 			

@@ -490,6 +490,23 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 
 **Ambiguous symbol handling.** By default, when a name in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the tool returns a structured `candidates` list and the agent retries with a `containingType` (or `filePath`+`line`) on its own — no interruption. Enabling `--elicit` (or `ROSLYNMCP_ELICIT=true`) instead prompts you to pick interactively via MCP elicitation, in clients that support it (Claude Code/Desktop do; many others don't and fall back to the candidate list). The `madq-roslynmcp setup` wizard offers this as an opt-in prompt; you can also add it by hand to the server entry's args: `"args": ["--elicit"]`. A committed project file can also enable it per repo — see the next section.
 
+### Tool-use hooks
+
+Agents reach for their built-in file tools out of habit. RoslynMcp ships a hook that answers a built-in read, search, listing or edit of a `.cs` file with one line naming the `roslyn_*` tools for that operation. It never blocks a call and never decides a permission: the built-in tool always runs.
+
+| Client | Installed by | Where | When the agent sees the hint |
+|---|---|---|---|
+| Claude Code | `madq-roslynmcp setup` | `~/.claude/settings.json`, a `PreToolUse` hook | Before the built-in tool runs |
+| Copilot CLI | `madq-roslynmcp setup-project` | `.github/hooks/roslynmcp.json` in the repository, a `postToolUse` hook; commit it | With the built-in tool's result, in time for the next call |
+
+The two differ because the clients do. Claude Code lets a `PreToolUse` hook add context. Copilot CLI's `preToolUse` hook can only allow, deny or ask, so the hint goes out from `postToolUse`, where Copilot appends a hook's `additionalContext` to the tool's result.
+
+The hook stays silent unless a RoslynMcp server is running for the directory the session works in: a server started on that directory, on one above it, or on one inside it. A server that belongs to another project does not count, so a session without RoslynMcp is not pointed at tools it does not have.
+
+**Upgrading from a version before this one (Copilot CLI):** run `madq-roslynmcp setup-project` again in the repository and commit the result. Earlier versions wrote the hook to `.github/roslynmcp.json`, which Copilot CLI does not read, and registered it for `preToolUse`. The command writes `.github/hooks/roslynmcp.json` and takes the hook out of the old file, deleting that file when the hook was all it held.
+
+`madq-roslynmcp hook --log` writes one `HOOK` entry per call to the server log, for finding out why a hint did or did not appear.
+
 ### Project-local server settings
 
 `madq-roslynmcp setup-project` can additionally write a committable `.madq_roslynmcp.json` at the repo root, so a team shares server preferences per project instead of every contributor hand-setting them in their global agent config:

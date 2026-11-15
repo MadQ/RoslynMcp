@@ -5,11 +5,22 @@ using System.Text.Json.Nodes;
 namespace RoslynMcp.Cli;
 
 /// <summary>
-///     Implements the <c>madq-roslynmcp hook</c> subcommand, used as the target for
-///     pre-tool-use hooks in Copilot CLI (<c>.github/hooks/roslynmcp.json</c>) and
-///     Claude Code (<c>~/.claude/settings.json</c>). Reads hook event JSON from stdin and, when a
+///     Implements the <c>madq-roslynmcp hook</c> subcommand, the target of the tool-use hooks
+///     of Copilot CLI (the project hook file <c>setup-project</c> writes) and Claude Code
+///     (<c>~/.claude/settings.json</c>). Reads hook event JSON from stdin and, when a
 ///     built-in file tool targets a <c>.cs</c> file, writes guidance naming the roslyn_* tools
-///     for that kind of operation. It never blocks: every other case answers <c>{}</c>.
+///     for that kind of operation. It never blocks and never decides a permission: every other
+///     case answers <c>{}</c>.
+///     <para>
+///         The two clients take the guidance at different moments (#310). Claude Code takes it
+///         before the tool runs, as <c>additionalContext</c> of a <c>PreToolUse</c> hook.
+///         Copilot CLI documents no such output for <c>preToolUse</c>, only a permission
+///         decision, its reason and replaced arguments; it documents <c>additionalContext</c>
+///         for <c>postToolUse</c>, where it is appended to the tool's result. So for Copilot
+///         the hook is a <c>postToolUse</c> hook: the agent reads the guidance with the result
+///         of the built-in tool, in time for its next call. A Copilot <c>preToolUse</c> event,
+///         which a hook file from before #310 still sends, is answered <c>{}</c>.
+///     </para>
 /// </summary>
 internal static class HookCommand
 {
@@ -109,11 +120,17 @@ internal static class HookCommand
 				?? node["tool_input"] as JsonObject;
 
 			var isCopilotFormat = node["toolName"] is not null;
-
+			
+			// Copilot's events carry no name. A postToolUse event is the one with the tool's result.
+			var isCopilotPost = isCopilotFormat && node["toolResult"] is not null;
+			
 			// Event name for the log entry. Claude Code surfaces it directly; Copilot
 			// doesn't, so we label by source.
 			eventName = node["hook_event_name"]?.GetValue<string>()
-				?? (isCopilotFormat ? "copilot-hook" : "claude-code-hook");
+				?? (isCopilotPost ? "copilot-postToolUse" : isCopilotFormat ? "copilot-preToolUse" : "claude-code-hook");
+			
+			// Where the session is working; both clients send it.
+			var workingDirectory = node["cwd"] is JsonValue cwd && cwd.GetValueKind() == JsonValueKind.String ? cwd.GetValue<string>() : null;
 
 			var suggestion = toolName is null ? null : SuggestionFor(toolName);
 
@@ -125,31 +142,40 @@ internal static class HookCommand
 				return 0;
 			}
 
-			// Without a live server the roslyn_* tools are not there to prefer.
-			if(!ServerHeartbeat.IsAlive()) {
-
+			// Copilot takes guidance after the tool, not before it: its preToolUse output is a
+			// permission decision, and advice must not be one.
+			if(isCopilotFormat && !isCopilotPost) {
+				
+				Console.WriteLine("{}");
+				outcome = "pass-through (copilot preToolUse)";
+				
+				return 0;
+			}
+			
+			// Without a live server for where the session works, the roslyn_* tools are not there
+			// to prefer: a server of another project says nothing about this session.
+			if(!ServerHeartbeat.IsAliveFor(workingDirectory)) {
+				
 				Console.WriteLine("{}");
 				outcome = "allow (no server)";
-
+				
 				return 0;
 			}
 
 			var hint = $"ℹ️ RoslynMcp: for .cs files prefer {suggestion}. These use the Roslyn compiler, so results are semantically accurate.";
 
 			// The operation always goes ahead; the hook only adds guidance to the agent's context.
-			// Claude Code takes it under hookSpecificOutput, and no permissionDecision is sent
-			// there: "allow" would skip the user's permission prompt, and advice must not grant
-			// permission. The Copilot CLI shape is unchanged from before #310.
-			// TODO: Copilot's hook reference lists no additionalContext output for preToolUse and
-			// describes permissionDecision as deciding whether the tool runs. Does Copilot show
-			// this hint at all, and should "allow" be sent? Open under #310.
+			// Claude Code takes it under hookSpecificOutput, and no permissionDecision is sent to
+			// either client: "allow" would skip the user's permission prompt, and advice must not
+			// grant permission. Copilot appends a postToolUse hook's additionalContext to the
+			// tool's result.
 			object response = isCopilotFormat
-				? new { permissionDecision = "allow", additionalContext = hint }
+				? new { additionalContext = hint }
 				: new { hookSpecificOutput = new { hookEventName = "PreToolUse", additionalContext = hint } }
 			;
-
+			
 			Console.WriteLine(JsonSerializer.Serialize(response, RoslynMcpJson.Compact));
-			outcome = "allow + guidance";
+			outcome = isCopilotFormat ? "guidance" : "allow + guidance";
 
 			return 0;
 		}
