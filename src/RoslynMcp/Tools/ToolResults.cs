@@ -750,7 +750,20 @@ internal sealed record ReplaceInCodeResult(
 	[property: JsonPropertyName("changed_nodes")] object[] ChangedNodes,
 	[property: JsonPropertyName("message")]       string?  Message     = null,
 	[property: JsonPropertyName("syntax_valid")]  bool     SyntaxValid = true
-) : ToolResult;
+) : ToolResult
+{
+	// What the file holds instead, when nothing matched (#476).
+	[JsonPropertyName("candidates")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public ReplaceInCodeCandidate[]? Candidates { get; init; }
+}
+
+/// <summary>A node <c>roslyn_replace_in_code</c> could have been pointed at: its declared name, or the start of its text, and where it starts.</summary>
+internal sealed record ReplaceInCodeCandidate(
+	[property: JsonPropertyName("name")]   string Name,
+	[property: JsonPropertyName("line")]   int    Line,
+	[property: JsonPropertyName("column")] int    Column
+);
 
 internal sealed record ReplaceInCodeNodeInfo(
 	[property: JsonPropertyName("original_text")]
@@ -833,6 +846,12 @@ internal sealed record ReplaceInFileResult : ToolResult
 	[property: JsonPropertyName("match_count")]         public int         MatchCount        { get; }
 	[property: JsonPropertyName("changed_line_ranges")] public LineRange[] ChangedLineRanges { get; }
 	[property: JsonPropertyName("message")]             public string?     Message           { get; }
+	
+	// The places a literal pattern matched, when it matched several and none was replaced (#476):
+	// grouped as a text search groups its hits, so the answer shows which one to narrow to.
+	[JsonPropertyName("matches")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public SearchDeclarationGroup[]? Matches { get; init; }
 }
 
 internal sealed record InsertLinesResult : ToolResult
