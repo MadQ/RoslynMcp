@@ -137,6 +137,16 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 	{
 		var text = name.AsSpan().Trim();
 		
+		// Comment lines copied along with the signature, as a search reports a member from its
+		// attached comment on: what a comment says is no part of the name, and its punctuation
+		// would end the text below.
+		while(text.StartsWith("//")) {
+			
+			var lineEnd = text.IndexOfAny('\r', '\n');
+			
+			text = lineEnd < 0 ? default : text[lineEnd..].TrimStart();
+		}
+		
 		// Attribute lists in front: '[Obsolete("x")] void Foo()'.
 		while(text.Length > 0 && text[0] == '[' && MatchingClose(text, 0) is var close and >= 0)
 			text = text[(close + 1)..].TrimStart();

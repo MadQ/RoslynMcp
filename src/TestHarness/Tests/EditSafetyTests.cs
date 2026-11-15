@@ -228,7 +228,7 @@ static class EditSafetyTests
 				
 				// With a modifier in front the tuple follows a word, as a parameter list does; and
 				// a property's expression holds a call, whose bracket is no parameter list.
-				var modified = await Replace(new { filePath = "names.cs", pattern = "return (0", replacement = "return (1", inMember = "public (int, string) Pair()", dryRun = true, projectPath = fx.Csproj });
+				var modified = await Replace(new { filePath = "names.cs", pattern = "return (0", replacement = "return (1", inMember = "/// <summary>A pair; never null.</summary>\n\t// total = a + b\n\tpublic (int, string) Pair()", dryRun = true, projectPath = fx.Csproj });
 				var property = await Replace(new { filePath = "names.cs", pattern = "Pair()", replacement = "Pair( )", inMember = "int Total => Pair().Item1;", dryRun = true, projectPath = fx.Csproj });
 				
 				if(modified?["match_count"]?.GetValue<int>() != 1 || property?["match_count"]?.GetValue<int>() != 1)
