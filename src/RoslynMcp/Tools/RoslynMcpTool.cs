@@ -1946,17 +1946,18 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		string.Equals(Path.GetExtension(path), ".cs", StringComparison.OrdinalIgnoreCase);
 	
 	/// <summary>
-	///     Builds a compiled regex for literal pattern matching, with CRLF-agnostic newline handling.
+	///     Builds a regex for literal pattern matching, with CRLF-agnostic newline handling.
 	///     Literal newlines in the pattern match both <c>\n</c> and <c>\r\n</c> in the file content,
 	///     preventing silent match failures on Windows files.
 	/// </summary>
 	/// <param name="matchTimeout">How long one match may run; <see cref="Regex.InfiniteMatchTimeout"/> for no limit.</param>
-	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive, TimeSpan matchTimeout)
+	/// <param name="engine"><see cref="RegexOptions.NonBacktracking"/>, or <see cref="RegexOptions.None"/> for the backtracking engine.</param>
+	protected static Regex BuildLiteralRegex(string pattern, bool caseSensitive, TimeSpan matchTimeout, RegexOptions engine)
 	{
 		// Split on real newlines before escaping: Regex.Escape renders a newline as \n but a literal
 		// backslash-n as \\n, and a post-escape Replace cannot tell the two apart (#292).
 		var escaped = string.Join(@"\r?\n", pattern.Split('\n').Select(Regex.Escape));
-		var options = RegexOptions.Compiled;
+		var options = engine;
 		
 		if(!caseSensitive)
 			options |= RegexOptions.IgnoreCase;
@@ -1972,7 +1973,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     <see cref="ArgumentException"/> on a malformed pattern — callers wrap this call and surface a structured error.
 	/// </summary>
 	protected static Regex BuildContentRegex(string pattern, MatchMode mode, bool caseSensitive)
-		=> BuildContentRegex(pattern, mode, caseSensitive, Regex.InfiniteMatchTimeout)
+		=> BuildContentRegex(pattern, mode, caseSensitive, Regex.InfiniteMatchTimeout, RegexOptions.None)
 	;
 	
 	/// <inheritdoc cref="BuildContentRegex(string, MatchMode, bool)"/>
@@ -1980,13 +1981,24 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     How long one match may run before it ends in <see cref="RegexMatchTimeoutException"/>, for a
 	///     caller whose lines are not source: a backtracking pattern on a line of a megabyte.
 	/// </param>
-	protected static Regex BuildContentRegex(string pattern, MatchMode mode, bool caseSensitive, TimeSpan matchTimeout)
+	/// <param name="engine">
+	///     <see cref="RegexOptions.NonBacktracking"/> for the engine that matches in linear time and
+	///     refuses, with <see cref="NotSupportedException"/>, a pattern that needs backtracking (a
+	///     lookaround, a backreference, an atomic group, a conditional); <see cref="RegexOptions.None"/>
+	///     for the backtracking engine.
+	/// </param>
+	/// <remarks>
+	///     Never <see cref="RegexOptions.Compiled"/> (#472): the regex is the pattern of one call and
+	///     is thrown away with it, and generating a matcher costs 15 to 35 ms that a pass over a whole
+	///     repository earns back only for a long alternation, and a pass over one file never.
+	/// </remarks>
+	protected static Regex BuildContentRegex(string pattern, MatchMode mode, bool caseSensitive, TimeSpan matchTimeout, RegexOptions engine)
 	{
 		if(mode is MatchMode.Literal)
 			
-			return BuildLiteralRegex(pattern, caseSensitive, matchTimeout);
+			return BuildLiteralRegex(pattern, caseSensitive, matchTimeout, engine);
 		
-		var options = RegexOptions.Compiled;
+		var options = engine;
 		
 		if(!caseSensitive)
 			options |= RegexOptions.IgnoreCase;
