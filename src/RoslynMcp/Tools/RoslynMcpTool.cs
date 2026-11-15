@@ -1951,14 +1951,26 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     where the file is a document of one, since a language version or a symbol the project
 	///     defines decides what is an error; otherwise as permissively as the parser can. Never a
 	///     failure: a workspace that does not resolve leaves the permissive options.
+	///     <para>
+	///         The document is looked for under the name the call gave, and only then under the
+	///         file that name leads to. The name comes first because it is the spelling the
+	///         workspace has: a project that compiles a link lists the link, and under a root that
+	///         is itself reached through a link (a macOS temporary directory) a resolved path
+	///         matches no document at all. The file is the fallback for a link of another name to
+	///         a document, which no document is listed under. Under a linked root that fallback
+	///         misses too, and the edit is checked with the permissive options.
+	///     </para>
 	/// </summary>
-	protected CSharpParseOptions ParseOptionsOf(string projectPath, string fullPath)
-		=> TryResolveSolution(projectPath, out var solution, out _)
-			&& solution.GetDocumentIdsWithFilePath(fullPath) is [var documentId, ..]
-			&& solution.GetDocument(documentId)?.Project.ParseOptions is CSharpParseOptions tracked
-				? tracked
-				: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
-	;
+	protected CSharpParseOptions ParseOptionsOf(string projectPath, string fullPath, string physical)
+	{
+		if(TryResolveSolution(projectPath, out var solution, out _))
+			foreach(var path in (string[]) [fullPath, physical])
+				if(solution.GetDocumentIdsWithFilePath(path) is [var documentId, ..] && solution.GetDocument(documentId)?.Project.ParseOptions is CSharpParseOptions tracked)
+					
+					return tracked;
+		
+		return CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+	}
 	
 	/// <summary>
 	///     Builds a regex for literal pattern matching, with CRLF-agnostic newline handling.

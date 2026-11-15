@@ -22,6 +22,13 @@ namespace RoslynMcp.Tools;
 internal sealed record SourcePlace(string File, int Line, int Column, string Text, EnclosingDeclaration? Declaration)
 {
 	/// <summary>
+	///     Whether the place is the name of <see cref="Declaration"/> itself. A method's name is;
+	///     a local, a parameter or a positional record property is declared <em>in</em> a member
+	///     and is not that member.
+	/// </summary>
+	public bool Declares { get; init; }
+	
+	/// <summary>
 	///     The place a location is, with its path relative to <paramref name="rootPath"/>. A
 	///     location that is in no syntax tree (metadata, a file the compilation does not hold) keeps
 	///     the path and line it reports and has no text and no declaration.
@@ -37,14 +44,18 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 		
 		var text        = tree.GetText(cancellationToken);
 		var line        = text.Lines[span.StartLinePosition.Line];
-		var declaration = EnclosingDeclaration.At(tree.GetRoot(cancellationToken), text, location.SourceSpan.Start).Declaration;
+		
+		var (declaration, names) = EnclosingDeclaration.At(tree.GetRoot(cancellationToken), text, location.SourceSpan.Start);
 		
 		return new(
 			file,
 			span.StartLinePosition.Line + 1,
 			span.StartLinePosition.Character + 1,
 			SearchFilesTool.Excerpt(text.ToString(line.Span), span.StartLinePosition.Character),
-			declaration);
+			declaration)
+		{
+			Declares = names.Any(name => name.OverlapsWith(location.SourceSpan)),
+		};
 	}
 	
 	/// <summary>
@@ -54,9 +65,12 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 	public static SourcePlace[] Sorted(IEnumerable<SourcePlace> places)
 		=> [..
 			places
-				.DistinctBy(place => (place.File, place.Line))
 				.OrderBy(place => place.File, StringComparer.Ordinal)
 				.ThenBy(place => place.Line)
+				.ThenBy(place => place.Column)
+				// After the sort: of several places on one line the leftmost is kept, and a long
+				// line's text is cut around that one whatever order the places were found in.
+				.DistinctBy(place => (place.File, place.Line))
 		]
 	;
 	
@@ -92,9 +106,14 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 		return [..files];
 	}
 	
-	/// <summary>A place that is a declaration itself: where it is, what it is, the lines it takes and where its node starts.</summary>
+	/// <summary>
+	///     Where a symbol is declared. What is declared, the lines it takes and where its node
+	///     starts are said only when the place is that declaration's own name: for a local or a
+	///     parameter they would be the enclosing method's, and an edit made with them would
+	///     replace the method.
+	/// </summary>
 	public DeclaredAt AsDeclared()
-		=> Declaration is { } found
+		=> Declares && Declaration is { } found
 			? new(File, Line) { Declaration = $"{found.Kind} {found.Name}".TrimEnd(), Lines = $"{found.FirstLine}-{found.EndLine}", At = $"{found.StartLine}:{found.StartColumn}" }
 			: new(File, Line)
 	;

@@ -82,7 +82,10 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		if(string.IsNullOrWhiteSpace(inMember))
 			inMember = null;
 		
-		var isCSharp = IsCSharpSourcePath(fullPath);
+		// What the file is goes by the file the name leads to, as in a batch: a link named
+		// 'build.txt' to a project file is a project file, and its edits are checked as one.
+		var physical = boundary.ResolveAllowed(fullPath) ?? fullPath;
+		var isCSharp = IsCSharpSourcePath(physical);
 		
 		if(inMember is not null && !isCSharp)
 			
@@ -128,7 +131,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		if(isCSharp) {
 			
 			sourceText = SourceText.From(originalContent);
-			tree       = CSharpSyntaxTree.ParseText(sourceText, ParseOptionsOf(projectPath, fullPath), fullPath);
+			tree       = CSharpSyntaxTree.ParseText(sourceText, ParseOptionsOf(projectPath, fullPath, physical), fullPath);
 		}
 		
 		var plan = Plan(filePath, originalContent, tree, sourceText, regex, matchMode, replacement, normalizeLineEndings, inMember, replaceAll, dryRun, modeCaution);
@@ -146,7 +149,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		var newContent = EditPlan.Apply(originalContent, plan.Changes);
 		
 		// Before the dry-run exit, so that a dry run's verdict is the write's (#267).
-		if(EditChecks.AddedErrors(fullPath, tree, originalContent, newContent) is { Length: > 0 } added) {
+		if(EditChecks.AddedErrors(physical, tree, originalContent, newContent) is { Length: > 0 } added) {
 			
 			var quoted = Quoted(added);
 			

@@ -43,6 +43,18 @@ static class EditSafetyTests
 			fx.Write($"{name}.props", Props);
 		
 		fx.Write("broken.props", Props.Replace("  </PropertyGroup>\n", ""));
+		
+		// A project file under a name that says nothing of what it is.
+		var target = fx.Write("target.props", Props);
+		var linked = false;
+		
+		try {
+			
+			File.CreateSymbolicLink(fx.PathOf("linked.txt"), target);
+			
+			linked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
 		fx.Write("twice_regex.txt", "same\nother\nsame\n");
@@ -326,6 +338,19 @@ static class EditSafetyTests
 				return Verdict(broken?["applied"]?.GetValue<bool>() == true && broken?["_caution"] is null
 					&& sound?["applied"]?.GetValue<bool>() == true && sound?["_caution"] is null
 					&& Read("sound.props") == Props.Replace("<Foo>1</Foo>", "<Foo>2</Foo>"), new JsonArray(broken?.DeepClone(), sound?.DeepClone()), Read("sound.props"));
+			}),
+			
+			// What a file is goes by the file a name leads to. Through a link named 'linked.txt'
+			// the same edit reached the project file unchecked, though a batch refused it.
+			new("edit safety: a project file edited through a link of another name is checked as one", async () => {
+				
+				if(!linked)
+					
+					return Skip.SetupUnavailable("this machine does not allow creating symbolic links");
+				
+				var answer = await Replace(new { filePath = "linked.txt", pattern = "  </PropertyGroup>\n", replacement = "", projectPath = fx.Csproj });
+				
+				return Verdict((answer?["error"]?.GetValue<string>() ?? "").Contains("PropertyGroup") && Read("target.props") == Props, answer, Read("target.props"));
 			}),
 			
 			// Five of the eight failures said "Replacement text contains syntax errors". The parser
