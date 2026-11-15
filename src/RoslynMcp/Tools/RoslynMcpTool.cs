@@ -4,6 +4,7 @@ using System.IO.Enumeration;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -1360,7 +1361,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     string-literal value, etc.) is fixed per tool — the mode only changes interpretation, never the
 	///     target. Filename/path matching is a separate axis and is not governed by this enum.
 	/// </summary>
-	protected enum MatchMode { Literal, Regex, Glob }
+	internal enum MatchMode { Literal, Regex, Glob }
 	
 	/// <summary>
 	///     Canonical description of the <c>mode</c> parameter — single source of truth so the wording cannot
@@ -1944,6 +1945,20 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected static bool IsCSharpSourcePath(string path) =>
 		string.Equals(Path.GetExtension(path), ".cs", StringComparison.OrdinalIgnoreCase);
+	
+	/// <summary>
+	///     The options a C# file is parsed with for a syntax check of an edit (#476): its project's,
+	///     where the file is a document of one, since a language version or a symbol the project
+	///     defines decides what is an error; otherwise as permissively as the parser can. Never a
+	///     failure: a workspace that does not resolve leaves the permissive options.
+	/// </summary>
+	protected CSharpParseOptions ParseOptionsOf(string projectPath, string fullPath)
+		=> TryResolveSolution(projectPath, out var solution, out _)
+			&& solution.GetDocumentIdsWithFilePath(fullPath) is [var documentId, ..]
+			&& solution.GetDocument(documentId)?.Project.ParseOptions is CSharpParseOptions tracked
+				? tracked
+				: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
+	;
 	
 	/// <summary>
 	///     Builds a regex for literal pattern matching, with CRLF-agnostic newline handling.

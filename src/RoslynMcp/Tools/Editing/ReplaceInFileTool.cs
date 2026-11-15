@@ -125,101 +125,28 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		if(isCSharp) {
 			
-			var options = TryResolveSolution(projectPath, out var solution, out _)
-				&& solution.GetDocumentIdsWithFilePath(fullPath) is [var documentId, ..]
-				&& solution.GetDocument(documentId)?.Project.ParseOptions is CSharpParseOptions tracked
-					? tracked
-					: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
-			;
-			
 			sourceText = SourceText.From(originalContent);
-			tree       = CSharpSyntaxTree.ParseText(sourceText, options, fullPath);
+			tree       = CSharpSyntaxTree.ParseText(sourceText, ParseOptionsOf(projectPath, fullPath), fullPath);
 		}
 		
-		// Split into lines to compute 1-based line numbers for each match position.
-		var lines        = originalContent.Split('\n')
-		;
-		var lineStarts   = BuildLineStartMap(lines);
-		Match[] matches  = [..regex.Matches(originalContent).Cast<Match>()];
-		var inFile       = matches.Length;
+		var plan = Plan(filePath, originalContent, tree, sourceText, regex, matchMode, replacement, normalizeLineEndings, inMember, replaceAll, dryRun, modeCaution);
 		
-		if(inMember is not null) {
+		foreach(var note in plan.Notes)
+			scope.Record(note);
+		
+		if(plan.Stop is { } stop)
 			
-			var root  = tree!.GetRoot();
-			var named = EnclosingDeclaration.Named(root, sourceText!, inMember);
-			
-			if(named.Length == 0) {
-				
-				var declared = EnclosingDeclaration.All(root, sourceText!).Select(declaration => declaration.Name).Distinct().ToArray();
-				
-				return scope.Failed("inMember not found", new ErrorResult(
-					$"No declaration named '{inMember}' in {filePath}.",
-					declared.Length == 0
-						? "The file declares nothing."
-						: $"The file declares: {string.Join(", ", declared.Take(MaxListed))}{(declared.Length > MaxListed ? $", and {declared.Length - MaxListed} more" : "")}. Write a name as 'Member' or 'Type.Member'."));
-			}
-			
-			matches = [..matches.Where(match => named.Any(declaration => declaration.Span.Start <= match.Index && match.Index + match.Length <= declaration.Span.End))];
-		}
+			return stop.Kind is EditStopKind.Failed ? scope.Failed(stop.Detail, stop.Answer)
+				: stop.Kind is EditStopKind.Error   ? scope.Error(stop.Answer)
+				: scope.Outcome(stop.Detail, stop.Answer)
+			;
 		
-		int[] changedLines = [..
-			matches
-				.Select(m => GetLineNumber(lineStarts, m.Index))
-				.Distinct()
-				.Order()
-		];
-		
-		if(matches.Length == 0) {
-			
-			var nothing = inMember is not null && inFile > 0
-				? $"No matches in {inMember}; the pattern matches {inFile} time(s) elsewhere in the file."
-				: "No matches found.";
-			
-			return scope.Failed("No matches found.", new ReplaceInFileResult(false, 0, [], nothing) { Caution = modeCaution });
-		}
-		
-		// A literal snippet is one place to the agent that wrote it. Where it is several, replacing
-		// them all changed lines nobody looked at (#476); the rule is the one of the edit tool every
-		// model knows. A dry run gets the same answer, since its verdict is the write's (#267). A
-		// regex or a glob says "every place like this" by being one.
-		if(matchMode is MatchMode.Literal && matches.Length > 1 && !replaceAll) {
-			
-			var narrowing = isCSharp && inMember is null
-				? "make the pattern longer so that it matches once, name the declaration with inMember"
-				: "make the pattern longer so that it matches once";
-			
-			return scope.Outcome("multiple matches", new ReplaceInFileResult(false, matches.Length, changedLines,
-				$"{(dryRun ? "Dry run: matched" : "Matched")} {matches.Length} places, and {(dryRun ? "a write would replace nothing" : "nothing was replaced")}: {narrowing}, or pass replaceAll: true to replace all {matches.Length}.")
-			{
-				Caution = modeCaution,
-				Matches = GroupMatches(matches, lines, lineStarts, tree, sourceText),
-			});
-		}
-		
-		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, originalContent) : replacement;
-		
-		// Regex mode honors $1/$&/${name} substitution in the replacement text; literal and glob modes
-		// insert the replacement VERBATIM, so a '$' (or '$1', '$&', '$$') in it stays literal in those
-		// modes. Match by match and not with Regex.Replace: with inMember, only some of the pattern's
-		// matches are replaced.
-		var builder  = new StringBuilder(originalContent.Length + Math.Max(0, effectiveReplacement.Length - pattern.Length) * matches.Length);
-		var position = 0;
-		
-		foreach(var match in matches) {
-			
-			builder.Append(originalContent, position, match.Index - position);
-			builder.Append(matchMode is MatchMode.Regex ? match.Result(effectiveReplacement) : effectiveReplacement);
-			position = match.Index + match.Length;
-		}
-		
-		builder.Append(originalContent, position, originalContent.Length - position);
-		
-		var newContent = builder.ToString();
+		var newContent = EditPlan.Apply(originalContent, plan.Changes);
 		
 		// Before the dry-run exit, so that a dry run's verdict is the write's (#267).
 		if(tree is not null && AddedSyntaxErrors(tree, newContent) is { Length: > 0 } added) {
 			
-			var quoted = $"{string.Join("; ", added.Take(MaxQuotedErrors))}{(added.Length > MaxQuotedErrors ? $"; and {added.Length - MaxQuotedErrors} more" : "")}";
+			var quoted = Quoted(added);
 			
 			if(!allowSyntaxErrors)
 				
@@ -236,7 +163,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		if(dryRun)
 			
-			return scope.Outcome("dry run", new ReplaceInFileResult(false, matches.Length, changedLines, Message: $"Dry run: {matches.Length} replacement(s) would be made.") { Caution = modeCaution });
+			return scope.Outcome("dry run", new ReplaceInFileResult(false, plan.MatchCount, plan.ChangedLines, Message: $"Dry run: {plan.MatchCount} replacement(s) would be made.") { Caution = modeCaution });
 		
 		var newBytes = FileWriter.Utf8NoBom.GetBytes(newContent);
 		
@@ -259,8 +186,107 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			
 			return scope.Error(truncErr);
 		
-		return scope.Outcome($"{matches.Length} replacement(s)", new ReplaceInFileResult(true, matches.Length, changedLines) { Caution = modeCaution });
+		return scope.Outcome(plan.Detail, new ReplaceInFileResult(true, plan.MatchCount, plan.ChangedLines) { Caution = modeCaution });
 	}
+	
+	/// <summary>
+	///     The core of the tool (#475): what a pattern and a replacement do to a text, as changes to
+	///     that text, with nothing read or written. The tool calls it for its one edit, and
+	///     <c>roslyn_multi_edit</c> for each such edit of a batch, against the file as it was.
+	///     <paramref name="tree"/> and <paramref name="sourceText"/> are those of a C# file and null
+	///     for any other.
+	/// </summary>
+	internal static TextReplacePlan Plan(
+		string filePath, string content, SyntaxTree? tree, SourceText? sourceText,
+		Regex regex, MatchMode matchMode, string replacement, bool normalizeLineEndings,
+		string? inMember, bool replaceAll, bool dryRun, string? modeCaution)
+	{
+		static TextReplacePlan Stopped(EditStopKind kind, string detail, ToolResult answer) => new() { Stop = new(kind, detail, answer) };
+		
+		if(inMember is not null && tree is null)
+			
+			return Stopped(EditStopKind.Error, "", new ErrorResult("inMember names a C# declaration, and this is not a C# file (.cs).", "Leave inMember out, and make the pattern longer so that it matches once."));
+		
+		// Split into lines to compute 1-based line numbers for each match position.
+		var lines        = content.Split('\n')
+		;
+		var lineStarts   = BuildLineStartMap(lines);
+		Match[] matches  = [..regex.Matches(content).Cast<Match>()];
+		var inFile       = matches.Length;
+		
+		if(inMember is not null) {
+			
+			var root  = tree!.GetRoot();
+			var named = EnclosingDeclaration.Named(root, sourceText!, inMember);
+			
+			if(named.Length == 0) {
+				
+				var declared = EnclosingDeclaration.All(root, sourceText!).Select(declaration => declaration.Name).Distinct().ToArray();
+				
+				return Stopped(EditStopKind.Failed, "inMember not found", new ErrorResult(
+					$"No declaration named '{inMember}' in {filePath}.",
+					declared.Length == 0
+						? "The file declares nothing."
+						: $"The file declares: {string.Join(", ", declared.Take(MaxListed))}{(declared.Length > MaxListed ? $", and {declared.Length - MaxListed} more" : "")}. Write a name as 'Member' or 'Type.Member'."));
+			}
+			
+			matches = [..matches.Where(match => named.Any(declaration => declaration.Span.Start <= match.Index && match.Index + match.Length <= declaration.Span.End))];
+		}
+		
+		int[] changedLines = [..
+			matches
+				.Select(m => GetLineNumber(lineStarts, m.Index))
+				.Distinct()
+				.Order()
+		];
+		
+		if(matches.Length == 0) {
+			
+			var nothing = inMember is not null && inFile > 0
+				? $"No matches in {inMember}; the pattern matches {inFile} time(s) elsewhere in the file."
+				: "No matches found.";
+			
+			return Stopped(EditStopKind.Failed, "No matches found.", new ReplaceInFileResult(false, 0, [], nothing) { Caution = modeCaution });
+		}
+		
+		// A literal snippet is one place to the agent that wrote it. Where it is several, replacing
+		// them all changed lines nobody looked at (#476); the rule is the one of the edit tool every
+		// model knows. A dry run gets the same answer, since its verdict is the write's (#267). A
+		// regex or a glob says "every place like this" by being one.
+		if(matchMode is MatchMode.Literal && matches.Length > 1 && !replaceAll) {
+			
+			var narrowing = tree is not null && inMember is null
+				? "make the pattern longer so that it matches once, name the declaration with inMember"
+				: "make the pattern longer so that it matches once";
+			
+			return Stopped(EditStopKind.NotApplied, "multiple matches", new ReplaceInFileResult(false, matches.Length, changedLines,
+				$"{(dryRun ? "Dry run: matched" : "Matched")} {matches.Length} places, and {(dryRun ? "a write would replace nothing" : "nothing was replaced")}: {narrowing}, or pass replaceAll: true to replace all {matches.Length}.")
+			{
+				Caution = modeCaution,
+				Matches = GroupMatches(matches, lines, lineStarts, tree, sourceText),
+			});
+		}
+		
+		var effectiveReplacement = normalizeLineEndings ? NormalizeLineEndings(replacement, content) : replacement;
+		
+		// Regex mode honors $1/$&/${name} substitution in the replacement text; literal and glob modes
+		// insert the replacement VERBATIM, so a '$' (or '$1', '$&', '$$') in it stays literal in those
+		// modes. Match by match and not with Regex.Replace: with inMember, only some of the pattern's
+		// matches are replaced, and a batch puts the changes of several edits together.
+		return new() {
+			
+			Changes      = [..matches.Select(match => new TextChange(new TextSpan(match.Index, match.Length), matchMode is MatchMode.Regex ? match.Result(effectiveReplacement) : effectiveReplacement))],
+			Detail       = $"{matches.Length} replacement(s)",
+			MatchCount   = matches.Length,
+			ChangedLines = changedLines,
+		};
+	}
+	
+	/// <summary>The parser's messages as an answer quotes them: the first few, and a count of the rest.</summary>
+	internal static string Quoted(string[] added)
+		=> $"{string.Join("; ", added.Take(MaxQuotedErrors))}{(added.Length > MaxQuotedErrors ? $"; and {added.Length - MaxQuotedErrors} more" : "")}"
+	;
+	
 	
 	// How many names, matches and parser messages an answer lists before it counts the rest.
 	const int MaxListed       = 40;
@@ -274,7 +300,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 	///     the errors are compared and not counted: by id and message, which hold no position and so
 	///     survive the lines an edit moves.
 	/// </summary>
-	static string[] AddedSyntaxErrors(SyntaxTree before, string newContent)
+	internal static string[] AddedSyntaxErrors(SyntaxTree before, string newContent)
 	{
 		static string Key(Diagnostic error) => $"{error.Id}: {error.GetMessage()}";
 		
@@ -378,4 +404,11 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		
 		return lo + 1;
 	}
+}
+
+/// <summary>The plan of one <c>roslyn_replace_in_file</c> edit: its changes, and what its answer reports.</summary>
+internal sealed record TextReplacePlan : EditPlan
+{
+	public int   MatchCount   { get; init; }
+	public int[] ChangedLines { get; init; } = [];
 }
