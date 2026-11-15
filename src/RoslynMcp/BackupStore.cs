@@ -622,14 +622,26 @@ internal sealed class BackupStore
 						continue;
 					}
 					
+					// Asked before the lock: the answer comes from the user's file system.
+					HashSet<string> orphans;
+					
+					try {
+						orphans = OrphanedPaths(dir, cutoff, orphanCutoff);
+					}
+					catch(Exception ex) {
+						
+						FilePruner.RecordPruneError(ex);
+						continue;
+					}
+					
 					asyncLock.Wait();
 					
 					try {
 						
-						var (expired, orphans) = PruneExpiredInDir(dir, cutoff, orphanCutoff);
+						var (expired, gone) = PruneExpiredInDir(dir, cutoff, orphanCutoff, orphans);
 						
 						removed  += expired;
-						orphaned += orphans;
+						orphaned += gone;
 					}
 					catch(Exception ex) {
 						FilePruner.RecordPruneError(ex);
@@ -663,7 +675,7 @@ internal sealed class BackupStore
 	
 	// The snapshots removed from the directory's meta file, and how many of them had not reached
 	// the retention and went because nothing is left to restore them into.
-	(int Removed, int Orphaned) PruneExpiredInDir(string dir, DateTime cutoff, DateTime orphanCutoff)
+	(int Removed, int Orphaned) PruneExpiredInDir(string dir, DateTime cutoff, DateTime orphanCutoff, HashSet<string> orphans)
 	{
 		var metaFile = Path.Combine(dir, MetaFileName);
 		var entries  = ReadAllMetaEntries(metaFile);
@@ -675,17 +687,9 @@ internal sealed class BackupStore
 		var removed  = 0;
 		var orphaned = 0;
 		
-		// One directory holds the snapshots of one path, so the question is asked once, and only
-		// when a snapshot is old enough for the answer to matter.
-		bool? orphan = null;
-		
 		foreach(var (token, meta) in entries.ToArray()) {
 			
-			if(!DateTime.TryParse(
-				meta.Timestamp,
-				null,
-				System.Globalization.DateTimeStyles.RoundtripKind,
-				out var ts))
+			if(!TryTime(meta, out var ts))
 				continue;
 			
 			if(ts >= orphanCutoff)
@@ -693,7 +697,7 @@ internal sealed class BackupStore
 			
 			if(ts >= cutoff) {
 				
-				if(!(orphan ??= IsOrphan(meta.AbsolutePath)))
+				if(!orphans.Contains(meta.AbsolutePath))
 					continue;
 				
 				orphaned++;
@@ -727,21 +731,32 @@ internal sealed class BackupStore
 	}
 	
 	/// <summary>
-	///     Whether a snapshot's file is gone together with the folder it was in (#474): there is
-	///     nothing to restore it into, and it expires after
-	///     <see cref="ServerArgs.BackupOrphanMaxAgeDays"/> days instead of the retention. On one
-	///     machine 7,318 of 7,646 backup directories were snapshots of test fixtures whose folders
-	///     had been deleted minutes after they were made, kept for ninety days.
+	///     Whether a snapshot has nothing left to be restored into (#474): its file is gone, the
+	///     folder it was in is gone, and so is the project it was written for. It then expires
+	///     after <see cref="ServerArgs.BackupOrphanMaxAgeDays"/> days instead of the retention. On
+	///     one machine 7,318 of 7,646 backup directories were snapshots of test fixtures whose
+	///     folders had been deleted minutes after they were made, kept for ninety days.
 	///     <para>
-	///         The folder is part of the rule on purpose. A file deleted from a project that is
-	///         still there is what local history is for, and keeps the retention. And the folder
-	///         counts as gone only where its drive is there: a removable or network drive that is
-	///         not mounted says nothing about the folder.
+	///         All three, because each alone is an ordinary state of a project that is still
+	///         there. A deleted file is what local history is for. A deleted file can take its
+	///         folder with it, when it was the last one in it or the folder was renamed. Only a
+	///         project that is gone as well says that nobody will ask for the file back.
 	///     </para>
+	///     <para>
+	///         And never where the place itself may only be away: a drive that is not there, on
+	///         Windows, and on the other systems a folder that would sit at or just below one of
+	///         the directories volumes are mounted under (<see cref="LooksUnmounted"/>). A share
+	///         or a stick that is not attached reads exactly like a deleted checkout.
+	///     </para>
+	///     The drive is asked first, so that a share that does not answer costs one question.
 	/// </summary>
-	static bool IsOrphan(string absolutePath)
+	static bool IsOrphan(string absolutePath, string projectPath)
 	{
 		try {
+			
+			if(Path.GetPathRoot(absolutePath) is not { Length: > 0 } root || !Directory.Exists(root))
+				
+				return false;
 			
 			if(File.Exists(absolutePath))
 				
@@ -751,13 +766,89 @@ internal sealed class BackupStore
 				
 				return false;
 			
-			return Path.GetPathRoot(absolutePath) is { Length: > 0 } root && Directory.Exists(root);
+			// A project path that says nothing (empty, relative) is not known to be gone.
+			if(!Path.IsPathFullyQualified(projectPath) || File.Exists(projectPath) || Directory.Exists(projectPath))
+				
+				return false;
+			
+			return !LooksUnmounted(folder);
 		}
 		catch {
 			
 			// A path that cannot be asked about is not known to be gone.
 			return false;
 		}
+	}
+	
+	// Where volumes are mounted on Linux and macOS: a missing folder up to two levels below one of
+	// these (/mnt/d, /media/user/stick, /Volumes/Share) may be a volume that is not attached.
+	static readonly string[] MountParents = ["/mnt", "/media", "/run/media", "/Volumes", "/net"];
+	
+	/// <summary>
+	///     Whether a folder that does not exist may be on a volume that is not mounted, on Linux
+	///     and macOS, where every path has the root <c>/</c> and the root says nothing. Asked of
+	///     the highest folder that is missing: when what is left above it is the root itself or
+	///     a place volumes are mounted under, the folder is not known to be deleted. Errs towards
+	///     keeping: a checkout deleted from the top of a mounted volume waits out the retention.
+	/// </summary>
+	static bool LooksUnmounted(string missingFolder)
+	{
+		if(OperatingSystem.IsWindows())
+			
+			return false;
+		
+		var above = Path.GetDirectoryName(missingFolder);
+		
+		while(above is { Length: > 0 } && !Directory.Exists(above))
+			above = Path.GetDirectoryName(above);
+		
+		if(above is not { Length: > 1 })
+			
+			return true;
+		
+		foreach(var parent in MountParents) {
+			
+			if(above == parent)
+				
+				return true;
+			
+			if(above.StartsWith(parent + "/", StringComparison.Ordinal) && above.AsSpan(parent.Length + 1).Count('/') <= 1)
+				
+				return true;
+		}
+		
+		return false;
+	}
+	
+	// The time a snapshot was made, as its meta entry has it.
+	static bool TryTime(BackupMeta meta, out DateTime made) =>
+		DateTime.TryParse(meta.Timestamp, null, System.Globalization.DateTimeStyles.RoundtripKind, out made)
+	;
+	
+	/// <summary>
+	///     The paths of a directory's snapshots that are orphans, asked only for a snapshot old
+	///     enough for the answer to matter. Per path and not once for the directory: the
+	///     directory's name is 32 bits of a hash, and two paths can share one. Called without the
+	///     store's lock, since it asks the file system of the user's machine, which can take as
+	///     long as a share takes to say it is not there, and every writing tool waits for that
+	///     lock; the meta file is replaced whole when it is written, so a read beside a writer
+	///     sees one version or the other.
+	/// </summary>
+	HashSet<string> OrphanedPaths(string dir, DateTime cutoff, DateTime orphanCutoff)
+	{
+		var orphans = new HashSet<string>(StringComparer.Ordinal);
+		var asked   = new HashSet<string>(StringComparer.Ordinal);
+		
+		foreach(var meta in ReadAllMetaEntries(Path.Combine(dir, MetaFileName)).Values) {
+			
+			if(!TryTime(meta, out var made) || made >= orphanCutoff || made < cutoff || !asked.Add(meta.AbsolutePath))
+				continue;
+			
+			if(IsOrphan(meta.AbsolutePath, meta.ProjectPath))
+				orphans.Add(meta.AbsolutePath);
+		}
+		
+		return orphans;
 	}
 	
 	// The time in a snapshot's file name: {file}_{unixMs}[_{nonce}][.pre|.post].bak, in every

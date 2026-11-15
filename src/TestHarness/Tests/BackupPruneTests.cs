@@ -181,10 +181,13 @@ static class BackupPruneTests
 			//   recent   a snapshot of today, its file's folder gone   skipped: its name says it is newer than
 			//                                                          anything the pass could remove, so
 			//                                                          its meta file is not opened
-			//   orphan   30 days old, its file's folder gone           removed: nothing to restore it into
+			//   orphan   30 days old, file, folder and project gone    removed: nothing to restore it into
 			//   deleted  30 days old, the file gone, the folder there  kept: a file deleted from a project
 			//                                                          that is still there is what local
 			//                                                          history is for
+			//   emptied  30 days old, file and folder gone,            kept: the last file of a folder takes
+			//            the project there                             the folder with it, in a project
+			//                                                          that is still there
 			//   live     30 days old, the file there                   kept
 			//   expired  100 days old, the file there                  removed: past the retention of 90
 			//
@@ -197,25 +200,34 @@ static class BackupPruneTests
 				var name    = $"backuporphans-{Guid.NewGuid():N}";
 				var gone    = Path.Combine(TestFixtures.TempRoot, $"gone-{Guid.NewGuid():N}");
 				
-				void Seed(string hash, int ageDays, string absolutePath)
+				void Seed(string hash, int ageDays, string absolutePath, string projectPath)
 				{
-					var made   = DateTimeOffset.UtcNow.AddDays(-ageDays);
-					var millis = made.ToUnixTimeMilliseconds();
-					var path   = absolutePath.Replace("\\", "\\\\");
+					var made    = DateTimeOffset.UtcNow.AddDays(-ageDays);
+					var millis  = made.ToUnixTimeMilliseconds();
+					var path    = absolutePath.Replace("\\", "\\\\");
+					var project = projectPath.Replace("\\", "\\\\");
 					
 					orphans.Write($"{hash}/meta.json",
-						$"{{ \"{hash}_{millis}_ab12_pre\": {{ \"absolutePath\": \"{path}\", \"projectPath\": \"{path}\", \"operation\": \"seed\", \"timestamp\": \"{made.UtcDateTime:yyyy-MM-ddTHH:mm:ss.fffZ}\", \"fileSizeBytes\": 3, \"phase\": \"pre\" }} }}\n");
+						$"{{ \"{hash}_{millis}_ab12_pre\": {{ \"absolutePath\": \"{path}\", \"projectPath\": \"{project}\", \"operation\": \"seed\", \"timestamp\": \"{made.UtcDateTime:yyyy-MM-ddTHH:mm:ss.fffZ}\", \"fileSizeBytes\": 3, \"phase\": \"pre\" }} }}\n");
 					orphans.Write($"{hash}/{Path.GetFileName(absolutePath)}_{millis}_ab12.pre.bak", "old");
 				}
 				
-				Seed("recent",  0,   Path.Combine(gone, "Recent.cs"));
-				Seed("orphan",  30,  Path.Combine(gone, "Orphan.cs"));
-				Seed("deleted", 30,  fx.PathOf("Deleted.cs"));
-				Seed("live",    30,  fx.PathOf("Probe.cs"));
-				Seed("expired", 100, fx.PathOf("Probe.cs"));
+				Seed("recent",  0,   Path.Combine(gone, "Recent.cs"),            Path.Combine(gone, "Gone.csproj"));
+				Seed("orphan",  30,  Path.Combine(gone, "Orphan.cs"),            Path.Combine(gone, "Gone.csproj"));
+				Seed("deleted", 30,  fx.PathOf("Deleted.cs"),                    fx.Dir);
+				Seed("emptied", 30,  Path.Combine(fx.Dir, "Removed", "Last.cs"), fx.Dir);
+				Seed("live",    30,  fx.PathOf("Probe.cs"),                      fx.Dir);
+				Seed("expired", 100, fx.PathOf("Probe.cs"),                      fx.Dir);
 				
+				// The two ages are pinned: the server takes the rest of its environment from the
+				// machine, and a developer's own retention would move the lines this test draws.
 				var (process, server) = await DefaultWorkspaceTests.StartServerLoggingToAsync(ctx, fx.Dir, Path.Combine(logs, $"{name}.log"),
-					new Dictionary<string, string> { ["ROSLYNMCP_BACKUP_PATH"] = orphans.Dir, ["ROSLYNMCP_PRUNE_MIN_RUNS"] = "1" });
+					new Dictionary<string, string> {
+						["ROSLYNMCP_BACKUP_PATH"]                = orphans.Dir,
+						["ROSLYNMCP_PRUNE_MIN_RUNS"]             = "1",
+						["ROSLYNMCP_BACKUP_MAX_AGE_DAYS"]        = "90",
+						["ROSLYNMCP_BACKUP_ORPHAN_MAX_AGE_DAYS"] = "7",
+					});
 				
 				try {
 					
@@ -237,12 +249,12 @@ static class BackupPruneTests
 						return (false, "FAIL  (no backup prune was logged within 90 s)");
 					
 					string[] left     = [..Directory.EnumerateDirectories(orphans.Dir).Select(dir => Path.GetFileName(dir)!).Order()];
-					string[] expected = ["deleted", "live", "recent"];
+					string[] expected = ["deleted", "emptied", "live", "recent"];
 					
 					if(!left.SequenceEqual(expected))
 						return (false, $"FAIL  (directories left: [{string.Join(", ", left)}], expected [{string.Join(", ", expected)}])");
 					
-					return line.Contains("5 directories, 1 skipped unread, 2 expired snapshot(s) removed, 1 of them orphaned")
+					return line.Contains("6 directories, 1 skipped unread, 2 expired snapshot(s) removed, 1 of them orphaned")
 						? (true, "PASS")
 						: (false, $"FAIL  (the pass did the right thing and logged another: {line})");
 				}
