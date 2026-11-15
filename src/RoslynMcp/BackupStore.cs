@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 
 namespace RoslynMcp;
@@ -561,6 +562,8 @@ internal sealed class BackupStore
 		
 		var directories = 0;
 		var removed     = 0;
+		var orphaned    = 0;
+		var skipped     = 0;
 		var owned       = false;
 		Mutex? mutex    = null;
 		
@@ -601,15 +604,48 @@ internal sealed class BackupStore
 			var started = Stopwatch.GetTimestamp();
 			var cutoff  = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupMaxAgeDays);
 			
+			// The later of the two, the orphan age being the shorter: a snapshot newer than this
+			// is kept whatever became of its file.
+			var orphanCutoff = DateTime.UtcNow - TimeSpan.FromDays(ServerArgs.Current.BackupOrphanMaxAgeDays);
+			
+			// Which directories hold a repository, a solution or a project, as far as this pass
+			// has asked: see InLivingTree.
+			var livingTrees = new Dictionary<string, bool>(StringComparer.Ordinal);
+			
 			try {
 				
 				foreach(var dir in Directory.EnumerateDirectories(backupRoot)) {
 					
 					directories++;
+					
+					// Before the lock and without opening a file: most directories hold nothing
+					// old enough to ask about.
+					if(!MayHoldExpired(dir, orphanCutoff)) {
+						
+						skipped++;
+						continue;
+					}
+					
+					// Asked before the lock: the answer comes from the user's file system.
+					HashSet<string> orphans;
+					
+					try {
+						orphans = OrphanedPaths(dir, cutoff, orphanCutoff, livingTrees);
+					}
+					catch(Exception ex) {
+						
+						FilePruner.RecordPruneError(ex);
+						continue;
+					}
+					
 					asyncLock.Wait();
 					
 					try {
-						removed += PruneExpiredInDir(dir, cutoff);
+						
+						var (expired, gone) = PruneExpiredInDir(dir, cutoff, orphanCutoff, orphans);
+						
+						removed  += expired;
+						orphaned += gone;
 					}
 					catch(Exception ex) {
 						FilePruner.RecordPruneError(ex);
@@ -624,7 +660,7 @@ internal sealed class BackupStore
 				FilePruner.RecordPruneError(ex);
 			}
 			
-			logger.LogInfo("Backups", $"pruned in {(long) Stopwatch.GetElapsedTime(started).TotalMilliseconds} ms: {directories} directories read, {removed} expired snapshot(s) removed");
+			logger.LogInfo("Backups", $"pruned in {(long) Stopwatch.GetElapsedTime(started).TotalMilliseconds} ms: {directories} directories, {skipped} skipped unread, {removed} expired snapshot(s) removed, {orphaned} of them orphaned");
 		}
 		catch(Exception ex) {
 			
@@ -641,29 +677,35 @@ internal sealed class BackupStore
 		}
 	}
 	
-	// The number of expired snapshots removed from the directory's meta file.
-	int PruneExpiredInDir(string dir, DateTime cutoff)
+	// The snapshots removed from the directory's meta file, and how many of them had not reached
+	// the retention and went because nothing is left to restore them into.
+	(int Removed, int Orphaned) PruneExpiredInDir(string dir, DateTime cutoff, DateTime orphanCutoff, HashSet<string> orphans)
 	{
 		var metaFile = Path.Combine(dir, MetaFileName);
 		var entries  = ReadAllMetaEntries(metaFile);
 		
 		if(entries.Count == 0)
 			
-			return 0;
+			return (0, 0);
 		
-		var removed = 0;
+		var removed  = 0;
+		var orphaned = 0;
 		
 		foreach(var (token, meta) in entries.ToArray()) {
 			
-			if(!DateTime.TryParse(
-				meta.Timestamp,
-				null,
-				System.Globalization.DateTimeStyles.RoundtripKind,
-				out var ts))
+			if(!TryTime(meta, out var ts))
 				continue;
 			
-			if(ts >= cutoff)
+			if(ts >= orphanCutoff)
 				continue;
+			
+			if(ts >= cutoff) {
+				
+				if(!orphans.Contains(meta.AbsolutePath))
+					continue;
+				
+				orphaned++;
+			}
 			
 			entries.Remove(token);
 			removed++;
@@ -677,19 +719,229 @@ internal sealed class BackupStore
 		
 		if(removed == 0)
 			
-			return 0;
+			return (0, 0);
 		
 		if(entries.Count == 0) {
 			
 			try { File.Delete(metaFile); } catch { }
 			try { Directory.Delete(dir); } catch { }
 			
-			return removed;
+			return (removed, orphaned);
 		}
 		
 		WriteMetaAtomic(metaFile, entries);
 		
-		return removed;
+		return (removed, orphaned);
+	}
+	
+	/// <summary>
+	///     Whether the snapshots of a path have nothing left to be restored into (#474). They then
+	///     expire after <see cref="ServerArgs.BackupOrphanMaxAgeDays"/> days instead of the
+	///     retention. On one machine 7,318 of 7,646 backup directories were snapshots of test
+	///     fixtures whose folders had been deleted minutes after they were made, kept for ninety
+	///     days.
+	///     <para>
+	///         The question is whether the place the file was in is still part of something
+	///         alive, and no single fact answers it. A deleted file is what local history is for.
+	///         A file takes its folder with it when it was the last one in it. A project is
+	///         renamed, folder and project file together, or is absent on the branch that is
+	///         checked out. So all of these must hold: the file is gone; its folder is gone;
+	///         every project a snapshot of it was written for is gone
+	///         (<paramref name="projectPaths"/>: the same file is saved for the solution before
+	///         it is in a project, and for its project after); and nothing above where the
+	///         folder was is a repository, a solution or a project (<see cref="InLivingTree"/>).
+	///         What is left is a tree that was removed whole: a deleted checkout, a temporary
+	///         directory.
+	///     </para>
+	///     <para>
+	///         And never where the place itself may only be away: a drive that is not there, on
+	///         Windows, and on the other systems a folder near one of the directories volumes are
+	///         mounted under (<see cref="LooksUnmounted"/>). A share or a stick that is not
+	///         attached reads exactly like a deleted checkout.
+	///     </para>
+	///     The drive is asked first, so that a share that does not answer costs one question.
+	/// </summary>
+	static bool IsOrphan(string absolutePath, IEnumerable<string> projectPaths, Dictionary<string, bool> livingTrees)
+	{
+		try {
+			
+			if(Path.GetPathRoot(absolutePath) is not { Length: > 0 } root || !Directory.Exists(root))
+				
+				return false;
+			
+			if(File.Exists(absolutePath))
+				
+				return false;
+			
+			if(Path.GetDirectoryName(absolutePath) is not { Length: > 0 } folder || Directory.Exists(folder))
+				
+				return false;
+			
+			// A project path that says nothing (empty, relative) is not known to be gone.
+			foreach(var projectPath in projectPaths)
+				if(!Path.IsPathFullyQualified(projectPath) || File.Exists(projectPath) || Directory.Exists(projectPath))
+					
+					return false;
+			
+			return !LooksUnmounted(folder) && !InLivingTree(folder, livingTrees);
+		}
+		catch {
+			
+			// A path that cannot be asked about is not known to be gone.
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Whether a folder that is gone was inside a repository, a solution or a project that is
+	///     still there: some directory above it that exists holds a <c>.git</c>, a <c>.sln</c>, a
+	///     <c>.slnx</c> or a <c>.csproj</c>. This is what outlives a rename of a project's folder
+	///     and a switch of branches, which take file, folder and project file away together.
+	///     Errs towards keeping: a worktree deleted from inside a repository, and everything
+	///     below a home directory that is itself a repository, wait out the retention.
+	///     <paramref name="known"/> keeps the answer per directory for one pass: thousands of
+	///     orphans share the few directories above a temporary root.
+	/// </summary>
+	static bool InLivingTree(string missingFolder, Dictionary<string, bool> known)
+	{
+		var above = Path.GetDirectoryName(missingFolder);
+		
+		while(above is { Length: > 0 } && !Directory.Exists(above))
+			above = Path.GetDirectoryName(above);
+		
+		for(; above is { Length: > 0 }; above = Path.GetDirectoryName(above)) {
+			
+			if(!known.TryGetValue(above, out var marked)) {
+				
+				marked = Directory.Exists(Path.Combine(above, ".git"))
+					|| File.Exists(Path.Combine(above, ".git"))
+					|| Directory.EnumerateFiles(above, "*.sln*").Any(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+					|| Directory.EnumerateFiles(above, "*.csproj").Any();
+				
+				known[above] = marked;
+			}
+			
+			if(marked)
+				
+				return true;
+		}
+		
+		return false;
+	}
+	
+	// Where volumes are mounted on Linux and macOS. A folder is taken for one on a volume that may
+	// not be attached when the nearest directory above it that exists is one of these or at most
+	// two levels below one: /mnt/d, /media/user/stick and /Volumes/Share, with the mount point
+	// left behind empty or not.
+	static readonly string[] MountParents = ["/mnt", "/media", "/run/media", "/Volumes", "/net"];
+	
+	/// <summary>
+	///     Whether a folder that does not exist may be on a volume that is not mounted, on Linux
+	///     and macOS, where every path has the root <c>/</c> and the root says nothing. Asked of
+	///     the highest folder that is missing: when what is left above it is the root itself or
+	///     a place volumes are mounted under, the folder is not known to be deleted. Errs towards
+	///     keeping: a checkout deleted from the top of a mounted volume waits out the retention.
+	/// </summary>
+	static bool LooksUnmounted(string missingFolder)
+	{
+		if(OperatingSystem.IsWindows())
+			
+			return false;
+		
+		var above = Path.GetDirectoryName(missingFolder);
+		
+		while(above is { Length: > 0 } && !Directory.Exists(above))
+			above = Path.GetDirectoryName(above);
+		
+		if(above is not { Length: > 1 })
+			
+			return true;
+		
+		foreach(var parent in MountParents) {
+			
+			// Without regard to case: a macOS volume usually has none, and taking /volumes for a
+			// mount directory only keeps a snapshot longer.
+			if(above.Equals(parent, StringComparison.OrdinalIgnoreCase))
+				
+				return true;
+			
+			if(above.StartsWith(parent + "/", StringComparison.OrdinalIgnoreCase) && above.AsSpan(parent.Length + 1).Count('/') <= 1)
+				
+				return true;
+		}
+		
+		return false;
+	}
+	
+	// The time a snapshot was made, as its meta entry has it.
+	static bool TryTime(BackupMeta meta, out DateTime made) =>
+		DateTime.TryParse(meta.Timestamp, null, System.Globalization.DateTimeStyles.RoundtripKind, out made)
+	;
+	
+	/// <summary>
+	///     The paths of a directory's snapshots that are orphans, asked only for a path that has
+	///     a snapshot old enough for the answer to matter. Per path and not once for the
+	///     directory: the directory's name is 32 bits of a hash, and two paths can share one. And
+	///     for a path with every project its snapshots name, whatever their age: one of them still
+	///     there is enough to keep the path. Called without the store's lock, since it asks the
+	///     file system of the user's machine, which can take as long as a share takes to say it
+	///     is not there, and every writing tool waits for that lock; the meta file is replaced
+	///     whole when it is written, so a read beside a writer sees one version or the other.
+	/// </summary>
+	HashSet<string> OrphanedPaths(string dir, DateTime cutoff, DateTime orphanCutoff, Dictionary<string, bool> livingTrees)
+	{
+		var orphans = new HashSet<string>(StringComparer.Ordinal);
+		var entries = ReadAllMetaEntries(Path.Combine(dir, MetaFileName)).Values;
+		
+		foreach(var path in entries
+			.Where(meta => meta.AbsolutePath is not null && TryTime(meta, out var made) && made < orphanCutoff && made >= cutoff)
+			.Select(meta => meta.AbsolutePath)
+			.Distinct(StringComparer.Ordinal)) {
+			
+			// Every spelling of the path: on Windows and macOS one directory holds them all, and a
+			// project recorded under another spelling is as much a reason to keep.
+			if(IsOrphan(path, entries.Where(meta => meta.AbsolutePath is not null && SecurityBoundary.PathComparer.Equals(meta.AbsolutePath, path)).Select(meta => meta.ProjectPath), livingTrees))
+				orphans.Add(path);
+		}
+		
+		return orphans;
+	}
+	
+	// The time in a snapshot's file name: {file}_{unixMs}[_{nonce}][.pre|.post].bak, in every
+	// format the store has written.
+	static readonly Regex SnapshotTime = new(@"_(\d{11,14})(?:_[0-9a-fA-F]+)?(?:\.(?:pre|post))?\.bak$", RegexOptions.CultureInvariant);
+	
+	/// <summary>
+	///     Whether a directory may hold a snapshot from before <paramref name="cutoff"/>, told from
+	///     its file names alone (#474): each snapshot's name carries the time it was made, so a
+	///     directory whose snapshots are all newer needs no meta file opened. The pass opened and
+	///     parsed one in every directory, 7,646 of them in 73 to 81 seconds on a cold disk. True
+	///     for anything that is not understood: a name without a time, an empty directory, a
+	///     listing that fails.
+	/// </summary>
+	static bool MayHoldExpired(string dir, DateTime cutoff)
+	{
+		try {
+			
+			var limit = new DateTimeOffset(cutoff).ToUnixTimeMilliseconds();
+			var any   = false;
+			
+			foreach(var file in Directory.EnumerateFiles(dir, "*.bak")) {
+				
+				any = true;
+				
+				if(SnapshotTime.Match(Path.GetFileName(file)) is not { Success: true } match
+					|| !long.TryParse(match.Groups[1].ValueSpan, out var made)
+					|| made < limit)
+					
+					return true;
+			}
+			
+			return !any;
+		}
+		catch {
+			return true;
+		}
 	}
 	
 	void PruneOldBackups(string dir, string absolutePath)

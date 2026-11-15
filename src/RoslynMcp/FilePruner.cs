@@ -25,6 +25,7 @@ internal static class FilePruner
 {
     internal const int DefaultMinRuns       = 3;
     internal const int DefaultBackupAgeDays = 90;
+    internal const int DefaultBackupOrphanAgeDays = 7;
     internal const int DefaultLogAgeDays    = 30;
 
     static readonly string StateDir = Path.Combine(

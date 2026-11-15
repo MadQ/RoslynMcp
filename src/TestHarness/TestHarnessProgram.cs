@@ -21,6 +21,29 @@ using System.Reflection;
 /// </summary>
 class Program
 {
+	/// <summary>
+	///     Deletes a directory this run made for itself under the fixture root, when the run ends
+	///     (#474). The next run's sweep (<see cref="TestFixtures.SweepStale"/>) removes what a
+	///     killed run leaves, but until then every run left its servers' snapshots behind, and a
+	///     machine that runs the harness often has many of them at once. Best-effort: a directory
+	///     that is not under the fixture root is never touched, and a file a slow process still
+	///     holds is left to the sweep.
+	/// </summary>
+	static void RemoveOwnDirectory(string? directory)
+	{
+		if(directory is not { Length: > 0 } || !Path.GetFullPath(directory).StartsWith(Path.GetFullPath(TestFixtures.TempRoot) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+			
+			return;
+		
+		try {
+			
+			if(Directory.Exists(directory))
+				Directory.Delete(directory, recursive: true);
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+	}
+	
+	
 	static async Task<int> Main(string[] args)
 	{
 		// A selection that cannot be honoured is a usage error, not a test failure: exit code 2. Checked
@@ -55,6 +78,9 @@ class Program
 		}
 		
 		await run.ShutdownServerAsync();
+		
+		// After the last server has stopped, and before the report: nothing reads it any more.
+		RemoveOwnDirectory(Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH"));
 		
 		return await run.ReportAsync();
 	}
