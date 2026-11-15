@@ -175,7 +175,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 					ProjectPath = fileProject,
 					Content     = content,
 					Text        = text,
-					Tree        = text is null ? null : CSharpSyntaxTree.ParseText(text, ParseOptionsOf(fileProject, fullPath), fullPath),
+					Tree        = text is null ? null : CSharpSyntaxTree.ParseText(text, ParseOptionsOf(fileProject, physical), fullPath),
 				};
 			}
 			

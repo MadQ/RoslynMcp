@@ -131,7 +131,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		if(isCSharp) {
 			
 			sourceText = SourceText.From(originalContent);
-			tree       = CSharpSyntaxTree.ParseText(sourceText, ParseOptionsOf(projectPath, fullPath), fullPath);
+			tree       = CSharpSyntaxTree.ParseText(sourceText, ParseOptionsOf(projectPath, physical), fullPath);
 		}
 		
 		var plan = Plan(filePath, originalContent, tree, sourceText, regex, matchMode, replacement, normalizeLineEndings, inMember, replaceAll, dryRun, modeCaution);
