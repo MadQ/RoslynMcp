@@ -138,6 +138,28 @@ static class LogFieldTests
 						$"expected the grouping note, three ranges and 'lines 3-5'; got search [{string.Join(" | ", search)}] and read [{string.Join(" | ", read)}]");
 				}),
 			
+			// A search that reads disk files matches in linear time unless its pattern needs
+			// backtracking (#472). How often that fallback happens in real use decides whether the
+			// time limit behind it is still worth its code, so the entry names the engine that ran:
+			// a plain word here, and the same word behind a lookahead, which the linear engine refuses.
+			new("log fields: a search that reads disk files records which regex engine ran",
+				async () => {
+					
+					await Call("roslyn_search_files", new { pattern = "TargetFramework", filePattern = "*.csproj", projectPath = fx.Csproj });
+					await Call("roslyn_search_files", new { pattern = "TargetFramework(?=>)", filePattern = "*.csproj", projectPath = fx.Csproj });
+					
+					var (linear, failure) = Details("search_files", "TargetFramework");
+					var (backtracking, _) = Details("search_files", "TargetFramework(?=>)");
+					
+					if(failure is not null)
+						
+						return (false, failure);
+					
+					return Verdict(linear.Any(detail => detail.Contains("engine: linear"))
+						&& backtracking.Any(detail => detail.Contains("engine: backtracking")),
+						$"expected 'engine: linear' and 'engine: backtracking'; got [{string.Join(" | ", linear)}] and [{string.Join(" | ", backtracking)}]");
+				}),
+			
 			// A project that loads with only part of its references is healthy to the health check,
 			// and its missing types read as "not found" (#447, #456). Nothing recorded how many
 			// references a project had, so that state could only be guessed at afterwards. Each load

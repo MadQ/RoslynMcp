@@ -64,22 +64,42 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		// was: the workspace's documents, and no walk of the disk (#327).
 		var searchesDisk = !NamesOnlyCSharp(filePattern);
 		
-		// A line of a disk file may hold a million characters, and the pattern is the agent's: on a
-		// line of source a backtracking pattern costs little, on a minified bundle it can run for
-		// minutes, and nothing between two lines could cancel it. So a search that reads disk
-		// files gives each match a time limit.
-		var matchTimeout = searchesDisk ? MatchTimeout : Regex.InfiniteMatchTimeout;
-		
 		var matchMode = MatchMode.Regex;
 		
 		if(mode is not null && !TryParseMatchMode(mode, out matchMode, out var modeError))
 			
 			return scope.Error(new ErrorResult(modeError));
 		
+		// A line of a disk file may hold a million characters, and the pattern is the agent's: on a
+		// line of source a backtracking pattern costs little, on a minified bundle it can run for
+		// minutes, and nothing between two lines could cancel it. So a search that reads disk
+		// files matches in linear time where the pattern allows it (#472), which nearly every
+		// pattern an agent sends does, and gives each match a time limit for the pattern that
+		// needs backtracking. A search of source alone keeps the backtracking engine: a plain name
+		// is three to four times slower on the other.
+		var backtracks = !searchesDisk;
+		
+		Regex BuildRegex(string text)
+		{
+			if(!searchesDisk)
+				
+				return BuildContentRegex(text, matchMode, caseSensitive);
+			
+			try {
+				return BuildContentRegex(text, matchMode, caseSensitive, MatchTimeout, RegexOptions.NonBacktracking);
+			}
+			catch(NotSupportedException) {
+				
+				backtracks = true;
+				
+				return BuildContentRegex(text, matchMode, caseSensitive, MatchTimeout, RegexOptions.None);
+			}
+		}
+		
 		Regex regex;
 		
 		try {
-			regex = BuildContentRegex(pattern, matchMode, caseSensitive, matchTimeout);
+			regex = BuildRegex(pattern);
 		}
 		catch(ArgumentException ex) {
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
@@ -123,7 +143,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				Regex? strippedRegex = null;
 				
 				try {
-					strippedRegex = BuildContentRegex(stripped, matchMode, caseSensitive, matchTimeout);
+					strippedRegex = BuildRegex(stripped);
 				}
 				catch(ArgumentException) { }
 				
@@ -155,7 +175,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		scope.Record(RangesNote(answer));
 		
 		if(searchesDisk)
-			scope.Record($"disk: {diskFiles} file(s) searched{skipped.Note()}");
+			scope.Record($"disk: {diskFiles} file(s) searched{skipped.Note()}; engine: {(backtracks ? "backtracking" : "linear")}");
 		
 		return scope.Outcome($"{result.Total} match(es)", answer);
 		

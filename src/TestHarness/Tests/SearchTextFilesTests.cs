@@ -186,12 +186,36 @@ static class SearchTextFilesTests
 			}),
 			
 			// The pattern is the agent's and a disk line can be long: '(a+)+$' on a line of a's
-			// that ends otherwise tries every way to split them, which no one waits for and no
-			// cancellation between two lines could stop. The match is given up after two seconds,
-			// and the file counted as not searched; the call answers.
-			new("text search: a pattern that backtracks without end is given up, and the file counted", async () => {
+			// that ends otherwise makes a backtracking engine try every way to split them. A search
+			// that reads disk files matches in linear time (#472), so the pattern is simply answered:
+			// no match, and no file skipped. Timed, because the same answer after the two-second
+			// limit of five attempts would be the backtracking engine giving up.
+			new("text search: a pattern that would backtrack without end is answered in linear time", async () => {
 				
+				var watch  = System.Diagnostics.Stopwatch.StartNew();
 				var answer = await Search("(a+)+$", "slow.txt");
+				
+				return Files(answer) is [] && answer?["skipped"] is null && answer?["total_matches"]?.GetValue<int>() == 0 && watch.ElapsedMilliseconds < 1500
+					? (true, "PASS")
+					: (false, $"FAIL  ({watch.ElapsedMilliseconds} ms: {answer?.ToJsonString() ?? "null"})");
+			}),
+			
+			// A lookahead is one of the things the linear engine refuses, so this pattern runs on
+			// the backtracking one, which must still find what it finds...
+			new("text search: a pattern with a lookahead still matches, on the backtracking engine", async () => {
+				
+				var answer = await Search("needle(?= here)", "*.md");
+				
+				return Files(answer) is ["notes.md disk"] && SearchHits.Of(answer) is [{ Line: 3 }]
+					? (true, "PASS")
+					: (false, $"FAIL  ({answer?.ToJsonString() ?? "null"})");
+			}),
+			
+			// ...and is still bounded there: the same runaway pattern behind a lookahead is given
+			// up after two seconds on its line, and the file counted as not searched.
+			new("text search: a backtracking pattern that runs away is given up, and the file counted", async () => {
+				
+				var answer = await Search("(?=a)(a+)+$", "slow.txt");
 				
 				return Files(answer) is [] && answer?["skipped"]?["pattern_timeout"]?.GetValue<int>() == 1
 					? (true, "PASS")
