@@ -206,8 +206,22 @@ static class BackupPruneTests
 				// keeps it, rightly, and this test would report that as a failure.
 				for(var above = TestFixtures.TempRoot; above is { Length: > 0 }; above = Path.GetDirectoryName(above)) {
 					
-					if(Directory.Exists(Path.Combine(above, ".git")) || File.Exists(Path.Combine(above, ".git"))
-						|| Directory.EnumerateFiles(above, "*.sln*").Any() || Directory.EnumerateFiles(above, "*.csproj").Any())
+					// What the server takes for a marker, and no more: a file that only starts like a
+					// solution is none. A directory that cannot be listed is one the server cannot
+					// ask either, and it keeps the snapshot then.
+					bool marked;
+					
+					try {
+						
+						marked = Directory.Exists(Path.Combine(above, ".git")) || File.Exists(Path.Combine(above, ".git"))
+							|| Directory.EnumerateFiles(above, "*.sln*").Any(file => file.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+							|| Directory.EnumerateFiles(above, "*.csproj").Any();
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						return Skip.SetupUnavailable($"'{above}', above the fixture root, cannot be listed ({ex.GetType().Name}), so the server cannot tell an orphan under it");
+					}
+					
+					if(marked)
 						
 						return Skip.SetupUnavailable($"'{above}', above the fixture root, holds a repository, a solution or a project, so nothing under it is an orphan");
 				}
