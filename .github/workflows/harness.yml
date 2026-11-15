@@ -52,6 +52,15 @@ jobs:
       with:
         dotnet-version: '10.0.302'
 
+    # Every FileSystemWatcher is an inotify instance, and Linux allows a user 128 by default. A full
+    # run loads so many fixture workspaces into its servers that it runs out part-way: a watcher
+    # that cannot start reports nothing, and the next test that waits for a file event fails
+    # ("expected reload_pending=True, got False"). That failed most pull request runs from
+    # 2026-11-15 on, a docs-only one among them. The limit is the runner's, not the product's.
+    - name: Raise the inotify instance limit
+      if: runner.os == 'Linux'
+      run: sudo sysctl -w fs.inotify.max_user_instances=1024
+
     # --quiet: one line per failing test, the server's stderr after them, and one summary line.
     # The exit code fails the job.
     - name: Run the TestHarness
