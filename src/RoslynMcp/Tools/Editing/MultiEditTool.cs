@@ -159,7 +159,9 @@ internal sealed class MultiEditTool : RoslynMcpTool
 					continue;
 				}
 				
-				var text = IsCSharpSourcePath(fullPath) ? SourceText.From(content) : null;
+				// What the file is goes by the file, as its identity does: a link named 'notes.txt'
+				// to a C# file is a C# file, whichever name the batch gives first.
+				var text = IsCSharpSourcePath(physical) ? SourceText.From(content) : null;
 				
 				files[physical] = file = new() {
 					
@@ -401,7 +403,18 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			
 			var length = change.NewText?.Length ?? 0;
 			var start  = Math.Clamp(change.Span.Start + shift, 0, newText.Length);
-			var end    = Math.Clamp(start + Math.Max(0, length - 1), 0, newText.Length);
+			
+			// An insertion that begins with a line break (one behind a last line that had none)
+			// has written the lines after the break, not the line the break now ends.
+			var lead = change.Span.Length > 0 || change.NewText is not { Length: > 1 } written ? 0
+				: written.StartsWith("\r\n", StringComparison.Ordinal) && written.Length > 2 ? 2
+				: written[0] == '\n' ? 1
+				: 0
+			;
+			
+			start = Math.Min(start + lead, newText.Length);
+			
+			var end = Math.Clamp(start + Math.Max(0, length - lead - 1), 0, newText.Length);
 			
 			// A change that ends in a line break has written the line before the break, not the
 			// one after it.

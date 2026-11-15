@@ -30,6 +30,18 @@ static class MultiEditTests
 			fx.Write($"{name}_A.cs", CodeOf(name));
 		
 		fx.Write("tail.txt", "alpha");
+		fx.Write("adjacent.cs", "class Adjacent\n{\n\tint One() => 1;\n\tint Two() => 2;\n}\n");
+		
+		var real   = fx.Write("real_A.cs", CodeOf("real"));
+		var linked = false;
+		
+		try {
+			
+			File.CreateSymbolicLink(fx.PathOf("link_A.cs"), real);
+			
+			linked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 		fx.Write("mixed_B.cs", OtherOf("mixed"));
 		fx.Write("mixed_notes.txt", Notes);
 		fx.Write("miss_B.cs", OtherOf("miss"));
@@ -261,7 +273,43 @@ static class MultiEditTests
 					new { op = "insert_lines", filePath = "tail.txt", insertAfter = "alpha", text = "x" },
 					new { op = "insert_lines", filePath = "tail.txt", atLine = 99, text = "y" });
 				
-				return Verdict(answer?["applied"]?.GetValue<bool>() == true && Read("tail.txt") == "alpha\nx\ny", answer, Read("tail.txt"));
+				// The lines written are 2 and 3; line 1 only got its line break.
+				var range = answer?["files"]?[0]?["changed_line_ranges"]?.AsArray() is [var only] ? only : null;
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true
+					&& Read("tail.txt") == "alpha\nx\ny"
+					&& range?["start"]?.GetValue<int>() == 2 && range?["end"]?.GetValue<int>() == 3, answer, Read("tail.txt"));
+			}),
+			
+			// Members on adjacent lines: taking the first out removes 'int One() => 1;\n\t' as the
+			// texts differ, which reaches into the indentation of the second, or '\tint One() =>
+			// 1;\n', the line. Only as the line does it leave an insertion before the second alone.
+			new("multi edit: a node deleted from the line above does not take the next line's indentation", async () => {
+				
+				var answer = await Batch(
+					new { op = "replace_in_code", filePath = "adjacent.cs", nodeKind = "method", textPattern = "One", replacement = "" },
+					new { op = "insert_lines", filePath = "adjacent.cs", atLine = 4, text = "\t// two" });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true
+					&& Read("adjacent.cs") == "class Adjacent\n{\n\t// two\n\tint Two() => 2;\n}\n", answer, Read("adjacent.cs"));
+			}),
+			
+			// A file and a link to it are one file of the batch, whichever name an edit uses:
+			// planned against one text and written once. As two files each was written whole,
+			// and the second write took the first's edit out again.
+			new("multi edit: edits through a file's name and through a link to it land in one file", async () => {
+				
+				if(!linked)
+					
+					return Skip.SetupUnavailable("this machine does not allow creating symbolic links");
+				
+				var answer = await Batch(
+					new { op = "replace_in_file", filePath = "real_A.cs", pattern = "return 1;", replacement = "return 10;" },
+					new { op = "replace_in_file", filePath = "link_A.cs", pattern = "return 3;", replacement = "return 30;" });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true
+					&& answer?["files"]?.AsArray() is { Count: 1 }
+					&& Read("real_A.cs") == CodeOf("real").Replace("return 1;", "return 10;").Replace("return 3;", "return 30;"), answer, Read("real_A.cs"));
 			}),
 			
 			new("multi edit: an unknown op fails its edit and names the three there are", async () => {
