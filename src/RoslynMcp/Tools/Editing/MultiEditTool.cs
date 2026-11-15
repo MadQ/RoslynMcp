@@ -52,6 +52,9 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		
 		public List<(int Edit, TextChange Change)> Changes { get; } = [];
 		
+		// What each edit lays claim to (EditPlan.Claims): at least what it changes.
+		public List<(int Edit, TextSpan Span)> Claims { get; } = [];
+		
 		public string  NewContent  { get; set; } = "";
 		public string? BackupToken { get; set; }
 	}
@@ -67,7 +70,8 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		"An insertion at the edge of a replaced span is fine, and two insertions at one place are written in the order given. " +
 		"Nothing is written when any edit cannot be made: a pattern or a node that is not found, a literal pattern that matches several times without replaceAll, a replacement that does not parse, an overlap. " +
 		"The answer names each edit's outcome (edits[], by its 1-based position in the call), so the one to correct is known. " +
-		"A C# file is parsed as the batch leaves it: a batch that adds a syntax error is refused, quoting the parser — the check is on the result of all edits together, so two edits that are each half of a change pass. allowSyntaxErrors: true writes anyway. " +
+		"A C# file is parsed as the batch leaves it: a batch that adds a syntax error is refused, quoting the parser — the check is on the result of all edits together, so two edits that are each half of a change pass. allowSyntaxErrors: true writes anyway. The replacement text of a replace_in_code edit must itself parse, whatever the rest of the batch does. " +
+		"A replace_in_code edit lays claim to its whole node: another edit inside that node is an overlap, also where the two would not change the same characters. " +
 		"On success, files[] lists each file with the line ranges that changed, in the file as it is now, and the backup token that restores it with roslyn_local_history. " +
 		"Supports dryRun=true: everything is resolved and checked, nothing is written. " +
 		"For a single edit, the tool of that kind is simpler; for a whole new file, roslyn_write_file."
@@ -134,9 +138,13 @@ internal sealed class MultiEditTool : RoslynMcpTool
 				continue;
 			}
 			
+			// By the file a name leads to, not by the name: a file and a link to it are one file,
+			// and as two they were each written whole, the second over the first's edits.
+			var physical = boundary.ResolveAllowed(fullPath) ?? fullPath;
+			
 			// One read per file, whatever the number of its edits: it is the text every one of
 			// them is resolved against.
-			if(!files.TryGetValue(fullPath, out var file)) {
+			if(!files.TryGetValue(physical, out var file)) {
 				
 				string content;
 				
@@ -153,7 +161,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 				
 				var text = IsCSharpSourcePath(fullPath) ? SourceText.From(content) : null;
 				
-				files[fullPath] = file = new() {
+				files[physical] = file = new() {
 					
 					Relative    = edit.FilePath,
 					FullPath    = fullPath,
@@ -185,6 +193,9 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			foreach(var change in plan.Changes)
 				file.Changes.Add((index, change));
 			
+			foreach(var claim in plan.Claims)
+				file.Claims.Add((index, claim));
+			
 			outcomes[index] = new(index + 1, op, edit.FilePath, true, plan.Detail);
 			
 			if(plan.Caution is not null)
@@ -195,20 +206,20 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		// against the text as it was.
 		foreach(var file in files.Values) {
 			
-			if(EditPlan.FirstOverlap([..file.Changes.Select(change => change.Change)]) is not { } overlap)
-				continue;
-			
-			var (first, second) = overlap;
-			var (firstEdit, secondEdit) = (file.Changes[first].Edit, file.Changes[second].Edit);
-			var line                    = LineOf(file.Content, file.Changes[second].Change.Span.Start);
-			
-			foreach(var (edit, other) in new[] { (firstEdit, secondEdit), (secondEdit, firstEdit) })
-				if(outcomes[edit].Ok)
-					outcomes[edit] = outcomes[edit] with {
-						
-						Ok     = false,
-						Detail = $"Changes the same text as edit {other + 1}, at line {line} of {file.Relative}. Positions refer to the file as it is before the batch: make the two changes in one edit.",
-					};
+			foreach(var (first, second) in EditPlan.Overlaps([..file.Claims.Select(claim => claim.Span)])) {
+				
+				var (firstEdit, secondEdit) = (file.Claims[first].Edit, file.Claims[second].Edit);
+				var line                    = LineOf(file.Content, file.Claims[second].Span.Start);
+				
+				// The first pair an edit is in is the one it is told about.
+				foreach(var (edit, other) in new[] { (firstEdit, secondEdit), (secondEdit, firstEdit) })
+					if(outcomes[edit].Ok)
+						outcomes[edit] = outcomes[edit] with {
+							
+							Ok     = false,
+							Detail = $"Changes the same text as edit {other + 1}, at line {line} of {file.Relative}. Positions refer to the file as it is before the batch: make the two changes in one edit.",
+						};
+			}
 		}
 		
 		// What a batch is made of, in every entry: the next look at the logs asks whether batches
@@ -370,7 +381,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 			
 			return Refused($"Line {edit.Line}, column {edit.Column} is not a valid position.", "Both are 1-based, and column requires line.");
 		
-		return ReplaceInCodeTool.Plan(file.Tree.GetRoot(), file.Text, file.FullPath, kind, edit.TextPattern, edit.Replacement ?? "", false, edit.Force, false, true, edit.Line, edit.Column);
+		return ReplaceInCodeTool.Plan(file.Tree.GetRoot(), file.Text, file.FullPath, kind, edit.TextPattern, edit.Replacement ?? "", false, edit.Force, false, true, edit.Line, edit.Column, validateFile: false);
 	}
 	
 	static int LineOf(string content, int position)

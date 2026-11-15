@@ -88,10 +88,13 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			position = lineEnd < 0 ? content.Length : lineEnd + 1;
 		}
 		
-		var inserted = string.Join(eol, newLines) + eol;
-		
-		if(insertIndex >= lines.Length && content.Length > 0 && content[^1] != '\n')
-			inserted = eol + inserted;
+		// Behind a last line without a line break the break goes in front and none behind: the
+		// text ends as it ended. With one at both ends, two insertions at the end of such a file
+		// had a blank line between them.
+		var inserted = insertIndex >= lines.Length && content.Length > 0 && content[^1] != '\n'
+			? eol + string.Join(eol, newLines)
+			: string.Join(eol, newLines) + eol
+		;
 		
 		return new() {
 			

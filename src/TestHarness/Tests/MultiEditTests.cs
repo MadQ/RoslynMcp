@@ -26,9 +26,10 @@ static class MultiEditTests
 		string CodeOf(string name)  => Code.Replace("class A", $"class A_{name}");
 		string OtherOf(string name) => Other.Replace("class B", $"class B_{name}");
 		
-		foreach(var name in new[] { "mixed", "order", "overlap", "miss", "syntax", "halves", "dry", "several", "same", "edge", "op" })
+		foreach(var name in new[] { "mixed", "order", "overlap", "miss", "syntax", "halves", "dry", "several", "same", "edge", "op", "claim", "delete", "edges", "pairs" })
 			fx.Write($"{name}_A.cs", CodeOf(name));
 		
+		fx.Write("tail.txt", "alpha");
 		fx.Write("mixed_B.cs", OtherOf("mixed"));
 		fx.Write("mixed_notes.txt", Notes);
 		fx.Write("miss_B.cs", OtherOf("miss"));
@@ -193,6 +194,74 @@ static class MultiEditTests
 				
 				return Verdict(answer?["applied"]?.GetValue<bool>() == true
 					&& Read("edge_A.cs") == CodeOf("edge").Replace("\tint Two()\n\t{\n\t\treturn 2;\n\t}", "\t// about Two\n\tint Two() => 2;"), answer, Read("edge_A.cs"));
+			}),
+			
+			// A node edit lays claim to its node, not to the characters its text happens to differ
+			// in: this replacement differs from the method in one character, far from the name the
+			// text edit changes. Judged by the difference, both were written and the file held
+			// 'long Two()' with a body nobody had seen beside it.
+			new("multi edit: a text edit inside a node the batch replaces is an overlap, wherever it is", async () => {
+				
+				var answer = await Batch(
+					new { op = "replace_in_code", filePath = "claim_A.cs", nodeKind = "method", textPattern = "Two", replacement = "int Two()\n\t{\n\t\treturn 20;\n\t}" },
+					new { op = "replace_in_file", filePath = "claim_A.cs", pattern = "int Two()", replacement = "long Two()" });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == false
+					&& Ok(answer) is [false, false]
+					&& Read("claim_A.cs") == CodeOf("claim"), answer, Read("claim_A.cs"));
+			}),
+			
+			// Deleting a method takes its lines, not the indentation of the next one: a line
+			// inserted before that next method in the same batch does not touch the deletion.
+			new("multi edit: a deleted node does not reach into the line after it", async () => {
+				
+				var answer = await Batch(
+					new { op = "replace_in_code", filePath = "delete_A.cs", nodeKind = "method", textPattern = "One", replacement = "" },
+					new { op = "insert_lines", filePath = "delete_A.cs", atLine = 8, text = "\t// two" });
+				
+				var content = Read("delete_A.cs");
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true
+					&& !content.Contains("One")
+					&& content.Contains("\t// two\n\tint Two()\n"), answer, content);
+			}),
+			
+			// The edge rule itself: an insertion exactly where a replaced span starts goes before
+			// it, and one exactly where a span ends goes behind it. Neither is inside.
+			new("multi edit: insertions at the very start and the very end of a replaced span are written around it", async () => {
+				
+				var answer = await Batch(
+					new { op = "replace_in_file", filePath = "edges_A.cs", pattern = "\tint Two()\n", replacement = "\tlong Two()\n" },
+					new { op = "insert_lines", filePath = "edges_A.cs", atLine = 8, text = "\t// before" },
+					new { op = "insert_lines", filePath = "edges_A.cs", atLine = 9, text = "\t// behind" });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true
+					&& Read("edges_A.cs") == CodeOf("edges").Replace("\tint Two()\n", "\t// before\n\tlong Two()\n\t// behind\n"), answer, Read("edges_A.cs"));
+			}),
+			
+			// Two tangles in one file: all four edits are named in one answer, not the first pair
+			// now and the second after the next call.
+			new("multi edit: every overlap of a file is named, not the first", async () => {
+				
+				var answer = await Batch(
+					new { op = "replace_in_file", filePath = "pairs_A.cs", pattern = "return 1;", replacement = "return 10;" },
+					new { op = "replace_in_code", filePath = "pairs_A.cs", nodeKind = "method", textPattern = "One", replacement = "int One() => 1;" },
+					new { op = "replace_in_file", filePath = "pairs_A.cs", pattern = "return 3;", replacement = "return 30;" },
+					new { op = "replace_in_code", filePath = "pairs_A.cs", nodeKind = "method", textPattern = "Three", replacement = "int Three() => 3;" });
+				
+				return Verdict(Ok(answer) is [false, false, false, false] && Read("pairs_A.cs") == CodeOf("pairs"), answer, Read("pairs_A.cs"));
+			}),
+			
+			// A file whose last line has no line break: two insertions at its end follow each
+			// other, and the text ends as it ended. With a break before and behind each, a blank
+			// line stood between them.
+			new("multi edit: two insertions at the end of a file without a final line break", async () => {
+				
+				var answer = await Batch(
+					new { op = "insert_lines", filePath = "tail.txt", insertAfter = "alpha", text = "x" },
+					new { op = "insert_lines", filePath = "tail.txt", atLine = 99, text = "y" });
+				
+				return Verdict(answer?["applied"]?.GetValue<bool>() == true && Read("tail.txt") == "alpha\nx\ny", answer, Read("tail.txt"));
 			}),
 			
 			new("multi edit: an unknown op fails its edit and names the three there are", async () => {

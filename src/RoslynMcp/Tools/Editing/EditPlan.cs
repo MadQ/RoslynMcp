@@ -37,6 +37,16 @@ internal abstract record EditPlan
 	/// <summary>The changes, as spans of the original text. Empty when <see cref="Stop"/> is set.</summary>
 	public TextChange[] Changes { get; init; } = [];
 	
+	/// <summary>
+	///     The text of the original the edit lays claim to, for telling whether two edits of a
+	///     batch touch the same text. For a text edit that is what it changes. A node edit claims
+	///     its nodes whole, although the change it amounts to may be one character of them:
+	///     another edit inside a node that is replaced has been overwritten, wherever it is.
+	/// </summary>
+	public TextSpan[] Claims { get => claims ?? [..Changes.Select(change => change.Span)]; init => claims = value; }
+	
+	readonly TextSpan[]? claims;
+	
 	/// <summary>What the edit does, in a few words, for the log and for a batch's answer.</summary>
 	public string Detail { get; init; } = "";
 	
@@ -75,6 +85,13 @@ internal abstract record EditPlan
 	///     The one change that turns <paramref name="original"/> into <paramref name="changed"/>:
 	///     what is left between their common start and their common end. For an edit that is made
 	///     on a syntax tree, whose result is a whole new text.
+	///     <para>
+	///         Where text was only removed or only added, the same change can be said at several
+	///         places: taking <c>A</c> out of <c>"\tA\n\tB"</c> removes <c>"A\n\t"</c> or
+	///         <c>"\tA\n"</c>. The common start is greedy and gives the first, which reaches into
+	///         the next line. The change is moved back to a line's start where it can be, so that
+	///         it takes whole lines and leaves the following one alone.
+	///     </para>
 	/// </summary>
 	public static TextChange Between(string original, string changed)
 	{
@@ -89,34 +106,55 @@ internal abstract record EditPlan
 		while(suffix < limit - prefix && original[^(suffix + 1)] == changed[^(suffix + 1)])
 			suffix++;
 		
-		return new TextChange(TextSpan.FromBounds(prefix, original.Length - suffix), changed[prefix..(changed.Length - suffix)]);
+		var removed = original.Length - suffix - prefix;
+		var added   = changed.Length - suffix - prefix;
+		
+		// Only for a pure removal or a pure addition: the text that is one of the two.
+		if(removed == 0 != (added == 0)) {
+			
+			var text   = removed > 0 ? original : changed;
+			var length = Math.Max(removed, added);
+			var start  = prefix;
+			
+			// One step back is the same change when the character that leaves the window at its
+			// end is the one that enters at its start.
+			while(start > 0 && text[start - 1] != '\n' && text[start - 1] == text[start + length - 1])
+				start--;
+			
+			// Kept only when it reached a line's start: anywhere else is no better a place.
+			if(start == 0 || text[start - 1] == '\n')
+				prefix = start;
+		}
+		
+		return new TextChange(new TextSpan(prefix, removed), changed.Substring(prefix, added));
 	}
 	
 	/// <summary>
-	///     The first two of <paramref name="changes"/> that touch the same text, by their index in
-	///     the list, or null. Two changes overlap when their spans share a character, and an
-	///     insertion when it falls inside another change's span; an insertion at the edge of a
-	///     span, or two at one position, do not.
+	///     Every pair of <paramref name="claims"/> that touch the same text, by their index in the
+	///     list. Two claims overlap when their spans share a character, and an empty one (an
+	///     insertion) when it falls inside another's span; an insertion at the edge of a span, or
+	///     two at one position, do not.
 	/// </summary>
-	public static (int First, int Second)? FirstOverlap(IReadOnlyList<TextChange> changes)
+	public static List<(int First, int Second)> Overlaps(IReadOnlyList<TextSpan> claims)
 	{
-		var order = Enumerable.Range(0, changes.Count)
-			.OrderBy(index => changes[index].Span.Start)
-			.ThenBy(index => changes[index].Span.Length)
+		var pairs = new List<(int, int)>();
+		var order = Enumerable.Range(0, claims.Count)
+			.OrderBy(index => claims[index].Start)
+			.ThenBy(index => claims[index].Length)
 		;
 		
-		// Against every earlier change that still reaches this far, not only the one before: a
-		// long span can hold several short ones.
+		// Against the earlier claim that reaches furthest, not only the one before: a long span
+		// can hold several short ones. Each claim is paired with that one, which names every
+		// edit of a tangle at least once.
 		var reach      = -1;
 		var reachIndex = -1;
 		
 		foreach(var index in order) {
 			
-			var span = changes[index].Span;
+			var span = claims[index];
 			
 			if(span.Start < reach)
-				
-				return (Math.Min(reachIndex, index), Math.Max(reachIndex, index));
+				pairs.Add((Math.Min(reachIndex, index), Math.Max(reachIndex, index)));
 			
 			if(span.End > reach) {
 				
@@ -125,6 +163,6 @@ internal abstract record EditPlan
 			}
 		}
 		
-		return null;
+		return pairs;
 	}
 }

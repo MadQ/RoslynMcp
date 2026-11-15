@@ -121,7 +121,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			syntaxTree = CSharpSyntaxTree.ParseText(sourceText, path: fullPath);
 		}
 		
-		var plan = Plan(await syntaxTree.GetRootAsync(cancellationToken), sourceText, fullPath, kind, textPattern, replacement, dryRun, force, verbose, normalizeLineEndings, line, column);
+		var plan = Plan(await syntaxTree.GetRootAsync(cancellationToken), sourceText, fullPath, kind, textPattern, replacement, dryRun, force, verbose, normalizeLineEndings, line, column, validateFile: true);
 		
 		foreach(var note in plan.Notes)
 			scope.Record(note);
@@ -190,10 +190,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///     be written. Nothing is read or written. The tool calls it for its one edit, and
 	///     <c>roslyn_multi_edit</c> for each such edit of a batch, against the file as it was; for
 	///     the batch the result is also given as the one change to the text it amounts to.
+	///     <paramref name="validateFile"/> is the tool's own check that the file as this edit
+	///     leaves it has no syntax error; a batch checks the file as all its edits leave it
+	///     instead, and so passes false. The replacement text itself must parse either way.
 	/// </summary>
 	internal static CodeReplacePlan Plan(
 		SyntaxNode root, SourceText sourceText, string fullPath, SyntaxKind kind, string? textPattern, string replacement,
-		bool dryRun, bool force, bool verbose, bool normalizeLineEndings, int line, int column)
+		bool dryRun, bool force, bool verbose, bool normalizeLineEndings, int line, int column, bool validateFile)
 	{
 		static CodeReplacePlan Stopped(EditStopKind stopKind, string detail, ToolResult answer, List<string> notes) => new() { Stop = new(stopKind, detail, answer), Notes = notes };
 		
@@ -432,7 +435,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			.ToArray()
 		;
 		
-		if(newDiagnostics.Length > 0)
+		if(validateFile && newDiagnostics.Length > 0)
 			
 			return Stopped(EditStopKind.Error, "", new ReplaceInCodeSyntaxError(
 				"In the file as it would be: " + string.Join("; ", newDiagnostics.Select(d => $"line {d.Location.GetLineSpan().StartLinePosition.Line + 1}: {d.GetMessage()} ({d.Id})")),
@@ -456,9 +459,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			caution = caution is null ? taken : $"{taken} {caution}";
 		}
 		
+		// One change, from the first character that differs to the last. What the edit claims is
+		// more: its nodes whole, so that a text edit inside a replaced node is seen as touching
+		// it, also where the replacement differs from the node in one character only.
+		var change = EditPlan.Between(sourceText.ToString(), newText);
+		var claim  = TextSpan.FromBounds(
+			Math.Min(change.Span.Start, matchedNodes.Min(n => n.SpanStart)),
+			Math.Max(change.Span.End,   matchedNodes.Max(n => n.Span.End)));
+		
 		return new() {
 			
-			Changes = [EditPlan.Between(sourceText.ToString(), newText)],
+			Changes = [change],
+			Claims  = [claim],
 			Detail  = $"{verb} {matchedNodes.Length} node(s)",
 			Caution = caution,
 			Notes   = logNotes,
