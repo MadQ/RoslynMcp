@@ -50,6 +50,7 @@ static class HarnessGroups
 		Group("Refactoring Tools",                         g => RefactoringTests.Build(g.Ctx)),
 		Group("File Editing Tools",                        g => EditingTests.Build(g.Ctx)),
 		Group("Edit Safety",                               g => EditSafetyTests.Build(g.Ctx)),
+		Group("Multi Edit",                                g => MultiEditTests.Build(g.Ctx)),
 		AsyncGroup("Reload Flagging",                      g => ReloadFlaggingTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Load Health",                          g => LoadHealthTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Unrestored Projects",                  g => UnrestoredProjectTests.BuildAsync(g.Ctx)),

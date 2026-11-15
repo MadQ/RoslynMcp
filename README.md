@@ -8,7 +8,7 @@
 **Give your AI agent a C# compiler instead of grep.**
 ([first battle-test results: 38-69% token savings, bugs found, lessons learned](docs/battle-test-results.md) · [shared workspace architecture](docs/plans/multi-instance-architecture.md) · [help wanted](#help-wanted))
 
-RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 49 MCP tools (48 public + 1 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
+RoslynMcp is a [Model Context Protocol](https://modelcontextprotocol.io/) server that gives AI coding agents real Roslyn compiler semantics: type resolution, cross-file references, semantic rename, diagnostics, and 50 MCP tools (49 public + 1 debug-only). Not string matching. Not regex. Actual compiler-level understanding of your C# code.
 
 ```
 Agent: "Rename OrderStatus.Pending to OrderStatus.AwaitingApproval"
@@ -144,7 +144,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 
 ## Tool Catalog
 
-49 total MCP tools: 48 public tools organized by what you need to do below, plus 1 debug-only tool: `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
+50 total MCP tools: 49 public tools organized by what you need to do below, plus 1 debug-only tool: `roslyn_debug_attach`. All tools work in-process using Roslyn APIs unless noted.
 
 ### Discovery
 
@@ -196,6 +196,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | `roslyn_replace_in_code` | Semantic C# editing -- replaces syntax nodes by kind, name or position, validates syntax |
 | `roslyn_replace_in_file` | Text-level find-and-replace with regex (any file type); on C# it checks the syntax of the result and can be limited to one member |
 | `roslyn_insert_lines` | Insert lines at a position or anchor pattern |
+| `roslyn_multi_edit` | Several edits of mixed kinds, in one file or several, in one call: all positions refer to the files as last read, and all edits are written or none |
 | `roslyn_write_file` | Atomically write or create a file; returns a backup token for undo |
 | `roslyn_local_history` | Browse, preview, and restore crash-safe file backups (list/preview/apply) |
 

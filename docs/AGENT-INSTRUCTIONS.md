@@ -232,6 +232,7 @@ Specific alternatives for common tasks:
 - Read method:    roslyn_get_member_body (not Read on the whole file)
 - Find usages:    roslyn_find_references (not Grep)
 - Edit C#:        roslyn_replace_in_code or roslyn_replace_in_file (not Edit)
+- Several edits:  roslyn_multi_edit (one call, positions from the files as last read)
 - Insert lines:   roslyn_insert_lines (not Edit)
 - Refactor:       roslyn_list_refactorings → roslyn_preview_refactoring → roslyn_apply_refactoring (not retyping code: move type to file, extract method, …)
 - Fix diagnostic: roslyn_preview_code_fix → roslyn_apply_code_fix (not hand edits)
