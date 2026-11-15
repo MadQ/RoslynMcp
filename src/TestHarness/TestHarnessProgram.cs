@@ -81,6 +81,7 @@ class Program
 		
 		// After the last server has stopped, and before the report: nothing reads it any more.
 		RemoveOwnDirectory(Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH"));
+		RemoveOwnDirectory(Environment.GetEnvironmentVariable("ROSLYNMCP_HEARTBEAT_PATH"));
 		
 		return await run.ReportAsync();
 	}
