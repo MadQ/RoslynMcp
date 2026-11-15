@@ -86,15 +86,13 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			// The types around it, innermost first, against the segments before the last.
 			var types = member.Ancestors().OfType<BaseTypeDeclarationSyntax>().Select(type => type.Identifier.Text).ToArray();
 			
-			if(types.Length < segments.Length - 1)
-				continue;
-			
-			var inTypes = true;
+			var inTypes = types.Length >= segments.Length - 1;
 			
 			for(var i = 0; i < segments.Length - 1 && inTypes; i++)
 				inTypes = types[i] == segments[segments.Length - 2 - i];
 			
-			if(inTypes)
+			// 'IDisposable.Dispose' is the explicit implementation, whatever type it is in.
+			if(inTypes || segments.Length == 2 && ExplicitInterface(member) == segments[0])
 				found.Add((described.Declaration, described.Span));
 		}
 		
@@ -111,22 +109,37 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 	
 	/// <summary>
 	///     A name as an agent writes it, in its segments: <c>void Type.Foo&lt;T&gt;(int a)</c> is
-	///     <c>Type</c>, <c>Foo</c>. What stands before the name (a return type, modifiers) and from
-	///     the first parenthesis on is dropped, and so are type arguments.
+	///     <c>Type</c>, <c>Foo</c>. Attributes before it, what stands before the name (a return
+	///     type, modifiers), its parameter list (or an indexer's) and type arguments are dropped.
+	///     <para>
+	///         The parameter list is the bracket the text ends in, found from its end: the first
+	///         parenthesis of <c>(int, string) Pair()</c> and of <c>Task&lt;(int, int)&gt; Foo()</c>
+	///         belongs to the return type.
+	///     </para>
 	/// </summary>
 	public static string[] NameSegments(string name)
 	{
-		var paren = name.IndexOf('(');
+		var text = name.AsSpan().Trim();
 		
-		if(paren >= 0)
-			name = name[..paren];
+		// Attribute lists in front: '[Obsolete("x")] void Foo()'.
+		while(text.Length > 0 && text[0] == '[' && MatchingClose(text, 0) is var close and >= 0)
+			text = text[(close + 1)..].TrimStart();
+		
+		// The parameter list: the bracket the text ends in, or one that was never closed ('Foo(').
+		if(text.Length > 0 && text[^1] is ')' or ']') {
+			
+			if(MatchingOpen(text, text.Length - 1) is var open and >= 0)
+				text = text[..open];
+		}
+		else if(text.LastIndexOfAny('(', '[') is var unclosed and >= 0 && text[unclosed..].IndexOfAny(')', ']') < 0)
+			text = text[..unclosed];
 		
 		// Type arguments out, at any depth, before the split: 'Map<string, int>.Add' has a dot-free
 		// argument list, 'Outer<A.B>.Add' has not.
-		var plain = new System.Text.StringBuilder(name.Length);
+		var plain = new System.Text.StringBuilder(text.Length);
 		var depth = 0;
 		
-		foreach(var c in name) {
+		foreach(var c in text) {
 			
 			if(c == '<')
 				depth++;
@@ -143,6 +156,58 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 			? []
 			: words[^1].Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
 		;
+	}
+	
+	// The index of the bracket that closes the one at 'open', or -1. Round, square and angle
+	// brackets nest; what is in a string literal is not looked at, a name holds none.
+	static int MatchingClose(ReadOnlySpan<char> text, int open)
+	{
+		var depth = 0;
+		
+		for(var i = open; i < text.Length; i++) {
+			
+			if(text[i] is '(' or '[')
+				depth++;
+			else if(text[i] is ')' or ']' && --depth == 0)
+				
+				return i;
+		}
+		
+		return -1;
+	}
+	
+	// The index of the bracket that opens the one at 'close', or -1.
+	static int MatchingOpen(ReadOnlySpan<char> text, int close)
+	{
+		var depth = 0;
+		
+		for(var i = close; i >= 0; i--) {
+			
+			if(text[i] is ')' or ']')
+				depth++;
+			else if(text[i] is '(' or '[' && --depth == 0)
+				
+				return i;
+		}
+		
+		return -1;
+	}
+	
+	/// <summary>
+	///     The interface an explicit implementation names (<c>IDisposable</c> in
+	///     <c>void IDisposable.Dispose()</c>), without its type arguments, or null. A name written
+	///     as <c>IDisposable.Dispose</c> means that member, though the type it is in is another.
+	/// </summary>
+	public static string? ExplicitInterface(SyntaxNode member)
+	{
+		var specifier = member switch {
+			
+			MethodDeclarationSyntax method         => method.ExplicitInterfaceSpecifier,
+			BasePropertyDeclarationSyntax property => property.ExplicitInterfaceSpecifier,
+			_                                      => null,
+		};
+		
+		return specifier is null ? null : NameSegments(specifier.Name.ToString()) is [.., var last] ? last : null;
 	}
 	
 	// A member as a declaration, where its name is written, and the span from the start of its first
