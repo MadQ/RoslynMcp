@@ -63,7 +63,7 @@ manual JSON in step 2 below.
 
 > [!IMPORTANT]
 > **Tell your agent to use RoslynMcp.** Agents default to grep and file reads unless you explicitly instruct them. Add a few lines to your project's `CLAUDE.md` or `AGENTS.md` — see [Agent Instructions](#agent-instructions) for a quick example, or [docs/AGENT-INSTRUCTIONS.md](docs/AGENT-INSTRUCTIONS.md) for complete copy-paste instructions covering every tool. Having trouble getting your agent to comply? See [#99](https://github.com/MadQ/RoslynMcp/issues/99).
-> Claude Code users: try our experimental [PreToolUse hook](scripts/enforce-roslyn-tools.sh) to enforce this automatically.
+> `madq-roslynmcp setup` also installs a hook for Claude Code, and `madq-roslynmcp setup-project` one for Copilot CLI, that reminds the agent of the matching `roslyn_*` tools when it reaches for a built-in file tool on a `.cs` file. It never blocks. See [Tool-use hooks](INSTALLATION.md#tool-use-hooks).
 
 **Option B — Download and extract** (simplest, no SDK required):
 

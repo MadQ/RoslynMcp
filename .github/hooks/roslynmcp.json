@@ -1,7 +1,7 @@
 {
   "version": 1,
   "hooks": {
-    "preToolUse": [
+    "postToolUse": [
       {
         "type": "command",
         "powershell": "madq-roslynmcp hook",

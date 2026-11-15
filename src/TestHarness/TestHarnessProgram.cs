@@ -81,6 +81,7 @@ class Program
 		
 		// After the last server has stopped, and before the report: nothing reads it any more.
 		RemoveOwnDirectory(Environment.GetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH"));
+		RemoveOwnDirectory(Environment.GetEnvironmentVariable("ROSLYNMCP_HEARTBEAT_PATH"));
 		
 		return await run.ReportAsync();
 	}
@@ -179,6 +180,18 @@ sealed class HarnessRun(string[] args, HarnessSelection selection)
 		// prune slow enough to stall a call (#445). Set on this process, which the servers inherit
 		// their environment from and FileRewriteTests reads the location from.
 		Environment.SetEnvironmentVariable("ROSLYNMCP_BACKUP_PATH", Path.Combine(TestFixtures.TempRoot, $"backups.{Guid.NewGuid():N}"));
+		
+		// And a heartbeat directory of its own (#310): a harness server's heartbeat among the
+		// developer's would make every session on the machine look served while a run lasts.
+		var heartbeats = Path.Combine(TestFixtures.TempRoot, $"heartbeat.{Guid.NewGuid():N}");
+		
+		Environment.SetEnvironmentVariable("ROSLYNMCP_HEARTBEAT_PATH", heartbeats);
+		
+		// The heartbeat of a server that died two days ago, for the Hook Hint group: a server
+		// that starts removes it. Made here, before the first server of the run starts.
+		Directory.CreateDirectory(heartbeats);
+		File.WriteAllText(Path.Combine(heartbeats, HookHintTests.DeadHeartbeat), "4194305");
+		File.SetLastWriteTimeUtc(Path.Combine(heartbeats, HookHintTests.DeadHeartbeat), DateTime.UtcNow.AddDays(-2));
 		
 		// -- Server build -----------------------------------------------------------------------
 		

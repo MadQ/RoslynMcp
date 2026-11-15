@@ -118,6 +118,7 @@ static int PrintHelp()
           ROSLYNMCP_VS_VERSION            Visual Studio version pin (same as --vs-version)
           ROSLYNMCP_ELICIT                Set to true to enable --elicit (see Options)
           ROSLYNMCP_BACKUP_PATH           Backup storage path (empty string = disable backups)
+          ROSLYNMCP_HEARTBEAT_PATH        Directory of the server heartbeats the tool-use hook reads
           ROSLYNMCP_LOG_MAX_AGE_DAYS      Log retention in days (default: 30)
           ROSLYNMCP_BACKUP_MAX_AGE_DAYS   Backup retention in days (default: 90)
           ROSLYNMCP_BACKUP_ORPHAN_MAX_AGE_DAYS
