@@ -188,7 +188,7 @@ static class MovedDirectoryTests
 					// error a second document causes.
 					var diagnostics = await Call("roslyn_get_diagnostics", new { projectPath = adhocCase.Dir, take = 200, severity = "errors" });
 					
-					if(diagnostics?["items"] is not JsonArray items)
+					if(DiagnosticItems.Of(diagnostics) is not JsonArray items)
 						
 						return (false, $"FAIL  (no diagnostics: {diagnostics?.ToJsonString() ?? "none"})");
 					

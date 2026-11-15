@@ -54,19 +54,45 @@ internal sealed record FindReferencesResult(
 	[property: JsonPropertyName("symbols_searched")] string[] SymbolsSearched,
 	[property: JsonPropertyName("skip")]             int      Skip,
 	[property: JsonPropertyName("take")]             int      Take,
-	[property: JsonPropertyName("references")]       string[] References,
+	// By file, and within a file by the declaration each reference is in, as a text search
+	// lists its hits (#487).
+	[property: JsonPropertyName("references")]       SearchFileGroup[] References,
 	[property: JsonPropertyName("page_token")]       string?  PageToken,
 	[property: JsonPropertyName("has_more")]         bool     HasMore
 ) : ToolResult
 {
 	/// <summary>
-	///     Where the symbols searched are declared in source, as <c>file:line</c> (#459). Roslyn's
-	///     reference search leaves the declaration out, and "where is it and who uses it" is one
-	///     question to an agent.
+	///     Where the symbols searched are declared in source (#459), each with the lines it takes
+	///     and where its node starts (#487). Roslyn's reference search leaves the declaration out,
+	///     and "where is it and who uses it" is one question to an agent.
 	/// </summary>
 	[JsonPropertyName("declarations")]
 	[JsonPropertyOrder(-1)]
-	public string[] Declarations { get; init; } = [];
+	public DeclaredAt[] Declarations { get; init; } = [];
+}
+
+/// <summary>
+///     Where a symbol is declared: the file and the line of its name, what is declared there
+///     (<c>method Read</c>), the lines it takes from its attached comment to its end, and where
+///     its node starts, as <c>roslyn_replace_in_code</c> takes it. The last three are absent for
+///     a declaration that is no member or type of its own: a local, a parameter.
+/// </summary>
+internal sealed record DeclaredAt(
+	[property: JsonPropertyName("file")] string File,
+	[property: JsonPropertyName("line")] int    Line
+)
+{
+	[JsonPropertyName("declaration")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Declaration { get; init; }
+	
+	[JsonPropertyName("lines")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Lines { get; init; }
+	
+	[JsonPropertyName("at")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? At { get; init; }
 }
 
 /// <summary>
@@ -88,7 +114,7 @@ internal sealed record NamedReferences([property: JsonPropertyName("name")] stri
 {
 	[JsonPropertyName("declarations")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	public string[]? Declarations { get; init; }
+	public DeclaredAt[]? Declarations { get; init; }
 	
 	[JsonPropertyName("symbols_searched")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -100,7 +126,7 @@ internal sealed record NamedReferences([property: JsonPropertyName("name")] stri
 	
 	[JsonPropertyName("references")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	public string[]? References { get; init; }
+	public SearchFileGroup[]? References { get; init; }
 	
 	[JsonPropertyName("has_more")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -585,6 +611,58 @@ internal sealed record TriviaSpan(
 	[property: JsonPropertyName("end")]   int End
 );
 
+/// <summary>The findings of <c>roslyn_get_diagnostics</c> in one file (#487), by the declaration each is in.</summary>
+internal sealed record DiagnosticFileGroup(
+	[property: JsonPropertyName("file")] string File,
+	// Set where the call covers several projects (#296).
+	[property: JsonPropertyName("project")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Project,
+	[property: JsonPropertyName("in")]   DiagnosticDeclarationGroup[] In
+);
+
+/// <summary>
+///     The findings in one declaration: what it is, the lines it takes and where its node starts,
+///     as a text search names them. All three are absent for findings in no declaration: a using
+///     directive, a namespace line.
+/// </summary>
+internal sealed record DiagnosticDeclarationGroup(
+	[property: JsonPropertyName("declaration")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Declaration,
+	[property: JsonPropertyName("lines")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Lines,
+	[property: JsonPropertyName("at")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? At,
+	[property: JsonPropertyName("findings")] DiagnosticFinding[] Findings
+);
+
+/// <summary>
+///     One thing found, once for all the places it was found in within a declaration: an analyzer
+///     reports one message many times. <see cref="Places"/> is absent for a finding with no place
+///     in a file, which names its <see cref="Project"/> instead where there are several.
+/// </summary>
+internal sealed record DiagnosticFinding(
+	[property: JsonPropertyName("code")]     string Code,
+	[property: JsonPropertyName("severity")] string Severity,
+	[property: JsonPropertyName("message")]  string Message
+)
+{
+	[JsonPropertyName("places")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public DiagnosticPlaceAt[]? Places { get; init; }
+	
+	[JsonPropertyName("project")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Project { get; init; }
+}
+
+/// <summary>Where a finding is: the line, the column, and the text of the line.</summary>
+internal sealed record DiagnosticPlaceAt(
+	[property: JsonPropertyName("line")]   int Line,
+	[property: JsonPropertyName("column")] int Column,
+	[property: JsonPropertyName("text")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Text
+);
+
 internal sealed record DiagnosticsResult(
 	[property: JsonPropertyName("summary")]       string           Summary,
 	[property: JsonPropertyName("source")]        string           Source,
@@ -596,9 +674,15 @@ internal sealed record DiagnosticsResult(
 	[property: JsonPropertyName("page_token")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string?                                       PageToken,
-	[property: JsonPropertyName("items")]
+	// The findings that have a place in a file, by file and by the declaration each is in
+	// (#487). Null when no findings were asked for (take: 0), empty when none were found.
+	[property: JsonPropertyName("files")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-	DiagnosticItem[]?                             Items,
+	DiagnosticFileGroup[]?                        Files,
+	// The findings with no place in a file: an analyzer that did not load, a missing reference.
+	[property: JsonPropertyName("general")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	DiagnosticFinding[]?                          General,
 	[property: JsonPropertyName("possible_workspace_load_issue")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
 	bool                                         PossibleWorkspaceLoadIssue,

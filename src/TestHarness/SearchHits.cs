@@ -13,9 +13,15 @@ static class SearchHits
 	///     Every hit of <paramref name="answer"/> in the order given, or null when it is no search
 	///     answer: a missing <c>files</c> must fail a test, not read as "no hits".
 	/// </summary>
-	internal static Hit[]? Of(JsonNode? answer)
+	internal static Hit[]? Of(JsonNode? answer) => In(answer?["files"]);
+	
+	/// <summary>
+	///     The same for any list of file groups in that shape: the <c>references</c> of
+	///     <c>roslyn_find_references</c> are one since #487.
+	/// </summary>
+	internal static Hit[]? In(JsonNode? groups)
 	{
-		if(answer?["files"] is not JsonArray files)
+		if(groups is not JsonArray files)
 			
 			return null;
 		

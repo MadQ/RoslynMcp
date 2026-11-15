@@ -432,7 +432,7 @@ static class LinkWriteSyncTests
 					{
 						var data = await Call("roslyn_get_diagnostics", new { projectPath = loose.Dir, take = 200, severity = "errors" });
 						
-						if(data?["items"] is not JsonArray items)
+						if(DiagnosticItems.Of(data) is not JsonArray items)
 							
 							return "unknown";
 						

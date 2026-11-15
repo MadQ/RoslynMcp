@@ -304,7 +304,7 @@ static class PaginationTests
 					
 					for(var page = first; page is not null && pages < 10; pages++) {
 						
-						var items = page["items"]?.AsArray() ?? [];
+						var items = DiagnosticItems.Of(page)?.AsArray() ?? [];
 						
 						sizes.Add(items.Count);
 						seen.AddRange(items.Select(item => $"{item?["code"]}@{item?["line"]}"));
@@ -379,9 +379,9 @@ static class PaginationTests
 					
 					return Verdict(
 						second?["total"]?.GetValue<int>() == 6
-							&& second["items"]?.AsArray().Count == 3
+							&& DiagnosticItems.Of(second)?.AsArray().Count == 3
 							&& !HasMore(second),
-						$"the page after the change: total {second?["total"]}, expected 6; items {second?["items"]?.AsArray().Count}, expected 3; has_more {HasMore(second)}, expected false");
+						$"the page after the change: total {second?["total"]}, expected 6; items {DiagnosticItems.Of(second)?.AsArray().Count}, expected 3; has_more {HasMore(second)}, expected false");
 				}),
 			
 			// The same for a change the workspace cannot take in place (#435): a new source file

@@ -51,7 +51,7 @@ static partial class DefaultWorkspaceTests
 				var (fileOk, onFile) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = solution, filePath = "Lib/Warn.cs", severity = "warnings" });
 				
 				static bool HasUnused(JsonNode? result)
-					=> result?["items"]?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "CS0168" && (item?["file"]?.GetValue<string>() ?? "").Contains("Warn.cs")) == true;
+					=> DiagnosticItems.Of(result)?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "CS0168" && (item?["file"]?.GetValue<string>() ?? "").Contains("Warn.cs")) == true;
 				
 				return Verdict(ok && fileOk && HasUnused(data) && HasUnused(onFile),
 					$"expected CS0168 in Lib/Warn.cs both ways; got {data?.ToJsonString() ?? "null"} / {onFile?.ToJsonString() ?? "null"}");
@@ -117,7 +117,7 @@ static partial class DefaultWorkspaceTests
 			new("DefaultWorkspace: get_diagnostics for a solution covers projects outside its directory and every target framework", async () => {
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = single.PathOf("Sln/Apart.slnx"), severity = "warnings", take = 200 });
-				var messages   = data?["items"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				var messages   = DiagnosticItems.Of(data)?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
 				
 				bool Has(string name) => messages.Any(message => message.Contains(name));
 				
@@ -181,7 +181,7 @@ static partial class DefaultWorkspaceTests
 					return messages.Any(message => message.Contains("missingOnWindows")) && messages.Any(message => message.Contains("missingElsewhere"));
 				}
 				
-				return Verdict(ok && dOk && built?["source"]?.GetValue<string>() == "roslyn" && Both(built?["errors"]) && Both(diags?["items"]),
+				return Verdict(ok && dOk && built?["source"]?.GetValue<string>() == "roslyn" && Both(built?["errors"]) && Both(DiagnosticItems.Of(diags)),
 					$"expected both frameworks' errors from each tool; got {built?.ToJsonString() ?? "null"} / {diags?.ToJsonString() ?? "null"}");
 			}),
 			
@@ -191,7 +191,7 @@ static partial class DefaultWorkspaceTests
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = adhocSln.PathOf("Pinned.slnx"), severity = "errors", take = 200 });
 				
-				return Verdict(ok && data?["items"]?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "CS0103") == true,
+				return Verdict(ok && DiagnosticItems.Of(data)?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "CS0103") == true,
 					$"expected CS0103 from Broken.cs; got {data?.ToJsonString() ?? "null"}");
 			}),
 			
@@ -200,7 +200,7 @@ static partial class DefaultWorkspaceTests
 			new("DefaultWorkspace: get_diagnostics for a file shared by two projects reports both projects' errors", async () => {
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_get_diagnostics", new { projectPath = single.PathOf("Shared/Shared.slnx"), filePath = "Common/SharedSource.cs", severity = "errors" });
-				var messages   = data?["items"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				var messages   = DiagnosticItems.Of(data)?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
 				
 				return Verdict(ok && messages.Any(m => m.Contains("OnlyInP1")) && messages.Any(m => m.Contains("OnlyInP2")),
 					$"expected the missing OnlyInP1 and OnlyInP2 both; got {data?.ToJsonString() ?? "null"}");

@@ -1137,7 +1137,7 @@ internal static class CodeFixTests
 				severity = "hidden",
 				includeAnalyzers = true
 			});
-			var listed = diagnostics?["items"]?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "IDE0005") == true;
+			var listed = DiagnosticItems.Of(diagnostics)?.AsArray().Any(item => item?["code"]?.GetValue<string>() == "IDE0005") == true;
 			
 			if(!listed)
 				return (false, $"FAIL  (diagnostics: {diagnosticsText}) [{sw.ElapsedMilliseconds}ms]");

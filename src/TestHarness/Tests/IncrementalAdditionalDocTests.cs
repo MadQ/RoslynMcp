@@ -145,7 +145,7 @@ static class IncrementalAdditionalDocTests
 			if(!ok)
 				return null;
 			
-			if(data?["items"] is not JsonArray items)
+			if(DiagnosticItems.Of(data) is not JsonArray items)
 				return "";
 			
 			foreach(var item in items) {

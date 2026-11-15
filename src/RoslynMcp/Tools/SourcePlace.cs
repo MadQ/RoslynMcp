@@ -1,0 +1,135 @@
+using Microsoft.CodeAnalysis;
+
+namespace RoslynMcp.Tools;
+
+/// <summary>
+///     One place in source as a semantic tool answers it (#487): the file, the line and column, the
+///     text of the line, and the declaration the place is in.
+///     <para>
+///         A reference, a caller or a diagnostic used to be a bare <c>file:line</c>, and what an
+///         agent did next was read the member around it: every reference search in a week of
+///         logs was followed by a read. <c>roslyn_search_files</c> answers with the enclosing
+///         declaration since #460; this is the same answer for the tools whose places come from
+///         the compiler and not from a pattern. One shape for both, so that what an agent learned
+///         to do with a search hit (read the member with <c>lines</c>, edit it with <c>at</c>)
+///         holds for a reference too.
+///     </para>
+///     <para>
+///         Plain values only: a place is kept between pages by the pagination cache, which must
+///         never hold a symbol, a syntax tree or a compilation.
+///     </para>
+/// </summary>
+internal sealed record SourcePlace(string File, int Line, int Column, string Text, EnclosingDeclaration? Declaration)
+{
+	/// <summary>
+	///     The place a location is, with its path relative to <paramref name="rootPath"/>. A
+	///     location that is in no syntax tree (metadata, a file the compilation does not hold) keeps
+	///     the path and line it reports and has no text and no declaration.
+	/// </summary>
+	public static SourcePlace Of(Location location, string rootPath, CancellationToken cancellationToken)
+	{
+		var span = location.GetLineSpan();
+		var file = span.Path is { Length: > 0 } path ? Path.GetRelativePath(rootPath, path) : "?";
+		
+		if(location.SourceTree is not { } tree)
+			
+			return new(file, span.StartLinePosition.Line + 1, span.StartLinePosition.Character + 1, "", null);
+		
+		var text        = tree.GetText(cancellationToken);
+		var line        = text.Lines[span.StartLinePosition.Line];
+		var declaration = EnclosingDeclaration.At(tree.GetRoot(cancellationToken), text, location.SourceSpan.Start).Declaration;
+		
+		return new(
+			file,
+			span.StartLinePosition.Line + 1,
+			span.StartLinePosition.Character + 1,
+			SearchFilesTool.Excerpt(text.ToString(line.Span), span.StartLinePosition.Character),
+			declaration);
+	}
+	
+	/// <summary>
+	///     The places in the order an answer lists them, by file and line, one per line: two
+	///     references on one line are one place to read.
+	/// </summary>
+	public static SourcePlace[] Sorted(IEnumerable<SourcePlace> places)
+		=> [..
+			places
+				.DistinctBy(place => (place.File, place.Line))
+				.OrderBy(place => place.File, StringComparer.Ordinal)
+				.ThenBy(place => place.Line)
+		]
+	;
+	
+	/// <summary>
+	///     The places as an answer shows them: by file, and within a file by the declaration each
+	///     is in, as a text search groups its hits. The places come sorted, so the groups are runs.
+	/// </summary>
+	public static SearchFileGroup[] Group(IReadOnlyList<SourcePlace> places)
+	{
+		var files = new List<SearchFileGroup>();
+		
+		for(var index = 0; index < places.Count;) {
+			
+			var file    = places[index].File;
+			var members = new List<SearchDeclarationGroup>();
+			
+			while(index < places.Count && places[index].File == file) {
+				
+				var declaration = places[index].Declaration;
+				var lines       = new List<SearchHit>();
+				
+				for(; index < places.Count && places[index].File == file && places[index].Declaration == declaration; index++)
+					lines.Add(new(places[index].Line, places[index].Text, null));
+				
+				members.Add(declaration is { } found
+					? new($"{found.Kind} {found.Name}".TrimEnd(), $"{found.FirstLine}-{found.EndLine}", $"{found.StartLine}:{found.StartColumn}", [..lines])
+					: new(null, null, null, [..lines]));
+			}
+			
+			files.Add(new(file, null, [..members]));
+		}
+		
+		return [..files];
+	}
+	
+	/// <summary>A place that is a declaration itself: where it is, what it is, the lines it takes and where its node starts.</summary>
+	public DeclaredAt AsDeclared()
+		=> Declaration is { } found
+			? new(File, Line) { Declaration = $"{found.Kind} {found.Name}".TrimEnd(), Lines = $"{found.FirstLine}-{found.EndLine}", At = $"{found.StartLine}:{found.StartColumn}" }
+			: new(File, Line)
+	;
+	
+	/// <summary>
+	///     What the grouping of one page came to, for the log, as a search notes it (#460):
+	///     <c>12 reference(s) in 3 file(s), 5 group(s), 5 in a declaration; flat ~310 chars</c>. The
+	///     flat figure is what the same places took as <c>file:line</c> strings, the form the
+	///     answer had before; beside the entry's own size it says what the grouping costs.
+	/// </summary>
+	public static string GroupingNote(IReadOnlyList<SourcePlace> places, string what)
+	{
+		if(places.Count == 0)
+			
+			return "";
+		
+		var files  = 0;
+		var groups = 0;
+		var named  = 0;
+		var flat   = 0;
+		
+		for(var index = 0; index < places.Count; index++) {
+			
+			var place    = places[index];
+			var newFile  = index == 0 || places[index - 1].File != place.File;
+			var newGroup = newFile || places[index - 1].Declaration != place.Declaration;
+			
+			files  += newFile ? 1 : 0;
+			groups += newGroup ? 1 : 0;
+			named  += newGroup && place.Declaration is not null ? 1 : 0;
+			
+			// "file:line", and the comma after it.
+			flat += 4 + place.File.Length + place.Line.ToString().Length;
+		}
+		
+		return $"{places.Count} {what} in {files} file(s), {groups} group(s), {named} in a declaration; flat ~{flat} chars";
+	}
+}

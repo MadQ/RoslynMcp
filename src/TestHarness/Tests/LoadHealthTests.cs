@@ -109,7 +109,7 @@ static class LoadHealthTests
 		Task<JsonNode?> Diagnostics(FixtureProject fx) => ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = fx.Csproj });
 		
 		static bool HasCs8632(JsonNode? diagnostics) =>
-			diagnostics?["items"]?.AsArray().Any(d => d?["code"]?.GetValue<string>() == "CS8632") == true;
+			DiagnosticItems.Of(diagnostics)?.AsArray().Any(d => d?["code"]?.GetValue<string>() == "CS8632") == true;
 		
 		static string[] Names(JsonNode? array) =>
 			array is JsonArray items ? [..items.Select(n => n?.GetValue<string>() ?? "")] : [];

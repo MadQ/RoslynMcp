@@ -258,7 +258,7 @@ static class LinkedFileTests
 					// cleanly. What is looked for is the one error a second document causes.
 					var data = await Call("roslyn_get_diagnostics", new { projectPath = loose.Dir, take = 200, severity = "errors" });
 					
-					if(data?["items"] is not JsonArray items)
+					if(DiagnosticItems.Of(data) is not JsonArray items)
 						
 						return (false, $"FAIL  (no diagnostics: {data?.ToJsonString() ?? "none"})");
 					
@@ -326,7 +326,7 @@ static class LinkedFileTests
 					}
 					
 					var data       = await Call("roslyn_get_diagnostics", new { projectPath = fading.Dir, take = 200, severity = "errors" });
-					var duplicates = data?["items"] is JsonArray items ? items.Count(item => item?["code"]?.GetValue<string>() == "CS0101") : -1;
+					var duplicates = DiagnosticItems.Of(data) is JsonArray items ? items.Count(item => item?["code"]?.GetValue<string>() == "CS0101") : -1;
 					var second     = await IsDocumentAsync(fading.Dir, "obj/Made.cs");
 					
 					return current && duplicates == 0 && !second

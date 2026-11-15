@@ -670,7 +670,7 @@ internal static partial class ShadowCopyTests
 		{
 			var diagnostics = await server.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = project.Csproj, includeAnalyzers = true });
 			
-			return [..(diagnostics?["items"]?.AsArray() ?? [])
+			return [..(DiagnosticItems.Of(diagnostics)?.AsArray() ?? [])
 				.Where(item => item?["code"]?.GetValue<string>() == FixtureAnalyzers.DiagnosticId)
 				.Select(item => item?["message"]?.GetValue<string>() ?? string.Empty)
 				.Distinct()];

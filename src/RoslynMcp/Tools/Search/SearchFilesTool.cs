@@ -409,7 +409,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 	///     ellipsis at each cut. A hit in a minified file is one line of a megabyte, and the
 	///     answer is read by a model.
 	/// </summary>
-	static string Excerpt(ReadOnlySpan<char> line, int matchIndex)
+	internal static string Excerpt(ReadOnlySpan<char> line, int matchIndex)
 	{
 		var trimmed = line.Trim();
 		

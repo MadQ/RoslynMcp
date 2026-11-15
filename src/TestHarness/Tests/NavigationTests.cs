@@ -68,9 +68,11 @@ static class NavigationTests
 					var page1     = content1 is not null ? JsonNode.Parse(content1) : null;
 					pageToken     = page1?["page_token"]?.GetValue<string>();
 					var hasMore   = page1?["has_more"]?.GetValue<bool>() == true;
-					var page1Refs = page1?["references"]?.AsArray();
 					
-					return pageToken is not null && hasMore && page1Refs?.Count == 2
+					// take counts references, not the file groups they are listed in (#487).
+					var page1Refs = SearchHits.In(page1?["references"]);
+					
+					return pageToken is not null && hasMore && page1Refs?.Length == 2
 						? (true,  $"PASS  [{sw.ElapsedMilliseconds}ms]")
 						: (false, $"FAIL  (no page_token or has_more) [{sw.ElapsedMilliseconds}ms]");
 				}),
@@ -92,13 +94,13 @@ static class NavigationTests
 					sw.Stop();
 					var content2   = resp2?["result"]?["content"]?[0]?["text"]?.GetValue<string>();
 					var page2      = content2 is not null ? JsonNode.Parse(content2) : null;
-					var page2Items = page2?["references"]?.AsArray();
+					var page2Items = SearchHits.In(page2?["references"]);
 					var page2Token = page2?["page_token"]?.GetValue<string>();
 					
 					// The token alone is the cursor (#305): no skip or take is passed, so two references
 					// starting at position 2, in the tool's own shape, prove it carried both. A token
 					// that names a later page cannot equal the one that named this page.
-					return page2Items?.Count == 2 && page2?["skip"]?.GetValue<int>() == 2 && page2?["symbols_searched"] is not null && page2Token != pageToken
+					return page2Items?.Length == 2 && page2?["skip"]?.GetValue<int>() == 2 && page2?["symbols_searched"] is not null && page2Token != pageToken
 						? (true,  $"PASS  [{sw.ElapsedMilliseconds}ms]")
 						: (false, $"FAIL  (page 2 is not 2 references at skip 2 in the tool's shape, or the token did not advance) [{sw.ElapsedMilliseconds}ms]");
 				}),
