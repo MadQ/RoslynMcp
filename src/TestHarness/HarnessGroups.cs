@@ -38,6 +38,7 @@ static class HarnessGroups
 		Group("Call Graph Tools",                          g => CallGraphTests.Build(g.Ctx)),
 		Group("Analyze Region",                            g => AnalyzeRegionTests.Build(g.Ctx)),
 		Group("Symbol Info",                               g => SymbolInfoTests.Build(g.Ctx)),
+		Group("Annotate Source",                           g => AnnotateSourceTests.Build(g.Ctx)),
 		Group("Code Generation Tools",                     g => CodeGenerationTests.Build(g.Ctx)),
 		Group("File Content Tools",                        g => FileContentTests.Build(g.Ctx)),
 		Group("Bounded Reads",                             g => BoundedReadTests.Build(g.Ctx, g.LogDir, g.LogGlob)),

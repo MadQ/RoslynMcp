@@ -8,6 +8,7 @@
 ### Analysis / navigation (25)
 
 - `roslyn_analyze_region`
+- `roslyn_annotate_source`
 - `roslyn_check_drift`
 - `roslyn_check_syntax`
 - `roslyn_find_callers`
