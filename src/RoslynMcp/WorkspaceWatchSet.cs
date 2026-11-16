@@ -533,6 +533,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	bool Add(WatchRoot root, bool withinCap)
 	{
 		FileSystemWatcher? watcher = null;
+		var                stopped = false;
 		
 		try {
 			
@@ -582,6 +583,19 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			return false;
 		}
+		catch {
+			
+			// Anything else goes to the caller, but not with the watcher left behind.
+			if(watcher is not null) {
+				
+				lock(gate)
+					adding.Remove(watcher);
+				
+				watcher.Dispose();
+			}
+			
+			throw;
+		}
 		
 		lock(gate) {
 			
@@ -595,9 +609,6 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			adding.Remove(watcher);
 			
-			if(!running && !disposed)
-				unwatched.TryAdd(root.Path, "the watcher stopped while it was starting");
-			
 			if(!disposed && fits && running && watchers.TryAdd(root.Path, (watcher, root))) {
 				
 				unwatched.Remove(root.Path);
@@ -605,12 +616,30 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				return true;
 			}
 			
-			// Not taken, so what it reported while starting is about no watcher of the set.
-			if(!watchers.ContainsKey(root.Path))
+			// Not taken. Where the set has another watcher for the root, this one changes nothing.
+			if(!watchers.ContainsKey(root.Path)) {
+				
+				// What it reported while starting is about no watcher of the set.
 				degraded.Remove(root.Path);
+				
+				// It stopped while it started. The root is tried again at the next reload, and
+				// is listed unless its directory is what went away. TryAdd: Failed may have been
+				// first, with the watcher's own words, and has then said it already.
+				if(!running && !disposed) {
+					
+					scopeKey = null;
+					stopped  = Directory.Exists(root.Path) && unwatched.TryAdd(root.Path, "the watcher stopped while it was starting");
+				}
+			}
 		}
 		
 		watcher.Dispose();
+		
+		if(stopped) {
+			
+			logger.LogInfo("Watch", $"WARN: watcher on '{root.Path}' stopped while it was starting — changes under it are not seen; roslyn_check_drift names it");
+			AnnounceUnwatched();
+		}
 		
 		return false;
 	}
@@ -688,7 +717,9 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 					
 					current = watchers.TryGetValue(root.Path, out var entry) && ReferenceEquals(entry.Watcher, watcher);
 					
-					if(!current && !adding.Contains(watcher))
+					// One that Add is starting counts only while the set has no watcher for the
+					// root: a second start for a watched root says nothing about the first.
+					if(!current && (!adding.Contains(watcher) || watchers.ContainsKey(root.Path)))
 						
 						return;
 					
@@ -734,7 +765,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			logger.LogError("Watch", $"Handling a watcher error for '{root.Path}' failed: {ex.GetType().Name}: {ex.Message}");
 		}
 	}
-
+	
 	// Scans for what an overflow dropped, a moment later and once for all the overflows until then.
 	// From the latest moment the disk was known: nothing says which events were lost, and a file
 	// found by the scan that was not changed is dropped again by the flush's comparison.

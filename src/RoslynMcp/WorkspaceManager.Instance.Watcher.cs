@@ -148,9 +148,16 @@ internal sealed partial class WorkspaceManager
 				// off, as for a delete: one wrongly assumed costs a reload. A file that is gone
 				// reports the year 1601 and is not taken here. Other inputs of the evaluation that
 				// were edited in place (a props file, a lock file) are not found by this scan.
+				// The solution file is the path the workspace was loaded from: an .slnx is opened
+				// project by project, which leaves the Roslyn solution without a file path.
+				var solutionFile = Path.GetExtension(loadPath) is var extension
+					&& (extension.Equals(".slnx", StringComparison.OrdinalIgnoreCase) || extension.Equals(".sln", StringComparison.OrdinalIgnoreCase))
+						? loadPath
+						: solution.FilePath;
+				
 				var projectFiles = solution.Projects
 					.Select(project => project.FilePath)
-					.Append(solution.FilePath)
+					.Append(solutionFile)
 					.OfType<string>()
 					.Distinct(WatchPlanner.PathComparer)
 				;
