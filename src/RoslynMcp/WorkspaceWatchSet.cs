@@ -584,12 +584,22 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 					// What it reported while starting is about a watcher that is not there.
 					degraded.Remove(root.Path);
 					
+					// Tried again at the next reload either way. A start from a plan gets that from
+					// its caller; a directory adopted later has only this.
+					scopeKey = null;
+					
 					if(exists)
 						unwatched[root.Path] = $"{ex.GetType().Name}: {ex.Message}";
 					else
-						scopeKey = null;
+						unwatched.Remove(root.Path);
+					
+					stopped = exists;
 				}
 			}
+			
+			// Silent while a start runs, which announces at its end; said here for an adopted one.
+			if(stopped)
+				AnnounceUnwatched();
 			
 			return false;
 		}
@@ -638,7 +648,11 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				if(!running && !disposed) {
 					
 					scopeKey = null;
-					stopped  = Directory.Exists(root.Path) && unwatched.TryAdd(root.Path, "the watcher stopped while it was starting");
+					
+					if(Directory.Exists(root.Path))
+						stopped = unwatched.TryAdd(root.Path, "the watcher stopped while it was starting");
+					else
+						unwatched.Remove(root.Path);
 				}
 			}
 		}
