@@ -4,24 +4,21 @@ using System.Text.Json.Nodes;
 ///     What happens when a file watcher fails while it is running (#499). #495 covered a watcher
 ///     that cannot start; one that starts and fails later was still only logged.
 ///     <para>
-///         Two of the four cases can be made for real and are tested here: a buffer overflow, and
-///         a root that is deleted and comes back. The other two cannot. A watcher that Windows
-///         switches off while its directory stays needs a volume that goes away, and a root
-///         watched only in part needs Linux's limit on watches to be reached, which a test cannot
-///         lower for itself. Those two paths have no test.
+///         Of the four cases only one can be made for real, and it is the one tested here: a root
+///         that is deleted and comes back. The others cannot. A buffer overflow needs a consumer
+///         slower than the server is: 100,000 events written at once went through without one, on
+///         Windows and on Linux. A watcher that Windows switches off while its directory stays
+///         needs a volume that goes away. A root watched only in part needs Linux's limit on
+///         watches to be reached, which a test cannot lower for itself. Those three paths have no
+///         test.
 ///     </para>
 /// </summary>
 static class WatcherFailureTests
 {
-	internal static TestGroup Build(TestContext ctx, string serverLogDir, string serverLogGlob)
+	internal static TestGroup Build(TestContext ctx)
 	{
-		var burst = TestFixtures.NewMsBuildProject("WatcherOverflow", targetFrameworks: "net10.0");
-		var gone  = TestFixtures.NewMsBuildProject("WatcherRootGone", targetFrameworks: "net10.0");
+		var gone = TestFixtures.NewMsBuildProject("WatcherRootGone", targetFrameworks: "net10.0");
 		
-		// The noise directory exists before the load, so that the files written into it later
-		// are events of a watcher that is already there and nothing has to be adopted first.
-		burst.Write("Probe.cs", "class Probe { }\n");
-		burst.Write("noise/first.txt", "noise\n");
 		gone.Write("Probe.cs", "class Probe { }\n");
 		
 		async Task<int> WatchRootsAsync(FixtureProject fx)
@@ -56,21 +53,6 @@ static class WatcherFailureTests
 		async Task<bool> ReloadPendingAsync(FixtureProject fx)
 			=> (await ctx.CallToolJsonAsync("roslyn_check_drift", new { projectPath = fx.Csproj }))?["reload_pending"]?.GetValue<bool>() == true;
 		
-		// The index of the first log line at or after 'from' that holds every one of the texts, or -1.
-		int LogLine(int from, params string[] texts)
-		{
-			if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var lines, out _))
-				
-				return -1;
-			
-			for(var i = Math.Max(from, 0); i < lines.Length; i++)
-				if(texts.All(text => lines[i].Contains(text, StringComparison.Ordinal)))
-					
-					return i;
-			
-			return -1;
-		}
-		
 		static void CopyTree(string from, string to)
 		{
 			Directory.CreateDirectory(to);
@@ -83,54 +65,6 @@ static class WatcherFailureTests
 		}
 		
 		var tests = new List<TestCase> {
-			
-			// An overflow drops events and says nothing about which. The server used to log a
-			// warning and go on, so whatever was in the dropped events stayed unknown until
-			// something else touched the file. Now it scans for what it missed.
-			//
-			// The overflow is made for real: thousands of files written at once, with long names,
-			// since the buffer is filled by the bytes of the names. Whether that overflows depends
-			// on the system and on how fast the server drains its buffer, so a run in which it did
-			// not is a skip, never a pass. Where it did, two things are required: the scan ran
-			// after it (the server's log says so, naming this workspace), and the one source file
-			// among the noise, written last and so the likeliest to be in a dropped event, is
-			// known to the server, which shows as a pending reload.
-			new("watcher failures: after a buffer overflow the server scans for what it missed",
-				async () => {
-					
-					if(!await WatchedAsync(burst, 20))
-						
-						return (false, "FAIL  (the fixture's watcher did not start within 20 s)");
-					
-					var name  = Path.GetFileName(burst.Dir);
-					var start = ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var before, out var failure) ? before.Length : -1;
-					
-					if(start < 0)
-						
-						return (false, failure);
-					
-					const int Files = 6000;
-					
-					var padding = new string('x', 120);
-					
-					for(var i = 0; i < Files; i++)
-						File.WriteAllBytes(burst.PathOf($"noise/{i:D5}-{padding}.txt"), []);
-					
-					burst.Write("Burst.cs", "class Burst { }\n");
-					
-					var overflow = -1;
-					
-					if(!await UntilAsync(() => Task.FromResult((overflow = LogLine(start, "dropped events", name)) >= 0), 5))
-						
-						return Skip.NotApplicable($"writing {Files} files at once did not overflow the watcher's buffer on this system");
-					
-					var scanned = await UntilAsync(() => Task.FromResult(LogLine(overflow, "unseen by the watchers", name) >= 0), 15);
-					var pending = await UntilAsync(() => ReloadPendingAsync(burst), 10);
-					
-					return scanned && pending
-						? (true, "PASS")
-						: (false, $"FAIL  (after the overflow: scan logged: {scanned}, the new source file flagged a reload: {pending})");
-				}),
 			
 			// A workspace root that is deleted and created again: a checkout removed and cloned
 			// anew under a running server. Windows reports the deletion as a watcher error and
@@ -224,7 +158,6 @@ static class WatcherFailureTests
 		
 		return new TestGroup($"Watcher Failures ({tests.Count} tests)", tests, Teardown: () => {
 			
-			burst.Dispose();
 			gone.Dispose();
 			
 			return Task.CompletedTask;
