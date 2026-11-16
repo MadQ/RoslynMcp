@@ -569,16 +569,26 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			watcher?.Dispose();
 			logger.LogInfo("Watch", $"WARN: cannot watch '{root.Path}' ({ex.GetType().Name}: {ex.Message}) — changes under it are not seen; roslyn_check_drift names it");
 			
+			// A directory that is not there is not one that should be watched and is not.
+			var exists = Directory.Exists(root.Path);
+			
 			lock(gate) {
-				
-				// What it reported while starting is about a watcher that is not there.
-				degraded.Remove(root.Path);
 				
 				if(watcher is not null)
 					adding.Remove(watcher);
 				
-				if(!disposed)
-					unwatched[root.Path] = $"{ex.GetType().Name}: {ex.Message}";
+				// Where the set has a watcher for the root, a second start that failed changes
+				// nothing: the root is watched.
+				if(!disposed && !watchers.ContainsKey(root.Path)) {
+					
+					// What it reported while starting is about a watcher that is not there.
+					degraded.Remove(root.Path);
+					
+					if(exists)
+						unwatched[root.Path] = $"{ex.GetType().Name}: {ex.Message}";
+					else
+						scopeKey = null;
+				}
 			}
 			
 			return false;
@@ -751,7 +761,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				var current = watchers.TryGetValue(root.Path, out var entry) && ReferenceEquals(entry.Watcher, watcher);
 				
 				// One error per directory that got no watch, thousands at the limit: the first says it.
-				if(!current && !adding.Contains(watcher) || !degraded.TryAdd(root.Path, reason))
+				if(!current && (!adding.Contains(watcher) || watchers.ContainsKey(root.Path)) || !degraded.TryAdd(root.Path, reason))
 					
 					return;
 				
