@@ -110,7 +110,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 					IMethodSymbol   m => m.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					IPropertySymbol p => p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					IFieldSymbol    f => f.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-					ILocalSymbol    l => ExpressionFacts.LocalType(model, l, CancellationToken.None).ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+					ILocalSymbol    l => ExpressionFacts.Bound(ExpressionFacts.LocalType(model, l, CancellationToken.None))?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					_                 => null
 				})
 		;
@@ -190,7 +190,7 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 	// is nullable for every reference type and would read as "may be null" (#355).
 	static string? DeclaredType(SemanticModel model, ISymbol? symbol) => symbol switch {
 		
-		ILocalSymbol     l => ExpressionFacts.LocalType(model, l, CancellationToken.None).ToDisplayString(TypeFormat),
+		ILocalSymbol     l => ExpressionFacts.Bound(ExpressionFacts.LocalType(model, l, CancellationToken.None))?.ToDisplayString(TypeFormat),
 		IParameterSymbol p => p.Type.ToDisplayString(TypeFormat),
 		IFieldSymbol     f => f.Type.ToDisplayString(TypeFormat),
 		IPropertySymbol  p => p.Type.ToDisplayString(TypeFormat),
