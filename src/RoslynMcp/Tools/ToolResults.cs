@@ -566,7 +566,16 @@ internal sealed record CheckDriftResult(
 	[property: JsonPropertyName("reload_pending")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
 	bool                                                 ReloadPending
-) : ToolResult;
+) : ToolResult
+{
+	/// <summary>
+	///     A fourth axis (#495): the directories whose file watcher could not start. A change made
+	///     there outside the server raises no event, so the three axes above are the only way it is
+	///     found, and a new file is found by none of them. Absent when everything is watched.
+	/// </summary>
+	[JsonPropertyName("unwatched_roots")]
+	public UnwatchedInfo[]? UnwatchedRoots { get; init; }
+}
 
 internal sealed record GetTriviaNoMatchResult(
 	[property: JsonPropertyName("message")]       string   Message,
@@ -1061,7 +1070,29 @@ internal sealed record InfoResult(
 	[property: JsonPropertyName("default_workspace")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	DefaultWorkspaceInfo?                             DefaultWorkspace = null
-) : ToolResult;
+) : ToolResult
+{
+	/// <summary>
+	///     The workspaces the server holds, each with its live watch roots and the ones that could
+	///     not start (#495). The sum of <c>watch_roots</c> is the watcher instances the server takes
+	///     from the system, of which Linux gives a user 128 by default.
+	/// </summary>
+	[JsonPropertyName("workspaces")]
+	public WorkspaceWatchInfo[]? Workspaces { get; init; }
+}
+
+/// <summary>One loaded workspace in <c>roslyn_info</c>: its root and its file watching.</summary>
+internal sealed record WorkspaceWatchInfo(
+	[property: JsonPropertyName("root")]            string           Root,
+	[property: JsonPropertyName("watch_roots")]     int              WatchRoots,
+	[property: JsonPropertyName("unwatched_roots")] UnwatchedInfo[]? UnwatchedRoots
+);
+
+/// <summary>A directory whose watcher could not start, as an answer names it.</summary>
+internal sealed record UnwatchedInfo(
+	[property: JsonPropertyName("path")]   string Path,
+	[property: JsonPropertyName("reason")] string Reason
+);
 
 /// <summary>
 ///     What an omitted <c>projectPath</c> stands for, as <c>roslyn_info</c> reports it (#298): the

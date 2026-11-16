@@ -525,6 +525,29 @@ chmod +x /path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe
 
 ---
 
+### Linux: edits made outside the server are not noticed ("File watching is off")
+
+**Symptom:** A tool answer carries the caution *File watching is off for part of the workspace*, or `roslyn_check_drift` lists `unwatched_roots`. Files changed in an editor or by `git` are not picked up, and a newly created file does not appear in symbol results.
+
+**Cause:** Every file watcher is an inotify instance on Linux, and a user has a fixed number of them (128 by default), shared by every program that watches files: other RoslynMcp servers, editors, build tools. A second limit counts the watched directories. When either runs out, the server loads the workspace but cannot start its watchers.
+
+**Check:**
+```bash
+cat /proc/sys/fs/inotify/max_user_instances /proc/sys/fs/inotify/max_user_watches
+```
+`roslyn_info` lists the workspaces the server holds with `watch_roots` each: their sum is the instances this server takes.
+
+**Solution:** Raise the limits, then call `roslyn_respawn` (or reload the workspace) so the watchers start:
+```bash
+sudo sysctl -w fs.inotify.max_user_instances=1024
+sudo sysctl -w fs.inotify.max_user_watches=524288
+```
+To keep them across restarts, put both lines without `sudo sysctl -w` into a file under `/etc/sysctl.d/`.
+
+Until then, existing files that changed still show as drift when `roslyn_check_drift` is called; new files do not show anywhere before a reload.
+
+---
+
 ### macOS: "RoslynMcp.exe cannot be opened because the developer cannot be verified"
 
 **Symptom:** macOS Gatekeeper blocks execution.

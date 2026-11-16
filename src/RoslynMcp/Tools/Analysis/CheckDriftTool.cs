@@ -32,6 +32,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"That state makes symbol results wrong-but-plausible and makes roslyn_get_diagnostics report phantom " +
 		"CS0246/CS0234 errors or CS8632 warnings for code that builds fine — source can be perfectly in sync " +
 		"while this is broken. " +
+		"Beside the three axes below, unwatched_roots lists the directories whose file watcher could not start (on Linux, the inotify limit), with the reason; changes made there outside the server are not noticed, and a new file is not seen until a reload. " +
 		"(3) Pending reload: reload_pending is true when a change could not be applied incrementally and the " +
 		"reload servicing it has not finished — the workspace is behind disk. This is the only axis that can " +
 		"account for a newly added file, because drifted_files is built from documents the workspace already " +
@@ -183,6 +184,21 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			}
 		};
 
+		// Fourth axis (#495): a directory whose watcher could not start. It explains drift that
+		// keeps coming back, and it is the one state in which a new file is found by nothing.
+		var watching = health?.Watching is { Unwatched.Length: > 0 } partly ? partly : null;
+		
+		if(watching is not null) {
+			
+			var problem = $"File watching is off for part of the workspace: {watching.Problem}";
+			
+			result = result with {
+				
+				UnwatchedRoots = [..watching.Unwatched.Select(root => new UnwatchedInfo(TryMakeRelative(root.Path, rootPath) ?? root.Path, root.Reason))],
+				Hint           = result.Hint is null ? problem : $"{result.Hint} Also: {problem}"
+			};
+		}
+		
 		var outcome = (driftedFiles.Length > 0, unhealthy) switch {
 
 			(true, true)  => $"{driftedFiles.Length} drifted, unhealthy load",
@@ -193,6 +209,9 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 
 		if(reloadPending)
 			outcome += ", reload pending";
+		
+		if(watching is not null)
+			outcome += $", {watching.Unwatched.Length} unwatched root(s)";
 
 		return scope.Outcome(outcome, result);
 	}

@@ -37,6 +37,10 @@ internal sealed class WorkspaceResolver
 	public Tools.DefaultWorkspaceInfo DescribeDefaultWorkspace()
 		=> manager.DescribeDefaultWorkspace();
 	
+	/// <summary>The file watching of every workspace the server holds, without loading one (#495).</summary>
+	public (string Root, WatchStatus? Status)[] DescribeWatching()
+		=> manager.DescribeWatching();
+	
 	/// <summary>
 	///     A projectPath made absolute as resolution makes it: against the default workspace root
 	///     when it names something there, else against the working directory (#298).
