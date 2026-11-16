@@ -238,6 +238,22 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	// The unwatched roots the last news was about, so the same state is announced once.
 	string announced = "";
 	
+	// The roots whose watcher runs and reported that it cannot watch all that is under it (#499):
+	// on Linux the limit on watches, which fails one directory at a time and stops nothing.
+	// Guarded by the gate. Such a watcher is started again by the next plan, and reports again
+	// then whatever it still cannot watch.
+	readonly Dictionary<string, string> degraded = new(WatchPlanner.PathComparer);
+	
+	// The latest moment up to which what is on disk is known: the caller's word at an Apply, or
+	// the start of the last scan after an overflow. The next such scan looks from here.
+	DateTime? syncedUtc;
+	
+	// A scan after an overflow is on its way; further overflows until it runs need no second one.
+	bool catchUpPending;
+	
+	// An overflow rarely comes alone: a checkout raises one after another.
+	static readonly TimeSpan CatchUpDelay = TimeSpan.FromSeconds(1);
+	
 	bool    disposed;
 	string? scopeKey;
 	
@@ -272,7 +288,16 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 		
 		lock(gate) {
 			
-			if(disposed || key == scopeKey)
+			if(disposed)
+				
+				return;
+			
+			// Also when the plan stays as it is: the caller has just read the disk, so a scan for
+			// events an overflow dropped need not look further back than this.
+			if(syncedUtc is not { } synced || sinceUtc > synced)
+				syncedUtc = sinceUtc;
+			
+			if(key == scopeKey)
 				
 				return;
 			
@@ -351,8 +376,10 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 					}
 					
 					// Part of the plan is not watching (#495): the same, so that a limit that was
-					// raised since is noticed at the next reload. What is live stays live.
-					if(unwatched.Count > 0)
+					// raised since is noticed at the next reload. What is live stays live. A root
+					// watched only in part (#499) is started again then, which is the one way to
+					// give it the watches it lacks.
+					if(unwatched.Count > 0 || degraded.Count > 0)
 						scopeKey = null;
 					
 					since             = reconcileSinceUtc;
@@ -405,7 +432,9 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				foreach(var (path, entry) in watchers) {
 					
-					if(wanted.TryGetValue(path, out var root) && root == entry.Root)
+					// A degraded root's watcher is replaced: a watcher adds its watches when it
+					// starts, so only a new start can add the ones it was refused.
+					if(wanted.TryGetValue(path, out var root) && root == entry.Root && !degraded.ContainsKey(path))
 						continue;
 					
 					stale.Add(entry.Watcher);
@@ -415,6 +444,9 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				// A root the new plan does not have is no longer one that should be watched.
 				foreach(var path in unwatched.Keys.Where(path => !wanted.ContainsKey(path)).ToArray())
 					unwatched.Remove(path);
+				
+				// Each of them is started again below, or is no longer planned.
+				degraded.Clear();
 			}
 			
 			foreach(var watcher in stale)
@@ -434,13 +466,16 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 		}
 	}
 	
-	/// <summary>How many roots are watched, and the ones that should be and are not, with why.</summary>
-	public WatchStatus Status {
-		get {
-			lock(gate)
-				return new(watchers.Count, [..unwatched.OrderBy(entry => entry.Key, StringComparer.Ordinal).Select(entry => new UnwatchedRoot(entry.Key, entry.Value))]);
-		}
+	/// <summary>How many roots are watched, and the ones that are not or only in part, with why.</summary>
+public WatchStatus Status {
+	get {
+		static WatchRootProblem[] Sorted(Dictionary<string, string> roots)
+			=> [..roots.OrderBy(entry => entry.Key, StringComparer.Ordinal).Select(entry => new WatchRootProblem(entry.Key, entry.Value))];
+		
+		lock(gate)
+			return new(watchers.Count, Sorted(unwatched), Sorted(degraded));
 	}
+}
 	
 	// Says once, on the next tool answer, that part of the workspace is not watched: an agent
 	// that never asks roslyn_check_drift would otherwise not learn that new files go unseen.
@@ -449,14 +484,14 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	void AnnounceUnwatched()
 	{
 		var    status = Status;
-		string state  = string.Join('|', status.Unwatched.Select(root => root.Path));
+		string state  = string.Join('|', status.Unwatched.Select(root => root.Path)) + "\n" + string.Join('|', status.Degraded.Select(root => root.Path));
 		
 		lock(gate)
 			if(state == announced)
 				
 				return;
 		
-		if(status.Unwatched.Length > 0 && !WatchNews.Post($"File watching is off for {status.Extent} '{rootPath}': {status.Problem} roslyn_check_drift lists the directories."))
+		if(status.HasProblem && !WatchNews.Post($"File watching is off for {status.Extent} '{rootPath}': {status.Problem} roslyn_check_drift lists the directories."))
 			
 			return;
 		
@@ -494,7 +529,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				Vanished(root, e.OldFullPath);
 				Appeared(root, e.FullPath);
 			};
-			watcher.Error += (_, e) => Failed(root, e.GetException());
+			watcher.Error += (sender, e) => Failed(root, (FileSystemWatcher) sender, e.GetException());
 			
 			// The slow step on Linux — one inotify watch per directory below a recursive root —
 			// and the reason it runs outside the gate.
@@ -505,9 +540,14 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			watcher?.Dispose();
 			logger.LogInfo("Watch", $"WARN: cannot watch '{root.Path}' ({ex.GetType().Name}: {ex.Message}) — changes under it are not seen; roslyn_check_drift names it");
 			
-			lock(gate)
+			lock(gate) {
+				
+				// What it reported while starting is about a watcher that is not there.
+				degraded.Remove(root.Path);
+				
 				if(!disposed)
 					unwatched[root.Path] = $"{ex.GetType().Name}: {ex.Message}";
+			}
 			
 			return false;
 		}
@@ -524,6 +564,10 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				return true;
 			}
+			
+			// Not taken, so what it reported while starting is about no watcher of the set.
+			if(!watchers.ContainsKey(root.Path))
+				degraded.Remove(root.Path);
 		}
 		
 		watcher.Dispose();
@@ -543,26 +587,137 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 		}
 	}
 	
-	// A watcher's own directory being deleted surfaces here as an access-denied error; that is
-	// the directory going away, not a missed change, so the watcher is retired without a warning.
-	// Anything else — typically an event-buffer overflow — may have dropped events.
-	void Failed(WatchRoot root, Exception error)
-	{
-		if(Directory.Exists(root.Path)) {
+	// A watcher's Error event. What it means depends on what is left of the watcher (#499):
+//   - Its directory is gone (on Windows the deletion surfaces as an access-denied error): the
+//     watcher is retired without a warning, and the plan's key is forgotten, so a directory that
+//     comes back is watched again after the next reload.
+//   - An event-buffer overflow: events were dropped and the watcher goes on. No state: what was
+//     missed is found by the scan that also runs once watchers go live.
+//   - On Windows any other error has switched the watcher off before it was raised. The root is
+//     then not watched at all, and is listed as such.
+//   - Elsewhere the watcher goes on. Linux reports this way each directory it could not add a
+//     watch for (the limit on watches), so the root is watched with holes: degraded.
+// Runs on a pool thread, or inside a watcher's start, with nothing above it.
+void Failed(WatchRoot root, FileSystemWatcher watcher, Exception error)
+{
+	try {
+		
+		var reason = $"{error.GetType().Name}: {error.Message}";
+		
+		if(!Directory.Exists(root.Path)) {
 			
-			logger.LogInfo("Watch", $"WARN: watcher on '{root.Path}' failed ({error.GetType().Name}: {error.Message}) — changes may have been missed; roslyn_check_drift reports them");
+			var retired = false;
+			
+			lock(gate) {
+				
+				if(watchers.TryGetValue(root.Path, out var entry) && ReferenceEquals(entry.Watcher, watcher)) {
+					
+					watchers.Remove(root.Path);
+					degraded.Remove(root.Path);
+					
+					scopeKey = null;
+					retired  = true;
+				}
+			}
+			
+			if(retired)
+				watcher.Dispose();
 			
 			return;
 		}
 		
-		FileSystemWatcher? gone = null;
+		if(error is InternalBufferOverflowException) {
+			
+			logger.LogInfo("Watch", $"WARN: watcher on '{root.Path}' dropped events ({error.Message}) — scanning for what was missed");
+			CatchUpSoon();
+			
+			return;
+		}
 		
-		lock(gate)
-			if(watchers.Remove(root.Path, out var entry))
-				gone = entry.Watcher;
+		if(OperatingSystem.IsWindows() && !watcher.EnableRaisingEvents) {
+			
+			lock(gate) {
+				
+				// Only the watcher the set has for the root: one already replaced, or one that
+				// is still starting, is somebody else's to account for.
+				if(disposed || !watchers.TryGetValue(root.Path, out var entry) || !ReferenceEquals(entry.Watcher, watcher))
+					
+					return;
+				
+				watchers.Remove(root.Path);
+				degraded.Remove(root.Path);
+				
+				unwatched[root.Path] = reason;
+				scopeKey             = null;
+			}
+			
+			watcher.Dispose();
+			logger.LogInfo("Watch", $"WARN: watcher on '{root.Path}' stopped ({reason}) — changes under it are not seen; roslyn_check_drift names it");
+			AnnounceUnwatched();
+			
+			return;
+		}
 		
-		gone?.Dispose();
+		lock(gate) {
+			
+			// One error per directory that got no watch, thousands at the limit: the first says it.
+			if(disposed || !degraded.TryAdd(root.Path, reason))
+				
+				return;
+			
+			scopeKey = null;
+		}
+		
+		logger.LogInfo("Watch", $"WARN: watcher on '{root.Path}' reported an error and goes on ({reason}) — some directories under it may not be watched; roslyn_check_drift names it");
+		AnnounceUnwatched();
 	}
+	catch(Exception ex) {
+		logger.LogError("Watch", $"Handling a watcher error for '{root.Path}' failed: {ex.GetType().Name}: {ex.Message}");
+	}
+}
+
+// Scans for what an overflow dropped, a moment later and once for all the overflows until then.
+// From the latest moment the disk was known: nothing says which events were lost, and a file
+// found by the scan that was not changed is dropped again by the flush's comparison.
+void CatchUpSoon()
+{
+	lock(gate) {
+		
+		if(disposed || catchUpPending)
+			
+			return;
+		
+		catchUpPending = true;
+	}
+	
+	_ = Task.Run(async () => {
+		
+		// Nothing is above this on a pool thread.
+		try {
+			
+			await Task.Delay(CatchUpDelay);
+			
+			DateTime since;
+			
+			lock(gate) {
+				
+				catchUpPending = false;
+				
+				if(disposed)
+					
+					return;
+				
+				since     = syncedUtc ?? DateTime.UtcNow;
+				syncedUtc = DateTime.UtcNow;
+			}
+			
+			reconcile(since);
+		}
+		catch(Exception ex) {
+			logger.LogError("Watch", $"Scanning for missed changes under '{rootPath}' failed: {ex.GetType().Name}: {ex.Message}");
+		}
+	});
+}
 	
 	void Appeared(WatchRoot root, string fullPath)
 	{
@@ -683,6 +838,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			watchers.Clear();
 			unwatched.Clear();
+			degraded.Clear();
 		}
 		
 		foreach(var watcher in toDispose)

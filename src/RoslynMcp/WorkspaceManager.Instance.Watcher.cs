@@ -52,7 +52,9 @@ internal sealed partial class WorkspaceManager
 		/// <summary>
 		///     Runs once the watchers are live. The workspace was read from disk before they
 		///     existed — during the load itself, then while they started in the background — so a
-		///     change made in that window raised no event. Three kinds are caught up on:
+		///     change made in that window raised no event. Also runs after a watcher dropped events
+		///     (a buffer overflow, #499), from the last moment the disk was known. Three kinds are
+		///     caught up on:
 		///     <list type="bullet">
 		///         <item>
 		///             A tracked document <b>written</b> since construction began is queued as if
@@ -147,7 +149,7 @@ internal sealed partial class WorkspaceManager
 				var created = QueueMissedCreates(solution, sinceUtc);
 				
 				if(modified + deleted + created > 0)
-					logger.LogInfo("Watch", $"Changed on disk while the workspace was loading — queued for sync: {modified} document(s) written, {created} file(s) created, {deleted} deleted");
+					logger.LogInfo("Watch", $"Changed on disk unseen by the watchers of '{rootPath}' — queued for sync: {modified} document(s) written, {created} file(s) created, {deleted} deleted");
 			}
 			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
 				// Disposed mid-flight — nothing left to reconcile.
