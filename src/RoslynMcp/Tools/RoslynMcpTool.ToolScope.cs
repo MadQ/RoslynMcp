@@ -265,6 +265,10 @@ internal abstract partial class RoslynMcpTool
 				&& Interlocked.CompareExchange(ref RoslynMcpTool.sessionNoteShown, 1, 0) == 0)
 				pendingCaution = SessionNote;
 			
+			// A watcher that could not start says so on the next answer that has room for it (#495).
+			if(pendingCaution is null && returnValue is ToolResult { Caution: null } && WatchNews.TryTake(out var watchNews))
+				pendingCaution = watchNews;
+			
 			// Merge pending hint/caution into the result when it is a ToolResult.
 			// Non-ToolResult returns (to be phased out) pass through unchanged.
 			if(returnValue is ToolResult tr && (_pendingHint is not null || pendingCaution is not null))

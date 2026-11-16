@@ -147,6 +147,9 @@ internal sealed partial class WorkspaceManager
 		///     <c>roslyn_check_drift</c>, and the sync clock says nothing about work still pending.
 		/// </summary>
 		public bool ReloadPending => reloadVersion != 0;
+		
+		/// <summary>The root this workspace was loaded for, and its file watching: for roslyn_info (#495).</summary>
+		public (string Root, WatchStatus? Status) Watching => (rootPath, watchSet?.Status);
 
 		/// <summary>
 		///     Load-health snapshot: projects the live workspace holds with zero metadata references,
@@ -183,7 +186,7 @@ internal sealed partial class WorkspaceManager
 					[..loadWarnings],
 					lastUnhealthyLoad,
 					ReloadPending
-				);
+				) { Watching = watchSet?.Status };
 			}
 		}
 		

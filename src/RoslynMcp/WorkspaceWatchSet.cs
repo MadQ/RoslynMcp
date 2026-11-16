@@ -230,6 +230,14 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	
 	readonly Dictionary<string, (FileSystemWatcher Watcher, WatchRoot Root)> watchers = new(WatchPlanner.PathComparer);
 	
+	// The roots whose watcher could not start, each with why (#495). Guarded by the gate. A root
+	// leaves when a later start succeeds or a new plan no longer has it. Until then nothing under
+	// it is seen, and that used to be said in the log alone.
+	readonly Dictionary<string, string> unwatched = new(WatchPlanner.PathComparer);
+	
+	// The unwatched roots the last news was about, so the same state is announced once.
+	string announced = "";
+	
 	bool    disposed;
 	string? scopeKey;
 	
@@ -342,6 +350,11 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 						return;
 					}
 					
+					// Part of the plan is not watching (#495): the same, so that a limit that was
+					// raised since is noticed at the next reload. What is live stays live.
+					if(unwatched.Count > 0)
+						scopeKey = null;
+					
 					since             = reconcileSinceUtc;
 					reconcileSinceUtc = null;
 				}
@@ -398,6 +411,10 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 					stale.Add(entry.Watcher);
 					watchers.Remove(path);
 				}
+				
+				// A root the new plan does not have is no longer one that should be watched.
+				foreach(var path in unwatched.Keys.Where(path => !wanted.ContainsKey(path)).ToArray())
+					unwatched.Remove(path);
 			}
 			
 			foreach(var watcher in stale)
@@ -411,8 +428,40 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			logger.LogInfo("Watch", $"{live}/{plan.Length} watch root(s) live ({shape}) in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0}ms: {rootPath}");
 			
+			AnnounceUnwatched();
+			
 			return live > 0;
 		}
+	}
+	
+	/// <summary>How many roots are watched, and the ones that should be and are not, with why.</summary>
+	public WatchStatus Status {
+		get {
+			lock(gate)
+				return new(watchers.Count, [..unwatched.OrderBy(entry => entry.Key, StringComparer.Ordinal).Select(entry => new UnwatchedRoot(entry.Key, entry.Value))]);
+		}
+	}
+	
+	// Says once, on the next tool answer, that part of the workspace is not watched: an agent
+	// that never asks roslyn_check_drift would otherwise not learn that new files go unseen.
+	// Once per state: the same roots failing again at the next reload are not news. A state is
+	// taken as said only when the news was accepted; a full queue means it is tried again.
+	void AnnounceUnwatched()
+	{
+		var    status = Status;
+		string state  = string.Join('|', status.Unwatched.Select(root => root.Path));
+		
+		lock(gate)
+			if(state == announced)
+				
+				return;
+		
+		if(status.Unwatched.Length > 0 && !WatchNews.Post($"File watching is off for {status.Extent} '{rootPath}': {status.Problem} roslyn_check_drift lists the directories."))
+			
+			return;
+		
+		lock(gate)
+			announced = state;
 	}
 	
 	bool IsWatched(string path)
@@ -454,7 +503,11 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 		catch(Exception ex) when (ex is IOException or ArgumentException or UnauthorizedAccessException or PlatformNotSupportedException) {
 			
 			watcher?.Dispose();
-			logger.LogInfo("Watch", $"WARN: cannot watch '{root.Path}' ({ex.GetType().Name}: {ex.Message}) — changes under it are not seen; roslyn_check_drift reports them");
+			logger.LogInfo("Watch", $"WARN: cannot watch '{root.Path}' ({ex.GetType().Name}: {ex.Message}) — changes under it are not seen; roslyn_check_drift names it");
+			
+			lock(gate)
+				if(!disposed)
+					unwatched[root.Path] = $"{ex.GetType().Name}: {ex.Message}";
 			
 			return false;
 		}
@@ -465,9 +518,12 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			// at once cannot both take the last slot. A planned root is always within it.
 			var fits = !withinCap || watchers.Count < WatchPlanner.MaxRoots;
 			
-			if(!disposed && fits && watchers.TryAdd(root.Path, (watcher, root)))
+			if(!disposed && fits && watchers.TryAdd(root.Path, (watcher, root))) {
+				
+				unwatched.Remove(root.Path);
 				
 				return true;
+			}
 		}
 		
 		watcher.Dispose();
@@ -626,6 +682,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			toDispose = [..watchers.Values.Select(entry => entry.Watcher)];
 			
 			watchers.Clear();
+			unwatched.Clear();
 		}
 		
 		foreach(var watcher in toDispose)

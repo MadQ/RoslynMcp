@@ -58,6 +58,13 @@ internal sealed record WorkspaceHealth(
 	string?      LastUnhealthyLoad,
 	bool         ReloadPending)
 {
+	/// <summary>
+	///     The file watching of the workspace (#495): null before its watchers were planned. Not part
+	///     of <see cref="IsHealthy"/>, which is about what was loaded: an unwatched root leaves the
+	///     compilation sound and its future changes unseen.
+	/// </summary>
+	public WatchStatus? Watching { get; init; }
+	
 	/// <summary>True when every loaded project resolved metadata references and loaded without an MSBuild failure.</summary>
 	public bool IsHealthy => ProjectsWithoutReferences.Length == 0 && ProjectsWithLoadFailures.Length == 0;
 	
@@ -692,6 +699,21 @@ internal sealed partial class WorkspaceManager : IDisposable
 				}
 			}
 		});
+	}
+	
+	/// <summary>
+	///     The file watching of every workspace the server holds (#495): how many watch roots each
+	///     has live, which is how many watcher instances the server takes from the system, and the
+	///     roots that are not watched. Read from the cache without loading anything.
+	/// </summary>
+	public (string Root, WatchStatus? Status)[] DescribeWatching()
+	{
+		WorkspaceInstance[] held;
+		
+		lock(cacheLock)
+			held = [..cache.Values.Select(entry => entry.Instance)];
+		
+		return [..held.Select(instance => instance.Watching)];
 	}
 	
 	public void Dispose()

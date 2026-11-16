@@ -63,7 +63,14 @@ internal sealed class InfoTool : RoslynMcpTool
 			SourcesWithoutProviders = listed.Length < reports.Length ? reports.Length - listed.Length : null,
 		};
 		
-		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker, codeActions, workspace.DescribeDefaultWorkspace()));
+		WorkspaceWatchInfo[] watching = [..workspace.DescribeWatching().Select(held => new WorkspaceWatchInfo(
+			held.Root,
+			held.Status?.Live ?? 0,
+			held.Status is { Unwatched: { Length: > 0 } unwatched } ? [..unwatched.Select(root => new UnwatchedInfo(root.Path, root.Reason))] : null))];
+		
+		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker, codeActions, workspace.DescribeDefaultWorkspace()) {
+			Workspaces = watching.Length > 0 ? watching : null
+		});
 	}
 	
 	static bool SaysSomething(ProviderSourceReport report)

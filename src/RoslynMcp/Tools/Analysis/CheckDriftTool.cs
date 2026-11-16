@@ -38,7 +38,10 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"has and a brand-new file is not one of them. " +
 		"Any of these is fixed by roslyn_respawn; drift alone can also be cleared by re-saving the files " +
 		"through roslyn editing tools. last_unhealthy_load is present when an unhealthy load happened " +
-		"at any point, even if the workspace has since recovered.")]
+		"at any point, even if the workspace has since recovered. " +
+		"Beside the three axes, unwatched_roots lists the directories whose file watcher could not start, with the reason " +
+		"(on Linux, usually the limit on inotify instances): changes made there outside the server are not noticed, and a new " +
+		"file is not seen until a reload. A respawn helps there only once the cause is gone: the hint says what that is.")]
 	public async Task<object> CheckDrift(CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
@@ -183,6 +186,26 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			}
 		};
 
+		// Fourth axis (#495): a directory whose watcher could not start. It explains drift that
+		// keeps coming back, and it is the one state in which a new file is found by nothing.
+		var watching = health?.Watching is { Unwatched.Length: > 0 } partly ? partly : null;
+		
+		if(watching is not null) {
+			
+			var problem = $"File watching is off for {watching.Extent}: {watching.Problem}";
+			
+			// Relative where that names a directory below the root. The root itself (".") and a
+			// directory outside it ("..\\..\\x") are given whole, as roslyn_info gives them.
+			string Shown(string path)
+				=> TryMakeRelative(path, rootPath) is { } relative && relative != "." && !relative.StartsWith("..", StringComparison.Ordinal) ? relative : path;
+			
+			result = result with {
+				
+				UnwatchedRoots = [..watching.Unwatched.Select(root => new UnwatchedInfo(Shown(root.Path), root.Reason))],
+				Hint           = result.Hint is null ? problem : $"{result.Hint} Also: {problem}"
+			};
+		}
+		
 		var outcome = (driftedFiles.Length > 0, unhealthy) switch {
 
 			(true, true)  => $"{driftedFiles.Length} drifted, unhealthy load",
@@ -193,6 +216,9 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 
 		if(reloadPending)
 			outcome += ", reload pending";
+		
+		if(watching is not null)
+			outcome += $", {watching.Unwatched.Length} unwatched root(s)";
 
 		return scope.Outcome(outcome, result);
 	}
