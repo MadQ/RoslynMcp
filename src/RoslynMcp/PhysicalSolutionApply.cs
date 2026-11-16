@@ -732,7 +732,7 @@ internal sealed record ApplyFileResult(
 	string  Path,
 	string  State,
 	string? Error,
-	string  Recovery
+	string? Recovery
 );
 
 /// <summary>
@@ -758,14 +758,36 @@ internal static class PhysicalApplyResultMapper
 				var relativePath = toRelativePath(file.Path);
 				var plannedFile  = plannedFiles[file.Path];
 				
+				// An existing file that was written, in an apply that succeeded, is the ordinary
+				// case: how to undo it is said once for the answer (UndoHint), where it used to be
+				// more than half of every answer and repeated per file (#490). Every other state
+				// keeps its own guidance, which differs by file and is what matters then.
+				var ordinary = report.Succeeded && file.State == PhysicalApplyState.Written && plannedFile.Operation == PhysicalFileOperation.Write;
+				
 				return new ApplyFileResult(
 					relativePath,
 					file.State.ToString().ToLowerInvariant(),
 					file.Error,
-					RecoveryGuidance(file.State, plannedFile.Operation, relativePath, backupsEnabled, changeNoun));
+					ordinary ? null : RecoveryGuidance(file.State, plannedFile.Operation, relativePath, backupsEnabled, changeNoun));
 			})
 			.ToArray()
 		;
+	}
+	
+	/// <summary>
+	///     How to undo the written files of an apply that succeeded, said once (#490); null for an
+	///     apply that did not, whose files each carry their own guidance, and for one that wrote no
+	///     existing file (it only created or deleted, and those files say what undoes them).
+	/// </summary>
+	public static string? UndoHint(PhysicalApplyReport report, PhysicalSolutionApplyPlan plan, bool backupsEnabled)
+	{
+		if(!report.Succeeded || !plan.Files.Any(file => file.Operation == PhysicalFileOperation.Write))
+			
+			return null;
+		
+		return backupsEnabled
+			? "To undo a written file: roslyn_local_history with action 'list' and its filePath, then 'preview' and 'apply' its 'pre' snapshot."
+			: "Local history is disabled: use source control or another backup to undo a written file.";
 	}
 	
 	/// <summary>

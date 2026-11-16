@@ -155,7 +155,7 @@ internal abstract class CodeActionApplyTool : RoslynMcpTool
 					report.FilesDeleted,
 					files,
 					created.Length == 0 ? null : [..created.Select(Relative)],
-					deleted.Length == 0 ? null : [..deleted.Select(Relative)]) { Caution = caution });
+					deleted.Length == 0 ? null : [..deleted.Select(Relative)]) { Caution = caution, Hint = PhysicalApplyResultMapper.UndoHint(report, plan, backups.IsEnabled) });
 			
 			var error = report.AllFilesReachedIntendedState
 				? "apply state uncertain"

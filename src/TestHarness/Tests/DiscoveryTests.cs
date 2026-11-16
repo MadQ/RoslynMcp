@@ -67,7 +67,10 @@ static class DiscoveryTests
 				() => ctx.RunTestAsync(
 					"roslyn_get_file_outline",
 					new { filePath = "WorkspaceManager.cs", projectPath = ctx.TargetPath },
-					data => data?["types"]?.AsArray().Count > 0)),
+					// A type's members are signatures by kind, not an object each (#490).
+					data => data?["types"]?.AsArray() is { Count: > 0 } types
+						&& types.Any(type => type?["members"]?["method"]?.AsArray() is { Count: > 0 } methods
+							&& methods.All(method => method?.GetValue<string>() is { Length: > 0 })))),
 			
 			new("roslyn_get_project_info: verify TFM and packages",
 				() => ctx.RunTestAsync(

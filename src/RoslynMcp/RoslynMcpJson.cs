@@ -22,8 +22,9 @@ internal static class RoslynMcpJson
 	};
 	
 	/// <summary>
-	///     For compact single-line serialization: tool args, response peeks, diagnostic
-	///     previews. No indent; includes null properties for faithful value representation.
+	///     For compact single-line serialization: tool args and diagnostic previews. No indent;
+	///     includes null properties for faithful value representation. Not for an answer or its
+	///     preview in the log: those are written with <see cref="Header"/>'s naming, without nulls.
 	/// </summary>
 	internal static readonly JsonSerializerOptions Compact = new() {
 		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -35,7 +36,9 @@ internal static class RoslynMcpJson
 	///     without explicit property names reads the same in a header as in an answer of its own.
 	/// </summary>
 	internal static readonly JsonSerializerOptions Header = new(JsonSerializerDefaults.Web) {
-		Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+		
+		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+		Encoder                = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 	};
 	
 	/// <summary>

@@ -386,6 +386,9 @@ internal abstract partial class RoslynMcpTool
 			return returnValue;
 		}
 		
+		// The notes of this call, each kept once.
+		readonly HashSet<string> recorded = new(StringComparer.Ordinal);
+		
 		/// <summary>
 		///     Appends a neutral annotation without changing the outcome. Notes are kept apart from the
 		///     terminal detail and joined after it on dispose — they used to be appended to the detail
@@ -397,6 +400,12 @@ internal abstract partial class RoslynMcpTool
 			// Callers pass null for "nothing worth noting" (e.g. the resolution-kind switch in
 			// TryGetCompilation) — ignored rather than logged as an empty "; " segment.
 			if(string.IsNullOrEmpty(note))
+				
+				return;
+			
+			// Said once: a batch resolves a project per edit and used to note it per edit (#490).
+			// A note is compared whole with the notes recorded so far, never with a part of one.
+			if(!recorded.Add(note))
 				
 				return;
 			
@@ -476,10 +485,11 @@ internal abstract partial class RoslynMcpTool
 				
 				// By the runtime type, as the SDK serializes the response: a helper declared to
 				// return a base result (RoslynMcpTool.ReadFailure) would otherwise log a peek
-				// without the derived type's fields.
+				// without the derived type's fields. And with the SDK's naming and without nulls
+				// (#490), so the entry's size and peek are those of the answer that was sent.
 				var json   = value is null
 					? "null"
-					: JsonSerializer.Serialize(value, value.GetType(), RoslynMcpJson.Compact)
+					: JsonSerializer.Serialize(value, value.GetType(), RoslynMcpJson.Header)
 				;
 				var tokens = json.Length / 4;
 				var peek   = json.Length <= PeekLength ? json : json[..PeekLength] + "…";

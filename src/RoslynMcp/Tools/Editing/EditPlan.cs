@@ -50,6 +50,10 @@ internal abstract record EditPlan
 	/// <summary>What the edit does, in a few words, for the log and for a batch's answer.</summary>
 	public string Detail { get; init; } = "";
 	
+	// How many places the edit changes. A batch that was written names only the edits that
+	// changed another number than one: for the rest the answer would repeat the call (#490).
+	public int Places { get; init; } = 1;
+	
 	/// <summary>What the answer must warn of although the edit is made.</summary>
 	public string? Caution { get; init; }
 	

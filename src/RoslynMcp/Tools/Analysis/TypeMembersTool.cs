@@ -12,7 +12,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_get_type_members", ReadOnly = true, Title = "Get Type Members", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Use this to inspect a type's API surface — all fields, properties, methods, events, and (for enums) member values, " +
-		"with full signatures, modifiers, parameter types, return types, and XML doc summaries. " +
+		"with full signatures, modifiers, parameter types, return types, and XML doc summaries, listed by kind (members.method, members.property, …). " +
 		"This is the right first tool when you need to understand what a type can do before generating code that uses it. " +
 		"By default returns only members declared directly on the type; set includeInherited=true to also include " +
 		"members from base types (up to but not including System.Object). " +
@@ -105,13 +105,30 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 			TypeKind:     typeKind,
 			TotalMembers: page.Total,
 			Skip: page.Skip, Take: page.Take,
-			Members:   page.Items,
+			Members:   ByKind(page.Items),
 			PageToken: page.PageToken,
 			HasMore:   page.HasMore)
 		{
 			Caution = caution
 		}
 	;
+	
+	// A page's members by kind, each kind in the order the page has them (#490): the kind and
+	// the name beside every signature were a fifth of the answer, and the signature has both.
+	static SortedDictionary<string, List<MemberEntry>> ByKind(object?[] members)
+	{
+		var byKind = new SortedDictionary<string, List<MemberEntry>>(StringComparer.Ordinal);
+		
+		foreach(var member in members.OfType<MemberInfo>()) {
+			
+			if(!byKind.TryGetValue(member.Kind, out var entries))
+				byKind[member.Kind] = entries = [];
+			
+			entries.Add(new(member.Signature, member.DocSummary));
+		}
+		
+		return byKind;
+	}
 	
 	private static INamedTypeSymbol? FindType(Compilation compilation, string typeName)
 	{
@@ -169,4 +186,7 @@ internal sealed class TypeMembersTool : RoslynMcpTool
 	}
 	
 	private sealed record MemberInfo(string Kind, string Name, string Signature, string? DocSummary);
+	
+	// A member as the answer lists it under its kind.
+	private sealed record MemberEntry(string Signature, string? DocSummary);
 }

@@ -87,7 +87,12 @@ internal static class CodeFixTests
 			
 			return files is not null
 				&& files.Count > 0
-				&& files.All(file => !string.IsNullOrWhiteSpace(file?["recovery"]?.GetValue<string>()));
+				// An apply that succeeded says once how to undo a written file (#490); every other
+				// answer says it per file.
+				// The hint stands for the files without guidance of their own, so there must be one
+				// when any file has none.
+				&& (files.All(file => !string.IsNullOrWhiteSpace(file?["recovery"]?.GetValue<string>()))
+					|| data?["hint"]?.GetValue<string>().Contains("roslyn_local_history", StringComparison.Ordinal) == true);
 		}
 		
 		async Task<(bool pass, string msg)> RunSingleWrite()
