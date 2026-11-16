@@ -110,14 +110,14 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 					IMethodSymbol   m => m.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					IPropertySymbol p => p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					IFieldSymbol    f => f.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-					ILocalSymbol    l => l.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+					ILocalSymbol    l => ExpressionFacts.LocalType(model, l, CancellationToken.None).ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					_                 => null
 				})
 		;
 		
 		var enriched = expression is not null
 			? AddExpressionFacts(result, model, expression, typeInfo, symbol)
-			: result with { Type = isDeclaration ? DeclaredType(symbol) : null }
+			: result with { Type = isDeclaration ? DeclaredType(model, symbol) : null }
 		;
 		
 		return scope.Outcome(symbol?.Name ?? "type", enriched with {
@@ -186,9 +186,11 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		};
 	}
 	
-	static string? DeclaredType(ISymbol? symbol) => symbol switch {
+	// A local declared with `var` is given what its value yields, not its declared type, which
+	// is nullable for every reference type and would read as "may be null" (#355).
+	static string? DeclaredType(SemanticModel model, ISymbol? symbol) => symbol switch {
 		
-		ILocalSymbol     l => l.Type.ToDisplayString(TypeFormat),
+		ILocalSymbol     l => ExpressionFacts.LocalType(model, l, CancellationToken.None).ToDisplayString(TypeFormat),
 		IParameterSymbol p => p.Type.ToDisplayString(TypeFormat),
 		IFieldSymbol     f => f.Type.ToDisplayString(TypeFormat),
 		IPropertySymbol  p => p.Type.ToDisplayString(TypeFormat),

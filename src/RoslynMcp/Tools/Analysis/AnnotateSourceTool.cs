@@ -276,19 +276,20 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 					case VariableDeclarationSyntax { Type.IsVar: true } declaration:
 						
 						// The declared type of a `var` local of a reference type is always nullable,
-						// whatever it is given: what the initializer yields at this point is the fact.
+						// whatever it is given: what the initializer yields at this point is the fact
+						// (ExpressionFacts.LocalType, which roslyn_get_symbol_info answers by too).
 						foreach(var declarator in declaration.Variables)
 							if(declarator.Initializer?.Value is { } value && !SaysItsType(value) && model.GetDeclaredSymbol(declarator, cancellationToken) is ILocalSymbol local)
-								AddType(declarator.Identifier, Flowed(local.Type, model.GetTypeInfo(value, cancellationToken).Nullability.FlowState));
+								AddType(declarator.Identifier, ExpressionFacts.LocalType(model, local, cancellationToken));
 						
 						break;
 					
-					case ForEachStatementSyntax { Type.IsVar: true } loop:
-						AddType(loop.Identifier, model.GetForEachStatementInfo(loop).ElementType);
+					case ForEachStatementSyntax { Type.IsVar: true } loop when model.GetDeclaredSymbol(loop, cancellationToken) is { } item:
+						AddType(loop.Identifier, ExpressionFacts.LocalType(model, item, cancellationToken));
 						break;
 					
-					case SingleVariableDesignationSyntax designation when IsImplicitlyTyped(designation) && model.GetDeclaredSymbol(designation, cancellationToken) is ILocalSymbol designated:
-						AddType(designation.Identifier, DesignatedType(model, designation, designated, cancellationToken));
+					case SingleVariableDesignationSyntax designation when ExpressionFacts.IsImplicitlyTyped(designation) && model.GetDeclaredSymbol(designation, cancellationToken) is ILocalSymbol designated:
+						AddType(designation.Identifier, ExpressionFacts.LocalType(model, designated, cancellationToken));
 						break;
 					
 					case ParameterSyntax { Type: null, Identifier.ValueText: not "_" } parameter when IsLambdaParameter(parameter) && model.GetDeclaredSymbol(parameter, cancellationToken) is { } lambdaParameter:
@@ -341,41 +342,6 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		}
 		
 		return lines;
-	}
-	
-	// A type that can hold a null reference, as flow analysis has it at a point: nullable where
-	// the value may be null, not nullable where it cannot, and unmarked where nullable analysis
-	// is off. An unconstrained type parameter is neither a reference nor a value type and counts.
-	static ITypeSymbol? Flowed(ITypeSymbol? type, NullableFlowState flow)
-		=> type is { IsReferenceType: true } or ITypeParameterSymbol { IsValueType: false }
-			? type.WithNullableAnnotation(flow switch {
-				
-				NullableFlowState.MaybeNull => NullableAnnotation.Annotated,
-				NullableFlowState.NotNull   => NullableAnnotation.NotAnnotated,
-				_                           => NullableAnnotation.None
-			})
-			: type
-	;
-	
-	// What a designation is given. `out var x` takes the parameter's type, nullable too when the
-	// method says the value may be null on some outcome (TryGetValue's [MaybeNullWhen(false)]).
-	// The pattern `e is var x` takes what e yields at that point. A deconstruction has no one
-	// place to read from and keeps its declared type, which for a reference is always nullable:
-	// that may say too much, never too little.
-	static ITypeSymbol? DesignatedType(SemanticModel model, SingleVariableDesignationSyntax designation, ILocalSymbol local, CancellationToken cancellationToken)
-	{
-		if(designation.Parent is DeclarationExpressionSyntax { Parent: ArgumentSyntax argument }
-			&& model.GetOperation(argument, cancellationToken) is Microsoft.CodeAnalysis.Operations.IArgumentOperation { Parameter: { } parameter })
-			
-			return parameter.GetAttributes().Any(attribute => attribute.AttributeClass?.Name is "MaybeNullWhenAttribute" or "MaybeNullAttribute")
-				? Flowed(parameter.Type, NullableFlowState.MaybeNull)
-				: parameter.Type;
-		
-		if(designation.Parent is VarPatternSyntax { Parent: IsPatternExpressionSyntax tested })
-			
-			return Flowed(local.Type, model.GetTypeInfo(tested.Expression, cancellationToken).Nullability.FlowState);
-		
-		return local.Type;
 	}
 	
 	// A member access that needs its receiver to be there. On a Nullable<T> only Value does:
@@ -432,17 +398,6 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 			or DefaultExpressionSyntax or TypeOfExpressionSyntax or InterpolatedStringExpressionSyntax
 		|| initializer.IsKind(SyntaxKind.AsExpression)
 	;
-	
-	// `out var x`, `var (a, b) = …` and the pattern `var x`: the designation has no type written.
-	static bool IsImplicitlyTyped(SingleVariableDesignationSyntax designation)
-	{
-		SyntaxNode? parent = designation.Parent;
-		
-		while(parent is ParenthesizedVariableDesignationSyntax)
-			parent = parent.Parent;
-		
-		return parent is DeclarationExpressionSyntax { Type.IsVar: true } or VarPatternSyntax;
-	}
 	
 	static bool IsLambdaParameter(ParameterSyntax parameter)
 		=> parameter.Parent is SimpleLambdaExpressionSyntax || parameter.Parent?.Parent is ParenthesizedLambdaExpressionSyntax
