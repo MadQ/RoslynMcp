@@ -199,7 +199,16 @@ static class WatcherFailureTests
 							return (false, "FAIL  (the root that came back was not watched again within 20 s of the reload)");
 						
 						// Settled first, so that the pending reload below can only be the new file's.
-						await UntilAsync(async () => !await ReloadPendingAsync(gone), 10);
+						var settled = await UntilAsync(async () => {
+							
+							await ctx.CallToolJsonAsync("roslyn_get_diagnostics", new { projectPath = gone.Csproj, severity = "errors", take = 0 });
+							
+							return !await ReloadPendingAsync(gone);
+						}, 20);
+						
+						if(!settled)
+							
+							return (false, "FAIL  (a reload was still pending 20 s after the root came back, so a new file's reload could not be told from it)");
 						
 						gone.Write("External.cs", "class External { }\n");
 						

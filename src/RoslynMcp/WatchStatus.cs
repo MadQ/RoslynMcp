@@ -29,39 +29,39 @@ internal sealed record WatchStatus(int Live, WatchRootProblem[] Unwatched, Watch
 	public string Extent => Live == 0 ? "the workspace" : "part of the workspace";
 	
 	/// <summary>
-///     The state as sentences for an agent, empty when every root is watched: what failed, what
-///     that costs, and what helps. On Linux the cause is nearly always one of the two inotify
-///     limits, which a reload does not lift, so the limit is named before the reload.
-/// </summary>
-public string Problem {
-	get {
-		var parts = new List<string>(2);
-		
-		if(Unwatched.Length > 0) {
+	///     The state as sentences for an agent, empty when every root is watched: what failed, what
+	///     that costs, and what helps. On Linux the cause is nearly always one of the two inotify
+	///     limits, which a reload does not lift, so the limit is named before the reload.
+	/// </summary>
+	public string Problem {
+		get {
+			var parts = new List<string>(2);
 			
-			var remedy = OperatingSystem.IsLinux()
-				? "On Linux this is usually the limit on inotify instances: raise fs.inotify.max_user_instances (sysctl), then call roslyn_respawn."
-				: "Call roslyn_respawn once the cause is gone.";
+			if(Unwatched.Length > 0) {
+				
+				var remedy = OperatingSystem.IsLinux()
+					? "On Linux this is usually the limit on inotify instances: raise fs.inotify.max_user_instances (sysctl), then call roslyn_respawn."
+					: "Call roslyn_respawn once the cause is gone.";
+				
+				parts.Add($"{Unwatched.Length} of {Live + Unwatched.Length} watch root(s) are not watched ({Unwatched[0].Reason}). "
+					+ "Files created or changed there outside the server are not noticed; a new file is not seen at all until the workspace reloads. "
+					+ remedy);
+			}
 			
-			parts.Add($"{Unwatched.Length} of {Live + Unwatched.Length} watch root(s) are not watched ({Unwatched[0].Reason}). "
-				+ "Files created or changed there outside the server are not noticed; a new file is not seen at all until the workspace reloads. "
-				+ remedy);
+			if(Degraded.Length > 0) {
+				
+				var remedy = OperatingSystem.IsLinux()
+					? "On Linux this is usually the limit on inotify watches: raise fs.inotify.max_user_watches (sysctl), then call roslyn_respawn."
+					: "Call roslyn_respawn once the cause is gone.";
+				
+				parts.Add($"{Degraded.Length} watch root(s) are watched only in part ({Degraded[0].Reason}). "
+					+ "In some directories under them, files created or changed outside the server are not noticed. "
+					+ remedy);
+			}
+			
+			return string.Join(' ', parts);
 		}
-		
-		if(Degraded.Length > 0) {
-			
-			var remedy = OperatingSystem.IsLinux()
-				? "On Linux this is usually the limit on inotify watches: raise fs.inotify.max_user_watches (sysctl), then call roslyn_respawn."
-				: "Call roslyn_respawn once the cause is gone.";
-			
-			parts.Add($"{Degraded.Length} watch root(s) are watched only in part ({Degraded[0].Reason}). "
-				+ "In some directories under them, files created or changed outside the server are not noticed. "
-				+ remedy);
-		}
-		
-		return string.Join(' ', parts);
 	}
-}
 }
 
 /// <summary>

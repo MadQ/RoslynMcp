@@ -142,6 +142,34 @@ internal sealed partial class WorkspaceManager
 					modified++;
 				}
 				
+				// A project file, or the solution's, written since then (#499). They are no documents,
+				// so nothing above finds one that was edited in place, and it is the change that
+				// costs most when missed: the workspace keeps the old references. No margin is taken
+				// off, as for a delete: one wrongly assumed costs a reload. A file that is gone
+				// reports the year 1601 and is not taken here. Other inputs of the evaluation that
+				// were edited in place (a props file, a lock file) are not found by this scan.
+				var projectFiles = solution.Projects
+					.Select(project => project.FilePath)
+					.Append(solution.FilePath)
+					.OfType<string>()
+					.Distinct(WatchPlanner.PathComparer)
+				;
+				
+				foreach(var path in projectFiles) {
+					
+					try {
+						
+						if(File.GetLastWriteTimeUtc(path) <= sinceUtc)
+							continue;
+					}
+					catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+						continue;
+					}
+					
+					ScheduleDebounced(path);
+					modified++;
+				}
+				
 				// A file that only links represent is no document, and is not in the list above.
 				missing.AddRange(index.Files.Where(file => solution.GetDocumentIdsWithFilePath(file).IsEmpty && !File.Exists(file)));
 				
@@ -149,7 +177,7 @@ internal sealed partial class WorkspaceManager
 				var created = QueueMissedCreates(solution, sinceUtc);
 				
 				if(modified + deleted + created > 0)
-					logger.LogInfo("Watch", $"Changed on disk unseen by the watchers of '{rootPath}' — queued for sync: {modified} document(s) written, {created} file(s) created, {deleted} deleted");
+					logger.LogInfo("Watch", $"Changed on disk unseen by the watchers of '{rootPath}' — queued for sync: {modified} file(s) written, {created} file(s) created, {deleted} deleted");
 			}
 			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
 				// Disposed mid-flight — nothing left to reconcile.
