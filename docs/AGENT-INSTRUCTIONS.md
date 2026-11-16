@@ -71,7 +71,8 @@ built-in tools only if a roslyn tool fails.
   and properties never appear.
 - `roslyn_annotate_source` — A member's source (or a line range's) followed by
   what the compiler knows that the text does not say: the type behind each `var`,
-  each dereferenced value that may be null, and the overload a call resolved to.
+  each dereferenced value that may be null, and the overload a call to the
+  solution's own method resolved to (calls into the framework are not annotated).
   One call in place of a `roslyn_get_symbol_info` per position. The annotations
   come after the source as `line: fact`; quote only the source in an edit.
 - `roslyn_find_implementations` — Find implementations of an interface or
