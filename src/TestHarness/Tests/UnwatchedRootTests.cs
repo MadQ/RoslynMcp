@@ -121,6 +121,12 @@ static class UnwatchedRootTests
 							
 							return Skip.NotApplicable($"the system gave more inotify instances than its limit of {instances}");
 						
+						// Refused at the first try: the limit was used up before this test, by this
+						// run or by another program, and there is no instance to give the server.
+						if(held.Count == 0)
+							
+							return Skip.SetupUnavailable("no inotify instance was free before the test took any");
+						
 						// One instance for the server: one of its roots starts, the rest are refused.
 						held[^1].Dispose();
 						held.RemoveAt(held.Count - 1);

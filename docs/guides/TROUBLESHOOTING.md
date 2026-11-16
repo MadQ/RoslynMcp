@@ -527,7 +527,7 @@ chmod +x /path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe
 
 ### Linux: edits made outside the server are not noticed ("File watching is off")
 
-**Symptom:** A tool answer carries the caution *File watching is off for part of the workspace*, or `roslyn_check_drift` lists `unwatched_roots`. Files changed in an editor or by `git` are not picked up, and a newly created file does not appear in symbol results.
+**Symptom:** A tool answer carries the caution *File watching is off for the workspace* (or *for part of the workspace*), or `roslyn_check_drift` lists `unwatched_roots`. Files changed in an editor or by `git` are not picked up, and a newly created file does not appear in symbol results.
 
 **Cause:** Every file watcher is an inotify instance on Linux, and a user has a fixed number of them (128 by default), shared by every program that watches files: other RoslynMcp servers, editors, build tools. When they run out, the server loads the workspace but cannot start its watchers.
 

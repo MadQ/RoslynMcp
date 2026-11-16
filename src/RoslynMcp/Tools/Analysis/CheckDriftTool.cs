@@ -41,7 +41,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"at any point, even if the workspace has since recovered. " +
 		"Beside the three axes, unwatched_roots lists the directories whose file watcher could not start, with the reason " +
 		"(on Linux, usually the limit on inotify instances): changes made there outside the server are not noticed, and a new " +
-		"file is not seen until a reload. A respawn alone does not help there: the hint says what to raise first.")]
+		"file is not seen until a reload. A respawn helps there only once the cause is gone: the hint says what that is.")]
 	public async Task<object> CheckDrift(CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
