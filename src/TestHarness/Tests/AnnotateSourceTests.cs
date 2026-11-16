@@ -45,7 +45,19 @@ static class AnnotateSourceTests
 		/* 32 */ "\t{",
 		/* 33 */ "\t\tvar missing = Nowhere();",
 		/* 34 */ "\t}",
-		/* 35 */ "}",
+		/* 35 */ "\t",
+		/* 36 */ "\tstatic void Par(params int[] values) { }",
+		/* 37 */ "\tstatic void Par(string text, params object[] values) { }",
+		/* 38 */ "\t",
+		/* 39 */ "\tint Edge(Dictionary<string, List<int>> map, List<string>? list, int? number)",
+		/* 40 */ "\t{",
+		/* 41 */ "\t\tmap.TryGetValue(\"k\", out var found);",
+		/* 42 */ "\t\tPar(1, 2, 3, 4);",
+		/* 43 */ "\t\tif(number.HasValue)",
+		/* 44 */ "\t\t\treturn number.Value;",
+		/* 45 */ "\t\treturn list.Count();",
+		/* 46 */ "\t}",
+		/* 47 */ "}",
 	];
 	
 	internal static TestGroup Build(TestContext ctx)
@@ -96,6 +108,27 @@ static class AnnotateSourceTests
 					},
 					expectJson: true)),
 			
+			// Four cases where the plain rule says the wrong thing. `found` may be null although
+			// the parameter's type is not nullable: TryGetValue says so with [MaybeNullWhen(false)].
+			// Four arguments fit both Par overloads through their params, so the call is overloaded.
+			// `number.HasValue` asks about the null and is no dereference, and `number.Value` behind
+			// it cannot be null. `list.Count()` is an extension call, but Count's receiver parameter
+			// is not nullable, so a null list fails there.
+			new("roslyn_annotate_source: an out var that may be null, params overloads, HasValue, and a null receiver of an extension call",
+				() => ctx.RunTestAsync(
+					"roslyn_annotate_source",
+					new { symbolName = "Edge", containingType = "Shop", projectPath = fx.Csproj },
+					(data, later) => {
+						
+						var lines = Annotations(later);
+						
+						return lines.Contains("41: found: List<int>?")
+							&& lines.Any(line => line.StartsWith("42: Par(params int[])", StringComparison.Ordinal) && line.EndsWith("1 of 2 overloads", StringComparison.Ordinal))
+							&& !lines.Any(line => line.Contains("number may be null", StringComparison.Ordinal))
+							&& lines.Contains("45: list may be null here");
+					},
+					expectJson: true)),
+			
 			// A line range and one kind: line 17 has an implicit type, and the call on it has one
 			// overload and no type arguments, so `types` alone yields exactly one annotation.
 			new("roslyn_annotate_source: a line range, with only the kind asked for",
@@ -135,8 +168,8 @@ static class AnnotateSourceTests
 					var overloaded = await ctx.CallToolJsonAsync("roslyn_annotate_source", new { symbolName = "Process", containingType = "Shop", projectPath = fx.Csproj });
 					var both       = await ctx.CallToolJsonAsync("roslyn_annotate_source", new { symbolName = "Run", containingType = "Shop", filePath = "Shop.cs", startLine = 17, endLine = 18, projectPath = fx.Csproj });
 					var error      = overloaded?["error"]?.GetValue<string>() ?? "";
-					var pass       = error.Contains("Process(Order) (lines 11-11)", StringComparison.Ordinal)
-						&& error.Contains("Process(string) (lines 12-12)", StringComparison.Ordinal)
+					var pass       = error.Contains("Process(Order) (Shop.cs, lines 11-11)", StringComparison.Ordinal)
+						&& error.Contains("Process(string) (Shop.cs, lines 12-12)", StringComparison.Ordinal)
 						&& both?["error"]?.GetValue<string>().Contains("both", StringComparison.Ordinal) == true;
 					
 					return (pass, pass ? "PASS" : $"FAIL  (overloaded: {overloaded} | both: {both})");

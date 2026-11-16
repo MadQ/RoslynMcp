@@ -136,7 +136,7 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 			
 			// A name finds the first of its overloads, and an answer for that one alone would not
 			// say there are others: the agent would go on to edit the wrong one.
-			if(symbol is IMethodSymbol && Overloads(symbol) is { Length: > 1 } overloads)
+			if(symbol is IMethodSymbol && Overloads(symbol, rootPath) is { Length: > 1 } overloads)
 				
 				return scope.Failed("several overloads", new ErrorResult(
 					$"'{symbolName}' has {overloads.Length} overloads: {string.Join("; ", overloads)}.",
@@ -207,15 +207,17 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		return scope.Outcome($"{lastLine - firstLine + 1} line(s), {annotations.Count} annotation(s)", header, parts);
 	}
 	
-	// The overloads of a method that are declared in source, each as its signature and its lines.
-	static string[] Overloads(ISymbol method)
+	// The overloads of a method that are declared in source, each as its signature, its file and
+	// its lines: a partial type can have them in several files.
+	static string[] Overloads(ISymbol method, string rootPath)
 		=> [..(method.ContainingType?.GetMembers(method.Name) ?? [])
 			.OfType<IMethodSymbol>()
 			.SelectMany(overload => overload.DeclaringSyntaxReferences.Take(1).Select(reference => {
 				
 				var lines = reference.SyntaxTree.GetLineSpan(reference.Span);
+				var file  = string.IsNullOrEmpty(reference.SyntaxTree.FilePath) ? "?" : Path.GetRelativePath(rootPath, reference.SyntaxTree.FilePath);
 				
-				return $"{overload.ToDisplayString(CallFormat)} (lines {lines.StartLinePosition.Line + 1}-{lines.EndLinePosition.Line + 1})";
+				return $"{overload.ToDisplayString(CallFormat)} ({file}, lines {lines.StartLinePosition.Line + 1}-{lines.EndLinePosition.Line + 1})";
 			}))]
 	;
 	
@@ -318,7 +320,7 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 			if(kinds.HasFlag(Kinds.Calls) && node is InvocationExpressionSyntax invocation
 				&& model.GetSymbolInfo(invocation, cancellationToken).Symbol is IMethodSymbol method) {
 				
-				var overloads = Alternatives(model.GetMemberGroup(invocation.Expression, cancellationToken), invocation.ArgumentList.Arguments.Count);
+				var overloads = Alternatives(model.GetMemberGroup(invocation.Expression, cancellationToken), invocation.ArgumentList.Arguments.Count, method.ReducedFrom is not null);
 				var inferred  = method.IsGenericMethod && !WritesTypeArguments(invocation.Expression);
 				
 				if(overloads > 1 || inferred)
@@ -341,10 +343,11 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		return lines;
 	}
 	
-	// A reference type as flow analysis has it at a point: nullable where the value may be null,
-	// not nullable where it cannot, and unmarked where nullable analysis is off.
+	// A type that can hold a null reference, as flow analysis has it at a point: nullable where
+	// the value may be null, not nullable where it cannot, and unmarked where nullable analysis
+	// is off. An unconstrained type parameter is neither a reference nor a value type and counts.
 	static ITypeSymbol? Flowed(ITypeSymbol? type, NullableFlowState flow)
-		=> type is { IsReferenceType: true }
+		=> type is { IsReferenceType: true } or ITypeParameterSymbol { IsValueType: false }
 			? type.WithNullableAnnotation(flow switch {
 				
 				NullableFlowState.MaybeNull => NullableAnnotation.Annotated,
@@ -354,37 +357,51 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 			: type
 	;
 	
-	// The type of `out var x` is the parameter's, which says whether it can be null. A
-	// deconstruction or a `var` pattern has no such place to read it from, and the declared type
-	// of a `var` is always nullable: there the type is given unmarked, which claims nothing.
+	// What a designation is given. `out var x` takes the parameter's type, nullable too when the
+	// method says the value may be null on some outcome (TryGetValue's [MaybeNullWhen(false)]).
+	// The pattern `e is var x` takes what e yields at that point. A deconstruction has no one
+	// place to read from and keeps its declared type, which for a reference is always nullable:
+	// that may say too much, never too little.
 	static ITypeSymbol? DesignatedType(SemanticModel model, SingleVariableDesignationSyntax designation, ILocalSymbol local, CancellationToken cancellationToken)
-		=> designation.Parent is DeclarationExpressionSyntax { Parent: ArgumentSyntax argument }
-			&& model.GetOperation(argument, cancellationToken) is Microsoft.CodeAnalysis.Operations.IArgumentOperation { Parameter.Type: { } parameterType }
-			? parameterType
-			: Flowed(local.Type, NullableFlowState.None)
-	;
+	{
+		if(designation.Parent is DeclarationExpressionSyntax { Parent: ArgumentSyntax argument }
+			&& model.GetOperation(argument, cancellationToken) is Microsoft.CodeAnalysis.Operations.IArgumentOperation { Parameter: { } parameter })
+			
+			return parameter.GetAttributes().Any(attribute => attribute.AttributeClass?.Name is "MaybeNullWhenAttribute" or "MaybeNullAttribute")
+				? Flowed(parameter.Type, NullableFlowState.MaybeNull)
+				: parameter.Type;
+		
+		if(designation.Parent is VarPatternSyntax { Parent: IsPatternExpressionSyntax tested })
+			
+			return Flowed(local.Type, model.GetTypeInfo(tested.Expression, cancellationToken).Nullability.FlowState);
+		
+		return local.Type;
+	}
 	
 	// A member access that needs its receiver to be there. On a Nullable<T> only Value does:
 	// HasValue and GetValueOrDefault are how its null is asked about. An extension method takes
-	// its receiver as an argument, and the compiler warns there only when the parameter says so.
+	// its receiver as an argument, so it needs it unless its first parameter is nullable.
 	static bool Dereferences(SemanticModel model, MemberAccessExpressionSyntax access, CancellationToken cancellationToken)
 	{
-		if(model.GetSymbolInfo(access, cancellationToken).Symbol is IMethodSymbol { IsExtensionMethod: true })
+		if(model.GetSymbolInfo(access, cancellationToken).Symbol is IMethodSymbol { ReducedFrom.Parameters: [var receiver, ..] })
 			
-			return false;
+			return receiver.Type.NullableAnnotation != NullableAnnotation.Annotated;
 		
 		return model.GetTypeInfo(access.Expression, cancellationToken).Type?.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T
 			|| access.Name.Identifier.ValueText == "Value";
 	}
 	
 	// How many of a name's methods a call with this many arguments could have meant, counting
-	// the ones that differ in what they take: overloads that differ only in the receiver's type
-	// (the twenty Sum() of LINQ) are told apart by the receiver, which is in the source.
-	static int Alternatives(System.Collections.Immutable.ImmutableArray<ISymbol> group, int argumentCount)
+	// the ones that differ in what they take. In a call on a receiver the receiver is not among
+	// them: overloads that differ only in its type (the Sum() of LINQ) are told apart by the
+	// receiver, which is in the source. A params method takes any number from its last parameter on.
+	static int Alternatives(System.Collections.Immutable.ImmutableArray<ISymbol> group, int argumentCount, bool onReceiver)
 		=> group.OfType<IMethodSymbol>()
-			.Select(method => method.ReducedFrom is null && method.IsExtensionMethod && method.Parameters.Length > 0 ? method.Parameters.RemoveAt(0) : method.Parameters)
-			.Where(parameters => parameters.Length >= argumentCount && parameters.Skip(argumentCount).All(parameter => parameter.IsOptional || parameter.IsParams))
-			.Select(parameters => string.Join(",", parameters.Select(parameter => parameter.Type.OriginalDefinition.ToDisplayString())))
+			.Select(method => onReceiver && method.ReducedFrom is null && method.IsExtensionMethod && method.Parameters.Length > 0 ? method.Parameters.RemoveAt(0) : method.Parameters)
+			.Where(parameters => parameters is [.., { IsParams: true }]
+				? argumentCount >= parameters.Length - 1
+				: parameters.Length >= argumentCount && parameters.Skip(argumentCount).All(parameter => parameter.IsOptional))
+			.Select(parameters => string.Join(",", parameters.Select(parameter => parameter.Type.ToDisplayString())))
 			.Distinct(StringComparer.Ordinal)
 			.Count()
 	;
