@@ -379,17 +379,32 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 	}
 	
 	// A member access that needs its receiver to be there. On a Nullable<T> only Value does:
-	// HasValue and GetValueOrDefault are how its null is asked about. An extension method takes
-	// its receiver as an argument, so it needs it unless its first parameter is nullable.
+	// HasValue and GetValueOrDefault are how its null is asked about. An extension member takes
+	// its receiver as an argument, so it needs it only when the parameter says it is not null.
 	static bool Dereferences(SemanticModel model, MemberAccessExpressionSyntax access, CancellationToken cancellationToken)
 	{
-		if(model.GetSymbolInfo(access, cancellationToken).Symbol is IMethodSymbol { ReducedFrom.Parameters: [var receiver, ..] })
+		var member   = model.GetSymbolInfo(access, cancellationToken).Symbol;
+		var receiver = member is IMethodSymbol { ReducedFrom.Parameters: [var first, ..] }
+			? first
+			: member?.ContainingType is { IsExtension: true, ExtensionParameter: { } extended } ? extended : null;
+		
+		if(receiver is not null)
 			
-			return receiver.Type.NullableAnnotation != NullableAnnotation.Annotated;
+			return TakesNoNull(receiver.Type);
 		
 		return model.GetTypeInfo(access.Expression, cancellationToken).Type?.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T
 			|| access.Name.Identifier.ValueText == "Value";
 	}
+	
+	// A parameter type that says null is not for it. A type parameter says so only by a constraint:
+	// `this T value` takes a `string?` as T without a word from the compiler. A type from code
+	// without nullable annotations says nothing either way.
+	static bool TakesNoNull(ITypeSymbol type) => type switch {
+		
+		ITypeParameterSymbol parameter => parameter.NullableAnnotation != NullableAnnotation.Annotated
+			&& (parameter.HasNotNullConstraint || parameter is { HasReferenceTypeConstraint: true, ReferenceTypeConstraintNullableAnnotation: NullableAnnotation.NotAnnotated }),
+		_                              => type.NullableAnnotation == NullableAnnotation.NotAnnotated
+	};
 	
 	// How many of a name's methods a call with this many arguments could have meant, counting
 	// the ones that differ in what they take. In a call on a receiver the receiver is not among
@@ -399,7 +414,7 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		=> group.OfType<IMethodSymbol>()
 			.Select(method => onReceiver && method.ReducedFrom is null && method.IsExtensionMethod && method.Parameters.Length > 0 ? method.Parameters.RemoveAt(0) : method.Parameters)
 			.Where(parameters => parameters is [.., { IsParams: true }]
-				? argumentCount >= parameters.Length - 1
+				? parameters.Take(parameters.Length - 1).Skip(argumentCount).All(parameter => parameter.IsOptional)
 				: parameters.Length >= argumentCount && parameters.Skip(argumentCount).All(parameter => parameter.IsOptional))
 			.Select(parameters => string.Join(",", parameters.Select(parameter => parameter.Type.ToDisplayString())))
 			.Distinct(StringComparer.Ordinal)
