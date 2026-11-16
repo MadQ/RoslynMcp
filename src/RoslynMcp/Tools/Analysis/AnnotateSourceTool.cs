@@ -51,7 +51,8 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		"then a one-line JSON header ({\"annotations\": N}) and the annotations, one per line as 'line: fact'. " +
 		"The annotations are not part of the file: quote only the source block in an edit. " +
 		"Literals, explicitly typed declarations and calls to a method with one overload are not annotated; code that does not bind gets none. " +
-		"Name a member with symbolName (and containingType), or a file with startLine and endLine. " +
+		"Name a member with symbolName (and containingType), or a file with startLine and endLine, not both. " +
+		"A method name with several overloads is answered with their line ranges, to name one by its lines. " +
 		"For a single position with every detail (conversion, constant value, the other overloads), use roslyn_get_symbol_info.")]
 	public async Task<object> AnnotateSource(
 		CancellationToken cancellationToken,
@@ -76,6 +77,12 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		if(symbolName is null && (filePath is null || startLine is null || endLine is null))
 			
 			return scope.Error(new ErrorResult("Nothing to annotate was named.", "Pass symbolName (and containingType), or filePath with startLine and endLine."));
+		
+		// A range beside a member would be dropped without a word, and the answer would be the
+		// whole member where less was asked for.
+		if(symbolName is not null && (filePath is not null || startLine is not null || endLine is not null))
+			
+			return scope.Error(new ErrorResult("A member and a file range were both named.", "Pass symbolName (and containingType), or filePath with startLine and endLine, not both."));
 		
 		SyntaxTree? tree;
 		string?     displayName = null;
@@ -126,6 +133,14 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 				return scope.Failed("several declarations", new ErrorResult(
 					$"'{symbolName}' is declared in {declarations.Length} parts.",
 					"Name one of its members, or pass filePath with startLine and endLine for the part to annotate."));
+			
+			// A name finds the first of its overloads, and an answer for that one alone would not
+			// say there are others: the agent would go on to edit the wrong one.
+			if(symbol is IMethodSymbol && Overloads(symbol) is { Length: > 1 } overloads)
+				
+				return scope.Failed("several overloads", new ErrorResult(
+					$"'{symbolName}' has {overloads.Length} overloads: {string.Join("; ", overloads)}.",
+					"Pass filePath with the startLine and endLine of the one to annotate."));
 			
 			var declaration = await declarations[0].GetSyntaxAsync(cancellationToken);
 			var lines       = declaration.SyntaxTree.GetLineSpan(declaration.Span);
@@ -192,6 +207,18 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		return scope.Outcome($"{lastLine - firstLine + 1} line(s), {annotations.Count} annotation(s)", header, parts);
 	}
 	
+	// The overloads of a method that are declared in source, each as its signature and its lines.
+	static string[] Overloads(ISymbol method)
+		=> [..(method.ContainingType?.GetMembers(method.Name) ?? [])
+			.OfType<IMethodSymbol>()
+			.SelectMany(overload => overload.DeclaringSyntaxReferences.Take(1).Select(reference => {
+				
+				var lines = reference.SyntaxTree.GetLineSpan(reference.Span);
+				
+				return $"{overload.ToDisplayString(CallFormat)} (lines {lines.StartLinePosition.Line + 1}-{lines.EndLinePosition.Line + 1})";
+			}))]
+	;
+	
 	// Null for a value that is none of the three; all three for no value.
 	static Kinds? ParseKinds(string? annotate)
 	{
@@ -246,21 +273,23 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 					
 					case VariableDeclarationSyntax { Type.IsVar: true } declaration:
 						
+						// The declared type of a `var` local of a reference type is always nullable,
+						// whatever it is given: what the initializer yields at this point is the fact.
 						foreach(var declarator in declaration.Variables)
-							if(!SaysItsType(declarator.Initializer?.Value) && model.GetDeclaredSymbol(declarator, cancellationToken) is ILocalSymbol local)
-								AddType(declarator.Identifier, local.Type);
+							if(declarator.Initializer?.Value is { } value && !SaysItsType(value) && model.GetDeclaredSymbol(declarator, cancellationToken) is ILocalSymbol local)
+								AddType(declarator.Identifier, Flowed(local.Type, model.GetTypeInfo(value, cancellationToken).Nullability.FlowState));
 						
 						break;
 					
-					case ForEachStatementSyntax { Type.IsVar: true } loop when model.GetDeclaredSymbol(loop, cancellationToken) is { } item:
-						AddType(loop.Identifier, item.Type);
+					case ForEachStatementSyntax { Type.IsVar: true } loop:
+						AddType(loop.Identifier, model.GetForEachStatementInfo(loop).ElementType);
 						break;
 					
 					case SingleVariableDesignationSyntax designation when IsImplicitlyTyped(designation) && model.GetDeclaredSymbol(designation, cancellationToken) is ILocalSymbol designated:
-						AddType(designation.Identifier, designated.Type);
+						AddType(designation.Identifier, DesignatedType(model, designation, designated, cancellationToken));
 						break;
 					
-					case ParameterSyntax { Type: null } parameter when IsLambdaParameter(parameter) && model.GetDeclaredSymbol(parameter, cancellationToken) is { } lambdaParameter:
+					case ParameterSyntax { Type: null, Identifier.ValueText: not "_" } parameter when IsLambdaParameter(parameter) && model.GetDeclaredSymbol(parameter, cancellationToken) is { } lambdaParameter:
 						AddType(parameter.Identifier, lambdaParameter.Type);
 						break;
 					
@@ -277,9 +306,9 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 				
 				var receiver = node switch {
 					
-					MemberAccessExpressionSyntax access when access.IsKind(SyntaxKind.SimpleMemberAccessExpression) => access.Expression,
-					ElementAccessExpressionSyntax element                                                           => element.Expression,
-					_                                                                                               => null
+					MemberAccessExpressionSyntax access when access.IsKind(SyntaxKind.SimpleMemberAccessExpression) && Dereferences(model, access, cancellationToken) => access.Expression,
+					ElementAccessExpressionSyntax element => element.Expression,
+					_                                     => null
 				};
 				
 				if(receiver is not null && MayBeNull(model, receiver, cancellationToken))
@@ -289,7 +318,7 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 			if(kinds.HasFlag(Kinds.Calls) && node is InvocationExpressionSyntax invocation
 				&& model.GetSymbolInfo(invocation, cancellationToken).Symbol is IMethodSymbol method) {
 				
-				var overloads = model.GetMemberGroup(invocation.Expression, cancellationToken).Length;
+				var overloads = Alternatives(model.GetMemberGroup(invocation.Expression, cancellationToken), invocation.ArgumentList.Arguments.Count);
 				var inferred  = method.IsGenericMethod && !WritesTypeArguments(invocation.Expression);
 				
 				if(overloads > 1 || inferred)
@@ -311,6 +340,54 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		
 		return lines;
 	}
+	
+	// A reference type as flow analysis has it at a point: nullable where the value may be null,
+	// not nullable where it cannot, and unmarked where nullable analysis is off.
+	static ITypeSymbol? Flowed(ITypeSymbol? type, NullableFlowState flow)
+		=> type is { IsReferenceType: true }
+			? type.WithNullableAnnotation(flow switch {
+				
+				NullableFlowState.MaybeNull => NullableAnnotation.Annotated,
+				NullableFlowState.NotNull   => NullableAnnotation.NotAnnotated,
+				_                           => NullableAnnotation.None
+			})
+			: type
+	;
+	
+	// The type of `out var x` is the parameter's, which says whether it can be null. A
+	// deconstruction or a `var` pattern has no such place to read it from, and the declared type
+	// of a `var` is always nullable: there the type is given unmarked, which claims nothing.
+	static ITypeSymbol? DesignatedType(SemanticModel model, SingleVariableDesignationSyntax designation, ILocalSymbol local, CancellationToken cancellationToken)
+		=> designation.Parent is DeclarationExpressionSyntax { Parent: ArgumentSyntax argument }
+			&& model.GetOperation(argument, cancellationToken) is Microsoft.CodeAnalysis.Operations.IArgumentOperation { Parameter.Type: { } parameterType }
+			? parameterType
+			: Flowed(local.Type, NullableFlowState.None)
+	;
+	
+	// A member access that needs its receiver to be there. On a Nullable<T> only Value does:
+	// HasValue and GetValueOrDefault are how its null is asked about. An extension method takes
+	// its receiver as an argument, and the compiler warns there only when the parameter says so.
+	static bool Dereferences(SemanticModel model, MemberAccessExpressionSyntax access, CancellationToken cancellationToken)
+	{
+		if(model.GetSymbolInfo(access, cancellationToken).Symbol is IMethodSymbol { IsExtensionMethod: true })
+			
+			return false;
+		
+		return model.GetTypeInfo(access.Expression, cancellationToken).Type?.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T
+			|| access.Name.Identifier.ValueText == "Value";
+	}
+	
+	// How many of a name's methods a call with this many arguments could have meant, counting
+	// the ones that differ in what they take: overloads that differ only in the receiver's type
+	// (the twenty Sum() of LINQ) are told apart by the receiver, which is in the source.
+	static int Alternatives(System.Collections.Immutable.ImmutableArray<ISymbol> group, int argumentCount)
+		=> group.OfType<IMethodSymbol>()
+			.Select(method => method.ReducedFrom is null && method.IsExtensionMethod && method.Parameters.Length > 0 ? method.Parameters.RemoveAt(0) : method.Parameters)
+			.Where(parameters => parameters.Length >= argumentCount && parameters.Skip(argumentCount).All(parameter => parameter.IsOptional || parameter.IsParams))
+			.Select(parameters => string.Join(",", parameters.Select(parameter => parameter.Type.OriginalDefinition.ToDisplayString())))
+			.Distinct(StringComparer.Ordinal)
+			.Count()
+	;
 	
 	// An initializer that names the type it gives: `new Foo()`, a literal, a cast, `x as Foo`.
 	static bool SaysItsType(ExpressionSyntax? initializer)

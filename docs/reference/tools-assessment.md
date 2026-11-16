@@ -5,7 +5,7 @@
 
 ## Public tool inventory (complete)
 
-### Analysis / navigation (25)
+### Analysis / navigation (26)
 
 - `roslyn_analyze_region`
 - `roslyn_annotate_source`

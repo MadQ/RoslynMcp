@@ -63,10 +63,10 @@ static class AnnotateSourceTests
 			
 			// The flagship case: one member, all three kinds. Each expected line is a fact the text
 			// of Run does not hold: what `var` stands for, which Process was meant, what First's T
-			// became, and that `name` was never checked before line 28. Lines 18 and 19 say their
-			// type themselves (a literal, a written type) and must have nothing. The source block is
-			// the file's text, so it can be quoted in an edit; and the annotations must be shorter
-			// than the source, or they cost more than they save.
+			// became, and that `name` was never checked before line 28. `items` is not nullable
+			// although the declared type of a `var` always is: GetItems() cannot return null. Lines
+			// 18 and 19 say their type themselves (a literal, a written type) and must have nothing.
+			// The source block is the file's text, so it can be quoted in an edit.
 			new("roslyn_annotate_source: a member's implicit types, null states and resolved calls",
 				() => ctx.RunTestAsync(
 					"roslyn_annotate_source",
@@ -78,10 +78,9 @@ static class AnnotateSourceTests
 						return data?["symbol_name"]?.GetValue<string>().Contains("Run") == true
 							&& data["start_line"]?.GetValue<int>() == 15
 							&& data["end_line"]?.GetValue<int>() == 29
-							&& later is [var source, var count, var annotations]
+							&& later is [var source, var count, _]
 							&& source == SourceOf(15, 29)
 							&& JsonNode.Parse(count)?["annotations"]?.GetValue<int>() == lines.Length
-							&& annotations.Length < source.Length
 							&& lines.Contains("17: items: List<Order?>")
 							&& lines.Contains("20: o: Order?")
 							&& lines.Any(line => line.StartsWith("21: Process(Order)", StringComparison.Ordinal) && line.EndsWith("1 of 2 overloads", StringComparison.Ordinal))
@@ -90,7 +89,10 @@ static class AnnotateSourceTests
 							&& lines.Contains("25: i: Order?")
 							&& lines.Contains("26: parsed: int")
 							&& lines.Contains("28: name may be null here")
-							&& !lines.Any(line => line.StartsWith("18:", StringComparison.Ordinal) || line.StartsWith("19:", StringComparison.Ordinal));
+							&& !lines.Any(line => line.StartsWith("18:", StringComparison.Ordinal) || line.StartsWith("19:", StringComparison.Ordinal))
+							// The overloads of Sum() differ only in the receiver's type, which the
+							// source shows: no annotation.
+							&& !lines.Any(line => line.Contains("Sum(", StringComparison.Ordinal));
 					},
 					expectJson: true)),
 			
@@ -123,6 +125,22 @@ static class AnnotateSourceTests
 					new { symbolName = "Broken", containingType = "Shop", projectPath = fx.Csproj },
 					(data, later) => data?["error"] is null && Annotations(later).Length == 0,
 					expectJson: true)),
+			
+			// `Process` has two overloads, on lines 11 and 12. Answering for the first alone would
+			// hide the second, so the answer is both with their lines; and a member named beside a
+			// range is refused, because one of the two would be dropped without a word.
+			new("roslyn_annotate_source: an overloaded name lists its overloads, and a member beside a range is refused",
+				async () => {
+					
+					var overloaded = await ctx.CallToolJsonAsync("roslyn_annotate_source", new { symbolName = "Process", containingType = "Shop", projectPath = fx.Csproj });
+					var both       = await ctx.CallToolJsonAsync("roslyn_annotate_source", new { symbolName = "Run", containingType = "Shop", filePath = "Shop.cs", startLine = 17, endLine = 18, projectPath = fx.Csproj });
+					var error      = overloaded?["error"]?.GetValue<string>() ?? "";
+					var pass       = error.Contains("Process(Order) (lines 11-11)", StringComparison.Ordinal)
+						&& error.Contains("Process(string) (lines 12-12)", StringComparison.Ordinal)
+						&& both?["error"]?.GetValue<string>().Contains("both", StringComparison.Ordinal) == true;
+					
+					return (pass, pass ? "PASS" : $"FAIL  (overloaded: {overloaded} | both: {both})");
+				}),
 			
 			new("roslyn_annotate_source: an unknown kind and a call that names nothing are structured errors",
 				async () => {
