@@ -45,6 +45,13 @@ static class SymbolInfoTests
 		/* 33 */ "{",
 		/* 34 */ "\tvoid Run(string s) { Console.WriteLine(s); }",
 		/* 35 */ "}",
+		/* 36 */ "",
+		/* 37 */ "#nullable enable",
+		/* 38 */ "class Sure",
+		/* 39 */ "{",
+		/* 40 */ "\tstring Text() => \"\";",
+		/* 41 */ "\tvoid Run() { var sure = Text(); Console.WriteLine(sure); }",
+		/* 42 */ "}",
 	];
 	
 	// The harder shapes: conditional access, delegates, method groups and code that does not bind.
@@ -174,6 +181,21 @@ static class SymbolInfoTests
 				() => At(16, 7, data => Text(data, "kind") == "local"
 					&& Text(data, "type") == "string?"
 					&& Text(data, "nullable_flow") is null)),
+			
+			// The declared type of a `var` local of a reference type is `string?` whatever it is
+			// given, which read as "may be null". Text() cannot return null, so the local is a
+			// `string`, at its declaration and as the symbol's type where it is used (#355). Line 16
+			// above is the other side: `var before = s` with a `string? s` stays `string?`.
+			new("roslyn_get_symbol_info: a var local takes the type its initializer yields, not the always-nullable declared one",
+				async () => {
+					
+					var declared = await ctx.CallToolJsonAsync("roslyn_get_symbol_info", new { filePath = "Facts.cs", line = 41, column = 19, projectPath = fx.Csproj });
+					var used     = await ctx.CallToolJsonAsync("roslyn_get_symbol_info", new { filePath = "Facts.cs", line = 41, column = 52, projectPath = fx.Csproj });
+					var pass     = Text(declared, "kind") == "local" && Text(declared, "type") == "string" && Text(declared, "type_or_return") == "string"
+						&& Text(used, "kind") == "local" && Text(used, "type") == "string" && Text(used, "type_or_return") == "string";
+					
+					return (pass, pass ? "PASS" : $"FAIL  (declared: {declared} | used: {used})");
+				}),
 			
 			new("roslyn_get_symbol_info: a parameter declaration resolves, with its declared type",
 				() => At(14, 19, data => Text(data, "kind") == "parameter" && Text(data, "type") == "string?")),

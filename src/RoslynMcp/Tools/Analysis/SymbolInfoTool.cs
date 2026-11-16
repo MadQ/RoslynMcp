@@ -10,10 +10,8 @@ namespace RoslynMcp.Tools;
 [McpServerToolType]
 internal sealed class SymbolInfoTool : RoslynMcpTool
 {
-	// The nullable marker is the whole point of these strings: 'string?' and 'string' differ here.
-	static readonly SymbolDisplayFormat TypeFormat = SymbolDisplayFormat.MinimallyQualifiedFormat.WithMiscellaneousOptions(
-		SymbolDisplayFormat.MinimallyQualifiedFormat.MiscellaneousOptions | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier
-	);
+	// Shared with roslyn_annotate_source, which states the same facts for a whole member (#355).
+	static SymbolDisplayFormat TypeFormat => ExpressionFacts.TypeFormat;
 	
 	public SymbolInfoTool(WorkspaceResolver workspace, FileLogger logger, PaginationCache paginationCache) : base(workspace, logger, paginationCache) { }
 	
@@ -112,14 +110,14 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 					IMethodSymbol   m => m.ReturnType.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					IPropertySymbol p => p.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					IFieldSymbol    f => f.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
-					ILocalSymbol    l => l.Type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
+					ILocalSymbol    l => ExpressionFacts.Bound(ExpressionFacts.LocalType(model, l, CancellationToken.None))?.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat),
 					_                 => null
 				})
 		;
 		
 		var enriched = expression is not null
 			? AddExpressionFacts(result, model, expression, typeInfo, symbol)
-			: result with { Type = isDeclaration ? DeclaredType(symbol) : null }
+			: result with { Type = isDeclaration ? DeclaredType(model, symbol) : null }
 		;
 		
 		return scope.Outcome(symbol?.Name ?? "type", enriched with {
@@ -167,14 +165,14 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 	static SymbolInfoResult AddExpressionFacts(SymbolInfoResult result, SemanticModel model, ExpressionSyntax expression, TypeInfo typeInfo, ISymbol? symbol)
 	{
 		// An error type means the code does not bind, and '?' is not a fact about it.
-		var type       = typeInfo.Type is { TypeKind: not TypeKind.Error } ? typeInfo.Type : null;
-		var converted  = typeInfo.ConvertedType is { TypeKind: not TypeKind.Error } ? typeInfo.ConvertedType : null;
+		var type       = ExpressionFacts.Bound(typeInfo.Type);
+		var converted  = ExpressionFacts.Bound(typeInfo.ConvertedType);
 		var conversion = model.GetConversion(expression);
 		var constant   = model.GetConstantValue(expression);
 		
 		// A type name is not a value, so it has no null state, and Roslyn gives it NotNull or None
 		// depending on where it stands. None would read as nullable analysis being off.
-		var nullable   = symbol is not ITypeSymbol && CanBeNull(type ?? converted);
+		var nullable   = symbol is not ITypeSymbol && ExpressionFacts.CanBeNull(type ?? converted);
 		var flow       = typeInfo.Nullability.FlowState;
 		
 		return result with {
@@ -188,15 +186,11 @@ internal sealed class SymbolInfoTool : RoslynMcpTool
 		};
 	}
 	
-	// A flow state on an int or a void call is true and useless. A pointer is no value type either,
-	// but nullable reference analysis does not apply to it.
-	static bool CanBeNull(ITypeSymbol? type)
-		=> type is not (null or IPointerTypeSymbol or IFunctionPointerTypeSymbol) && (!type.IsValueType || type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
-	;
-	
-	static string? DeclaredType(ISymbol? symbol) => symbol switch {
+	// A local declared with `var` is given what its value yields, not its declared type, which
+	// is nullable for every reference type and would read as "may be null" (#355).
+	static string? DeclaredType(SemanticModel model, ISymbol? symbol) => symbol switch {
 		
-		ILocalSymbol     l => l.Type.ToDisplayString(TypeFormat),
+		ILocalSymbol     l => ExpressionFacts.Bound(ExpressionFacts.LocalType(model, l, CancellationToken.None))?.ToDisplayString(TypeFormat),
 		IParameterSymbol p => p.Type.ToDisplayString(TypeFormat),
 		IFieldSymbol     f => f.Type.ToDisplayString(TypeFormat),
 		IPropertySymbol  p => p.Type.ToDisplayString(TypeFormat),

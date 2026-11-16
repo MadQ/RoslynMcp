@@ -69,6 +69,11 @@ built-in tools only if a roslyn tool fails.
   range: what an extracted method would take and return, what a lambda captures,
   whether every path returns. Covers locals, parameters and `this` only; fields
   and properties never appear.
+- `roslyn_annotate_source` — A member's source (or a line range's) followed by
+  what the compiler knows that the text does not say: the type behind each `var`,
+  each dereferenced value that may be null, and the overload a call resolved to.
+  One call in place of a `roslyn_get_symbol_info` per position. The annotations
+  come after the source as `line: fact`; quote only the source in an edit.
 - `roslyn_find_implementations` — Find implementations of an interface or
   overrides of a virtual/abstract method. Grep cannot do this.
 - `roslyn_get_symbol_definition` — Jump to a symbol's declaration. Returns file,
