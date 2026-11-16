@@ -529,7 +529,9 @@ chmod +x /path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe
 
 **Symptom:** A tool answer carries the caution *File watching is off for part of the workspace*, or `roslyn_check_drift` lists `unwatched_roots`. Files changed in an editor or by `git` are not picked up, and a newly created file does not appear in symbol results.
 
-**Cause:** Every file watcher is an inotify instance on Linux, and a user has a fixed number of them (128 by default), shared by every program that watches files: other RoslynMcp servers, editors, build tools. A second limit counts the watched directories. When either runs out, the server loads the workspace but cannot start its watchers.
+**Cause:** Every file watcher is an inotify instance on Linux, and a user has a fixed number of them (128 by default), shared by every program that watches files: other RoslynMcp servers, editors, build tools. When they run out, the server loads the workspace but cannot start its watchers.
+
+A second limit, `fs.inotify.max_user_watches`, counts the watched directories. Running out of that one is **not** reported in an answer yet: the watcher starts and then misses the directories it got no watch for, and the server only writes a `Watch — WARN: watcher on … failed` line to its log. If edits go unnoticed and no answer says why, look there.
 
 **Check:**
 ```bash

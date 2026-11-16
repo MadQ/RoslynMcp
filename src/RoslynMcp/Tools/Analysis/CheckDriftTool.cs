@@ -32,14 +32,16 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"That state makes symbol results wrong-but-plausible and makes roslyn_get_diagnostics report phantom " +
 		"CS0246/CS0234 errors or CS8632 warnings for code that builds fine — source can be perfectly in sync " +
 		"while this is broken. " +
-		"Beside the three axes below, unwatched_roots lists the directories whose file watcher could not start (on Linux, the inotify limit), with the reason; changes made there outside the server are not noticed, and a new file is not seen until a reload. " +
 		"(3) Pending reload: reload_pending is true when a change could not be applied incrementally and the " +
 		"reload servicing it has not finished — the workspace is behind disk. This is the only axis that can " +
 		"account for a newly added file, because drifted_files is built from documents the workspace already " +
 		"has and a brand-new file is not one of them. " +
 		"Any of these is fixed by roslyn_respawn; drift alone can also be cleared by re-saving the files " +
 		"through roslyn editing tools. last_unhealthy_load is present when an unhealthy load happened " +
-		"at any point, even if the workspace has since recovered.")]
+		"at any point, even if the workspace has since recovered. " +
+		"Beside the three axes, unwatched_roots lists the directories whose file watcher could not start, with the reason " +
+		"(on Linux, usually the limit on inotify instances): changes made there outside the server are not noticed, and a new " +
+		"file is not seen until a reload. A respawn alone does not help there: the hint says what to raise first.")]
 	public async Task<object> CheckDrift(CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
@@ -190,11 +192,16 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		
 		if(watching is not null) {
 			
-			var problem = $"File watching is off for part of the workspace: {watching.Problem}";
+			var problem = $"File watching is off for {watching.Extent}: {watching.Problem}";
+			
+			// Relative where that names a directory below the root. The root itself (".") and a
+			// directory outside it ("..\\..\\x") are given whole, as roslyn_info gives them.
+			string Shown(string path)
+				=> TryMakeRelative(path, rootPath) is { } relative && relative != "." && !relative.StartsWith("..", StringComparison.Ordinal) ? relative : path;
 			
 			result = result with {
 				
-				UnwatchedRoots = [..watching.Unwatched.Select(root => new UnwatchedInfo(TryMakeRelative(root.Path, rootPath) ?? root.Path, root.Reason))],
+				UnwatchedRoots = [..watching.Unwatched.Select(root => new UnwatchedInfo(Shown(root.Path), root.Reason))],
 				Hint           = result.Hint is null ? problem : $"{result.Hint} Also: {problem}"
 			};
 		}

@@ -444,26 +444,24 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	
 	// Says once, on the next tool answer, that part of the workspace is not watched: an agent
 	// that never asks roslyn_check_drift would otherwise not learn that new files go unseen.
-	// Once per state: the same roots failing again at the next reload are not news.
+	// Once per state: the same roots failing again at the next reload are not news. A state is
+	// taken as said only when the news was accepted; a full queue means it is tried again.
 	void AnnounceUnwatched()
 	{
-		WatchStatus status;
+		var    status = Status;
+		string state  = string.Join('|', status.Unwatched.Select(root => root.Path));
 		
-		lock(gate) {
-			
-			var state = string.Join('|', unwatched.Keys.Order(StringComparer.Ordinal));
-			
+		lock(gate)
 			if(state == announced)
 				
 				return;
+		
+		if(status.Unwatched.Length > 0 && !WatchNews.Post($"File watching is off for {status.Extent} '{rootPath}': {status.Problem} roslyn_check_drift lists the directories."))
 			
+			return;
+		
+		lock(gate)
 			announced = state;
-		}
-		
-		status = Status;
-		
-		if(status.Unwatched.Length > 0)
-			WatchNews.Post($"File watching is off for part of the workspace '{rootPath}': {status.Problem} roslyn_check_drift lists the directories.");
 	}
 	
 	bool IsWatched(string path)
