@@ -348,8 +348,11 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 	// to such a method is annotated (#502). Which overload of the solution's own method was meant
 	// is what an agent cannot know and is about to change; which Where or ToDictionary was meant
 	// is what a reader of C# knows, and those were twelve of the fourteen annotations of the
-	// tool's first real use. The types a framework call infers are still said where they land, on
-	// the implicitly typed variable that takes the result.
+	// tool's first real use. The types a framework call infers are still said when its result goes
+	// into an implicitly typed variable, on that variable; one whose result is returned or passed
+	// straight on is described nowhere now, which is the price. A project of the solution that
+	// reached the compilation as an assembly (it did not load, or is referenced by its file) is
+	// not source here, and its methods are not annotated.
 	static bool IsOwn(IMethodSymbol method)
 		=> (method.ReducedFrom ?? method).OriginalDefinition.Locations.Any(location => location.IsInSource)
 	;
