@@ -39,9 +39,11 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"Any of these is fixed by roslyn_respawn; drift alone can also be cleared by re-saving the files " +
 		"through roslyn editing tools. last_unhealthy_load is present when an unhealthy load happened " +
 		"at any point, even if the workspace has since recovered. " +
-		"Beside the three axes, unwatched_roots lists the directories whose file watcher could not start, with the reason " +
+		"Beside the three axes, unwatched_roots lists the directories whose file watcher could not start or has stopped, with the reason " +
 		"(on Linux, usually the limit on inotify instances): changes made there outside the server are not noticed, and a new " +
-		"file is not seen until a reload. A respawn helps there only once the cause is gone: the hint says what that is.")]
+		"file is not seen until a reload. degraded_roots lists the directories whose watcher runs and reported that it cannot " +
+		"watch everything under them (on Linux, usually the limit on inotify watches): changes in some of their subdirectories " +
+		"are not noticed. A respawn helps with either only once the cause is gone: the hint says what that is.")]
 	public async Task<object> CheckDrift(CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null)
 	{
@@ -186,9 +188,10 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			}
 		};
 
-		// Fourth axis (#495): a directory whose watcher could not start. It explains drift that
-		// keeps coming back, and it is the one state in which a new file is found by nothing.
-		var watching = health?.Watching is { Unwatched.Length: > 0 } partly ? partly : null;
+		// Fourth axis (#495): a directory whose watcher is not running, or (#499) runs with holes.
+		// It explains drift that keeps coming back, and it is the one state in which a new file is
+		// found by nothing.
+		var watching = health?.Watching is { HasProblem: true } partly ? partly : null;
 		
 		if(watching is not null) {
 			
@@ -201,7 +204,8 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			
 			result = result with {
 				
-				UnwatchedRoots = [..watching.Unwatched.Select(root => new UnwatchedInfo(Shown(root.Path), root.Reason))],
+				UnwatchedRoots = watching.Unwatched.Length > 0 ? [..watching.Unwatched.Select(root => new WatchRootProblemInfo(Shown(root.Path), root.Reason))] : null,
+				DegradedRoots  = watching.Degraded.Length > 0 ? [..watching.Degraded.Select(root => new WatchRootProblemInfo(Shown(root.Path), root.Reason))] : null,
 				Hint           = result.Hint is null ? problem : $"{result.Hint} Also: {problem}"
 			};
 		}
@@ -217,8 +221,11 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		if(reloadPending)
 			outcome += ", reload pending";
 		
-		if(watching is not null)
+		if(watching is { Unwatched.Length: > 0 })
 			outcome += $", {watching.Unwatched.Length} unwatched root(s)";
+		
+		if(watching is { Degraded.Length: > 0 })
+			outcome += $", {watching.Degraded.Length} degraded root(s)";
 
 		return scope.Outcome(outcome, result);
 	}

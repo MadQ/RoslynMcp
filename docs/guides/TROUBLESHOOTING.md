@@ -527,17 +527,19 @@ chmod +x /path/to/RoslynMcp/publish/net10.0/RoslynMcp.exe
 
 ### Linux: edits made outside the server are not noticed ("File watching is off")
 
-**Symptom:** A tool answer carries the caution *File watching is off for the workspace* (or *for part of the workspace*), or `roslyn_check_drift` lists `unwatched_roots`. Files changed in an editor or by `git` are not picked up, and a newly created file does not appear in symbol results.
+**Symptom:** A tool answer carries the caution *File watching is off for the workspace* (or *for part of the workspace*), or `roslyn_check_drift` lists `unwatched_roots` or `degraded_roots`. Files changed in an editor or by `git` are not picked up, and a newly created file does not appear in symbol results.
 
 **Cause:** Every file watcher is an inotify instance on Linux, and a user has a fixed number of them (128 by default), shared by every program that watches files: other RoslynMcp servers, editors, build tools. When they run out, the server loads the workspace but cannot start its watchers.
 
-A second limit, `fs.inotify.max_user_watches`, counts the watched directories. Running out of that one is **not** reported in an answer yet: the watcher starts and then misses the directories it got no watch for, and the server only writes a `Watch — WARN: watcher on … failed` line to its log. If edits go unnoticed and no answer says why, look there.
+A second limit, `fs.inotify.max_user_watches`, counts the watched directories. When that one runs out the watcher starts and goes on, without the directories it got no watch for. Such a root is listed under `degraded_roots` with what the watcher said, and the same caution is given: changes in some directories under it are not noticed.
+
+**A server that runs for a long time can use the instances up by itself.** In .NET 10 a watcher whose directory was deleted before the watcher was stopped never gives its inotify instance back (the runtime ends a watcher by removing its watches, and a deleted directory has none left to remove). Each workspace root that is deleted while a server holds it, such as a removed worktree, costs one instance until that server exits. `roslyn_respawn` frees them. The runtime's next version shares one instance among all watchers of a process, which ends this.
 
 **Check:**
 ```bash
 cat /proc/sys/fs/inotify/max_user_instances /proc/sys/fs/inotify/max_user_watches
 ```
-`roslyn_info` lists the workspaces the server holds with `watch_roots` each: their sum is the instances this server takes.
+`roslyn_info` lists the workspaces the server holds with `watch_roots` each: their sum is the instances this server's live watchers take. Instances lost as described above are not in that sum; count them with `ls -l /proc/<pid>/fd | grep -c inotify`.
 
 **Solution:** Raise the limits, then call `roslyn_respawn` (or reload the workspace) so the watchers start:
 ```bash

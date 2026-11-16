@@ -169,6 +169,16 @@ fi
 
 export DOTNET_NOLOGO=1 DOTNET_CLI_TELEMETRY_OPTOUT=1
 
+# A full run uses up the default of 128 inotify instances: under .NET 10 a watcher whose directory
+# was deleted before it was stopped never gives its instance back, and every fixture ends that
+# way (#499). The tests that then fail are far from the cause, so say it before the run. A
+# warning, not a stop: a filtered run fits within the default.
+instances="$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)"
+
+if [ "$instances" -gt 0 ] && [ "$instances" -lt 512 ]; then
+    echo "WARNING: fs.inotify.max_user_instances is $instances. A full harness run needs more: tests that wait for a file event will fail late in the run (Ignored Directories, Incremental Additional/AnalyzerConfig Doc). Raise it with: sudo sysctl -w fs.inotify.max_user_instances=1024" >&2
+fi
+
 exec dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- "$@"
 '@
 

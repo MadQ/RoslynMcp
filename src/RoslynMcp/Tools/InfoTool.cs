@@ -66,7 +66,8 @@ internal sealed class InfoTool : RoslynMcpTool
 		WorkspaceWatchInfo[] watching = [..workspace.DescribeWatching().Select(held => new WorkspaceWatchInfo(
 			held.Root,
 			held.Status?.Live ?? 0,
-			held.Status is { Unwatched: { Length: > 0 } unwatched } ? [..unwatched.Select(root => new UnwatchedInfo(root.Path, root.Reason))] : null))];
+			held.Status is { Unwatched: { Length: > 0 } unwatched } ? [..unwatched.Select(root => new WatchRootProblemInfo(root.Path, root.Reason))] : null,
+			held.Status is { Degraded: { Length: > 0 } degraded } ? [..degraded.Select(root => new WatchRootProblemInfo(root.Path, root.Reason))] : null))];
 		
 		return scope.Outcome("info", new InfoResult(version, pid, uptime, msbuild, FilePruner.GetPruneErrors(), marker, codeActions, workspace.DescribeDefaultWorkspace()) {
 			Workspaces = watching.Length > 0 ? watching : null

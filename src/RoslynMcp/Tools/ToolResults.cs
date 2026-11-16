@@ -574,7 +574,15 @@ internal sealed record CheckDriftResult(
 	///     found, and a new file is found by none of them. Absent when everything is watched.
 	/// </summary>
 	[JsonPropertyName("unwatched_roots")]
-	public UnwatchedInfo[]? UnwatchedRoots { get; init; }
+	public WatchRootProblemInfo[]? UnwatchedRoots { get; init; }
+	
+	/// <summary>
+	///     The directories whose watcher runs and reported that it cannot watch everything under
+	///     them (#499): changes in some of their subdirectories raise no event. Absent when there
+	///     are none.
+	/// </summary>
+	[JsonPropertyName("degraded_roots")]
+	public WatchRootProblemInfo[]? DegradedRoots { get; init; }
 }
 
 internal sealed record GetTriviaNoMatchResult(
@@ -1073,8 +1081,8 @@ internal sealed record InfoResult(
 ) : ToolResult
 {
 	/// <summary>
-	///     The workspaces the server holds, each with its live watch roots and the ones that could
-	///     not start (#495). The sum of <c>watch_roots</c> is the watcher instances the server takes
+	///     The workspaces the server holds, each with its live watch roots, the ones that are not
+	///     watched (#495) and the ones watched only in part (#499). The sum of <c>watch_roots</c> is the watcher instances the server takes
 	///     from the system, of which Linux gives a user 128 by default.
 	/// </summary>
 	[JsonPropertyName("workspaces")]
@@ -1085,11 +1093,12 @@ internal sealed record InfoResult(
 internal sealed record WorkspaceWatchInfo(
 	[property: JsonPropertyName("root")]            string           Root,
 	[property: JsonPropertyName("watch_roots")]     int              WatchRoots,
-	[property: JsonPropertyName("unwatched_roots")] UnwatchedInfo[]? UnwatchedRoots
+	[property: JsonPropertyName("unwatched_roots")] WatchRootProblemInfo[]? UnwatchedRoots,
+	[property: JsonPropertyName("degraded_roots")]  WatchRootProblemInfo[]? DegradedRoots
 );
 
-/// <summary>A directory whose watcher could not start, as an answer names it.</summary>
-internal sealed record UnwatchedInfo(
+/// <summary>A directory that is not watched, or only in part, with the watcher's own words, as an answer names it.</summary>
+internal sealed record WatchRootProblemInfo(
 	[property: JsonPropertyName("path")]   string Path,
 	[property: JsonPropertyName("reason")] string Reason
 );

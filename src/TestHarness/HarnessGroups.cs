@@ -66,6 +66,7 @@ static class HarnessGroups
 		Group("Linked Files",                              g => LinkedFileTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Watcher Start-up",                          g => WatcherStartupTests.Build(g.Ctx)),
 		Group("Unwatched Roots",                           g => UnwatchedRootTests.Build(g.Ctx)),
+		Group("Watcher Failures",                          g => WatcherFailureTests.Build(g.Ctx)),
 		Group("Watcher Through Writes",                    g => WatcherThroughWritesTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Moved Directory",                           g => MovedDirectoryTests.Build(g.Ctx)),
 		Group("Hook Hint",                                 g => HookHintTests.Build(g.Ctx)),
