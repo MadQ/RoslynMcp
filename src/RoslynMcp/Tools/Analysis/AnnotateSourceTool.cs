@@ -386,23 +386,28 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		var member   = model.GetSymbolInfo(access, cancellationToken).Symbol;
 		var receiver = member is IMethodSymbol { ReducedFrom.Parameters: [var first, ..] }
 			? first
-			: member?.ContainingType is { IsExtension: true, ExtensionParameter: { } extended } ? extended : null;
+			// The block as it is declared: of a constructed one the parameter's type is the type
+			// argument that was inferred, and a `string?` receiver would always pass.
+			: member?.ContainingType?.OriginalDefinition is { IsExtension: true, ExtensionParameter: { } extended } ? extended : null;
 		
 		if(receiver is not null)
 			
-			return TakesNoNull(receiver.Type);
+			return TakesNoNull(receiver.Type, 0);
 		
 		return model.GetTypeInfo(access.Expression, cancellationToken).Type?.OriginalDefinition.SpecialType != SpecialType.System_Nullable_T
 			|| access.Name.Identifier.ValueText == "Value";
 	}
 	
-	// A parameter type that says null is not for it. A type parameter says so only by a constraint:
-	// `this T value` takes a `string?` as T without a word from the compiler. A type from code
-	// without nullable annotations says nothing either way.
-	static bool TakesNoNull(ITypeSymbol type) => type switch {
+	// A parameter type that says null is not for it. A type parameter says so only by a constraint
+	// (notnull, class, or a type that itself takes no null): `this T value` takes a `string?` as T
+	// without a word from the compiler. A type from code without nullable annotations says nothing
+	// either way. The depth is for code that does not compile: `where T : U where U : T`.
+	static bool TakesNoNull(ITypeSymbol type, int depth) => type switch {
 		
 		ITypeParameterSymbol parameter => parameter.NullableAnnotation != NullableAnnotation.Annotated
-			&& (parameter.HasNotNullConstraint || parameter is { HasReferenceTypeConstraint: true, ReferenceTypeConstraintNullableAnnotation: NullableAnnotation.NotAnnotated }),
+			&& (parameter.HasNotNullConstraint
+				|| parameter is { HasReferenceTypeConstraint: true, ReferenceTypeConstraintNullableAnnotation: NullableAnnotation.NotAnnotated }
+				|| (depth < 8 && parameter.ConstraintTypes.Any(constraint => TakesNoNull(constraint, depth + 1)))),
 		_                              => type.NullableAnnotation == NullableAnnotation.NotAnnotated
 	};
 	
