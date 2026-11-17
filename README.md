@@ -167,7 +167,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | `roslyn_analyze_region` | Data flow and control flow for a line range: extract-method inputs and outputs, captures, reachability, exits |
 | `roslyn_find_implementations` | All types implementing an interface or overriding a member |
 | `roslyn_get_symbol_info` | What a name at a location resolves to, with its flow-adjusted type, nullable state, conversions and overloads |
-| `roslyn_annotate_source` | A member's source and, apart from it, what the text does not say: implicit types, values that may be null, the overload each call resolved to |
+| `roslyn_annotate_source` | A member's source and, apart from it, what the text does not say: implicit types, values that may be null, the overload a call to the solution's own method resolved to |
 | `roslyn_get_symbol_definition` | Jump to where a symbol is declared |
 | `roslyn_get_symbols_in_scope` | All symbols accessible at a file location |
 | `roslyn_get_type_hierarchy` | Base types, interfaces, and derived types |

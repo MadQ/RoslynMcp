@@ -66,6 +66,25 @@ static class AnnotateSourceTests
 		
 		fx.Write("Shop.cs", string.Join("\n", Shop) + "\n");
 		
+		// A second project that calls into the first: a method of the solution that is not of
+		// the project asked about (#502).
+		var lib = TestFixtures.NewMsBuildProject("AnnotateSourceLib", targetFrameworks: "net10.0");
+		var app = TestFixtures.NewMsBuildProject("AnnotateSourceApp", "net10.0", $"<ItemGroup><ProjectReference Include=\"{lib.Csproj}\" /></ItemGroup>");
+		
+		lib.Write("Stock.cs", "public static class Stock\n{\n\tpublic static void Put(int count) { }\n\tpublic static void Put(string name) { }\n}\n");
+		app.Write("Clerk.cs", string.Join("\n", [
+			/* 1 */ "using System.Linq;",
+			/* 2 */ "",
+			/* 3 */ "class Clerk",
+			/* 4 */ "{",
+			/* 5 */ "\tint Work(int[] counts)",
+			/* 6 */ "\t{",
+			/* 7 */ "\t\tStock.Put(counts.Length);",
+			/* 8 */ "\t\treturn counts.Select(c => c + 1).First();",
+			/* 9 */ "\t}",
+			/* 10 */ "}",
+		]) + "\n");
+		
 		static string SourceOf(int startLine, int endLine) => string.Join("\n", Shop[(startLine - 1)..endLine]) + "\n";
 		
 		// The annotations of an answer, one per line; empty when the answer has none.
@@ -104,7 +123,10 @@ static class AnnotateSourceTests
 							&& !lines.Any(line => line.StartsWith("18:", StringComparison.Ordinal) || line.StartsWith("19:", StringComparison.Ordinal))
 							// The overloads of Sum() differ only in the receiver's type, which the
 							// source shows: no annotation.
-							&& !lines.Any(line => line.Contains("Sum(", StringComparison.Ordinal));
+							&& !lines.Any(line => line.Contains("Sum(", StringComparison.Ordinal))
+							// Select on line 25 is overloaded and infers its type arguments, and is the
+							// framework's: no annotation (#502). What it inferred is said by `i`.
+							&& !lines.Any(line => line.Contains("Select<", StringComparison.Ordinal));
 					},
 					expectJson: true)),
 			
@@ -125,7 +147,29 @@ static class AnnotateSourceTests
 						return lines.Contains("41: found: List<int>?")
 							&& lines.Any(line => line.StartsWith("42: Par(params int[])", StringComparison.Ordinal) && line.EndsWith("1 of 2 overloads", StringComparison.Ordinal))
 							&& !lines.Any(line => line.Contains("number may be null", StringComparison.Ordinal))
-							&& lines.Contains("45: list may be null here");
+							&& lines.Contains("45: list may be null here")
+							// Count<string> on that line is the framework's call: said by nothing (#502).
+							&& !lines.Any(line => line.Contains("Count<", StringComparison.Ordinal));
+					},
+					expectJson: true)),
+			
+			// Whose method a call is decides whether it is annotated (#502), and "the solution's own"
+			// has to include a project the asked-about one references: Put is declared in the Lib
+			// fixture and overloaded, so the call on line 7 names the overload. Select and First on
+			// line 8 are overloaded too and infer their type arguments, and are the framework's: in
+			// the tool's first real use, calls like them were twelve of fourteen annotations. Only
+			// calls are narrowed: the lambda parameter on that line still gets its type.
+			new("roslyn_annotate_source: a call is annotated when its method is the solution's own, also from another project",
+				() => ctx.RunTestAsync(
+					"roslyn_annotate_source",
+					new { symbolName = "Work", containingType = "Clerk", projectPath = app.Csproj },
+					(data, later) => {
+						
+						var lines = Annotations(later);
+						
+						return lines.Any(line => line.StartsWith("7: Put(int)", StringComparison.Ordinal) && line.EndsWith("1 of 2 overloads", StringComparison.Ordinal))
+							&& lines.Contains("8: c: int")
+							&& !lines.Any(line => line.Contains("Select<", StringComparison.Ordinal) || line.Contains("First<", StringComparison.Ordinal));
 					},
 					expectJson: true)),
 			
@@ -191,6 +235,8 @@ static class AnnotateSourceTests
 		return new TestGroup($"Annotate Source ({tests.Count} tests)", tests, Teardown: () => {
 			
 			fx.Dispose();
+			app.Dispose();
+			lib.Dispose();
 			
 			return Task.CompletedTask;
 		});

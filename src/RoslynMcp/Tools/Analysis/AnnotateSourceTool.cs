@@ -45,12 +45,12 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		"Returns the source of one member, or of a line range, followed by what the compiler knows about it that the text does not say: " +
 		"the type of every implicitly typed variable (var, foreach, out var, deconstruction, lambda parameters, target-typed new), " +
 		"each place where a value that is dereferenced may be null by the compiler's flow analysis, " +
-		"and the overload a call resolved to when the name is overloaded or its type arguments were inferred. " +
+		"and, for a call to a method declared in the solution's own source, the overload it resolved to when the name is overloaded or its type arguments were inferred. " +
 		"Use this before changing a member whose types are not written in it, instead of one roslyn_get_symbol_info call per position. " +
 		"The response is a one-line JSON header (symbol_name, file, start_line, end_line), then the source as raw text exactly as the file has it, " +
 		"then a one-line JSON header ({\"annotations\": N}) and the annotations, one per line as 'line: fact'. " +
 		"The annotations are not part of the file: quote only the source block in an edit. " +
-		"Literals, explicitly typed declarations and calls to a method with one overload are not annotated; code that does not bind gets none. " +
+		"Literals, explicitly typed declarations, calls to a method with one overload and calls into the framework or a package (Where, ToDictionary) are not annotated; code that does not bind gets none. " +
 		"Name a member with symbolName (and containingType), or a file with startLine and endLine, not both. " +
 		"A method name with several overloads is answered with their line ranges, to name one by its lines. " +
 		"For a single position with every detail (conversion, constant value, the other overloads), use roslyn_get_symbol_info.")]
@@ -319,7 +319,7 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 			}
 			
 			if(kinds.HasFlag(Kinds.Calls) && node is InvocationExpressionSyntax invocation
-				&& model.GetSymbolInfo(invocation, cancellationToken).Symbol is IMethodSymbol method) {
+				&& model.GetSymbolInfo(invocation, cancellationToken).Symbol is IMethodSymbol method && IsOwn(method)) {
 				
 				var overloads = Alternatives(model.GetMemberGroup(invocation.Expression, cancellationToken), invocation.ArgumentList.Arguments.Count, method.ReducedFrom is not null);
 				var inferred  = method.IsGenericMethod && !WritesTypeArguments(invocation.Expression);
@@ -343,6 +343,19 @@ internal sealed class AnnotateSourceTool : RoslynMcpTool
 		
 		return lines;
 	}
+	
+	// A method declared in source: in this project or in another one of the solution. Only a call
+	// to such a method is annotated (#502). Which overload of the solution's own method was meant
+	// is what an agent cannot know and is about to change; which Where or ToDictionary was meant
+	// is what a reader of C# knows, and those were twelve of the fourteen annotations of the
+	// tool's first real use. The types a framework call infers are still said when its result goes
+	// into an implicitly typed variable, on that variable; one whose result is returned or passed
+	// straight on is described nowhere now, which is the price. A project of the solution that
+	// reached the compilation as an assembly (it did not load, or is referenced by its file) is
+	// not source here, and its methods are not annotated.
+	static bool IsOwn(IMethodSymbol method)
+		=> (method.ReducedFrom ?? method).OriginalDefinition.Locations.Any(location => location.IsInSource)
+	;
 	
 	// A member access that needs its receiver to be there. On a Nullable<T> only Value does:
 	// HasValue and GetValueOrDefault are how its null is asked about. An extension member takes
