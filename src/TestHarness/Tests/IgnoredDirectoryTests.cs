@@ -27,7 +27,7 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class IgnoredDirectoryTests
 {
-	internal static async Task<TestGroup> BuildAsync(TestContext ctx)
+	internal static async Task<TestGroup> BuildAsync(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
 		
 		var fx     = TestFixtures.NewMsBuildProject("IgnoredDirs");
@@ -130,6 +130,40 @@ static class IgnoredDirectoryTests
 			return false;
 		}
 		
+		// What the server's log says about watching this fixture, for a failure's message (#339).
+		// The adoption test failed on macOS now and then, and the log of the run that failed was
+		// gone: whether the new directory was never seen, or seen before its file was there, or
+		// the watchers were not live yet, is in these lines and nowhere else.
+		string WatchLog()
+		{
+			if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var lines, out var failure))
+				
+				return $"the server's log could not be read: {failure}";
+			
+			// The fixture by its directory's name: a path in a log line is JSON, its separators escaped.
+			var name = Path.GetFileName(fx.Dir);
+			
+			string[] said = [..
+				lines.Where(line => line.Contains(name, StringComparison.Ordinal) && (line.Contains("Watch", StringComparison.Ordinal) || line.Contains("Reload", StringComparison.Ordinal)))
+					.Select(line => {
+						
+						try {
+							
+							var entry = JsonNode.Parse(line);
+							
+							return $"{entry?["timestamp"]?.GetValue<string>()} {entry?["message"]?.GetValue<string>()}";
+						}
+						catch(System.Text.Json.JsonException) {
+							
+							return line;
+						}
+					})
+					.TakeLast(15)
+			];
+			
+			return said.Length == 0 ? "the server's log has no line about watching this fixture" : string.Join(" | ", said);
+		}
+		
 		await fx.WarmAsync(ctx);
 		
 		var tests = new List<TestCase> {
@@ -222,11 +256,13 @@ static class IgnoredDirectoryTests
 						
 						return (false, "FAIL  (precondition: reload_pending never cleared)");
 					
+					var written = DateTime.UtcNow;
+					
 					fx.Write("fresh/Inside.cs", "class InsideFresh { }\n");
 					
 					return await BecomesPendingAsync(TimeSpan.FromSeconds(10))
 						? (true,  "PASS  (reload_pending=True after fresh/Inside.cs appeared)")
-						: (false, "FAIL  (reload_pending stayed False for 10 s — the new directory was not adopted)");
+						: (false, $"FAIL  (reload_pending stayed False for 10 s after fresh/Inside.cs was written at {written:O}. The server's log: {WatchLog()})");
 				}),
 			
 			// The watcher must not see ignored trees. A new .cs anywhere it does watch flags a

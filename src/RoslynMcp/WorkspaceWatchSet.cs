@@ -851,7 +851,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				// Already covered by this watcher, so only its files are news.
 				if(!IsLeftAlone(fullPath))
-					ReportFilesOf(fullPath);
+					_ = ReportFilesOf(fullPath);
 			}
 			else
 				onChange(fullPath, false);
@@ -919,7 +919,9 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			Replan();
 		}
 		
-		ReportFilesOf(directory);
+		// Said in the log (#339): a directory that was made and not adopted, and one adopted
+		// before its files were there, looked the same from outside, a new file nobody saw.
+		logger.LogInfo("Watch", $"Adopted '{directory}', created under a watched root: {ReportFilesOf(directory)} file(s) in it reported");
 	}
 	
 	bool IsLeftAlone(string directory)
@@ -927,21 +929,25 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			|| WorkspaceWalker.IsLink(new DirectoryInfo(directory))
 	;
 	
-	void ReportFilesOf(string directory)
+	// Reports the files in a directory that arrived, and returns how many.
+	int ReportFilesOf(string directory)
 	{
 		var reported = 0;
 		
 		foreach(var file in WorkspaceWalker.EnumerateFiles(directory, "*", recursive: true, (ref FileSystemEntry entry) => rules.IsNeverInput(entry.FileName))) {
 			
-			if(++reported > AdoptedFileLimit) {
+			if(reported == AdoptedFileLimit) {
 				
 				logger.LogInfo("Watch", $"WARN: '{directory}' appeared with more than {AdoptedFileLimit} files — the rest were not reported; roslyn_check_drift cannot see new files, so reload with roslyn_respawn if sources are missing");
 				
 				break;
 			}
 			
+			reported++;
 			onChange(file, false);
 		}
+		
+		return reported;
 	}
 	
 	public void Dispose()

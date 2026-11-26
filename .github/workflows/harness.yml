@@ -12,8 +12,24 @@ on:
   # Called by publish.yml and by nightly.yml.
   workflow_call:
 
-  # Run by hand, on any branch: Actions -> Test Harness -> Run workflow.
+  # Run by hand, on any branch: Actions -> Test Harness -> Run workflow. With nothing filled in it
+  # is the full run on all three systems. The inputs are for chasing a test that fails now and
+  # then on one system (#339): one system, a few groups, many times.
   workflow_dispatch:
+    inputs:
+      os:
+        description: The system to run on. 'all' is the three of the release gate.
+        type: choice
+        options: [ all, macos-latest, ubuntu-latest, windows-latest ]
+        default: all
+      harness_args:
+        description: >-
+          Arguments for the harness. Split at spaces, with no quoting: name a group by one word
+          of its name ('--only ignored').
+        default: --quiet
+      repeat:
+        description: How many times to run the harness, 1 to 100. Every run is made; the job fails if any did.
+        default: '1'
 
   # Every pull request, docs-only ones included: a workflow skipped by a path filter reports no
   # status at all, so if this check is ever made required, a docs-only pull request would wait for
@@ -39,7 +55,8 @@ jobs:
       # gate and the night keep all three. Giving either a pull_request trigger would cut it to
       # Linux.
       matrix:
-        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || fromJSON('["windows-latest", "ubuntu-latest", "macos-latest"]') }}
+        # A run by hand may name one system. A caller's run has no such input and gets all three.
+        os: ${{ github.event_name == 'pull_request' && fromJSON('["ubuntu-latest"]') || (inputs.os && inputs.os != 'all') && fromJSON(format('["{0}"]', inputs.os)) || fromJSON('["windows-latest", "ubuntu-latest", "macos-latest"]') }}
 
     # A full run takes a few minutes. The limit only stops a hung run from holding a runner.
     timeout-minutes: 30
@@ -61,5 +78,51 @@ jobs:
 
     # --quiet: one line per failing test, the server's stderr after them, and one summary line.
     # The exit code fails the job.
+    # The step of every pull request, night and release: anything but a run by hand with its
+    # inputs changed.
     - name: Run the TestHarness
+      if: ${{ (inputs.harness_args || '--quiet') == '--quiet' && (inputs.repeat || '1') == '1' }}
       run: dotnet run --project src/TestHarness/TestHarness.csproj -f net10.0 -- --quiet
+
+    # A run by hand with other arguments, or several runs. A step of its own, in bash on every
+    # system, so that the step above stays what it was for the release gate. The inputs reach the
+    # script as environment variables, never as text in it. Every run is made, also after one
+    # failed: how often a test fails is what such a run is for.
+    - name: Run the TestHarness as asked
+      if: ${{ (inputs.harness_args || '--quiet') != '--quiet' || (inputs.repeat || '1') != '1' }}
+      shell: bash
+      env:
+        HARNESS_ARGS: ${{ inputs.harness_args }}
+        REPEAT: ${{ inputs.repeat }}
+      run: |
+        case "$REPEAT" in
+          ''|*[!0-9]*) echo "::error::repeat must be a number from 1 to 100, got '$REPEAT'"; exit 2 ;;
+        esac
+
+        if [ "$REPEAT" -lt 1 ] || [ "$REPEAT" -gt 100 ]; then
+          echo "::error::repeat must be a number from 1 to 100, got '$REPEAT'"
+          exit 2
+        fi
+
+        # Split at spaces on purpose: see the input's description.
+        read -r -a harness_args <<< "$HARNESS_ARGS"
+
+        dotnet build src/TestHarness/TestHarness.csproj -f net10.0 --nologo -v quiet
+
+        failed=0
+
+        for run in $(seq 1 "$REPEAT"); do
+          echo "::group::Run $run of $REPEAT"
+
+          if ! dotnet run --no-build --project src/TestHarness/TestHarness.csproj -f net10.0 -- "${harness_args[@]}"; then
+            failed=$((failed + 1))
+            echo "::endgroup::"
+            echo "::warning::Run $run of $REPEAT failed"
+          else
+            echo "::endgroup::"
+          fi
+        done
+
+        echo "$failed of $REPEAT run(s) failed"
+
+        [ "$failed" -eq 0 ]
