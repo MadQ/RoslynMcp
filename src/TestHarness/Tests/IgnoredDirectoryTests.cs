@@ -265,6 +265,39 @@ static class IgnoredDirectoryTests
 						: (false, $"FAIL  (reload_pending stayed False for 10 s after fresh/Inside.cs was written at {written:O}. The server's log: {WatchLog()})");
 				}),
 			
+			// An adopted directory is listed again half a second and three seconds after its
+			// adoption (#339), for a file that landed before its watcher delivered. That look
+			// back must report nothing the first listing or the reload already took: here the
+			// reload it caused is serviced, and no second one may be flagged while the look
+			// back runs. What it is for, a file no watcher saw, cannot be staged from outside
+			// the server; that it costs nothing when there is no such file can.
+			new("ignored dirs: the look back at an adopted directory flags no second reload",
+				async () => {
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: reload_pending never cleared)");
+					
+					fx.Write("later/Inside.cs", "class InsideLater { }\n");
+					
+					if(!await BecomesPendingAsync(TimeSpan.FromSeconds(10)))
+						
+						return (false, $"FAIL  (reload_pending stayed False for 10 s after later/Inside.cs was written. The server's log: {WatchLog()})");
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (the reload for later/Inside.cs was not serviced)");
+					
+					// Past the second look back, counted generously from the write.
+					await Task.Delay(4000);
+					
+					var pending = await ReloadPendingAsync();
+					
+					return pending == false
+						? (true,  "PASS  (no reload flagged by the look back)")
+						: (false, $"FAIL  (expected reload_pending=False after the look back, got {pending?.ToString() ?? "no result"}. The server's log: {WatchLog()})");
+				}),
+			
 			// The watcher must not see ignored trees. A new .cs anywhere it does watch flags a
 			// reload (see the next test), so "no flag" after a .cs lands in node_modules and in the
 			// configured directory is the observable for "not watched, or dropped". 1.5 s covers

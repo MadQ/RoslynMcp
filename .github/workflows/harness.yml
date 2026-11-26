@@ -28,7 +28,9 @@ on:
           of its name ('--only ignored').
         default: --quiet
       repeat:
-        description: How many times to run the harness, 1 to 100. Every run is made; the job fails if any did.
+        description: >-
+          How many times to run the harness, 1 to 100. Every run is made; the job fails if any did.
+          For a filtered run: the job's limit of 30 minutes holds two or three runs of the full suite.
         default: '1'
 
   # Every pull request, docs-only ones included: a workflow skipped by a path filter reports no
@@ -92,11 +94,14 @@ jobs:
       if: ${{ (inputs.harness_args || '--quiet') != '--quiet' || (inputs.repeat || '1') != '1' }}
       shell: bash
       env:
-        HARNESS_ARGS: ${{ inputs.harness_args }}
-        REPEAT: ${{ inputs.repeat }}
+        # The defaults again: an input left blank is one the conditions above take for its default.
+        HARNESS_ARGS: ${{ inputs.harness_args || '--quiet' }}
+        REPEAT: ${{ inputs.repeat || '1' }}
       run: |
+        # Four digits or more are refused before the comparison below: a number too large for
+        # the shell fails both of its tests, which would read as "in range".
         case "$REPEAT" in
-          ''|*[!0-9]*) echo "::error::repeat must be a number from 1 to 100, got '$REPEAT'"; exit 2 ;;
+          ''|*[!0-9]*|????*) echo "::error::repeat must be a number from 1 to 100, got '$REPEAT'"; exit 2 ;;
         esac
 
         if [ "$REPEAT" -lt 1 ] || [ "$REPEAT" -gt 100 ]; then

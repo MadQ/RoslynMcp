@@ -262,6 +262,11 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	// An overflow rarely comes alone: a checkout raises one after another.
 	static readonly TimeSpan CatchUpDelay = TimeSpan.FromSeconds(1);
 	
+	// When an adopted directory is listed again, counted from its adoption (#339). Twice: soon,
+	// for the file written right behind the directory, and once more for a watcher that took
+	// its time to come up on a loaded machine.
+	static readonly TimeSpan[] AdoptedLookBack = [TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(3)];
+	
 	bool    disposed;
 	string? scopeKey;
 	
@@ -851,7 +856,7 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				// Already covered by this watcher, so only its files are news.
 				if(!IsLeftAlone(fullPath))
-					_ = ReportFilesOf(fullPath);
+					_ = ReportFilesOf(fullPath, null);
 			}
 			else
 				onChange(fullPath, false);
@@ -919,9 +924,60 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			Replan();
 		}
 		
+		var seen = new HashSet<string>(WatchPlanner.PathComparer);
+		
 		// Said in the log (#339): a directory that was made and not adopted, and one adopted
 		// before its files were there, looked the same from outside, a new file nobody saw.
-		logger.LogInfo("Watch", $"Adopted '{directory}', created under a watched root: {ReportFilesOf(directory)} file(s) in it reported");
+		logger.LogInfo("Watch", $"Adopted '{directory}', created under a watched root: {ReportFilesOf(directory, seen)} file(s) in it reported");
+		
+		LookBackAt(directory, seen);
+	}
+	
+	/// <summary>
+	///     Lists an adopted directory again a moment later and reports what has appeared since
+	///     (#339). A directory is often adopted before its first file is there: the event for the
+	///     directory comes, the listing finds nothing, and the file written the next instant is
+	///     the new watcher's to see. Whether a watcher delivers from the instant it was started
+	///     is the system's affair, and where it does not, that file was seen by nobody: not by
+	///     the listing, which was before it, and not by the watcher, which was not up. A new
+	///     source file then stayed unknown until something else caused a reload.
+	///     <para>
+	///         Only what the earlier listings did not report is reported: said again, a source
+	///         file no project compiles would flag a second reload. A file the watcher itself
+	///         reported in between is not known here and is said once more, which is a text
+	///         compared and found unchanged for every file that became a document.
+	///     </para>
+	/// </summary>
+	void LookBackAt(string directory, HashSet<string> seen)
+	{
+		_ = Task.Run(async () => {
+			
+			// Nothing is above this on a pool thread.
+			try {
+				
+				var waited = TimeSpan.Zero;
+				
+				foreach(var at in AdoptedLookBack) {
+					
+					await Task.Delay(at - waited);
+					
+					waited = at;
+					
+					// A directory that is no longer watched is no longer this set's to report on:
+					// it went away, or a new plan covers it another way.
+					lock(gate)
+						if(disposed || !watchers.ContainsKey(directory))
+							
+							return;
+					
+					if(ReportFilesOf(directory, seen) is > 0 and var late)
+						logger.LogInfo("Watch", $"'{directory}' held {late} more file(s) {at.TotalMilliseconds:0} ms after it was adopted — reported");
+				}
+			}
+			catch(Exception ex) {
+				logger.LogError("Watch", $"Looking back at the adopted '{directory}' failed: {ex.GetType().Name}: {ex.Message}");
+			}
+		});
 	}
 	
 	bool IsLeftAlone(string directory)
@@ -929,12 +985,16 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			|| WorkspaceWalker.IsLink(new DirectoryInfo(directory))
 	;
 	
-	// Reports the files in a directory that arrived, and returns how many.
-	int ReportFilesOf(string directory)
+	// Reports the files in a directory that arrived, and returns how many. With a set, only the
+	// files that are not in it yet are reported, and they are added to it.
+	int ReportFilesOf(string directory, HashSet<string>? seen)
 	{
 		var reported = 0;
 		
 		foreach(var file in WorkspaceWalker.EnumerateFiles(directory, "*", recursive: true, (ref FileSystemEntry entry) => rules.IsNeverInput(entry.FileName))) {
+			
+			if(seen is not null && !seen.Add(file))
+				continue;
 			
 			if(reported == AdoptedFileLimit) {
 				
