@@ -1776,6 +1776,18 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		"it is held, so nothing is built from half-saved content. Retry the call later."
 	;
 	
+	/// <summary>
+	///     The error of a write that failed after the file's backup was saved, with that backup's
+	///     token in its hint (#513). A failed write is when the way back is needed most, and the
+	///     hint sent the agent to list the snapshots first; the token was at hand. Unchanged when
+	///     no backup was saved.
+	/// </summary>
+	protected static T NamingBackup<T>(T error, string? backupToken) where T : ToolResult
+		=> backupToken is null
+			? error
+			: error with { Hint = $"{error.Hint} The snapshot of the file as it was before this write has the token '{backupToken}': roslyn_local_history (action: \"apply\") with it rolls the file back.".TrimStart() }
+	;
+	
 	// Returns recovery guidance that agents can act on when a write produces bad results.
 	protected static string BackupRecoveryHint(string relPath) =>
 		$"Both pre- and post-write snapshots were saved before the write. " +
