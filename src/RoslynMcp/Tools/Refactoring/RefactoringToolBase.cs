@@ -53,7 +53,10 @@ internal abstract class RefactoringToolBase : RoslynMcpTool
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			return (null, resolveError);
 		
-		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
+		var fullPath = ResolveFilePath(filePath, rootPath, boundary, out var ambiguousFile);
+		
+		if(ambiguousFile is not null)
+			return (null, ambiguousFile);
 		
 		if(fullPath is null)
 			return (null, new ErrorResult("file_not_found", $"File '{filePath}' was not found under the project root."));

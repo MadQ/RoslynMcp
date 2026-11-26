@@ -47,7 +47,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		string      source;
 		
 		var normalized = NormalizePath(filePath);
-		var fullPath   = ResolveFilePath(filePath, rootPath, boundary);
+		var fullPath   = ResolveFilePath(filePath, rootPath, boundary, out var ambiguousOnDisk);
 		
 		if(fullPath is not null) {
 			
@@ -126,7 +126,11 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		}
 		else {
 			
-			return scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
+			// A C# file was looked for in the compilation above, where the project may hold one
+			// of the files a path ends; for any other file the files on disk are all there is.
+			return ambiguousOnDisk is not null
+				? scope.Error(ambiguousOnDisk)
+				: scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));
 		}
 		
 		if(streamed is { TooMuch: true })

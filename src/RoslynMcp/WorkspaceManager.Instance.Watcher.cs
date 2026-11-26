@@ -343,11 +343,11 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		// The directories a walk for source files stays out of. An AdhocWorkspace also leaves
-		// out hidden and system directories, as its loading walk does; a project is walked
-		// the way the watch set watches it.
+		// out hidden and system directories and linked worktrees, as its loading walk does; a
+		// project is walked the way the watch set watches it.
 		bool PruneFromWalk(ref FileSystemEntry directory)
 			=> ignoreRules.IsExcluded(directory.FileName)
-				|| (!isMSBuild && (directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+				|| (!isMSBuild && ((directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0 || GitWorktrees.For(rootPath, fresh: false).IsRoot(ref directory)))
 		;
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)

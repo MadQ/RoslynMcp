@@ -57,7 +57,11 @@ internal sealed class WriteFileTool : RoslynMcpTool
 		}
 		else {
 			
-			var existing = ResolveFilePath(filePath, rootPath, boundary);
+			var existing = ResolveFilePath(filePath, rootPath, boundary, out var ambiguousFile);
+			
+			if(ambiguousFile is not null)
+				
+				return scope.Error(ambiguousFile);
 			
 			if(existing is null)
 				

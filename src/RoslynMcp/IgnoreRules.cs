@@ -28,6 +28,12 @@ namespace RoslynMcp;
 ///             document discovery.
 ///         </item>
 ///     </list>
+///     Beside the tiers: the linked git worktrees below the root (<see cref="GitWorktrees"/>,
+///     #511), each a second checkout of the whole tree. <see cref="IsPrunedFromListing"/> leaves
+///     them out, as they were when the rules were asked for. A loaded workspace keeps its rules
+///     while worktrees come and go, so it asks <see cref="GitWorktrees.For"/> itself. They are
+///     not in <see cref="IsNeverInput"/>: a project whose items reach into one does compile
+///     those files, and what a project compiles is MSBuild's to say.
 /// </remarks>
 internal sealed class IgnoreRules
 {
@@ -43,11 +49,12 @@ internal sealed class IgnoreRules
 		: StringComparer.OrdinalIgnoreCase;
 	
 	/// <summary>Rules with no configured names and no <c>.gitignore</c> — the built-in lists only.</summary>
-	public static readonly IgnoreRules BuiltIn = new([], [], []);
+	public static readonly IgnoreRules BuiltIn = new([], [], [], GitWorktrees.Below.None);
 	
-	// One entry per workspace root, revalidated against the .gitignore stamp on every lookup.
+	// One entry per workspace root, revalidated against the .gitignore stamp and the worktrees
+	// below the root on every lookup.
 	// Keyed with the file system's own case rule: on Linux /work/Foo and /work/foo are two roots.
-	static readonly Dictionary<string, (IgnoreRules Rules, string[] Configured, long GitIgnoreStamp)> cache = new(gitComparer);
+	static readonly Dictionary<string, (IgnoreRules Rules, string[] Configured, long GitIgnoreStamp, GitWorktrees.Below Worktrees)> cache = new(gitComparer);
 	static readonly Lock cacheLock = new();
 	
 	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> neverInput;
@@ -56,8 +63,17 @@ internal sealed class IgnoreRules
 	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> gitPaths;
 	readonly bool                                                  hasGitPaths;
 	
-	IgnoreRules(string[] configuredNames, string[] gitIgnoredNames, string[] gitIgnoredPaths)
+	// The linked worktrees below the root, relative to it with forward slashes, as the listing
+	// walks ask. Matched as the anchored .gitignore entries are, since both are paths under
+	// the root that a walk from the root builds itself.
+	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> worktreePaths;
+	readonly bool                                                  hasWorktrees;
+	
+	IgnoreRules(string[] configuredNames, string[] gitIgnoredNames, string[] gitIgnoredPaths, GitWorktrees.Below worktrees)
 	{
+		worktreePaths = Lookup(worktrees.RelativePaths, gitComparer);
+		hasWorktrees  = worktrees.RelativePaths.Length > 0;
+		
 		neverInput  = Lookup([..neverInputNames, ..configuredNames], StringComparer.OrdinalIgnoreCase);
 		excluded    = Lookup([..neverInputNames, ..buildOutputNames, ..configuredNames], StringComparer.OrdinalIgnoreCase);
 		gitNames    = Lookup(gitIgnoredNames, gitComparer);
@@ -71,27 +87,30 @@ internal sealed class IgnoreRules
 	/// <summary>
 	///     The rules for the workspace rooted at <paramref name="rootPath"/>: built-in names, the
 	///     configured ignore list (<c>--ignore</c> / <c>ROSLYNMCP_IGNORE</c>, else the project file's
-	///     <c>ignore</c>), and the root <c>.gitignore</c>. Never throws — an unreadable
-	///     <c>.gitignore</c> contributes nothing.
+	///     <c>ignore</c>), the root <c>.gitignore</c>, and the linked git worktrees below the
+	///     root. Never throws — an unreadable <c>.gitignore</c> contributes nothing, and neither
+	///     do worktree records that cannot be read.
 	/// </summary>
 	public static IgnoreRules ForRoot(string rootPath, FileLogger logger)
 	{
 		var configured    = ProjectConfig.EffectiveIgnore(rootPath, logger);
 		var gitIgnorePath = Path.Combine(rootPath, ".gitignore");
 		var stamp         = GitIgnoreStamp(gitIgnorePath);
+		var worktrees     = GitWorktrees.For(rootPath, fresh: true);
 		
 		lock(cacheLock)
 			if(cache.TryGetValue(rootPath, out var cached)
 			   && cached.GitIgnoreStamp == stamp
+			   && ReferenceEquals(cached.Worktrees, worktrees)
 			   && ReferenceEquals(cached.Configured, configured))
 				
 				return cached.Rules;
 		
 		var (names, paths) = stamp == 0 ? (Names: [], Paths: []) : ReadGitIgnore(gitIgnorePath);
-		var rules          = new IgnoreRules(configured, names, paths);
+		var rules          = new IgnoreRules(configured, names, paths, worktrees);
 		
 		lock(cacheLock)
-			cache[rootPath] = (rules, configured, stamp);
+			cache[rootPath] = (rules, configured, stamp, worktrees);
 		
 		return rules;
 	}
@@ -226,8 +245,8 @@ internal sealed class IgnoreRules
 	public bool IsExcluded(ReadOnlySpan<char> name) => excluded.Contains(name);
 	
 	/// <summary>
-	///     <see cref="IsExcluded"/> plus the root <c>.gitignore</c>, for walks that list or look up
-	///     files. <paramref name="relativeDirectory"/> is the parent of the directory called
+	///     <see cref="IsExcluded"/> plus the root <c>.gitignore</c> and the linked worktrees below
+	///     the root, for walks that list or look up files. <paramref name="relativeDirectory"/> is the parent of the directory called
 	///     <paramref name="name"/>, relative to the workspace root (empty for a top-level directory).
 	/// </summary>
 	public bool IsPrunedFromListing(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
@@ -236,15 +255,16 @@ internal sealed class IgnoreRules
 			
 			return true;
 		
-		if(!hasGitPaths)
+		if(!hasGitPaths && !hasWorktrees)
 			
 			return false;
 		
-		// Anchored entries are rare, so the root-relative path is only built when one exists.
+		// Anchored entries and worktrees are rare, so the root-relative path is only built when
+		// one exists.
 		var relative = relativeDirectory.IsEmpty
 			? name.ToString()
 			: string.Concat(relativeDirectory, "/", name).Replace('\\', '/');
 		
-		return gitPaths.Contains(relative);
+		return gitPaths.Contains(relative) || worktreePaths.Contains(relative);
 	}
 }
