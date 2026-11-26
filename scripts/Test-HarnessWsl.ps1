@@ -14,7 +14,10 @@
     that mount are slow. bin/, obj/, .git/ and .vs/ are not copied, so the Linux build keeps its
     own incremental state between runs.
 
-    The .NET SDK must be the version global.json pins. The script uses a private copy in
+    The .NET SDK must be the version global.json pins, and no other is used: the run is there
+    to show what CI will see, and CI builds with the pinned SDK only. global.json itself lets a
+    newer 10.0.x SDK build, so the copy of the tree gets the strict pin back
+    (rollForward: disable), as a CI job's checkout does. The script uses a private copy in
     ~/.roslynmcp-wsl/dotnet if it has that version, else the dotnet on the WSL PATH. When
     neither has it, the script stops and says so; -InstallSdk installs the pinned version into
     the private directory (nothing is added to PATH, and the system SDK is left alone).
@@ -142,7 +145,7 @@ elif [ "$install" = "1" ]; then
     trap - EXIT
     dotnet_bin="$private_dotnet"
 else
-    echo "WSL has no .NET SDK $sdk (the version global.json pins). Run again with -InstallSdk to install it into $home_dir/dotnet." >&2
+    echo "WSL has no .NET SDK $sdk (the version global.json pins, and the only one CI builds with; this run uses no other). Run again with -InstallSdk to install it into $home_dir/dotnet." >&2
     exit 2
 fi
 
@@ -160,6 +163,21 @@ rsync -a --delete \
     "$src/" "$tree/"
 
 cd "$tree"
+
+# The strict pin, in the copy only: with global.json as committed, a dotnet that also has a newer
+# 10.0.x SDK would build with that one, and the run would no longer be what CI does
+# (.github/actions/setup-pinned-dotnet makes the same change to a job's checkout). The harness
+# copies this file to its fixtures, so they are pinned with it. rsync restores the original at
+# the next run.
+sed 's/"rollForward"[[:space:]]*:[[:space:]]*"[^"]*"/"rollForward": "disable"/' global.json > global.json.pinned
+mv global.json.pinned global.json
+
+# Checked, as the action checks it: a global.json without a rollForward to rewrite would run
+# under the default policy, which is not the strict pin.
+if ! grep -q '"rollForward": "disable"' global.json; then
+    echo "global.json has no rollForward to set to disable, so the run would not be pinned to SDK $sdk." >&2
+    exit 2
+fi
 
 # The private SDK is not on PATH; the harness starts dotnet by name, so put it there.
 if [ "$dotnet_bin" = "$private_dotnet" ]; then

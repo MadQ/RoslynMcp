@@ -12,17 +12,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     # RestoreLockedMode + ContinuousIntegrationBuild are enabled in CI via Directory.Build.props
-    # (gated on GITHUB_ACTIONS). The lock is validated, not regenerated: the SDK is pinned by
-    # global.json (10.0.302) and RuntimeIdentifiers in the csproj keeps packages.lock.json
+    # (gated on GITHUB_ACTIONS). The lock is validated, not regenerated: the SDK is the one
+    # global.json pins (setup-pinned-dotnet fails on any other) and RuntimeIdentifiers in the csproj keeps packages.lock.json
     # multi-RID and platform-independent. Cross-platform publishing is validated by publish.yml.
 
     steps:
     - uses: actions/checkout@v4
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '10.0.302'
+      uses: ./.github/actions/setup-pinned-dotnet
 
     - name: Restore dependencies
       run: dotnet restore src/RoslynMcp/RoslynMcp.csproj
@@ -43,11 +41,9 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '10.0.302'
+      uses: ./.github/actions/setup-pinned-dotnet
 
     - name: Validate packages.lock.json (locked, multi-RID)
       run: |
         dotnet restore src/RoslynMcp/RoslynMcp.csproj --locked-mode \
-          || { echo "::error::packages.lock.json is stale or not multi-RID. Regenerate and commit it: dotnet restore src/RoslynMcp/RoslynMcp.csproj --force-evaluate"; exit 1; }
+          || { echo "::error::packages.lock.json is stale or not multi-RID. Regenerate and commit it, with the SDK version global.json names (any other SDK writes a lock of its own under obj/ and leaves this file as it is): dotnet restore src/RoslynMcp/RoslynMcp.csproj --force-evaluate"; exit 1; }

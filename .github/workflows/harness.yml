@@ -48,9 +48,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '10.0.302'
+      uses: ./.github/actions/setup-pinned-dotnet
 
     # Every FileSystemWatcher is an inotify instance, and Linux allows a user 128 by default. A full
     # run loads so many fixture workspaces into its servers that it runs out part-way: a watcher

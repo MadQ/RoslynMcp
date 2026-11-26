@@ -1,0 +1,42 @@
+name: Setup the pinned .NET SDK
+description: >-
+  Installs the SDK version global.json names and makes the job use exactly that version.
+  Needs the repository checked out.
+
+# global.json lets a newer 10.0.x feature band run (rollForward: latestFeature), so that a local
+# build needs no exact SDK. A runner has other SDKs preinstalled, in the directory setup-dotnet
+# installs into, and one of them would be picked the same way: the build would pass on an SDK
+# nobody chose, and every project would restore against a lock file of that SDK's own instead of
+# the committed one (Directory.Build.targets). So the job's checkout gets the strict pin back, and
+# the last step fails if dotnet still resolves anything else. The version is read from
+# global.json, the one place it is written.
+runs:
+  using: composite
+  steps:
+    - name: Read the pinned SDK version and forbid any other
+      id: pin
+      shell: bash
+      run: |
+        version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' global.json | head -n 1)
+        # The value goes into later steps: nothing but a version may pass.
+        [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || { echo "::error::global.json names no SDK version, or one that is not a version."; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        # Not sed -i: its argument differs between GNU and macOS sed.
+        sed 's/"rollForward"[[:space:]]*:[[:space:]]*"[^"]*"/"rollForward": "disable"/' global.json > global.json.pinned
+        mv global.json.pinned global.json
+        grep -q '"rollForward": "disable"' global.json || { echo "::error::global.json has no rollForward to set to disable."; exit 1; }
+
+    # By commit, not by tag: a tag can be moved, and the publish job runs this with the right to
+    # mint a NuGet token. The commit is the one v4 named on 2026-11-25.
+    - name: Setup .NET
+      uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+      with:
+        dotnet-version: ${{ steps.pin.outputs.version }}
+
+    - name: Check that dotnet resolves the pinned SDK
+      shell: bash
+      env:
+        PINNED: ${{ steps.pin.outputs.version }}
+      run: |
+        resolved=$(dotnet --version)
+        [ "$resolved" = "$PINNED" ] || { echo "::error::dotnet resolved SDK $resolved, but global.json pins $PINNED. CI builds and publishes with the pinned SDK only."; exit 1; }
