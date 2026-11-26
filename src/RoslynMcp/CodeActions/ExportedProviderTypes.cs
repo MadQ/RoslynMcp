@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.PortableExecutable;
@@ -36,6 +37,13 @@ internal static class ExportedProviderTypes
 	///     <c>Outer+Inner</c>). Throws what reading the file or its metadata throws; the caller
 	///     falls back to what it knows without the names.
 	/// </summary>
+	// IL3000 flags Assembly.Location because an assembly bundled into a single-file executable
+	// has none. The assembly here is never one of the server's own: the one caller hands in an
+	// analyzer assembly that ShadowCopyAnalyzerLoader loaded from a copy on disk, which always
+	// has a path. Should it ever be empty, the read throws like any other failed read, and the
+	// caller reports the types by count (#485). The attribute and not a pragma: it is what the
+	// publish-time tooling reads as well as the compiler.
+	[UnconditionalSuppressMessage("SingleFile", "IL3000:Avoid accessing Assembly file path when publishing as a single file", Justification = "The assembly is an analyzer assembly loaded from a shadow copy on disk, never one bundled into the executable; an empty path fails the read, which the caller handles.")]
 	internal static ImmutableArray<string> Read(Assembly assembly)
 	{
 		// The reader takes the bytes as they are; wrapping the array does not copy it.
