@@ -46,4 +46,4 @@ jobs:
     - name: Validate packages.lock.json (locked, multi-RID)
       run: |
         dotnet restore src/RoslynMcp/RoslynMcp.csproj --locked-mode \
-          || { echo "::error::packages.lock.json is stale or not multi-RID. Regenerate and commit it: dotnet restore src/RoslynMcp/RoslynMcp.csproj --force-evaluate"; exit 1; }
+          || { echo "::error::packages.lock.json is stale or not multi-RID. Regenerate and commit it, with the SDK version global.json names (any other SDK writes a lock of its own under obj/ and leaves this file as it is): dotnet restore src/RoslynMcp/RoslynMcp.csproj --force-evaluate"; exit 1; }

@@ -5,13 +5,28 @@
        packages it adds itself (ILLink.Tasks), and would rewrite the lock at every restore. Such an
        SDK keeps a lock of its own under obj\, which is not committed.
 
+       The price: only the pinned SDK can update a committed lock. A change to a package reference
+       made under another SDK leaves it stale, which CI's lock-check then refuses; the message
+       below says so at every command-line restore that is not the pinned SDK's.
+
        CI installs the pinned SDK and fails when another one is resolved
        (.github/actions/setup-pinned-dotnet), so locked mode there always checks the committed files.
 
        Here and not in Directory.Build.props: NETCoreSdkVersion is not set yet when that file is
-       read. The pinned version is read from global.json, the one place it is written. -->
+       read. The pinned version is read from global.json, the one place it is written; a tree
+       without that file has no pin, and so no redirect. -->
   <PropertyGroup>
-    <PinnedSdkVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)global.json')), '"version"\s*:\s*"([^"]+)"').Groups.get_Item(1).Value)</PinnedSdkVersion>
+    <PinnedSdkVersion Condition="Exists('$(MSBuildThisFileDirectory)global.json')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)global.json')), '"version"\s*:\s*"([^"]+)"').Groups.get_Item(1).Value)</PinnedSdkVersion>
     <NuGetLockFilePath Condition="'$(PinnedSdkVersion)' != '' and '$(NETCoreSdkVersion)' != '' and '$(NETCoreSdkVersion)' != '$(PinnedSdkVersion)'">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', 'obj', 'packages.sdk-$(NETCoreSdkVersion).lock.json'))</NuGetLockFilePath>
   </PropertyGroup>
+
+  <!-- _GenerateRestoreProjectSpec: the target a restore runs in each project. Restore itself runs
+       in the project or solution the command names, which for a solution is not a project of ours.
+       That covers command-line restores (dotnet restore, build, run); a restore by Visual Studio or
+       a static-graph restore does not run it and prints nothing. The target is NuGet's own and not
+       a public one: renamed there, the note is lost and nothing else changes. CI's lock-check
+       message says the same and does not depend on it. -->
+  <Target Name="NoteSdkOwnLockFile" BeforeTargets="_GenerateRestoreProjectSpec" Condition="'$(NuGetLockFilePath)' != ''">
+    <Message Importance="high" Text="$(MSBuildProjectName): SDK $(NETCoreSdkVersion) is not the pinned $(PinnedSdkVersion), so this restore uses a lock file of its own under obj\ and leaves packages.lock.json as it is. After changing a package reference, update packages.lock.json with SDK $(PinnedSdkVersion)." />
+  </Target>
 </Project>
