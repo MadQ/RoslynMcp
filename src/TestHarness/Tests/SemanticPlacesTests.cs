@@ -6,7 +6,11 @@ using System.Text.Json.Nodes;
 ///     with the lines to read it and the place to edit it, and say the text of the line. This
 ///     group covers <c>roslyn_find_callers</c>, <c>roslyn_get_call_graph</c>,
 ///     <c>roslyn_find_string_literal</c> and <c>roslyn_semantic_search</c>; references and
-///     diagnostics have theirs in <see cref="DiagnosticPlacesTests"/>.
+///     diagnostics have theirs in <see cref="DiagnosticPlacesTests"/>. It also covers the tools
+///     whose answer is a declaration, which say the lines it takes and where its node starts
+///     (<c>roslyn_find_implementations</c>, <c>roslyn_find_unused</c>,
+///     <c>roslyn_get_symbol_definition</c>), and the errors of <c>roslyn_build_project</c>, which
+///     are listed as diagnostics are.
 /// </summary>
 /// <remarks>
 ///     One file. <c>Say</c> takes lines 3 to 5 with its comment and starts at its attribute on
@@ -32,11 +36,37 @@ static class SemanticPlacesTests
 		"\tstatic string Once() => Say(\"single\");\n" +
 		"}\n";
 	
+	// Square takes lines 3 to 9 with its comment and starts on line 4; its unused field is on
+	// line 8. Derived overrides Size on line 15.
+	const string Shapes =
+		"interface IShape { int Area(); }\n" +
+		"\n" +
+		"/// <summary>A square.</summary>\n" +
+		"class Square : IShape\n" +
+		"{\n" +
+		"\tpublic int Area() => 4;\n" +
+		"\n" +
+		"\tint spare;\n" +
+		"}\n" +
+		"\n" +
+		"abstract class Base { public abstract int Size(); }\n" +
+		"\n" +
+		"class Derived : Base\n" +
+		"{\n" +
+		"\tpublic override int Size() => 1;\n" +
+		"}\n";
+	
+	// Bad takes lines 3 to 6; the unknown name is on line 5.
+	const string Broken = "class Broken\n{\n\tint Bad()\n\t{\n\t\treturn missing;\n\t}\n}\n";
+	
 	internal static TestGroup Build(TestContext ctx)
 	{
 		var fx = TestFixtures.NewMsBuildProject("SemanticPlaces");
 		
 		fx.Write("Calls.cs", Source);
+		fx.Write("Shapes.cs", Shapes);
+		fx.Write("Broken.cs", Broken);
+		fx.Write("Lonely.cs", "interface ILonely { }\n");
 		
 		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
@@ -137,8 +167,8 @@ static class SemanticPlacesTests
 			// the letter. Line 9 has it many times and is one place.
 			new("semantic places: a line declares when any of its matches is the name, not only the leftmost", async () => {
 				
-				var all  = await Call("roslyn_semantic_search", new { pattern = "s", projectPath = fx.Csproj });
-				var code = await Call("roslyn_semantic_search", new { pattern = "s", context = "code", projectPath = fx.Csproj });
+				var all  = await Call("roslyn_semantic_search", new { pattern = "s", filePattern = "Calls.cs", projectPath = fx.Csproj });
+				var code = await Call("roslyn_semantic_search", new { pattern = "s", context = "code", filePattern = "Calls.cs", projectPath = fx.Csproj });
 				
 				return Verdict(SearchHits.Of(all)?.Where(hit => hit.Declares).Select(hit => hit.Line).SequenceEqual(new[] { 1, 5 }) == true
 					&& SearchHits.Of(code)?.Where(hit => hit.Declares).Select(hit => hit.Line).SequenceEqual(new[] { 1, 5 }) == true
@@ -149,7 +179,7 @@ static class SemanticPlacesTests
 			// pattern that starts in the indentation before a doc comment is about the comment.
 			new("semantic places: a match that starts in whitespace is labelled by what follows it", async () => {
 				
-				var answer = await Call("roslyn_semantic_search", new { pattern = @"\s+/// <summary>", projectPath = fx.Csproj });
+				var answer = await Call("roslyn_semantic_search", new { pattern = @"\s+/// <summary>", filePattern = "Calls.cs", projectPath = fx.Csproj });
 				
 				return Verdict(SearchHits.Of(answer) is [{ Line: 3, Context: "xmldoc" }], answer);
 			}),
@@ -162,6 +192,110 @@ static class SemanticPlacesTests
 				var answer = await Call("roslyn_semantic_search", new { pattern = "Says hello|single", caseSensitive = true, projectPath = fx.Csproj });
 				
 				return Verdict(SearchHits.Of(answer) is [{ Line: 3, Context: "xmldoc", Declaration: "method Say" }, { Line: 13, Context: "string", Declaration: "method Once" }], answer);
+			}),
+			
+			// An implementation is a declaration: the answer says where it is, the lines to read
+			// it (from its comment) and the place to edit it. It was a name, and the lookup of
+			// that name came next.
+			new("semantic places: an implementing type and an overriding method come with their lines and place", async () => {
+				
+				var types   = await Call("roslyn_find_implementations", new { symbolName = "IShape", projectPath = fx.Csproj });
+				var methods = await Call("roslyn_find_implementations", new { symbolName = "Size", containingType = "Base", projectPath = fx.Csproj });
+				
+				var square = types?["implementations"]?.AsArray() is [var only] ? only : null;
+				var size   = methods?["overrides"]?.AsArray() is [var one] ? one : null;
+				
+				return Verdict(square?["name"]?.GetValue<string>() == "Square"
+					&& (square["file"]?.GetValue<string>() ?? "").EndsWith("Shapes.cs")
+					&& square["line"]?.GetValue<int>() == 4
+					&& square["lines"]?.GetValue<string>() == "3-9"
+					&& square["at"]?.GetValue<string>() == "4:1"
+					&& size?["name"]?.GetValue<string>().StartsWith("Derived.Size(") == true
+					&& size["line"]?.GetValue<int>() == 15
+					&& size["lines"]?.GetValue<string>() == "15-15"
+					&& size["at"]?.GetValue<string>() == "15:2", new JsonArray(types?.DeepClone(), methods?.DeepClone()));
+			}),
+			
+			// No implementations is an empty list. It was a list of one sentence, which a caller
+			// that counted the entries took for an implementation.
+			new("semantic places: a type nothing implements has an empty list of implementations", async () => {
+				
+				var answer = await Call("roslyn_find_implementations", new { symbolName = "ILonely", projectPath = fx.Csproj });
+				
+				return Verdict(answer?["total_implementations"]?.GetValue<int>() == 0 && answer["implementations"]?.AsArray().Count == 0, answer);
+			}),
+			
+			// An unused symbol is read next, or removed: the entry says the lines it takes, from
+			// its comment, and the place roslyn_replace_in_code deletes it at. Nothing names
+			// Square; the members of an unused type are not listed beside it.
+			new("semantic places: an unused symbol comes with its lines and place", async () => {
+				
+				var answer = await Call("roslyn_find_unused", new { take = 200, projectPath = fx.Csproj });
+				var square = answer?["unused"]?.AsArray().FirstOrDefault(entry => entry?["name"]?.GetValue<string>() == "Square");
+				
+				return Verdict((square?["file"]?.GetValue<string>() ?? "").EndsWith("Shapes.cs")
+					&& square?["line"]?.GetValue<int>() == 4
+					&& square["lines"]?.GetValue<string>() == "3-9"
+					&& square["at"]?.GetValue<string>() == "4:1", answer);
+			}),
+			
+			// line and column are where the name is; lines and at are the declaration's, from its
+			// comment and from its first token. The same in the answer to several names.
+			new("semantic places: a symbol's definition comes with its lines and place, also for several names", async () => {
+				
+				var one     = await Call("roslyn_get_symbol_definition", new { symbolName = "Square", projectPath = fx.Csproj });
+				var several = await Call("roslyn_get_symbol_definition", new { symbolName = "Square|Say", projectPath = fx.Csproj });
+				var say     = several?["definitions"]?[1]?["definition"];
+				
+				return Verdict(one?["line"]?.GetValue<int>() == 4
+					&& one["column"]?.GetValue<int>() == 7
+					&& one["lines"]?.GetValue<string>() == "3-9"
+					&& one["at"]?.GetValue<string>() == "4:1"
+					&& several?["definitions"]?[0]?["definition"]?["lines"]?.GetValue<string>() == "3-9"
+					&& say?["line"]?.GetValue<int>() == 5
+					&& say["lines"]?.GetValue<string>() == "3-5"
+					&& say["at"]?.GetValue<string>() == "4:2", new JsonArray(one?.DeepClone(), several?.DeepClone()));
+			}),
+			
+			// The errors a build stops at are listed as roslyn_get_diagnostics lists them: under
+			// the declaration, with the lines to read it and the text of the line. They were flat
+			// items in two lists, and the read of the method came next.
+			new("semantic places: a build's errors are listed under their declaration, with the line's text", async () => {
+				
+				var answer = await Call("roslyn_build_project", new { projectPath = fx.Csproj });
+				var error  = DiagnosticItems.Of(answer)?.FirstOrDefault(item => item?["code"]?.GetValue<string>() == "CS0103");
+				
+				return Verdict(answer?["succeeded"]?.GetValue<bool>() == false
+					&& answer["source"]?.GetValue<string>() == "roslyn"
+					&& answer["error_count"]?.GetValue<int>() == 1
+					&& answer["warning_count"]?.GetValue<int>() > 0
+					&& answer["errors"] is null && answer["warnings"] is null
+					&& (error?["file"]?.GetValue<string>() ?? "").EndsWith("Broken.cs")
+					&& error?["declaration"]?.GetValue<string>() == "method Bad"
+					&& error["lines"]?.GetValue<string>() == "3-6"
+					&& error["at"]?.GetValue<string>() == "3:2"
+					&& error["line"]?.GetValue<int>() == 5
+					&& error["text"]?.GetValue<string>() == "return missing;", answer);
+			}),
+			
+			// The same from a build that ran: MSBuild prints a file, a line and a column, and the
+			// place gets its line's text and its declaration from that file on disk. The project
+			// is restored first, or the build stops at the SDK before it compiles anything. Last
+			// in the group: the restore flags a reload.
+			new("semantic places: the errors of a build that ran are found in the file and listed the same way", async () => {
+				
+				var restored = await Call("roslyn_restore_packages", new { projectPath = fx.Csproj });
+				var answer   = await Call("roslyn_build_project", new { projectPath = fx.Csproj, forceBuild = true });
+				var error    = DiagnosticItems.Of(answer)?.FirstOrDefault(item => item?["code"]?.GetValue<string>() == "CS0103");
+				
+				return Verdict(answer?["source"]?.GetValue<string>() == "msbuild"
+					&& answer["succeeded"]?.GetValue<bool>() == false
+					&& answer["error_count"]?.GetValue<int>() == 1
+					&& (error?["file"]?.GetValue<string>() ?? "").EndsWith("Broken.cs")
+					&& error?["declaration"]?.GetValue<string>() == "method Bad"
+					&& error["lines"]?.GetValue<string>() == "3-6"
+					&& error["line"]?.GetValue<int>() == 5
+					&& error["text"]?.GetValue<string>() == "return missing;", new JsonArray(restored?.DeepClone(), answer?.DeepClone()));
 			}),
 		};
 		

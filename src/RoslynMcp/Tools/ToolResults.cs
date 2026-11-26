@@ -151,6 +151,16 @@ internal sealed record UnusedSymbolEntry(
 	[JsonPropertyName("project")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public string? Project { get; init; }
+	
+	/// <summary>The lines the declaration takes, from its attached comment to its end: what to read to see it, or to remove (#487).</summary>
+	[JsonPropertyName("lines")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Lines { get; init; }
+	
+	/// <summary>Where the declaration's node starts, as <c>roslyn_replace_in_code</c> takes it (#487).</summary>
+	[JsonPropertyName("at")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? At { get; init; }
 }
 
 internal sealed record FindUnusedResult(
@@ -168,7 +178,7 @@ internal sealed record FindImplementationsResult(
 	[property: JsonPropertyName("total_implementations")] int      TotalImplementations,
 	[property: JsonPropertyName("skip")]                  int      Skip,
 	[property: JsonPropertyName("take")]                  int      Take,
-	[property: JsonPropertyName("implementations")]       string[] Implementations,
+	[property: JsonPropertyName("implementations")]       ImplementationEntry[] Implementations,
 	[property: JsonPropertyName("page_token")]            string?  PageToken = null,
 	[property: JsonPropertyName("has_more")]              bool     HasMore   = false
 ) : ToolResult;
@@ -179,10 +189,35 @@ internal sealed record FindOverridesResult(
 	[property: JsonPropertyName("total_overrides")] int      TotalOverrides,
 	[property: JsonPropertyName("skip")]            int      Skip,
 	[property: JsonPropertyName("take")]            int      Take,
-	[property: JsonPropertyName("overrides")]       string[] Overrides,
+	[property: JsonPropertyName("overrides")]       ImplementationEntry[] Overrides,
 	[property: JsonPropertyName("page_token")]      string?  PageToken = null,
 	[property: JsonPropertyName("has_more")]        bool     HasMore   = false
 ) : ToolResult;
+
+/// <summary>
+///     One implementing type or overriding method (#487): what it is, and where it is declared,
+///     with the lines it takes and where its node starts. An implementation is a declaration
+///     itself, and reading it was the next call. The place is absent for one declared in a
+///     referenced assembly; a type declared in parts names its first.
+/// </summary>
+internal sealed record ImplementationEntry([property: JsonPropertyName("name")] string Name)
+{
+	[JsonPropertyName("file")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? File { get; init; }
+	
+	[JsonPropertyName("line")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public int? Line { get; init; }
+	
+	[JsonPropertyName("lines")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Lines { get; init; }
+	
+	[JsonPropertyName("at")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? At { get; init; }
+}
 
 internal sealed record FindCallersResult(
 	[property: JsonPropertyName("symbol_searched")] string        SymbolSearched,
@@ -342,7 +377,18 @@ internal sealed record SymbolDefinitionResult(
 	[property: JsonPropertyName("column")]      int     Column,
 	[property: JsonPropertyName("signature")]   string  Signature,
 	[property: JsonPropertyName("doc_summary")] string? DocSummary
-) : ToolResult;
+) : ToolResult
+{
+	/// <summary>The lines the declaration takes, from its attached comment to its end: what to pass to <c>roslyn_read_file</c> (#487).</summary>
+	[JsonPropertyName("lines")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Lines { get; init; }
+	
+	/// <summary>Where the declaration's node starts, as <c>roslyn_replace_in_code</c> takes it (#487). Not the place of the name, which <c>line</c> and <c>column</c> are.</summary>
+	[JsonPropertyName("at")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? At { get; init; }
+}
 
 /// <summary>
 ///     The answer of <c>roslyn_get_symbol_definition</c> to several names (#459): one entry per name,
@@ -684,6 +730,11 @@ internal sealed record DiagnosticFinding(
 	[JsonPropertyName("project")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public string? Project { get; init; }
+	
+	/// <summary>The target frameworks a build reported the finding under, where MSBuild says (<c>roslyn_build_project</c>).</summary>
+	[JsonPropertyName("target_frameworks")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string[]? TargetFrameworks { get; init; }
 }
 
 /// <summary>Where a finding is: the line, the column, and the text of the line.</summary>
@@ -866,8 +917,15 @@ internal sealed record DetailedErrorResult(
 
 internal sealed record BuildResult(
 	[property: JsonPropertyName("succeeded")]     bool             Succeeded,
-	[property: JsonPropertyName("errors")]        DiagnosticItem[] Errors,
-	[property: JsonPropertyName("warnings")]      DiagnosticItem[] Warnings,
+	[property: JsonPropertyName("error_count")]   int              ErrorCount,
+	[property: JsonPropertyName("warning_count")] int              WarningCount,
+	// The errors and warnings as roslyn_get_diagnostics lists its findings (#487): by file and
+	// by the declaration each is in, once per code and message with its places. The ones with
+	// no place in a source file (a restore error, an MSBuild error of the project) are under
+	// general, each with the file MSBuild named as its project.
+	[property: JsonPropertyName("files")]         DiagnosticFileGroup[] Files,
+	[property: JsonPropertyName("general")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DiagnosticFinding[]? General,
 	[property: JsonPropertyName("source")]        string           Source,
 	[property: JsonPropertyName("build_skipped")] bool             BuildSkipped,
 	[property: JsonPropertyName("skip_reason")]   string?          SkipReason,

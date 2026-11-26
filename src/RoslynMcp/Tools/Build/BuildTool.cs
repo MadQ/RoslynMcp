@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Text;
 using ModelContextProtocol.Server;
 
 namespace RoslynMcp.Tools;
@@ -49,9 +51,13 @@ internal sealed class BuildTool : RoslynMcpTool
 		"to build the whole default solution in a single run. Do not issue several builds in parallel — the server runs " +
 		"one dotnet build/clean/restore at a time and queues the rest, so parallel calls only wait. " +
 		"Requires a .csproj to be present. " +
-		"NuGet/MSBuild errors (NU*, MSB*) without a source location appear in errors[] with line: 0, column: 0. " +
+		"Returns succeeded, error_count, warning_count and the errors and warnings grouped as roslyn_get_diagnostics groups its findings: " +
+		"files[] by file, in[] by the declaration each is in ('method Enqueue', with its lines to pass to roslyn_read_file and where its node starts " +
+		"for roslyn_replace_in_code), and findings[] once per code and message with places[] of line, column and the line's text, " +
+		"so an error can often be fixed without reading the file. " +
+		"NuGet/MSBuild errors (NU*, MSB*) without a source location are under general, each with the project file MSBuild named as project. " +
 		"exit_code is null when build_skipped is true (no dotnet build ran). " +
-		"When succeeded is false but errors is empty, check the error_details field — it contains the raw build " +
+		"When succeeded is false but error_count is 0, check the error_details field — it contains the raw build " +
 		"output tail (last 30 lines) and explains the failure (e.g. locked output file, linker error). " +
 		"Do NOT run dotnet build in a terminal to investigate — error_details already has the output you need.")]
 	public async Task<object> BuildProject(
@@ -121,15 +127,15 @@ internal sealed class BuildTool : RoslynMcpTool
 			var reason = $"The workspace {health.Problem}. Builds run with --no-restore, so this one could only fail: call "
 				+ "roslyn_restore_packages first, then roslyn_build_project again.";
 			
-			return scope.Failed("not restored — build skipped", new BuildResult(
-				Succeeded:    false,
-				Errors:       [],
-				Warnings:     [],
-				Source:       "roslyn",
-				BuildSkipped: true,
-				SkipReason:   reason,
-				DurationMs:   0,
-				ExitCode:     null
+			return scope.Failed("not restored — build skipped", Result(
+				succeeded:    false,
+				findings:     [],
+				source:       "roslyn",
+				buildSkipped: true,
+				skipReason:   reason,
+				durationMs:   0,
+				exitCode:     null,
+				errorDetails: null
 			));
 		}
 		
@@ -153,24 +159,23 @@ internal sealed class BuildTool : RoslynMcpTool
 				
 				return scope.Error(targetError);
 			
-			var aggregated = new List<DiagnosticItem>();
+			var aggregated = new List<DiagnosticPlace>();
 			
 			foreach(var (compilation, _) in targets)
-				aggregated.AddRange(GetRoslynDiagnostics(compilation, rootPath));
+				aggregated.AddRange(GetRoslynDiagnostics(compilation, rootPath, cancellationToken));
 			
 			// A file linked into several projects, and every file of a multi-targeted project, is compiled —
-			// and diagnosed — once per target, with identical items where the targets agree (the fast path
+			// and diagnosed — once per target, with identical places where the targets agree (the fast path
 			// carries no per-project or TFM context to tell them apart).
-			// Record equality is exact here because TargetFrameworks is always null on this path.
-			DiagnosticItem[] roslynDiagnostics = [..aggregated.Distinct()];
-			
-			var roslynErrors      = roslynDiagnostics.Where(d => d.Severity == "error").ToArray();
+			// Record equality is exact here: a place holds plain values, and no frameworks on this path.
+			var roslynDiagnostics = DiagnosticPlace.Sorted(aggregated.Distinct());
+			var roslynHasErrors   = roslynDiagnostics.Any(d => d.Severity == "error");
 			
 			// Health again, of the compilations just checked: getting them can wait for a reload, and a
 			// reload may promote an unhealthy workspace — past the discard cap, or one that breaks nothing
 			// the live one had working. The health read above describes the workspace before it, and its
 			// errors would then stop a build they have no say in (#300 review).
-			if(roslynErrors.Length > 0
+			if(roslynHasErrors
 			   && TryGetHealth(projectPath) is { } now
 			   && targets.FirstOrDefault(target => target.Project is not null).Project is { } first
 			   && now.Covering(first.Solution, targets.Select(target => target.Project?.FilePath).OfType<string>()) is { IsHealthy: false } narrowed) {
@@ -180,19 +185,20 @@ internal sealed class BuildTool : RoslynMcpTool
 				
 				scope.Record("workspace turned unhealthy while the Roslyn check ran — building instead");
 			}
-			else if(roslynErrors.Length > 0) {
+			else if(roslynHasErrors) {
 				
-				DiagnosticItem[] roslynWarnings = [.. roslynDiagnostics.Where(d => d.Severity == "warning")];
+				// How the findings grouped, and what they took as flat items (#487).
+				scope.Record(DiagnosticPlace.GroupingNote(roslynDiagnostics));
 				
-				return scope.Failed("Roslyn reported errors — fix these first, then call roslyn_build_project again.", new BuildResult(
-					Succeeded:    false,
-					Errors:       roslynErrors,
-					Warnings:     roslynWarnings,
-					Source:       "roslyn",
-					BuildSkipped: true,
-					SkipReason:   "Roslyn reported errors — fix these first, then call roslyn_build_project again.",
-					DurationMs:   0,
-					ExitCode:     null
+				return scope.Failed("Roslyn reported errors — fix these first, then call roslyn_build_project again.", Result(
+					succeeded:    false,
+					findings:     roslynDiagnostics,
+					source:       "roslyn",
+					buildSkipped: true,
+					skipReason:   "Roslyn reported errors — fix these first, then call roslyn_build_project again.",
+					durationMs:   0,
+					exitCode:     null,
+					errorDetails: null
 				));
 			}
 		}
@@ -250,24 +256,23 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 		catch(InvalidOperationException ex) {
 			
-			return scope.Failed(ex.Message, new BuildResult(
-				Succeeded:    false,
-				Errors:       (DiagnosticItem[]) [],
-				Warnings:     (DiagnosticItem[]) [],
-				Source:       "msbuild",
-				BuildSkipped: true,
-				SkipReason:   ex.Message,
-				DurationMs:   0,
-				ExitCode:     null,
-				ErrorDetails: ex.InnerException?.Message
+			return scope.Failed(ex.Message, Result(
+				succeeded:    false,
+				findings:     [],
+				source:       "msbuild",
+				buildSkipped: true,
+				skipReason:   ex.Message,
+				durationMs:   0,
+				exitCode:     null,
+				errorDetails: ex.InnerException?.Message
 			));
 		}
 		
-		var diagnostics = ParseMSBuildDiagnostics(output, rootPath);
+		// What the build said, each place with the text of its line and the declaration it is
+		// in (#487). Without a boundary to ask, no file is read and the places stay bare.
+		var diagnostics = await LocateAsync(ParseMSBuildDiagnostics(output, rootPath), TryResolveFileContext(projectPath, out _, out var boundary, out _) ? boundary : null, rootPath, cancellationToken);
 		
-		DiagnosticItem[] errors   = [.. diagnostics.Where(d => d.Severity == "error")  ];
-		DiagnosticItem[] warnings = [.. diagnostics.Where(d => d.Severity == "warning")]
-		;
+		scope.Record(DiagnosticPlace.GroupingNote(diagnostics));
 		
 		var succeeded = failedOutput is null;
 		
@@ -279,17 +284,16 @@ internal sealed class BuildTool : RoslynMcpTool
 			: null
 		;
 		
-		return scope.Outcome("msbuild", new BuildResult(
+		return scope.Outcome("msbuild", Result(
 			succeeded,
-			errors,
-			warnings,
-			Source:        "msbuild",
-			BuildSkipped: false,
-			SkipReason:   null,
-			DurationMs:   (int) elapsed.TotalMilliseconds,
-			ExitCode:     exitCode,
-			ErrorDetails: errorDetails
-		) {
+			diagnostics,
+			source:       "msbuild",
+			buildSkipped: false,
+			skipReason:   null,
+			durationMs:   (int) elapsed.TotalMilliseconds,
+			exitCode:     exitCode,
+			errorDetails: errorDetails
+		) with {
 			// Say so explicitly: a build that succeeds while roslyn_get_diagnostics reports
 			// hundreds of errors is otherwise baffling.
 			Hint = unhealthyWorkspace && health!.OnlyNeedsRestore
@@ -426,37 +430,106 @@ internal sealed class BuildTool : RoslynMcpTool
 	async Task<(string output, TimeSpan elapsed, int exitCode)> RunDotnetAsync(string[] args, string workingDirectory, ToolScope scope, CancellationToken cancellationToken)
 		=> await DotnetRunner.RunAsync(args, workingDirectory, scope.Record, cancellationToken);
 	
-	private static DiagnosticItem[] GetRoslynDiagnostics(Compilation compilation, string rootPath)
+	// The errors and warnings of one compilation as places, each with the text of its line and
+	// the declaration it is in; the caller sorts them, once for all targets.
+	private static IEnumerable<DiagnosticPlace> GetRoslynDiagnostics(Compilation compilation, string rootPath, CancellationToken cancellationToken)
+		=> compilation.GetDiagnostics(cancellationToken)
+			.Where(d => IsUnderRoot(d, rootPath))
+			.Where(d => d.Severity >= DiagnosticSeverity.Warning)
+			.Where(d => !IgnoredDiagnostics.Contains(d.Id))
+			.Select(d => DiagnosticPlace.Of(d, null, TryMakeRelative(d.Location.GetLineSpan().Path, rootPath), cancellationToken))
+	;
+	
+	/// <summary>
+	///     The answer for a build, or for the check that stood in for one, with its findings counted
+	///     and listed as <c>roslyn_get_diagnostics</c> lists them (#487).
+	/// </summary>
+	static BuildResult Result(bool succeeded, DiagnosticPlace[] findings, string source, bool buildSkipped, string? skipReason, long durationMs, int? exitCode, string? errorDetails)
+		=> new(
+			succeeded,
+			findings.Count(finding => finding.Severity == "error"),
+			findings.Count(finding => finding.Severity == "warning"),
+			DiagnosticPlace.Group(findings),
+			DiagnosticPlace.General(findings),
+			source,
+			buildSkipped,
+			skipReason,
+			durationMs,
+			exitCode,
+			errorDetails)
+	;
+	
+	/// <summary>
+	///     The diagnostics a build printed, as places. MSBuild names a file, a line and a column;
+	///     for a C# file the place gets the text of the line and the declaration it is in. They
+	///     are read from the file on disk and not from the workspace: the disk is what the build
+	///     compiled, a generated file under obj is no stranger to it, and a file written a moment
+	///     before the build is not a document yet. Only a file the workspace's boundary allows is
+	///     read; any other keeps its line and column alone. A diagnostic with no line is about
+	///     the project and not about a place in a file: it has no file, and the file MSBuild
+	///     named, the project's, is its <c>project</c>.
+	/// </summary>
+	static async Task<DiagnosticPlace[]> LocateAsync(DiagnosticItem[] items, SecurityBoundary? boundary, string rootPath, CancellationToken cancellationToken)
 	{
-		return [..
-			compilation.GetDiagnostics()
-				.Where(d => IsUnderRoot(d, rootPath))
-				.Where(d => d.Severity >= DiagnosticSeverity.Warning)
-				.Where(d => !IgnoredDiagnostics.Contains(d.Id))
-				.Select(d => ConvertRoslynDiagnostic(d, rootPath))
-				.DistinctBy(d => (d.Severity, d.Code, d.File, d.Line, d.Column, d.Message))
-				.OrderByDescending(d => d.Severity == "error")
-				.ThenBy(d => d.File)
-				.ThenBy(d => d.Line)
-				.ThenBy(d => d.Column)
-				.ThenBy(d => d.Code)
-				.ThenBy(d => d.Message)
-		];
+		var places = new List<DiagnosticPlace>(items.Length);
+		
+		// Each file once, however many diagnostics name it; null for one that is not read.
+		var sources = new Dictionary<string, (SourceText Text, SyntaxNode Root)?>(SecurityBoundary.PathComparer);
+		
+		foreach(var item in items) {
+			
+			var rank       = item.Severity == "error" ? (int) DiagnosticSeverity.Error : (int) DiagnosticSeverity.Warning;
+			var frameworks = item.TargetFrameworks is { Length: > 0 } named ? string.Join(',', named) : null;
+			
+			if(item.Line <= 0 || item.File is null) {
+				
+				places.Add(new(item.Code, item.Severity, rank, item.Message, null, item.File, 0, 0, null, null) { Frameworks = frameworks });
+				continue;
+			}
+			
+			string?               text        = null;
+			EnclosingDeclaration? declaration = null;
+			
+			var fullPath = Path.GetFullPath(Path.Combine(rootPath, item.File));
+			
+			if(!sources.TryGetValue(fullPath, out var known))
+				sources[fullPath] = known = await ReadSourceAsync(fullPath, boundary, cancellationToken);
+			
+			// A line past the end: the file changed since the build read it.
+			if(known is var (source, root) && item.Line <= source.Lines.Count) {
+				
+				var line   = source.Lines[item.Line - 1];
+				var column = Math.Clamp(item.Column - 1, 0, line.Span.Length);
+				
+				text        = SearchFilesTool.Excerpt(source.ToString(line.Span), column);
+				declaration = EnclosingDeclaration.At(root, source, line.Start + column).Declaration;
+			}
+			
+			places.Add(new(item.Code, item.Severity, rank, item.Message, item.File, null, item.Line, item.Column, text, declaration) { Frameworks = frameworks });
+		}
+		
+		return DiagnosticPlace.Sorted(places);
 	}
 	
-	private static DiagnosticItem ConvertRoslynDiagnostic(Diagnostic diagnostic, string rootPath)
+	// A C# file a build diagnostic names, parsed for its declarations; null when it is not
+	// C#, lies where the workspace may not read, or cannot be read. The path comes from the
+	// build's output, so the boundary is asked as for a path a caller gave.
+	static async Task<(SourceText Text, SyntaxNode Root)?> ReadSourceAsync(string fullPath, SecurityBoundary? boundary, CancellationToken cancellationToken)
 	{
-		var span     = diagnostic.Location.GetLineSpan();
-		var severity = diagnostic.Severity == DiagnosticSeverity.Error ? "error" : "warning";
+		if(boundary is null || !IsCSharpSourcePath(fullPath) || !boundary.IsPathAllowed(fullPath))
+			
+			return null;
 		
-		return new DiagnosticItem(
-			Code:     diagnostic.Id,
-			Severity: severity,
-			File:     TryMakeRelative(span.Path, rootPath),
-			Line:     span.StartLinePosition.Line + 1,
-			Column:   span.StartLinePosition.Character + 1,
-			Message:  diagnostic.GetMessage()
-		);
+		try {
+			
+			var text = SourceText.From(await FileReader.ReadAllTextAsync(fullPath, FileReader.DocumentLimit));
+			
+			return (text, await CSharpSyntaxTree.ParseText(text, cancellationToken: cancellationToken).GetRootAsync(cancellationToken));
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			
+			return null;
+		}
 	}
 	
 	private static DiagnosticItem[] ParseMSBuildDiagnostics(string output, string rootPath)

@@ -18,7 +18,9 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 		"Finds private, internal, and effectively internal source symbols with zero direct static references across the loaded solution. " +
 		"Checks types, methods, constructors, fields, properties, and events. " +
 		"Conservatively skips generated symbols, attributed symbols, members of attributed or generated types, partial methods, protected members, interface implementations, and inheritance-dispatched members. " +
-		"Results are paged and include declaration locations, confidence, and a reason. Dynamic or reflection-based usage cannot be detected. " +
+		"Results are paged and include confidence, a reason and where each symbol is declared: file, line, its lines ('108-158': pass them to " +
+		"roslyn_read_file to read the whole declaration) and at ('112:2': the line and column roslyn_replace_in_code takes, with an empty " +
+		"replacement to remove it). Dynamic or reflection-based usage cannot be detected. " +
 		"For a solution (projectPath omitted with a solution as default workspace, or a .sln/.slnx given) the symbols of every project are checked, and each result names its project.")]
 	public async Task<object> FindUnused(
 		CancellationToken cancellationToken,
@@ -108,11 +110,9 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 			if(references.SelectMany(r => r.Locations).Any())
 				continue;
 			
-			var declaration = symbol.Locations.First(l => l.IsInSource);
-			var span        = declaration.GetLineSpan();
-			var file        = span.Path is { Length: > 0 }
-				? Path.GetRelativePath(rootPath, span.Path)
-				: "?";
+			// Where it is declared, with the lines it takes and where its node starts (#487):
+			// an unused symbol is read next, or removed.
+			var declared = SourcePlace.Of(symbol.Locations.First(l => l.IsInSource), rootPath, cancellationToken).AsDeclared();
 			
 			unused.Add(new UnusedCandidate(symbol, new UnusedSymbolEntry(
 				Kind:          GetKind(symbol),
@@ -120,9 +120,11 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 				Accessibility: symbol.DeclaredAccessibility.ToString().ToLowerInvariant(),
 				Confidence:    GetConfidence(symbol),
 				Reason:        GetReason(symbol, hasFriendAssemblies),
-				File:          file,
-				Line:          span.StartLinePosition.Line + 1) {
-					Project = projectName
+				File:          declared.File,
+				Line:          declared.Line) {
+					Project = projectName,
+					Lines   = declared.Lines,
+					At      = declared.At
 				}));
 		}
 	}

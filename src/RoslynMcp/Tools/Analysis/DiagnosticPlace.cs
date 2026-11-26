@@ -17,6 +17,13 @@ internal sealed record DiagnosticPlace(
 	string Code, string Severity, int Rank, string Message,
 	string? File, string? Project, int Line, int Column, string? Text, EnclosingDeclaration? Declaration)
 {
+	/// <summary>
+	///     The target frameworks a build reported the finding under, joined by commas, where
+	///     MSBuild says (<c>roslyn_build_project</c>). One string and not a list, so that two
+	///     places are equal when their values are.
+	/// </summary>
+	public string? Frameworks { get; init; }
+	
 	/// <summary>The finding at the place a diagnostic reports. <paramref name="relativeFile"/> is its file as the answer names it, or null for a finding with no place in a file.</summary>
 	public static DiagnosticPlace Of(Diagnostic diagnostic, string? project, string? relativeFile, CancellationToken cancellationToken)
 	{
@@ -87,7 +94,7 @@ internal sealed record DiagnosticPlace(
 	{
 		DiagnosticFinding[] general = [..
 			page.Where(place => place.File is null)
-				.Select(place => new DiagnosticFinding(place.Code, place.Severity, place.Message) { Project = place.Project })
+				.Select(place => new DiagnosticFinding(place.Code, place.Severity, place.Message) { Project = place.Project, TargetFrameworks = place.Frameworks?.Split(',') })
 		];
 		
 		return general.Length > 0 ? general : null;
@@ -117,13 +124,14 @@ internal sealed record DiagnosticPlace(
 				
 				var declaration = page[index].Declaration;
 				
-				// By code, severity and message, in the order each first appears.
+				// By code, severity, message and the frameworks a build named, in the order each
+				// first appears.
 				var findings = new List<(DiagnosticPlace First, List<DiagnosticPlaceAt> Places)>();
 				
 				for(; index < page.Count && page[index].File == file && page[index].Project == project && page[index].Declaration == declaration; index++) {
 					
 					var place = page[index];
-					var entry = findings.Find(found => found.First.Code == place.Code && found.First.Severity == place.Severity && found.First.Message == place.Message);
+					var entry = findings.Find(found => found.First.Code == place.Code && found.First.Severity == place.Severity && found.First.Message == place.Message && found.First.Frameworks == place.Frameworks);
 					
 					if(entry.Places is null)
 						findings.Add(entry = (place, []));
@@ -131,7 +139,7 @@ internal sealed record DiagnosticPlace(
 					entry.Places.Add(new(place.Line, place.Column, place.Text));
 				}
 				
-				DiagnosticFinding[] listed = [..findings.Select(found => new DiagnosticFinding(found.First.Code, found.First.Severity, found.First.Message) { Places = [..found.Places] })];
+				DiagnosticFinding[] listed = [..findings.Select(found => new DiagnosticFinding(found.First.Code, found.First.Severity, found.First.Message) { Places = [..found.Places], TargetFrameworks = found.First.Frameworks?.Split(',') })];
 				
 				members.Add(declaration is { } inside
 					? new($"{inside.Kind} {inside.Name}".TrimEnd(), $"{inside.FirstLine}-{inside.EndLine}", $"{inside.StartLine}:{inside.StartColumn}", listed)

@@ -19,6 +19,9 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		"a base implementation — useful for impact analysis before refactoring. " +
 		"For interface and abstract class symbols, returns implementing types. " +
 		"For abstract or virtual method symbols, returns overriding methods with full signatures. " +
+		"Each entry is its name and where it is declared: file, line, its lines ('108-158': pass them to roslyn_read_file to read " +
+		"the whole declaration) and at ('112:2': the line and column roslyn_replace_in_code takes), so an implementation can be read " +
+		"or edited without another lookup. One declared in a referenced assembly has its name only. " +
 		"Results are alphabetically ordered and paged. " +
 		"For the full inheritance graph of a type (base chain, all interfaces, all derived), use roslyn_get_type_hierarchy instead.")]
 	public async Task<object> FindImplementations(
@@ -36,7 +39,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<string>(page_token, ref skip, ref take, 50, 200, out var cached))
+		if(scope.TryServeCachedPage<ImplementationEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -62,6 +65,10 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 			
 			return scope.Error(solutionError);
 		
+		if(!TryResolveRoot(projectPath, out var rootPath, out var rootError))
+			
+			return scope.Error(rootError);
+		
 		// Handle type symbols (interface or abstract class).
 		if(symbol is INamedTypeSymbol typeSymbol) {
 			
@@ -70,8 +77,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var impls	   = await RoslynSymbolFinder.FindImplementationsAsync(typeSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = impls
 					.OfType<INamedTypeSymbol>()
-					.Select(t => t.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat))
-					.Order()
+					.Select(t => Entry(t.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat), t, rootPath, cancellationToken))
+					.OrderBy(entry => entry.Name)
 					.ToArray()
 				;
 				
@@ -80,7 +87,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				
 				if(allResults.Length == 0)
 					
-					return scope.Outcome("no implementations", new FindImplementationsResult(typeKind, typeName, 0, skip, take, ["No implementations found."]));
+					return scope.Outcome("no implementations", new FindImplementationsResult(typeKind, typeName, 0, skip, take, []));
 				
 				var shape  = ImplementationsShape(typeKind, typeName, AdhocCaution(projectPath));
 				var result = PaginateAndStore(allResults, ref skip, take, shape);
@@ -99,8 +106,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				var overrides  = await RoslynSymbolFinder.FindOverridesAsync(methodSymbol, solution, cancellationToken: cancellationToken);
 				var allResults = overrides
 					.OfType<IMethodSymbol>()
-					.Select(m => FormatMethod(m))
-					.Order()
+					.Select(m => Entry(FormatMethod(m), m, rootPath, cancellationToken))
+					.OrderBy(entry => entry.Name)
 					.ToArray()
 				;
 				
@@ -108,7 +115,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 				
 				if(allResults.Length == 0)
 					
-					return scope.Outcome("no overrides", new FindOverridesResult("method", methodDisplay, 0, skip, take, ["No overrides found."]));
+					return scope.Outcome("no overrides", new FindOverridesResult("method", methodDisplay, 0, skip, take, []));
 				
 				var shape  = OverridesShape(methodDisplay, AdhocCaution(projectPath));
 				var result = PaginateAndStore(allResults, ref skip, take, shape);
@@ -126,8 +133,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 	// alike; static factories taking plain values, so the functions the pagination cache holds never
 	// capture a symbol or the solution. The cache stores the shape with the results, so a token from a
 	// type query is always served as FindImplementationsResult and one from a method query as
-	// FindOverridesResult, although both page over strings.
-	static Func<PaginatedResult<string>, object> ImplementationsShape(string typeKind, string typeName, string? caution)
+	// FindOverridesResult, although both page over the same kind of entry.
+	static Func<PaginatedResult<ImplementationEntry>, object> ImplementationsShape(string typeKind, string typeName, string? caution)
 		=> page => new FindImplementationsResult(
 			SymbolType:  typeKind,
 			SymbolName:  typeName,
@@ -141,7 +148,7 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		}
 	;
 	
-	static Func<PaginatedResult<string>, object> OverridesShape(string methodDisplay, string? caution)
+	static Func<PaginatedResult<ImplementationEntry>, object> OverridesShape(string methodDisplay, string? caution)
 		=> page => new FindOverridesResult(
 			SymbolType: "method",
 			SymbolName: methodDisplay,
@@ -155,6 +162,23 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		}
 	;
 	
+	
+	// One implementation with where it is declared (#487): an implementation is a declaration,
+	// and reading it was the next call. Plain values, since the pagination cache keeps it. A
+	// symbol of a referenced assembly has no place; a type declared in parts names its first,
+	// by file and line.
+	static ImplementationEntry Entry(string name, ISymbol symbol, string rootPath, CancellationToken cancellationToken)
+	{
+		var places = SourcePlace.Sorted(symbol.Locations.Where(location => location.IsInSource).Select(location => SourcePlace.Of(location, rootPath, cancellationToken)));
+		
+		if(places is not [var first, ..])
+			
+			return new(name);
+		
+		var declared = first.AsDeclared();
+		
+		return new(name) { File = declared.File, Line = declared.Line, Lines = declared.Lines, At = declared.At };
+	}
 	
 	private static string FormatMethod(IMethodSymbol method)
 	{

@@ -131,7 +131,7 @@ static partial class DefaultWorkspaceTests
 			new("DefaultWorkspace: build_project's Roslyn check covers every target framework", async () => {
 				
 				var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = single.PathOf("Tfm/Tfm.slnx") });
-				var messages   = data?["errors"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+				var messages   = DiagnosticItems.Of(data)?.Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
 				
 				bool Has(string name) => messages.Any(message => message.Contains(name));
 				
@@ -147,7 +147,7 @@ static partial class DefaultWorkspaceTests
 				async Task<(bool Ok, string Got)> Only(string framework, string expected, string excluded)
 				{
 					var (ok, data) = await Call(rootedCtx, "roslyn_build_project", new { projectPath = single.PathOf("Tfm/Split/Split.csproj"), targetFramework = framework });
-					var messages   = data?["errors"]?.AsArray().Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
+					var messages   = DiagnosticItems.Of(data)?.Select(item => item?["message"]?.GetValue<string>() ?? "").ToArray() ?? [];
 					
 					return (ok && data?["source"]?.GetValue<string>() == "roslyn"
 						&& messages.Any(message => message.Contains(expected)) && !messages.Any(message => message.Contains(excluded)),
@@ -181,7 +181,7 @@ static partial class DefaultWorkspaceTests
 					return messages.Any(message => message.Contains("missingOnWindows")) && messages.Any(message => message.Contains("missingElsewhere"));
 				}
 				
-				return Verdict(ok && dOk && built?["source"]?.GetValue<string>() == "roslyn" && Both(built?["errors"]) && Both(DiagnosticItems.Of(diags)),
+				return Verdict(ok && dOk && built?["source"]?.GetValue<string>() == "roslyn" && Both(DiagnosticItems.Of(built)) && Both(DiagnosticItems.Of(diags)),
 					$"expected both frameworks' errors from each tool; got {built?.ToJsonString() ?? "null"} / {diags?.ToJsonString() ?? "null"}");
 			}),
 			

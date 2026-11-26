@@ -117,18 +117,14 @@ static class ValidationTests
 						new { projectPath = fx.Csproj, forceBuild = true },
 						data => {
 							
-							var errors   = data?["errors"]?.AsArray();
-							var warnings = data?["warnings"]?.AsArray();
-							
-							if(errors is null || warnings is null)
-								
-								return false;
-							
-							var errorCodes = errors.Select(e => e?["code"]?.GetValue<string>()).ToHashSet();
-							
-							// CS error codes may vary by SDK version — just check that errors were reported.
-							
-							return errors.Count > 0;
+							// The build's errors and warnings are listed as roslyn_get_diagnostics lists
+							// its findings (#487). That an error was reported is all that is checked:
+							// the fixture is not restored, so the build stops at the SDK's NETSDK1004
+							// before it compiles the scratch file. A build that reaches the compiler
+							// is checked in the group Semantic Places.
+							return data?["error_count"]?.GetValue<int>() > 0
+								&& data["errors"] is null
+								&& DiagnosticItems.Of(data) is { Count: > 0 };
 						});
 				}),
 			
@@ -148,14 +144,11 @@ static class ValidationTests
 					new { projectPath = fx.Csproj, forceBuild = true },
 					data => {
 						
-						var errors   = data?["errors"]?.AsArray();
-						var warnings = data?["warnings"]?.AsArray();
-						
-						if(errors is null || warnings is null)
+						if(DiagnosticItems.Of(data) is not { } items)
 							
 							return false;
 						
-						return errors.Concat(warnings).Any(d =>
+						return items.Any(d =>
 							d?["target_frameworks"]?.AsArray() is { } tfms
 							&& tfms.Count > 0
 							&& tfms.Any(t => t?.GetValue<string>()?.StartsWith("net") == true)

@@ -3,7 +3,8 @@ using System.Text.Json.Nodes;
 /// <summary>
 ///     The findings of a <c>roslyn_get_diagnostics</c> answer as a flat list. The answer groups them
 ///     by file, by the declaration each is in and by what was found (#487); most tests ask only
-///     whether a code was reported, in which file, on which line.
+///     whether a code was reported, in which file, on which line. The errors and warnings of
+///     <c>roslyn_build_project</c> come in the same shape.
 /// </summary>
 static class DiagnosticItems
 {
@@ -30,6 +31,8 @@ static class DiagnosticItems
 				["severity"] = finding?["severity"]?.GetValue<string>(),
 				["message"]  = finding?["message"]?.GetValue<string>(),
 				["project"]  = finding?["project"]?.GetValue<string>(),
+				
+				["target_frameworks"] = finding?["target_frameworks"]?.DeepClone(),
 			});
 		
 		foreach(var file in files)
@@ -49,6 +52,8 @@ static class DiagnosticItems
 							["declaration"] = group?["declaration"]?.GetValue<string>(),
 							["lines"]       = group?["lines"]?.GetValue<string>(),
 							["at"]          = group?["at"]?.GetValue<string>(),
+							
+							["target_frameworks"] = finding?["target_frameworks"]?.DeepClone(),
 						});
 		
 		return items;
