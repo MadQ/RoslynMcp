@@ -79,6 +79,35 @@ static class SemanticPlacesTests
 		fx.Write("Broken.cs", Broken);
 		fx.Write("Lonely.cs", "interface ILonely { }\n");
 		
+		// A project reached through a link above its directory (#516): 'link' leads to 'real',
+		// and the project is given as link/proj. A build prints a source file by the path
+		// the link leads to, where the system resolves the working directory (Linux, macOS),
+		// so the files it names are not under the root as the workspace spells it. On macOS
+		// every fixture is in that position, the temporary directory being a link; this one is
+		// on every system that can make a link. The link is above the project and is not the
+		// project's own directory: through that, a build on Linux finds no sources at all.
+		var box    = TestFixtures.NewAdhocDir("SemanticPlacesLinked");
+		var link   = box.PathOf("link");
+		var linked = false;
+		
+		box.Write("real/proj/Linked.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		box.Write("real/proj/Broken.cs", Broken);
+		
+		// And a project whose error is in the project it references, beside it: that file is
+		// behind the same link and not under the root of the project that is built.
+		box.Write("real/app/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n  <ItemGroup>\n    <ProjectReference Include=\"../lib/Lib.csproj\" />\n  </ItemGroup>\n</Project>\n");
+		box.Write("real/app/App.cs", "class App { }\n");
+		box.Write("real/lib/Lib.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n");
+		box.Write("real/lib/Broken.cs", Broken);
+		
+		try {
+			
+			Directory.CreateSymbolicLink(link, box.PathOf("real"));
+			
+			linked = true;
+		}
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		
 		Task<JsonNode?> Call(string tool, object args) => ctx.CallToolJsonAsync(tool, args);
 		
 		static (bool, string) Verdict(bool pass, JsonNode? answer) => pass
@@ -336,14 +365,75 @@ static class SemanticPlacesTests
 				return Verdict(answer?["source"]?.GetValue<string>() == "msbuild"
 					&& answer["succeeded"]?.GetValue<bool>() == false
 					&& answer["error_count"]?.GetValue<int>() == 1
-					&& (error?["file"]?.GetValue<string>() ?? "").EndsWith("Broken.cs")
-					&& error?["declaration"]?.GetValue<string>() == "method Bad"
+					// The file as every tool names it, relative to the root: on macOS, where the
+					// build prints the real path of the temporary directory, it was a path that
+					// climbed out of the root and back in (#516), and ended in the same name.
+					&& error?["file"]?.GetValue<string>() == "Broken.cs"
+					&& error["declaration"]?.GetValue<string>() == "method Bad"
 					&& error["lines"]?.GetValue<string>() == "3-6"
 					&& error["line"]?.GetValue<int>() == 5
 					&& error["text"]?.GetValue<string>() == "return missing;", new JsonArray(restored?.DeepClone(), answer?.DeepClone()));
 			}),
+			
+			// The same for a project given through a link above it. The build names the file by
+			// where the link leads; the answer names it under the root, and reads it.
+			new("semantic places: a build through a linked directory names its files under the root, and reads them", async () => {
+				
+				if(!linked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var project  = Path.Combine(link, "proj", "Linked.csproj");
+				var restored = await Call("roslyn_restore_packages", new { projectPath = project });
+				var answer   = await Call("roslyn_build_project", new { projectPath = project, forceBuild = true });
+				var error    = DiagnosticItems.Of(answer)?.FirstOrDefault(item => item?["code"]?.GetValue<string>() == "CS0103");
+				
+				return Verdict(answer?["source"]?.GetValue<string>() == "msbuild"
+					&& error?["file"]?.GetValue<string>() == "Broken.cs"
+					&& error["declaration"]?.GetValue<string>() == "method Bad"
+					&& error["text"]?.GetValue<string>() == "return missing;", new JsonArray(restored?.DeepClone(), answer?.DeepClone()));
+			}),
+			
+			// The error is in the referenced project, which is beside the one built and so not
+			// under its root: the link is above both, and the file is named from the root as a
+			// file of that project is, one directory up and down again. It was the path the
+			// link leads to, climbing out of the workspace altogether. Its line is not read:
+			// a workspace of one project reads below that project's directory only, with a
+			// link above it or without.
+			new("semantic places: a build through a linked directory names a referenced project's file beside the root", async () => {
+				
+				if(!linked)
+					
+					return Skip.SetupUnavailable("cannot create symbolic links here");
+				
+				var project  = Path.Combine(link, "app", "App.csproj");
+				var restored = await Call("roslyn_restore_packages", new { projectPath = project });
+				var answer   = await Call("roslyn_build_project", new { projectPath = project, forceBuild = true });
+				var error    = DiagnosticItems.Of(answer)?.FirstOrDefault(item => item?["code"]?.GetValue<string>() == "CS0103");
+				
+				return Verdict(answer?["source"]?.GetValue<string>() == "msbuild"
+					&& (error?["file"]?.GetValue<string>() ?? "").Replace('\\', '/') == "../lib/Broken.cs"
+					&& error?["line"]?.GetValue<int>() == 5, new JsonArray(restored?.DeepClone(), answer?.DeepClone()));
+			}),
 		};
 		
-		return new TestGroup($"Semantic Places ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); return Task.CompletedTask; });
+		return new TestGroup($"Semantic Places ({tests.Count} tests)", tests, Teardown: () => {
+			
+			fx.Dispose();
+			
+			// The link first: it is a name for a directory of the fixture, not one of its own.
+			// One that cannot be removed is left to the sweep of the next run, as a fixture's
+			// own files are: a teardown that throws ends the run without its results.
+			try {
+				
+				if(linked)
+					Directory.Delete(link);
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+			
+			box.Dispose();
+			
+			return Task.CompletedTask;
+		});
 	}
 }

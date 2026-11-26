@@ -562,9 +562,65 @@ internal sealed class BuildTool : RoslynMcpTool
 		}
 	}
 	
+	/// <summary>
+	///     Where the path of the workspace root and its real path part ways (#516): the directory
+	///     on the way to the root that is a link, as the root spells it, and the directory it
+	///     leads to. Null for a root reached through no link. For a root /var/folders/x on macOS
+	///     that is (/var, /private/var), and a real path under the second is the same file under
+	///     the first.
+	///     <para>
+	///         Found from the end: the root and its real path, then their parents for as long as
+	///         the two end in one name and the shorter path still leads to the shorter real one.
+	///         The second half matters: /data/cur leading to /data/v2/cur ends in one name, and
+	///         one step further up /data does not lead to /data/v2.
+	///     </para>
+	/// </summary>
+	static (string Link, string Real)? LinkAbove(string rootPath)
+	{
+		var link = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
+		
+		if(FileIdentity.FinalPath(link) is not { } real || SecurityBoundary.PathComparer.Equals(link, real = Path.TrimEndingDirectorySeparator(real)))
+			
+			return null;
+		
+		while(Path.GetFileName(link) is { Length: > 0 } name && name == Path.GetFileName(real)
+		      && Path.GetDirectoryName(link) is { } linkParent && Path.GetDirectoryName(real) is { } realParent
+		      && FileIdentity.FinalPath(linkParent) is { } leadsTo
+		      && SecurityBoundary.PathComparer.Equals(Path.TrimEndingDirectorySeparator(leadsTo), Path.TrimEndingDirectorySeparator(realParent))
+		      && !SecurityBoundary.PathComparer.Equals(linkParent, realParent))
+			(link, real) = (linkParent, realParent);
+		
+		return (link, real);
+	}
+	
 	private static DiagnosticItem[] ParseMSBuildDiagnostics(string output, string rootPath)
 	{
 		var results = new List<(DiagnosticItem Item, string? Context)>();
+		
+		// MSBuild names a file by the path the build reached it by, which is the real one where
+		// the workspace root is reached through a link: on macOS the temporary directory
+		// /var/folders is a link to /private/var/folders, and a build started in a linked
+		// directory on Linux prints the directory it leads to (#516). Such a path is under the
+		// link's real path and not under the root, and came out as '../../../private/var/…':
+		// no file any other tool names, and none the workspace reads as its own. It is put
+		// back under the link first: a file of the root, and one of a project beside it that
+		// the same link leads to. Asked for once, and only when a path needs it.
+		var spellings = new Lazy<(string Link, string Real)?>(() => LinkAbove(rootPath));
+		
+		string? Relative(string file)
+		{
+			try {
+				
+				if(Path.IsPathRooted(file) && !SecurityBoundary.IsUnderDirectory(file, rootPath)
+				   && spellings.Value is var (link, real) && SecurityBoundary.IsUnderDirectory(file, real))
+					file = Path.Combine(link, Path.GetRelativePath(real, file));
+			}
+			catch(Exception ex) when(ex is ArgumentException or NotSupportedException) {
+				// A path that is none is named as the build printed it.
+			}
+			
+			return TryMakeRelative(file, rootPath);
+		}
 		
 		foreach(var raw in output.Split('\n')) {
 			
@@ -587,7 +643,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				results.Add((new DiagnosticItem(
 					Code:     code,
 					Severity: m.Groups["severity"].Value.ToLowerInvariant(),
-					File:     TryMakeRelative(m.Groups["file"].Value.Trim(), rootPath),
+					File:     Relative(m.Groups["file"].Value.Trim()),
 					Line:     int.Parse(m.Groups["line"].Value),
 					Column:   int.Parse(m.Groups["col"].Value),
 					Message:  m.Groups["message"].Value.Trim()
@@ -615,7 +671,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			results.Add((new DiagnosticItem(
 				Code:     projCode,
 				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
-				File:     TryMakeRelative(m.Groups["file"].Value.Trim(), rootPath),
+				File:     Relative(m.Groups["file"].Value.Trim()),
 				Line:     0,
 				Column:   0,
 				Message:  m.Groups["message"].Value.Trim()
