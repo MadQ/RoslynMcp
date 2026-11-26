@@ -152,7 +152,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 |------|--------------|
 | `roslyn_search_files` | Regex search across workspace files with paging |
 | `roslyn_semantic_search` | Context-aware C# search -- filter by comments, strings, identifiers, xmldocs |
-| `roslyn_find_string_literal` | Search C# string literals with glob or regex; returns raw and decoded values |
+| `roslyn_find_string_literal` | Search C# string literals with glob or regex; returns each literal's line and decoded value |
 | `roslyn_list_files` | Glob-based file enumeration (fast, no content) |
 | `roslyn_list_types` | All types in the project with namespace/kind filters |
 

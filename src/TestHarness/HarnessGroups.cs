@@ -52,6 +52,7 @@ static class HarnessGroups
 		Group("File Editing Tools",                        g => EditingTests.Build(g.Ctx)),
 		Group("Edit Safety",                               g => EditSafetyTests.Build(g.Ctx)),
 		Group("Diagnostic Places",                         g => DiagnosticPlacesTests.Build(g.Ctx)),
+		Group("Semantic Places",                           g => SemanticPlacesTests.Build(g.Ctx)),
 		Group("Multi Edit",                                g => MultiEditTests.Build(g.Ctx)),
 		AsyncGroup("Reload Flagging",                      g => ReloadFlaggingTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Load Health",                          g => LoadHealthTests.BuildAsync(g.Ctx)),

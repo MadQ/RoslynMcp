@@ -184,30 +184,44 @@ internal sealed record FindOverridesResult(
 	[property: JsonPropertyName("has_more")]        bool     HasMore   = false
 ) : ToolResult;
 
-internal sealed record CallerEntry(
-	[property: JsonPropertyName("caller")] string Caller,
-	[property: JsonPropertyName("file")]   string File,
-	[property: JsonPropertyName("line")]   int    Line
-);
-
 internal sealed record FindCallersResult(
 	[property: JsonPropertyName("symbol_searched")] string        SymbolSearched,
 	[property: JsonPropertyName("total_callers")]   int           TotalCallers,
 	[property: JsonPropertyName("skip")]            int           Skip,
 	[property: JsonPropertyName("take")]            int           Take,
-	[property: JsonPropertyName("callers")]         CallerEntry[] Callers,
+	// The calling lines by file, and within a file by the declaration each is in (#487): that
+	// declaration is the caller, which used to be a qualified name beside every line.
+	[property: JsonPropertyName("callers")]         SearchFileGroup[] Callers,
 	[property: JsonPropertyName("page_token")]      string?       PageToken,
 	[property: JsonPropertyName("has_more")]        bool          HasMore
 ) : ToolResult;
 
+/// <summary>
+///     One call in the method a call graph was asked for: what is called, the line and its text.
+///     <see cref="File"/> is set only for a call in another file than the one the answer names,
+///     which takes a method declared in parts.
+/// </summary>
 internal sealed record CallSiteEntry(
 	[property: JsonPropertyName("callee")] string Callee,
-	[property: JsonPropertyName("file")]   string File,
-	[property: JsonPropertyName("line")]   int    Line
-);
+	[property: JsonPropertyName("line")]   int    Line,
+	[property: JsonPropertyName("text")]   string Text
+)
+{
+	[JsonPropertyName("file")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? File { get; init; }
+}
 
 internal sealed record GetCallGraphResult(
 	[property: JsonPropertyName("method")]      string          Method,
+	// Where the method is, said once for all its calls (#487): its file, the lines it takes from
+	// its attached comment to its end, and where its node starts. Absent when it has no body here.
+	[property: JsonPropertyName("file")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? File,
+	[property: JsonPropertyName("lines")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Lines,
+	[property: JsonPropertyName("at")]
+	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? At,
 	[property: JsonPropertyName("total_calls")] int             TotalCalls,
 	[property: JsonPropertyName("skip")]        int             Skip,
 	[property: JsonPropertyName("take")]        int             Take,
@@ -775,7 +789,23 @@ internal sealed record SearchHit(
 	[property: JsonPropertyName("text")] string Text,
 	[property: JsonPropertyName("declares")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Declares
-);
+)
+{
+	// What the tools that find more than a line say about a place (#487). A string literal:
+	// the column it starts at, since a line can hold several, and its decoded value. A semantic
+	// search over all contexts: the context this match was found in.
+	[JsonPropertyName("column")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public int? Column { get; init; }
+	
+	[JsonPropertyName("context")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Context { get; init; }
+	
+	[JsonPropertyName("value")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? Value { get; init; }
+}
 
 internal sealed record SearchFilesResult(
 	[property: JsonPropertyName("files")]         SearchFileGroup[] Files,
@@ -791,7 +821,8 @@ internal sealed record SearchFilesResult(
 }
 
 internal sealed record SemanticSearchResult(
-	[property: JsonPropertyName("matches")]       object[] Matches,
+	// By file and declaration, as roslyn_search_files lists its hits (#487).
+	[property: JsonPropertyName("files")]         SearchFileGroup[] Files,
 	[property: JsonPropertyName("total_matches")] int      TotalMatches,
 	[property: JsonPropertyName("returned")]      int      Returned,
 	[property: JsonPropertyName("page_token")]    string?  PageToken,

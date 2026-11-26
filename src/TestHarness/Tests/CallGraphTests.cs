@@ -12,9 +12,8 @@ static class CallGraphTests
 					"roslyn_find_callers",
 					new { symbolName = "GetCompilation", containingType = "WorkspaceManager", projectPath = ctx.TargetPath },
 					data => data?["total_callers"]?.GetValue<int>() > 0
-						&& data?["callers"]?.AsArray().Count > 0
-						&& data?["callers"]?[0]?["caller"] is not null
-						&& data?["callers"]?[0]?["file"] is not null)),
+						// Each calling line is under the declaration that calls (#487).
+						&& SearchHits.In(data?["callers"]) is [{ File.Length: > 0, Declaration: not null, Text.Length: > 0 }, ..])),
 			
 			new("roslyn_get_call_graph: outgoing calls from GetCompilation",
 				() => ctx.RunTestAsync(
@@ -23,7 +22,10 @@ static class CallGraphTests
 					data => data?["method"]?.GetValue<string>().Contains("GetCompilation") == true
 						&& data?["total_calls"]?.GetValue<int>() > 0
 						&& data?["calls"]?.AsArray().Count > 0
-						&& data?["calls"]?[0]?["callee"] is not null)),
+						&& data?["calls"]?[0]?["callee"] is not null
+						&& data?["calls"]?[0]?["text"] is not null
+						&& data?["file"]?.GetValue<string>().EndsWith("WorkspaceManager.cs") == true
+						&& data?["lines"] is not null)),
 		};
 		
 		return new TestGroup($"Call Graph Tools ({tests.Count} tests)", tests);

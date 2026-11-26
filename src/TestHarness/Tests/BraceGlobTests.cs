@@ -53,10 +53,8 @@ static class BraceGlobTests
 			
 			var data = await Call(tool, args);
 			
-			// roslyn_search_files groups its hits by file (#460); the other two search tools list
-			// them flat, each with its file.
-			var files = SearchHits.Of(data)?.Select(m => m.File)
-				?? (data?["matches"] as JsonArray)?.Select(m => m!["file"]!.GetValue<string>());
+			// All three search tools group their hits by file (#460, #487).
+			var files = SearchHits.Of(data)?.Select(m => m.File);
 			
 			return files is null
 				? null

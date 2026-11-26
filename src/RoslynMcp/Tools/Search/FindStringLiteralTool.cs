@@ -14,14 +14,18 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 
 	[McpServerTool(Name = "roslyn_find_string_literal", ReadOnly = true, Title = "Find String Literal", OpenWorld = false, Idempotent = true)]
 	[Description(
-		"Searches C# string literal tokens for a pattern and returns both the raw source text and the decoded " +
-		"value (quotes stripped, escape sequences resolved) for each match. " +
+		"Searches C# string literal tokens for a pattern and returns, for each match, the line it is on and its decoded " +
+		"value (quotes stripped, escape sequences resolved). " +
 		"Covers all string forms: regular (\"\"), verbatim (@\"\"), interpolated literal parts ($\"\"), " +
 		"raw (\"\"\"...\"\"\"), and UTF-8 literal variants. " +
 		"Use this instead of roslyn_semantic_search context:\"strings\" when you need: " +
 		"(1) glob matching via mode: \"glob\" (e.g. *roslynmcp* with no regex escaping required); " +
 		"(2) to match against the decoded value (e.g. search for a tab character, not \\\\t); " +
-		"(3) a clean result with separate 'text' (raw) and 'value' (decoded) fields per match. " +
+		"(3) the decoded 'value' of each literal beside the 'text' of its source line. " +
+		"The matches are grouped as roslyn_search_files groups its hits: files[] by file, in[] by the declaration each literal is in " +
+		"('method Enqueue'), with its lines ('108-158': pass them to roslyn_read_file to read the whole member) and where its node starts " +
+		"('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with line, column (where the literal starts: " +
+		"a line can hold several), text (the source line, cut around the literal when long) and value. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> FindStringLiteral(
@@ -66,7 +70,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 
 		filePattern ??= "*.cs";
 
-		if(scope.TryServeCachedPage<StringLiteralMatch>(page_token, ref skip, ref take, 50, 200, out var cached))
+		if(scope.TryServeCachedPage<SourcePlace>(page_token, ref skip, ref take, 50, 200, out var cached))
 
 			return scope.Outcome("cached page", cached);
 
@@ -103,7 +107,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		string? fallbackCaution = null;
 		string? fallbackHint    = null;
 
-		if(allMatches.Count == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
+		if(allMatches.Length == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
 
 			if(stripped.Length == 0)
 				fallbackHint = ChatRefTruncatedHint;
@@ -118,7 +122,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 
 				var retry = strippedRegex is null ? null : await CollectAsync(strippedRegex);
 
-				if(retry is { Count: > 0 }) {
+				if(retry is { Length: > 0 }) {
 
 					allMatches      = retry;
 					fallbackCaution = ChatRefFallbackCaution(pattern, stripped);
@@ -128,15 +132,19 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 			}
 		}
 
-		var allResults = allMatches.ToArray();
-		var shape      = PageShape(ComposeCautions(modeCaution, fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
-		var result     = PaginateAndStore(allResults, ref skip, take, shape);
+		var shape  = PageShape(ComposeCautions(modeCaution, fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
+		var result = PaginateAndStore(allMatches, ref skip, take, shape);
+
+		// How the page grouped, and what the same literals took listed flat (#487).
+		scope.Record(SourcePlace.GroupingNote(result.Items, "literal(s)"));
 
 		return scope.Outcome($"{result.Total} match(es)", shape(result));
 
-		async Task<List<StringLiteralMatch>> CollectAsync(Regex rx)
+		// The literals as places, by file, line and column. Every literal is one: two on a line
+		// have two values, so they are not folded into one place as two references on a line are.
+		async Task<SourcePlace[]> CollectAsync(Regex rx)
 		{
-			var matches = new List<StringLiteralMatch>();
+			var matches = new List<SourcePlace>();
 			// seenPaths prevents searching the same physical file twice in multi-targeted projects.
 			var seenPaths = new HashSet<string>(SecurityBoundary.PathComparer);
 
@@ -159,9 +167,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 					if(tree is null)
 						continue;
 
-					var root         = tree.GetRoot(cancellationToken);
-					var sourceText   = tree.GetText(cancellationToken);
-					var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
+					var root = tree.GetRoot(cancellationToken);
 
 					foreach(var token in root.DescendantTokens()) {
 
@@ -181,21 +187,25 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 						if(!rx.IsMatch(candidate))
 							continue;
 
-						var pos = sourceText.Lines.GetLinePosition(token.SpanStart);
-
-						matches.Add(new StringLiteralMatch(relativePath, pos.Line + 1, pos.Character + 1, token.Text, token.ValueText));
+						// The raw token is not kept: it is on the line, whose text the place has.
+						matches.Add(SourcePlace.Of(token.GetLocation(), rootPath, cancellationToken) with { Value = token.ValueText, ColumnMatters = true });
 					}
 				}
 
-			return matches;
+			return [..
+				matches
+					.OrderBy(place => place.File, StringComparer.Ordinal)
+					.ThenBy(place => place.Line)
+					.ThenBy(place => place.Column)
+			];
 		}
 	}
 
 	// Builds every page of one query, first and cached alike, so a cached page keeps the same fields
 	// — the caution and hint included.
-	static Func<PaginatedResult<StringLiteralMatch>, object> PageShape(string? caution, string? hint)
+	static Func<PaginatedResult<SourcePlace>, object> PageShape(string? caution, string? hint)
 		=> page => new FindStringLiteralResult(
-			page.Items,
+			SourcePlace.Group(page.Items, sayDeclares: false),
 			page.Total,
 			page.Items.Length,
 			page.PageToken,
@@ -207,16 +217,10 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 	;
 }
 
-sealed record StringLiteralMatch(
-	[property: JsonPropertyName("file")]   string File,
-	[property: JsonPropertyName("line")]   int    Line,
-	[property: JsonPropertyName("column")] int    Column,
-	[property: JsonPropertyName("text")]   string Text,
-	[property: JsonPropertyName("value")]  string Value
-);
-
 sealed record FindStringLiteralResult(
-	[property: JsonPropertyName("matches")]       StringLiteralMatch[] Matches,
+	// By file and declaration, as roslyn_search_files lists its hits (#487); each match has the
+	// literal's column and decoded value beside the line and its text.
+	[property: JsonPropertyName("files")]         SearchFileGroup[]    Files,
 	[property: JsonPropertyName("total_matches")] int                  Total,
 	[property: JsonPropertyName("returned")]      int                  Count,
 	[property: JsonPropertyName("page_token")]    string?              PageToken,

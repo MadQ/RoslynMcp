@@ -29,6 +29,21 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 	public bool Declares { get; init; }
 	
 	/// <summary>
+	///     What a tool found at the place beside its line, for the tools that say it: the syntax
+	///     context of a semantic search's match, the decoded value of a string literal.
+	/// </summary>
+	public string? Context { get; init; }
+	
+	/// <inheritdoc cref="Context"/>
+	public string? Value { get; init; }
+	
+	/// <summary>
+	///     Whether the answer says the column too. A line is one place to read, so most answers
+	///     leave it out; two string literals on one line are two places.
+	/// </summary>
+	public bool ColumnMatters { get; init; }
+	
+	/// <summary>
 	///     The place a location is, with its path relative to <paramref name="rootPath"/>. A
 	///     location that is in no syntax tree (metadata, a file the compilation does not hold) keeps
 	///     the path and line it reports and has no text and no declaration.
@@ -77,8 +92,11 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 	/// <summary>
 	///     The places as an answer shows them: by file, and within a file by the declaration each
 	///     is in, as a text search groups its hits. The places come sorted, so the groups are runs.
+	///     <paramref name="sayDeclares"/> marks a place that is its declaration's own name, for the
+	///     tools whose places can be one: a search by pattern finds a name where it is declared, a
+	///     search for references or callers does not.
 	/// </summary>
-	public static SearchFileGroup[] Group(IReadOnlyList<SourcePlace> places)
+	public static SearchFileGroup[] Group(IReadOnlyList<SourcePlace> places, bool sayDeclares)
 	{
 		var files = new List<SearchFileGroup>();
 		
@@ -92,8 +110,17 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 				var declaration = places[index].Declaration;
 				var lines       = new List<SearchHit>();
 				
-				for(; index < places.Count && places[index].File == file && places[index].Declaration == declaration; index++)
-					lines.Add(new(places[index].Line, places[index].Text, null));
+				for(; index < places.Count && places[index].File == file && places[index].Declaration == declaration; index++) {
+					
+					var place = places[index];
+					
+					lines.Add(new(place.Line, place.Text, sayDeclares && place.Declares ? true : null) {
+						
+						Column  = place.ColumnMatters ? place.Column : null,
+						Context = place.Context,
+						Value   = place.Value,
+					});
+				}
 				
 				members.Add(declaration is { } found
 					? new($"{found.Kind} {found.Name}".TrimEnd(), $"{found.FirstLine}-{found.EndLine}", $"{found.StartLine}:{found.StartColumn}", [..lines])

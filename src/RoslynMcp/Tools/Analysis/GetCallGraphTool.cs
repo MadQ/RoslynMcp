@@ -15,7 +15,9 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		"Returns all methods directly invoked within the named method body — answers 'what does this method depend on?' without reading it. " +
 		"Walks the Roslyn IOperation tree for precise semantic results: finds actual invocations, not text patterns. " +
 		"Includes constructors, extension methods, property accessor calls, and event member references made within the body. " +
-		"Each result shows the fully qualified callee name, file path of the call site, and 1-based line number. " +
+		"The answer names the method's file, its lines ('108-158': pass them to roslyn_read_file to read the whole method) and where its node starts " +
+		"('112:2': the line and column roslyn_replace_in_code takes) once, and each call as the fully qualified callee, the 1-based line and the text of that line, " +
+		"so a call can be judged without reading the method. " +
 		"Provide containingType when multiple methods share the same name. " +
 		"Results are paged; pass page_token from a previous response to get subsequent pages. " +
 		"Pair with roslyn_find_callers to trace the full call chain in both directions.")]
@@ -74,6 +76,10 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 		
 		var allCalls = new List<CallSiteEntry>();
 		
+		// Where the method is: the first declaration with a body. Said once, since every call is
+		// in it (#487); a call in another part of the method names its own file.
+		DeclaredAt? declared = null;
+		
 		foreach(var syntaxRef in symbol.DeclaringSyntaxReferences) {
 			
 			var syntaxNode    = await syntaxRef.GetSyntaxAsync(cancellationToken);
@@ -89,6 +95,14 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 			if(operation is null)
 				continue;
 			
+			var text = syntaxNode.SyntaxTree.GetText(cancellationToken);
+			var name = symbol.Locations.FirstOrDefault(location => location.SourceTree == syntaxNode.SyntaxTree && syntaxNode.Span.Contains(location.SourceSpan))
+				?? syntaxNode.GetLocation()
+			;
+			var here = SourcePlace.Of(name, rootPath, cancellationToken).AsDeclared();
+			
+			declared ??= here;
+			
 			foreach(var descendant in operation.DescendantsAndSelf()) {
 				
 				ISymbol? callee = descendant switch {
@@ -103,37 +117,46 @@ internal sealed class GetCallGraphTool : RoslynMcpTool
 				if(callee is null)
 					continue;
 				
-				var loc  = descendant.Syntax.GetLocation();
-				var span = loc.GetLineSpan();
-				var file = span.Path is { Length: > 0 } p
-					? Path.GetRelativePath(rootPath, p)
-					: "?";
+				// An operation's syntax is in the tree of the declaration it was read from.
+				var start = descendant.Syntax.GetLocation().GetLineSpan().StartLinePosition;
 				
 				allCalls.Add(new CallSiteEntry(
 					Callee: FormatSymbolName(callee),
-					File:   file,
-					Line:   span.StartLinePosition.Line + 1
-				));
+					Line:   start.Line + 1,
+					Text:   SearchFilesTool.Excerpt(text.ToString(text.Lines[start.Line].Span), start.Character)
+				)
+				{
+					File = here.File == declared.File ? null : here.File
+				});
 			}
 		}
 		
+		// The calls of the file the answer names first, then those of any other part.
 		var allResults = allCalls
-			.OrderBy(c => c.File)
+			.OrderBy(c => c.File ?? "", StringComparer.Ordinal)
 			.ThenBy(c => c.Line)
 			.ToArray()
 		;
 		
-		var shape  = PageShape(FormatSymbolName(symbol), AdhocCaution(projectPath));
+		var shape  = PageShape(FormatSymbolName(symbol), declared, AdhocCaution(projectPath));
 		var result = PaginateAndStore(allResults, ref skip, take, shape);
+		
+		// What the file took when every call named it, as the answer had it before (#487): the
+		// figure the other tools' entries call flat.
+		if(declared is not null && result.Items.Length > 0)
+			scope.Record($"{result.Items.Length} call(s) under 1 declaration; flat ~{result.Items.Sum(call => 4 + (call.File ?? declared.File).Length + call.Line.ToString().Length)} chars");
 		
 		return scope.Outcome(result.Total == 0 ? "no outgoing calls" : $"{result.Items.Length}/{result.Total} call(s)", shape(result));
 	}
 	
 	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
 	// the function the pagination cache holds never captures a symbol or the compilation.
-	static Func<PaginatedResult<CallSiteEntry>, object> PageShape(string method, string? caution)
+	static Func<PaginatedResult<CallSiteEntry>, object> PageShape(string method, DeclaredAt? declared, string? caution)
 		=> page => new GetCallGraphResult(
 			Method:     method,
+			File:       declared?.File,
+			Lines:      declared?.Lines,
+			At:         declared?.At,
 			TotalCalls: page.Total,
 			Skip: page.Skip, Take: page.Take,
 			Calls:     page.Items,
