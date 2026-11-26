@@ -1094,6 +1094,21 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     compilation (see <see cref="FindSyntaxTree"/>). <c>found_in</c> lists the files, not projects: a
 	///     different projectPath would not help, a longer filePath does.
 	/// </summary>
+	// How many of the files a path ends are named in the answer that says it is ambiguous.
+	const int MaxAmbiguousFiles = 5;
+	
+	/// <summary>
+	///     The answer for a file path that ends the paths of several files under the workspace
+	///     root (#511), with the files: the counterpart of <see cref="AmbiguousSourceFileError"/>
+	///     for a lookup on disk. At most <see cref="MaxAmbiguousFiles"/> are named.
+	/// </summary>
+	protected static PathErrorResult AmbiguousFileError(string filePath, string[] candidates)
+		=> new($"'{filePath}' matches {(candidates.Length == MaxAmbiguousFiles ? "at least " : "")}{candidates.Length} files under the workspace root.", FileName: filePath, FoundIn: candidates)
+		{
+			Error = "ambiguous_file",
+			Hint  = "Pass filePath relative to the workspace root, or enough of its directories to name one file (e.g. 'src/App/App.csproj')."
+		};
+	
 	protected static PathErrorResult AmbiguousSourceFileError(string filePath, string[] candidates)
 		=> new($"'{filePath}' matches {candidates.Length} files in the project.", FileName: filePath, FoundIn: candidates)
 		{
@@ -1578,10 +1593,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     Resolves a relative file path to a full path. Tries <paramref name="rootPath"/> first;
 	///     if the file isn't found there, walks subdirectories looking for a suffix match — skipping
 	///     ignored directories (see <see cref="IgnoreRules.IsPrunedFromListing"/>) unless the path
-	///     names one. Returns null if the file can't be found.
+	///     names one. Returns null if the file can't be found, and then says in
+	///     <paramref name="ambiguous"/> when that is because the path ends several files' paths
+	///     (#511): "not found" for a path that is there twice sent an agent looking for a typo.
+	///     Several files that share only the name are not that: the path names none of them.
 	/// </summary>
-	protected string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary)
+	protected string? ResolveFilePath(string filePath, string rootPath, SecurityBoundary boundary, out PathErrorResult? ambiguous)
 	{
+		ambiguous = null;
+		
 		try {
 			
 			if(Path.IsPathRooted(filePath)) {
@@ -1607,9 +1627,10 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			var suffix        = Path.DirectorySeparatorChar + normalized
 			;
 			var fileName      = Path.GetFileName(normalized);
-			string? suffixHit = null;
 			string? nameHit   = null;
-			var     ambiguous = false;
+			
+			// The files the path ends. Two make it ambiguous; a few more are kept to name them.
+			var suffixHits = new List<string>();
 			
 			var     rules     = IgnoreRules.ForRoot(rootPath, logger);
 			var     named     = NamedDirectories(normalized, anchorLeadingSegments: false);
@@ -1623,9 +1644,10 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
 			);
 			
-			// Deliberately not capped: stopping early would report a match as unique without
+			// Not stopped at the first match: that would report a match as unique without
 			// having seen the rest, and uniqueness is the whole point of the checks below. The
-			// pruned walk is what bounds the cost.
+			// pruned walk is what bounds the cost. It stops once it has enough files to name in
+			// the ambiguity it has already found.
 			foreach(var candidate in candidates) {
 				
 				try {
@@ -1634,13 +1656,10 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
 						
-						if(suffixHit is not null) {
-							
-							ambiguous = true;
-							break;
-						}
+						suffixHits.Add(candidate);
 						
-						suffixHit = candidate;
+						if(suffixHits.Count == MaxAmbiguousFiles)
+							break;
 					}
 					else if(string.Equals(Path.GetFileName(candidate), fileName, StringComparison.OrdinalIgnoreCase)) {
 						
@@ -1655,9 +1674,16 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				}
 			}
 			
-			if(!ambiguous && suffixHit is not null)
+			if(suffixHits is [var only])
 				
-				return suffixHit;
+				return only;
+			
+			if(suffixHits.Count > 1) {
+				
+				ambiguous = AmbiguousFileError(filePath, [..suffixHits.Select(hit => Path.GetRelativePath(rootPath, hit)).Order(StringComparer.Ordinal)]);
+				
+				return null;
+			}
 			
 			if(nameHit is not null)
 				

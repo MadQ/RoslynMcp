@@ -51,7 +51,7 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 		foreach(var filePath in paths) {
 			
 			var normalized = NormalizePath(filePath);
-			var fullPath   = ResolveFilePath(filePath, rootPath, boundary);
+			var fullPath   = ResolveFilePath(filePath, rootPath, boundary, out var ambiguousOnDisk);
 			
 			if(fullPath is not null) {
 				
@@ -123,7 +123,11 @@ internal sealed class GetLineCountTool : RoslynMcpTool
 				continue;
 			}
 			
-			results.Add(new LineCountEntry(filePath, null, "file not found on disk"));
+			// A C# file was looked for in the compilation above, where a project may hold one
+			// of the files a path ends; for any other file the files on disk are all there is.
+			results.Add(new LineCountEntry(filePath, null, ambiguousOnDisk is { FoundIn: { } several }
+				? $"ambiguous: matches {string.Join(", ", several)}"
+				: "file not found on disk"));
 		}
 		
 		var total      = results.Count;

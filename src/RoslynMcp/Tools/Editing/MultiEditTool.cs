@@ -136,11 +136,13 @@ internal sealed class MultiEditTool : RoslynMcpTool
 				continue;
 			}
 			
-			var fullPath = ResolveFilePath(edit.FilePath, rootPath, boundary);
+			var fullPath = ResolveFilePath(edit.FilePath, rootPath, boundary, out var ambiguousFile);
 			
 			if(fullPath is null) {
 				
-				outcomes[index] = Failed($"File not found: {edit.FilePath}", null);
+				outcomes[index] = ambiguousFile is not null
+					? Failed(ambiguousFile.Message ?? "ambiguous_file", ambiguousFile)
+					: Failed($"File not found: {edit.FilePath}", null);
 				continue;
 			}
 			

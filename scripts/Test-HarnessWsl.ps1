@@ -156,10 +156,32 @@ fi
 
 mkdir -p "$tree"
 
+# Linked git worktrees inside the working tree (.claude/worktrees/<name>, say) are not copied:
+# each is a second checkout of everything, and without the .git directory, which is not copied
+# either, the server cannot tell that one is a worktree and stays out of it (#511). Git records
+# them as the Windows path of the .git file at each worktree's root. A copy an earlier run made
+# is removed, since rsync leaves an excluded directory alone on both sides.
+worktrees=()
+
+for record in "$src"/.git/worktrees/*/gitdir; do
+    [ -f "$record" ] || continue
+    marker="$(wslpath -u "$(tr -d '\r\n' < "$record")" 2>/dev/null)" || continue
+    worktree="$(dirname "$marker")"
+
+    case "$worktree" in
+        "$src"/*)
+            relative="${worktree#"$src"/}"
+            worktrees+=(--exclude "/$relative/")
+            rm -rf "$tree/$relative"
+            ;;
+    esac
+done
+
 # --delete removes files that no longer exist in the working tree. Excluded directories are
 # left alone on both sides, so the Linux bin/ and obj/ survive for the next incremental build.
 rsync -a --delete \
     --exclude '.git/' --exclude '.vs/' --exclude 'bin/' --exclude 'obj/' --exclude 'publish/' \
+    ${worktrees[@]+"${worktrees[@]}"} \
     "$src/" "$tree/"
 
 cd "$tree"

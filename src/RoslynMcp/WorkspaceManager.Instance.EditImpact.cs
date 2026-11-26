@@ -134,6 +134,14 @@ internal sealed partial class WorkspaceManager
 					
 					return false;
 				
+				// A linked worktree below the root is another checkout of the repository, usually
+				// another session's: every save there was an unknown .cs or project file here, and
+				// so a full reload (#511). It is this workspace's business only when a project
+				// reaches into it, and that shows in what the solution has loaded from it.
+				if(ignoreRules.LinkedWorktreeOf(fullPath) is { } worktree && !LoadsFrom(solution, worktree))
+					
+					return false;
+				
 				var extension = Path.GetExtension(fullPath);
 				
 				if(extension.Equals(".cs", StringComparison.OrdinalIgnoreCase)) {
@@ -172,6 +180,25 @@ internal sealed partial class WorkspaceManager
 						
 						return true;
 					}
+				}
+				
+				return false;
+			}
+			
+			// Whether the solution holds a project file or a document of any kind under a
+			// directory. Asked only for a change inside a linked worktree, so the pass over the
+			// documents is not on the path of an ordinary edit.
+			static bool LoadsFrom(Solution solution, string directory)
+			{
+				foreach(var project in solution.Projects) {
+					
+					if(project.FilePath is { } projectFile && SecurityBoundary.IsUnderDirectory(projectFile, directory))
+						
+						return true;
+					
+					foreach(var document in project.Documents.Concat<TextDocument>(project.AdditionalDocuments).Concat(project.AnalyzerConfigDocuments))
+						if(document.FilePath is { } file && SecurityBoundary.IsUnderDirectory(file, directory))
+							return true;
 				}
 				
 				return false;

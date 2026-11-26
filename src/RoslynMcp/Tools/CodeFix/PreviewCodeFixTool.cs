@@ -56,7 +56,10 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		if(!TryResolveFileContext(projectPath, out var rootPath, out var boundary, out var resolveError))
 			
 			return scope.Error(resolveError);
-		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
+		var fullPath = ResolveFilePath(filePath, rootPath, boundary, out var ambiguousFile);
+		
+		if(ambiguousFile is not null)
+			return scope.Error(ambiguousFile);
 		
 		if(fullPath is null)
 			return scope.Failed("file not found", new PreviewCodeFixResult(

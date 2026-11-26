@@ -73,7 +73,12 @@ internal sealed class LocalHistoryTool : RoslynMcpTool
 				
 				return resolveError;
 			
-			absolutePath = ResolveFilePath(filePath, rootPath, boundary);
+			absolutePath = ResolveFilePath(filePath, rootPath, boundary, out var ambiguousFile);
+			
+			// Without a path the list is every file's: an ambiguous one must not widen it to that.
+			if(ambiguousFile is not null)
+				
+				return ambiguousFile;
 		}
 		
 		else if(token is not null) {

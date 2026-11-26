@@ -113,11 +113,12 @@ internal sealed partial class WorkspaceManager
 		}
 		
 		// Whether the loading walk reaches a path: it lies under the root, and no directory
-		// between the two is one the walk stays out of (an excluded name, a hidden or system
-		// directory, or a link). A directory that cannot be asked counts as one it stays out of.
+		// between the two is one the walk stays out of (an excluded name, a linked worktree, a
+		// hidden or system directory, or a link). A directory that cannot be asked counts as one
+		// it stays out of.
 		bool IsInLoadedTree(string path)
 		{
-			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path))
+			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path) || ignoreRules.IsInLinkedWorktree(path))
 				
 				return false;
 			
@@ -203,6 +204,9 @@ internal sealed partial class WorkspaceManager
 				(ref FileSystemEntry directory) =>
 					(directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0
 					|| ignoreRules.IsExcluded(directory.FileName)
+					// A linked worktree below the root is a second checkout: loaded, it would
+					// declare every type of the tree twice (#511).
+					|| ignoreRules.IsLinkedWorktree(ref directory)
 			);
 		}
 		

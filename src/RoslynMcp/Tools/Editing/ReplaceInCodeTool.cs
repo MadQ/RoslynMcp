@@ -72,7 +72,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			return scope.Error(resolveError);
 		
-		var fullPath = ResolveFilePath(filePath, rootPath, boundary);
+		var fullPath = ResolveFilePath(filePath, rootPath, boundary, out var ambiguousFile);
+		
+		if(ambiguousFile is not null)
+			
+			return scope.Error(ambiguousFile);
 		
 		if(fullPath is null)
 			
