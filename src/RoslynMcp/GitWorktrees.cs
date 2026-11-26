@@ -21,12 +21,14 @@ namespace RoslynMcp;
 ///         elsewhere). Only files named <c>gitdir</c> and <c>commondir</c> are read there, each
 ///         bounded, and nothing of them is returned: they yield directories below the root to
 ///         stay out of, and a wrong one costs a directory not listed. A path that leads to
-///         another machine is not followed.
+///         another machine than the root's own is not followed.
 ///     </para>
 ///     <para>
 ///         Worktrees are made while a session runs, so the answer is never fixed for the life
-///         of a workspace: <see cref="For"/> checks the records again, every time for a call
-///         that lists and at most once a second for the questions a file event asks.
+///         of a workspace: <see cref="For"/> checks the records again. Every time, for a call
+///         that lists and wherever a late answer would stay wrong (a file added to an
+///         AdhocWorkspace is not taken out again); at most once a second where it would only
+///         be late (a reload flagged for a save in a worktree made a moment ago).
 ///     </para>
 /// </summary>
 internal static class GitWorktrees
@@ -177,7 +179,7 @@ internal static class GitWorktrees
 				// A file: this directory is a linked worktree or a submodule, and the file says
 				// where its git directory is. A worktree's git directory names the repository's
 				// own in "commondir"; a submodule's is a repository of its own.
-				if(GitDirectoryOf(entry) is not { } gitDirectory)
+				if(GitDirectoryOf(entry, rootPath) is not { } gitDirectory)
 					
 					return null;
 				
@@ -186,7 +188,7 @@ internal static class GitWorktrees
 					? Path.GetFullPath(Path.Combine(gitDirectory, FileReader.ReadAllText(commonFile, FileReader.ConfigLimit).Trim()))
 					: gitDirectory;
 				
-				return IsOnAnotherMachine(common) ? null : Path.Combine(common, "worktrees");
+				return IsOnAnotherMachine(common, rootPath) ? null : Path.Combine(common, "worktrees");
 			}
 		}
 		catch(Exception ex) when(IsUnreadable(ex)) {
@@ -202,24 +204,52 @@ internal static class GitWorktrees
 		=> ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException
 	;
 	
-	// A UNC path. The content of a ".git" file decides where the records are looked for, and a
-	// tree that was unpacked from somewhere must not make the server call a host of its choosing
-	// at every lookup. The extended-length form of a local path ("\\?\C:\…") is not one.
-	static bool IsOnAnotherMachine(string path)
+	// A UNC path on another share than the workspace root's own. The content of a ".git" file
+	// decides where the records are looked for, and a tree that was unpacked from somewhere must
+	// not make the server call a host of its choosing at every lookup. A repository that itself
+	// lives on a share (\\server\share\repo, \\wsl.localhost\Ubuntu\…) has all its records there,
+	// and those are followed.
+	static bool IsOnAnotherMachine(string path, string rootPath)
+		=> ShareOf(path) is { } share && !string.Equals(share, ShareOf(rootPath), StringComparison.OrdinalIgnoreCase)
+	;
+	
+	// The server and share a UNC path starts with, as "server\share"; null for a local path, of
+	// which the extended-length form ("\\?\C:\…") is one.
+	static string? ShareOf(string path)
 	{
-		if(path.Length < 2 || !IsSeparator(path[0]) || !IsSeparator(path[1]))
+		if(path.Length < 3 || !IsSeparator(path[0]) || !IsSeparator(path[1]))
 			
-			return false;
+			return null;
 		
-		return !(path.StartsWith(@"\\?\", StringComparison.Ordinal) || path.StartsWith(@"\\.\", StringComparison.Ordinal))
-			|| path.AsSpan(4).StartsWith("UNC", StringComparison.OrdinalIgnoreCase);
+		var rest = path.AsSpan(2);
+		
+		if(rest.Length >= 2 && rest[0] is '?' or '.' && IsSeparator(rest[1])) {
+			
+			rest = rest[2..];
+			
+			if(!rest.StartsWith("UNC", StringComparison.OrdinalIgnoreCase))
+				
+				return null;
+			
+			rest = rest[3..].TrimStart("\\/");
+		}
+		
+		var server = rest.IndexOfAny('\\', '/');
+		
+		if(server < 0)
+			
+			return rest.ToString();
+		
+		var share = rest[(server + 1)..].IndexOfAny('\\', '/');
+		
+		return (share < 0 ? rest : rest[..(server + 1 + share)]).ToString().Replace('/', '\\');
 		
 		static bool IsSeparator(char c) => c is '\\' or '/';
 	}
 	
 	// The directory a ".git" file points to: its one line is "gitdir: <path>", absolute or
 	// relative to the file's directory.
-	static string? GitDirectoryOf(string gitFile)
+	static string? GitDirectoryOf(string gitFile, string rootPath)
 	{
 		const string prefix = "gitdir:";
 		
@@ -231,11 +261,13 @@ internal static class GitWorktrees
 		
 		var target = line[prefix.Length..].Trim().ToString();
 		
-		if(target.Length == 0 || IsOnAnotherMachine(target))
+		if(target.Length == 0)
 			
 			return null;
 		
-		return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(gitFile)!, target));
+		var directory = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(gitFile)!, target));
+		
+		return IsOnAnotherMachine(directory, rootPath) ? null : directory;
 	}
 	
 	/// <summary>
@@ -302,7 +334,7 @@ internal static class GitWorktrees
 				if(++count > maxWorktrees)
 					break;
 				
-				if(MarkerOf(record) is not { } marker)
+				if(MarkerOf(record, rootPath) is not { } marker)
 					continue;
 				
 				// A record outlives its worktree until git prunes it, and the directory may
@@ -334,7 +366,7 @@ internal static class GitWorktrees
 	
 	// The ".git" file one record names, at the root of its worktree; null when the record
 	// cannot be read or names another machine.
-	static string? MarkerOf(DirectoryInfo record)
+	static string? MarkerOf(DirectoryInfo record, string rootPath)
 	{
 		try {
 			
@@ -346,12 +378,14 @@ internal static class GitWorktrees
 			
 			var recorded = FileReader.ReadAllText(file, FileReader.ConfigLimit).Trim();
 			
-			if(recorded.Length == 0 || IsOnAnotherMachine(recorded))
+			if(recorded.Length == 0)
 				
 				return null;
 			
 			// Absolute, or relative to the record's directory (git's worktree.useRelativePaths).
-			return Path.GetFullPath(Path.Combine(record.FullName, recorded));
+			var marker = Path.GetFullPath(Path.Combine(record.FullName, recorded));
+			
+			return IsOnAnotherMachine(marker, rootPath) ? null : marker;
 		}
 		catch(Exception ex) when(IsUnreadable(ex)) {
 			

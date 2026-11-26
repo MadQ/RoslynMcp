@@ -233,11 +233,9 @@ static class WorktreeBoundaryTests
 				async Task<string[]> TypesAsync() => [
 					..((await Call("roslyn_list_types", new { projectPath = adhoc.Dir }))?["types"]?.AsArray() ?? []).Select(type => type!.GetValue<string>())];
 				
+				// The record and the file with nothing between them, as git writes them: a file
+				// added on what the worktrees were a moment ago would stay a document.
 				LinkWorktree(adhoc, "late", "trees/late");
-				
-				// A file event takes an answer about the worktrees that is up to a second old.
-				await Task.Delay(1200);
-				
 				adhoc.Write("trees/late/Late.cs", "class Late { }\n");
 				adhoc.Write("Fresh.cs", "class Fresh { }\n");
 				

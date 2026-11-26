@@ -118,7 +118,7 @@ internal sealed partial class WorkspaceManager
 		// it stays out of.
 		bool IsInLoadedTree(string path)
 		{
-			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path) || GitWorktrees.For(rootPath, fresh: false).Of(path) is not null)
+			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path) || GitWorktrees.For(rootPath, fresh: true).Of(path) is not null)
 				
 				return false;
 			
@@ -281,6 +281,17 @@ internal sealed partial class WorkspaceManager
 					return;
 				}
 				
+				// A file that appears in a linked worktree below the root is another checkout's
+				// copy (#511): the load does not walk there, and as a document it would declare
+				// its types a second time. One that is a document already keeps getting its text.
+				// Before the link is followed: a link in a worktree is that checkout's as well.
+				// The worktrees are asked for as they are now, not as they were a moment ago:
+				// git writes a worktree's record and its files in the same instant, and a file
+				// added on an old answer would stay. Only a file that is no document yet asks.
+				if(adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && GitWorktrees.For(rootPath, fresh: true).Of(path) is not null)
+					
+					return;
+				
 				if(path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)
 					&& adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty
 					&& links.TargetOf(path) is { } target) {
@@ -308,13 +319,6 @@ internal sealed partial class WorkspaceManager
 					
 					return;
 				}
-				
-				// A file that appears in a linked worktree below the root is another checkout's
-				// copy (#511): the load does not walk there, and as a document it would declare
-				// its types a second time. One that is a document already keeps getting its text.
-				if(adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && GitWorktrees.For(rootPath, fresh: false).Of(path) is not null)
-					
-					return;
 				
 				AddOrUpdateDocument(adhocWorkspace, projectId, path);
 			}
