@@ -566,6 +566,30 @@ internal sealed class BuildTool : RoslynMcpTool
 	{
 		var results = new List<(DiagnosticItem Item, string? Context)>();
 		
+		// MSBuild names a file by the path the build reached it by, which is the real one where
+		// the workspace root is reached through a link: on macOS the temporary directory
+		// /var/folders is a link to /private/var/folders, and a build started in a linked
+		// directory on Linux prints the directory it leads to (#516). Such a path is under the
+		// root's real path and not under the root, and came out as '../../../private/var/…':
+		// no file any other tool names, and none the workspace reads as its own. It is put
+		// under the root first. Asked for once, and only when a path needs it.
+		var realRoot = new Lazy<string?>(() => FileIdentity.FinalPath(rootPath));
+		
+		string? Relative(string file)
+		{
+			try {
+				
+				if(Path.IsPathRooted(file) && !SecurityBoundary.IsUnderDirectory(file, rootPath)
+				   && realRoot.Value is { } real && SecurityBoundary.IsUnderDirectory(file, real))
+					file = Path.Combine(rootPath, Path.GetRelativePath(real, file));
+			}
+			catch(Exception ex) when(ex is ArgumentException or NotSupportedException) {
+				// A path that is none is named as the build printed it.
+			}
+			
+			return TryMakeRelative(file, rootPath);
+		}
+		
 		foreach(var raw in output.Split('\n')) {
 			
 			var line = raw.Trim();
@@ -587,7 +611,7 @@ internal sealed class BuildTool : RoslynMcpTool
 				results.Add((new DiagnosticItem(
 					Code:     code,
 					Severity: m.Groups["severity"].Value.ToLowerInvariant(),
-					File:     TryMakeRelative(m.Groups["file"].Value.Trim(), rootPath),
+					File:     Relative(m.Groups["file"].Value.Trim()),
 					Line:     int.Parse(m.Groups["line"].Value),
 					Column:   int.Parse(m.Groups["col"].Value),
 					Message:  m.Groups["message"].Value.Trim()
@@ -615,7 +639,7 @@ internal sealed class BuildTool : RoslynMcpTool
 			results.Add((new DiagnosticItem(
 				Code:     projCode,
 				Severity: m.Groups["severity"].Value.ToLowerInvariant(),
-				File:     TryMakeRelative(m.Groups["file"].Value.Trim(), rootPath),
+				File:     Relative(m.Groups["file"].Value.Trim()),
 				Line:     0,
 				Column:   0,
 				Message:  m.Groups["message"].Value.Trim()
