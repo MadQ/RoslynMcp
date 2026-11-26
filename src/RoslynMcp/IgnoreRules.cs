@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using System.IO.Enumeration;
 
 namespace RoslynMcp;
 
@@ -31,10 +30,10 @@ namespace RoslynMcp;
 ///     </list>
 ///     Beside the tiers: the linked git worktrees below the root (<see cref="GitWorktrees"/>,
 ///     #511), each a second checkout of the whole tree. <see cref="IsPrunedFromListing"/> leaves
-///     them out, and so does an AdhocWorkspace's own search for sources
-///     (<see cref="IsLinkedWorktree"/>, <see cref="IsInLinkedWorktree"/>). They are not in
-///     <see cref="IsNeverInput"/>: a project whose items reach into one does compile those
-///     files, and what a project compiles is MSBuild's to say.
+///     them out, as they were when the rules were asked for. A loaded workspace keeps its rules
+///     while worktrees come and go, so it asks <see cref="GitWorktrees.For"/> itself. They are
+///     not in <see cref="IsNeverInput"/>: a project whose items reach into one does compile
+///     those files, and what a project compiles is MSBuild's to say.
 /// </remarks>
 internal sealed class IgnoreRules
 {
@@ -50,12 +49,12 @@ internal sealed class IgnoreRules
 		: StringComparer.OrdinalIgnoreCase;
 	
 	/// <summary>Rules with no configured names and no <c>.gitignore</c> — the built-in lists only.</summary>
-	public static readonly IgnoreRules BuiltIn = new([], [], [], "", []);
+	public static readonly IgnoreRules BuiltIn = new([], [], [], GitWorktrees.Below.None);
 	
-	// One entry per workspace root, revalidated against the .gitignore stamp and the worktree
-	// records' stamp on every lookup.
+	// One entry per workspace root, revalidated against the .gitignore stamp and the worktrees
+	// below the root on every lookup.
 	// Keyed with the file system's own case rule: on Linux /work/Foo and /work/foo are two roots.
-	static readonly Dictionary<string, (IgnoreRules Rules, string[] Configured, long GitIgnoreStamp, long WorktreeStamp)> cache = new(gitComparer);
+	static readonly Dictionary<string, (IgnoreRules Rules, string[] Configured, long GitIgnoreStamp, GitWorktrees.Below Worktrees)> cache = new(gitComparer);
 	static readonly Lock cacheLock = new();
 	
 	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> neverInput;
@@ -64,16 +63,16 @@ internal sealed class IgnoreRules
 	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> gitPaths;
 	readonly bool                                                  hasGitPaths;
 	
-	// The linked worktrees below the root, twice: relative to the root with forward slashes,
-	// as the listing walks ask, and as full paths in the root's own spelling, as the walks that
-	// start elsewhere under the root ask.
+	// The linked worktrees below the root, relative to it with forward slashes, as the listing
+	// walks ask. Matched as the anchored .gitignore entries are, since both are paths under
+	// the root that a walk from the root builds itself.
 	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> worktreePaths;
-	readonly string[]                                              worktreeRoots;
+	readonly bool                                                  hasWorktrees;
 	
-	IgnoreRules(string[] configuredNames, string[] gitIgnoredNames, string[] gitIgnoredPaths, string rootPath, string[] worktrees)
+	IgnoreRules(string[] configuredNames, string[] gitIgnoredNames, string[] gitIgnoredPaths, GitWorktrees.Below worktrees)
 	{
-		worktreePaths = Lookup([..worktrees.Select(relative => relative.Replace('\\', '/'))], gitComparer);
-		worktreeRoots = [..worktrees.Select(relative => Path.Combine(rootPath, relative))];
+		worktreePaths = Lookup(worktrees.RelativePaths, gitComparer);
+		hasWorktrees  = worktrees.RelativePaths.Length > 0;
 		
 		neverInput  = Lookup([..neverInputNames, ..configuredNames], StringComparer.OrdinalIgnoreCase);
 		excluded    = Lookup([..neverInputNames, ..buildOutputNames, ..configuredNames], StringComparer.OrdinalIgnoreCase);
@@ -97,23 +96,21 @@ internal sealed class IgnoreRules
 		var configured    = ProjectConfig.EffectiveIgnore(rootPath, logger);
 		var gitIgnorePath = Path.Combine(rootPath, ".gitignore");
 		var stamp         = GitIgnoreStamp(gitIgnorePath);
-		var records       = GitWorktrees.RecordsDirectory(rootPath);
-		var worktreeStamp = GitWorktrees.Stamp(records);
+		var worktrees     = GitWorktrees.For(rootPath, fresh: true);
 		
 		lock(cacheLock)
 			if(cache.TryGetValue(rootPath, out var cached)
 			   && cached.GitIgnoreStamp == stamp
-			   && cached.WorktreeStamp == worktreeStamp
+			   && ReferenceEquals(cached.Worktrees, worktrees)
 			   && ReferenceEquals(cached.Configured, configured))
 				
 				return cached.Rules;
 		
 		var (names, paths) = stamp == 0 ? (Names: [], Paths: []) : ReadGitIgnore(gitIgnorePath);
-		var worktrees      = worktreeStamp == 0 ? [] : GitWorktrees.Below(rootPath, records!);
-		var rules          = new IgnoreRules(configured, names, paths, rootPath, worktrees);
+		var rules          = new IgnoreRules(configured, names, paths, worktrees);
 		
 		lock(cacheLock)
-			cache[rootPath] = (rules, configured, stamp, worktreeStamp);
+			cache[rootPath] = (rules, configured, stamp, worktrees);
 		
 		return rules;
 	}
@@ -258,7 +255,7 @@ internal sealed class IgnoreRules
 			
 			return true;
 		
-		if(!hasGitPaths && worktreeRoots.Length == 0)
+		if(!hasGitPaths && !hasWorktrees)
 			
 			return false;
 		
@@ -269,38 +266,5 @@ internal sealed class IgnoreRules
 			: string.Concat(relativeDirectory, "/", name).Replace('\\', '/');
 		
 		return gitPaths.Contains(relative) || worktreePaths.Contains(relative);
-	}
-	
-	/// <summary>
-	///     Whether the directory a walk has reached is the root of a linked worktree below the
-	///     workspace root. For the walks that do not start at the root and so cannot ask by
-	///     relative path. The full path is built only when there is a worktree to compare with.
-	/// </summary>
-	public bool IsLinkedWorktree(ref FileSystemEntry directory)
-	{
-		if(worktreeRoots.Length == 0)
-			
-			return false;
-		
-		var fullPath = directory.ToFullPath();
-		
-		foreach(var root in worktreeRoots)
-			if(gitComparer.Equals(root, fullPath))
-				return true;
-		
-		return false;
-	}
-	
-	/// <summary>Whether <paramref name="fullPath"/> is a linked worktree below the workspace root, or lies in one.</summary>
-	public bool IsInLinkedWorktree(string fullPath) => LinkedWorktreeOf(fullPath) is not null;
-	
-	/// <summary>The root of the linked worktree below the workspace root that <paramref name="fullPath"/> is, or lies in; null when it is in none.</summary>
-	public string? LinkedWorktreeOf(string fullPath)
-	{
-		foreach(var root in worktreeRoots)
-			if(gitComparer.Equals(root, fullPath) || SecurityBoundary.IsUnderDirectory(fullPath, root))
-				return root;
-		
-		return null;
 	}
 }

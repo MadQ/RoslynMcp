@@ -159,18 +159,28 @@ mkdir -p "$tree"
 # Linked git worktrees inside the working tree (.claude/worktrees/<name>, say) are not copied:
 # each is a second checkout of everything, and without the .git directory, which is not copied
 # either, the server cannot tell that one is a worktree and stays out of it (#511). Git records
-# them as the Windows path of the .git file at each worktree's root. A copy an earlier run made
-# is removed, since rsync leaves an excluded directory alone on both sides.
+# them as the path of the .git file at each worktree's root: a Windows path, or one relative to
+# the record's directory (git's worktree.useRelativePaths). A copy an earlier run made is
+# removed, since rsync leaves an excluded directory alone on both sides. The path is made
+# canonical first: what is removed is named by a file's content, and a ".." in it must not
+# lead out of the copy.
 worktrees=()
+real_src="$(realpath -m "$src")"
 
 for record in "$src"/.git/worktrees/*/gitdir; do
     [ -f "$record" ] || continue
-    marker="$(wslpath -u "$(tr -d '\r\n' < "$record")" 2>/dev/null)" || continue
-    worktree="$(dirname "$marker")"
+    recorded="$(tr -d '\r\n' < "$record")"
+
+    case "$recorded" in
+        [A-Za-z]:*|/*|\\*) marker="$(wslpath -u "$recorded" 2>/dev/null)" || continue ;;
+        *)                 marker="$(dirname "$record")/$recorded" ;;
+    esac
+
+    worktree="$(realpath -m "$(dirname "$marker")")"
 
     case "$worktree" in
-        "$src"/*)
-            relative="${worktree#"$src"/}"
+        "$real_src"/*)
+            relative="${worktree#"$real_src"/}"
             worktrees+=(--exclude "/$relative/")
             rm -rf "$tree/$relative"
             ;;

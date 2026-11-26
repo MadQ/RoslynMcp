@@ -1089,11 +1089,6 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			Hint  = "This file exists in multiple loaded projects. Specify which .csproj to use as projectPath."
 		};
 	
-	/// <summary>
-	///     The <c>ambiguous_file</c> error for a <paramref name="filePath"/> that names several files of one
-	///     compilation (see <see cref="FindSyntaxTree"/>). <c>found_in</c> lists the files, not projects: a
-	///     different projectPath would not help, a longer filePath does.
-	/// </summary>
 	// How many of the files a path ends are named in the answer that says it is ambiguous.
 	const int MaxAmbiguousFiles = 5;
 	
@@ -1109,6 +1104,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			Hint  = "Pass filePath relative to the workspace root, or enough of its directories to name one file (e.g. 'src/App/App.csproj')."
 		};
 	
+	/// <summary>
+	///     The <c>ambiguous_file</c> error for a <paramref name="filePath"/> that names several files of one
+	///     compilation (see <see cref="FindSyntaxTree"/>). <c>found_in</c> lists the files, not projects: a
+	///     different projectPath would not help, a longer filePath does.
+	/// </summary>
 	protected static PathErrorResult AmbiguousSourceFileError(string filePath, string[] candidates)
 		=> new($"'{filePath}' matches {candidates.Length} files in the project.", FileName: filePath, FoundIn: candidates)
 		{

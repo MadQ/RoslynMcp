@@ -162,10 +162,12 @@ static class WorktreeBoundaryTests
 			// Another session saves a C# file in its worktree. Here that was an unknown source
 			// file under the root, and so a full reload, at every save. No project of this
 			// workspace has anything loaded from the worktree, so the change is not its business.
+			// The worktree is made here, after the workspace loaded, as a session makes one: the
+			// workspace must not answer from what was there when it was built.
 			// The control is a new file in the checkout: it must flag a reload, or the first half
 			// would pass with a watcher that saw nothing. Last of the project's tests, since it
 			// leaves that reload pending.
-			new("worktrees: a file saved in a worktree flags no reload, one saved in the checkout does", async () => {
+			new("worktrees: a file saved in a worktree made after the load flags no reload, one saved in the checkout does", async () => {
 				
 				// The answer leaves reload_pending out when nothing is pending; null is a call that failed.
 				async Task<bool?> PendingAsync()
@@ -180,7 +182,12 @@ static class WorktreeBoundaryTests
 					
 					return (false, $"FAIL  (a reload was pending before the test wrote anything: {(await Call("roslyn_check_drift", new { projectPath = fx.Csproj }))?.ToJsonString()})");
 				
-				fx.Write(".trees/wt/Saved.cs", "class Saved { }\n");
+				LinkWorktree(fx, "late", ".trees/late");
+				
+				// A file event takes an answer about the worktrees that is up to a second old.
+				await Task.Delay(1200);
+				
+				fx.Write(".trees/late/Saved.cs", "class Saved { }\n");
 				
 				// Well past the watcher's debounce of 300 ms.
 				await Task.Delay(1500);
@@ -216,6 +223,36 @@ static class WorktreeBoundaryTests
 					&& only?["file"]?.GetValue<string>() == "Thing.cs"
 					&& !diagnostics.ToJsonString().Contains("CS0101")
 					&& types?["types"]?.AsArray().Count == 1, new JsonArray(diagnostics?.DeepClone(), types?.DeepClone()));
+			}),
+			
+			// The same for a worktree made after the AdhocWorkspace loaded: a source file that
+			// appears in it is not added. The control is a file that appears in the checkout,
+			// which is: without it the first half would pass with a watcher that saw nothing.
+			new("worktrees: an AdhocWorkspace does not add a source that appears in a worktree made after the load", async () => {
+				
+				async Task<string[]> TypesAsync() => [
+					..((await Call("roslyn_list_types", new { projectPath = adhoc.Dir }))?["types"]?.AsArray() ?? []).Select(type => type!.GetValue<string>())];
+				
+				LinkWorktree(adhoc, "late", "trees/late");
+				
+				// A file event takes an answer about the worktrees that is up to a second old.
+				await Task.Delay(1200);
+				
+				adhoc.Write("trees/late/Late.cs", "class Late { }\n");
+				adhoc.Write("Fresh.cs", "class Fresh { }\n");
+				
+				string[] types = [];
+				
+				for(var attempt = 0; attempt < 40 && !types.Any(type => type.Contains("Fresh")); attempt++) {
+					
+					await Task.Delay(250);
+					
+					types = await TypesAsync();
+				}
+				
+				return types.Any(type => type.Contains("Fresh")) && !types.Any(type => type.Contains("Late"))
+					? (true, "PASS")
+					: (false, $"FAIL  (types: {string.Join(", ", types)})");
 			}),
 		};
 		

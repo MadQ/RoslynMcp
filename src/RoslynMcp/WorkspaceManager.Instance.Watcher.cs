@@ -347,7 +347,7 @@ internal sealed partial class WorkspaceManager
 		// project is walked the way the watch set watches it.
 		bool PruneFromWalk(ref FileSystemEntry directory)
 			=> ignoreRules.IsExcluded(directory.FileName)
-				|| (!isMSBuild && ((directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0 || ignoreRules.IsLinkedWorktree(ref directory)))
+				|| (!isMSBuild && ((directory.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0 || GitWorktrees.For(rootPath, fresh: false).IsRoot(ref directory)))
 		;
 		
 		void ScheduleDebounced(string fullPath, bool deleted = false)

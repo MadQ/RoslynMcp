@@ -118,7 +118,7 @@ internal sealed partial class WorkspaceManager
 		// it stays out of.
 		bool IsInLoadedTree(string path)
 		{
-			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path) || ignoreRules.IsInLinkedWorktree(path))
+			if(!SecurityBoundary.IsUnderDirectory(path, rootPath) || edits.IsUnderExcludedDirectory(path) || GitWorktrees.For(rootPath, fresh: false).Of(path) is not null)
 				
 				return false;
 			
@@ -197,6 +197,10 @@ internal sealed partial class WorkspaceManager
 				
 				return [];
 			
+			// Asked now and not taken from the rules the workspace was built with: worktrees are
+			// made while a session runs, and this walk runs again at every reload.
+			var worktrees = GitWorktrees.For(rootPath, fresh: true);
+			
 			return WorkspaceWalker.EnumerateFiles(
 				path,
 				searchPatterns,
@@ -206,7 +210,7 @@ internal sealed partial class WorkspaceManager
 					|| ignoreRules.IsExcluded(directory.FileName)
 					// A linked worktree below the root is a second checkout: loaded, it would
 					// declare every type of the tree twice (#511).
-					|| ignoreRules.IsLinkedWorktree(ref directory)
+					|| worktrees.IsRoot(ref directory)
 			);
 		}
 		
@@ -304,6 +308,13 @@ internal sealed partial class WorkspaceManager
 					
 					return;
 				}
+				
+				// A file that appears in a linked worktree below the root is another checkout's
+				// copy (#511): the load does not walk there, and as a document it would declare
+				// its types a second time. One that is a document already keeps getting its text.
+				if(adhocWorkspace.CurrentSolution.GetDocumentIdsWithFilePath(path).IsEmpty && GitWorktrees.For(rootPath, fresh: false).Of(path) is not null)
+					
+					return;
 				
 				AddOrUpdateDocument(adhocWorkspace, projectId, path);
 			}
