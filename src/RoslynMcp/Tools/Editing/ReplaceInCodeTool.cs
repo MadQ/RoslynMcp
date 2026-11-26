@@ -46,7 +46,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern, pass line and column, or set force=true to proceed. " +
 		"Supports dryRun=true to preview which nodes would be replaced without writing; the replacement is parsed and validated exactly as for a real write, so a passing dry run reflects the same syntax checks the write would run. " +
 		"Set verbose=true to also include each matched node's original_text in the response (omitted by default to save tokens; always included on error). " +
-		"A write also returns backup_token: pass it to roslyn_local_history (action: apply) to put the file back as it was before the edit."
+		"A write also returns backup_token, when the backup was saved: pass it to roslyn_local_history (action: apply) to put the file back as it was before the edit."
 	)]
 	public async Task<object> ReplaceInCode(
 		[Description("Relative path to the C# file from the workspace root.")] string filePath,
@@ -164,11 +164,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			if(!TryApplyEdit(projectPath, newSolution, out var applyError))
 				
-				return scope.Error(applyError);
+				return scope.Error(NamingBackup(applyError, backupToken));
 			
 			if(await TryRecoverTruncation(filePath, fullPath, projectPath, newBytes) is { } truncErr)
 				
-				return scope.Error(truncErr);
+				return scope.Error(NamingBackup(truncErr, backupToken));
 		}
 		else {
 			
@@ -179,10 +179,10 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				if(CheckForTruncation(filePath, fullPath, newText.Length) is { } truncErr)
 					
-					return scope.Error(truncErr);
+					return scope.Error(NamingBackup(truncErr, backupToken));
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-				return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
+				return scope.Error(NamingBackup(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)), backupToken));
 			}
 		}
 		

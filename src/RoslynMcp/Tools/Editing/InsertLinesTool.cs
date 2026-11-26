@@ -222,7 +222,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 			await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(resultText, FileWriter.Utf8NoBom));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or NotSupportedException) {
-			return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
+			return scope.Error(NamingBackup(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)), backupToken));
 		}
 		
 		// TryRecoverTruncation subsumes CheckForTruncation: it detects the same empty-file outcome
@@ -230,7 +230,7 @@ internal sealed class InsertLinesTool : RoslynMcpTool
 		// result of four bytes or fewer, report a truncation that recovery had already cleared.
 		if(await TryRecoverTruncation(filePath, fullPath, projectPath, resultBytes) is { } truncErr)
 			
-			return scope.Error(truncErr);
+			return scope.Error(NamingBackup(truncErr, backupToken));
 		
 		return scope.Outcome("inserted", new InsertLinesResult(true, insertIndex + 1, newLines.Length, Enumerable.Range(insertIndex + 1, newLines.Length), backupToken: backupToken));
 	}

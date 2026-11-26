@@ -31,7 +31,7 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 		"To replace a whole member or statement by its kind and name, use roslyn_replace_in_code; " +
 		"for inserting new lines without replacing existing content, use roslyn_insert_lines. " +
 		"Returns the number of replacements made and changed_line_ranges as inclusive { start, end } 1-based line ranges; start equals end for a single changed line. " +
-		"A write also returns backup_token: pass it to roslyn_local_history (action: apply) to put the file back as it was before the edit. " +
+		"A write also returns backup_token, when the backup was saved: pass it to roslyn_local_history (action: apply) to put the file back as it was before the edit. " +
 		"Literal patterns are matched case-sensitively and whitespace-exactly — verify the exact text with " +
 		"roslyn_read_file or roslyn_search_files before attempting a replacement if unsure of the content. " +
 		"Line endings in the replacement text are normalized to match the file's existing style by default (normalizeLineEndings=true). " +
@@ -189,12 +189,12 @@ internal sealed class ReplaceInFileTool : RoslynMcpTool
 			await workspace.ApplyTextChange(projectPath, fullPath, SourceText.From(newContent, FileWriter.Utf8NoBom));
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			return scope.Error(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)));
+			return scope.Error(NamingBackup(new ErrorResult($"Write failed — '{filePath}' may be in an inconsistent state: {ex.Message}.", BackupRecoveryHint(filePath)), backupToken));
 		}
 		
 		if(CheckForTruncation(filePath, fullPath, newContent.Length) is { } truncErr)
 			
-			return scope.Error(truncErr);
+			return scope.Error(NamingBackup(truncErr, backupToken));
 		
 		return scope.Outcome(plan.Detail, new ReplaceInFileResult(true, plan.MatchCount, plan.ChangedLines) { BackupToken = backupToken, Caution = modeCaution });
 	}
