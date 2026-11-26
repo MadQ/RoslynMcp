@@ -97,7 +97,8 @@ internal class SetupProjectCommand : CliCommand
 	// Prompts for the commit-worthy server settings and writes them to .madq_roslynmcp.json at
 	// the repo root — the file ProjectConfig discovers by walking up from each request's project
 	// path. Reruns preserve earlier choices (prompt defaults reflect the existing file) and any
-	// unknown keys in it. Returns whether the config file was written.
+	// unknown keys in it, and a rerun whose answers change nothing leaves the file as it is.
+	// Returns whether the repository has the config file after the run.
 	static bool ConfigureServerConfig(string repoRoot)
 	{
 		var configPath = Path.Combine(repoRoot, ProjectConfig.FileName);
@@ -148,6 +149,9 @@ internal class SetupProjectCommand : CliCommand
 				}
 			}
 		}
+		
+		// The file as it was read, to tell at the end whether the answers changed anything.
+		var before = exists && !parseFailed ? root.DeepClone() : null;
 		
 		// Current values drive the prompt defaults so a rerun preserves earlier choices.
 		var currentElicit = root["elicit"] is JsonValue elicitNode
@@ -389,6 +393,27 @@ internal class SetupProjectCommand : CliCommand
 		else if(codeActionsSection is null)
 			root[CodeActionConfig.SectionName] = section;
 		
+		var relativeConfig = Path.GetRelativePath(Environment.CurrentDirectory, configPath);
+		
+		// Ends with a line break, as a text file does and as an editor or a formatter leaves it.
+		var text = root.ToJsonString(new JsonSerializerOptions {
+			
+			WriteIndented = true,
+			Encoder       = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+		}) + Environment.NewLine;
+		
+		// The file already says what the answers come to: it is left byte for byte, its comments
+		// and formatting with it, and gets no backup (#505). It is committed, and a rerun that
+		// wrote it again showed as a change wherever its formatting was not the serializer's.
+		// Compared as parsed text on both sides, as in MergeHookEntry.
+		if(before is not null && JsonNode.DeepEquals(before, JsonNode.Parse(text))) {
+			
+			Console.WriteLine();
+			Console.WriteLine($"  ✓ Project server config is up to date: {relativeConfig}");
+			
+			return true;
+		}
+		
 		string? backupPath = null;
 		
 		if(exists) {
@@ -400,16 +425,7 @@ internal class SetupProjectCommand : CliCommand
 		// Atomic write: temp → final so a crash mid-write can't corrupt the config. An existing
 		// file keeps its permissions, and a config that is a symbolic link is written through.
 		// No PrivateWhenNew: this file is committed and shared, so it takes the usual mode.
-		FileWriter.ReplaceAtomic(
-			configPath,
-			FileWriter.Utf8NoBom.GetBytes(root.ToJsonString(new JsonSerializerOptions {
-				
-				WriteIndented = true,
-				Encoder       = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-			})),
-			AtomicReplace.FollowLink);
-		
-		var relativeConfig = Path.GetRelativePath(Environment.CurrentDirectory, configPath);
+		FileWriter.ReplaceAtomic(configPath, FileWriter.Utf8NoBom.GetBytes(text), AtomicReplace.FollowLink);
 		
 		Console.WriteLine();
 		Console.WriteLine(exists
@@ -449,7 +465,7 @@ internal class SetupProjectCommand : CliCommand
 	{
 		if(!File.Exists(hookFile)) {
 			
-			File.WriteAllText(hookFile, BuildFreshJson(hookCommand));
+			WriteHookFile(hookFile, BuildFreshJson(hookCommand));
 			
 			return (HookFileOutcome.Created, null);
 		}
@@ -464,7 +480,7 @@ internal class SetupProjectCommand : CliCommand
 		var backupPath = hookFile + ".roslynmcp.bak";
 		
 		File.Copy(hookFile, backupPath, overwrite: true);
-		File.WriteAllText(hookFile, merged ?? BuildFreshJson(hookCommand));
+		WriteHookFile(hookFile, merged ?? BuildFreshJson(hookCommand));
 		
 		return (HookFileOutcome.Updated, backupPath);
 	}
@@ -484,6 +500,11 @@ internal class SetupProjectCommand : CliCommand
 	// The hook file as it is written: indented, and ending with a line break, as a text file does
 	// and as an editor or a formatter would leave it.
 	static string HookFileText(JsonObject root) => root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
+	
+	// Written whole or not at all (temp file, then rename), so a crash mid-write cannot leave half
+	// of a committed file. An existing file keeps its permissions, and one that is a symbolic
+	// link is written through.
+	static void WriteHookFile(string path, string text) => FileWriter.ReplaceAtomic(path, FileWriter.Utf8NoBom.GetBytes(text), AtomicReplace.FollowLink);
 	
 	// The event the hook is registered for (#310). Copilot CLI takes guidance from a postToolUse
 	// hook, as additionalContext appended to the tool's result; a preToolUse hook can only decide
@@ -522,19 +543,10 @@ internal class SetupProjectCommand : CliCommand
 				root["hooks"] = hooksObj;
 			}
 			
-			// Remove any existing RoslynMcp entries (current or legacy command forms), then add
-			// one fresh. Matching by the whole invocation — not exact string equality — so a
-			// renamed command doesn't leave a stale duplicate behind.
+			// An entry a version before #310 left under preToolUse goes; under postToolUse there is
+			// one fresh entry afterwards, whatever was there (current or legacy command forms).
 			RemoveOurEntries(hooksObj, LegacyHookEvent);
-			RemoveOurEntries(hooksObj, HookEvent);
-			
-			if(hooksObj[HookEvent] is not JsonArray entries) {
-				
-				entries             = new JsonArray();
-				hooksObj[HookEvent] = entries;
-			}
-			
-			entries.Add(HookEntry(hookCommand));
+			UpsertOurEntry(hooksObj, hookCommand);
 			
 			var merged = HookFileText(root);
 			
@@ -561,21 +573,54 @@ internal class SetupProjectCommand : CliCommand
 		
 		for(var i = entries.Count - 1; i >= 0; i--) {
 			
-			if(entries[i] is not JsonObject entry)
+			if(!IsOurEntry(entries[i]))
 				continue;
 			
-			if(ToolCommand.IsOurCommandInvocation(entry["powershell"]?.GetValue<string>()) ||
-			   ToolCommand.IsOurCommandInvocation(entry["bash"]?.GetValue<string>())) {
-				
-				entries.RemoveAt(i);
-				removed = true;
-			}
+			entries.RemoveAt(i);
+			removed = true;
 		}
 		
 		if(entries.Count == 0)
 			hooksObj.Remove(eventName);
 		
 		return removed;
+	}
+	
+	// Matching by the whole invocation — not exact string equality — so a renamed command doesn't
+	// leave a stale duplicate behind.
+	static bool IsOurEntry(JsonNode? node)
+		=> node is JsonObject entry
+		&& (ToolCommand.IsOurCommandInvocation(entry["powershell"]?.GetValue<string>()) ||
+		    ToolCommand.IsOurCommandInvocation(entry["bash"]?.GetValue<string>()));
+	
+	// Leaves exactly one entry of RoslynMcp's under the current event: a fresh one where its first
+	// was, or at the end when there was none. In place, so that a file with somebody else's hook
+	// after RoslynMcp's keeps its order, and a rerun on it has nothing to write (#505).
+	static void UpsertOurEntry(JsonObject hooksObj, string hookCommand)
+	{
+		if(hooksObj[HookEvent] is not JsonArray entries) {
+			
+			entries             = new JsonArray();
+			hooksObj[HookEvent] = entries;
+		}
+		
+		// From the end, so that the index left over is that of the first entry removed: the
+		// entries before it are still where they were.
+		var first = -1;
+		
+		for(var i = entries.Count - 1; i >= 0; i--) {
+			
+			if(!IsOurEntry(entries[i]))
+				continue;
+			
+			entries.RemoveAt(i);
+			first = i;
+		}
+		
+		if(first < 0)
+			entries.Add(HookEntry(hookCommand));
+		else
+			entries.Insert(first, HookEntry(hookCommand));
 	}
 	
 	/// <summary>
@@ -609,7 +654,7 @@ internal class SetupProjectCommand : CliCommand
 				return "Removed";
 			}
 			
-			File.WriteAllText(legacyFile, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+			WriteHookFile(legacyFile, HookFileText(root));
 			
 			return "Removed the RoslynMcp hook from";
 		}

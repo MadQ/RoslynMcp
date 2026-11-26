@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
@@ -21,6 +22,12 @@ using System.Text.Json.Nodes;
 ///         indentation than the serializer's; a file from before #310 with the entry under the
 ///         old event, beside somebody else's hook; and a file that is not JSON.
 ///     </para>
+///     <para>
+///         The last two tests run the whole command as a process, because the server config,
+///         <c>.madq_roslynmcp.json</c>, is under the same rule and its logic reads the console:
+///         a repository whose two files already say what a rerun comes to must come out of it
+///         without a changed byte, and a config that does need a change must still get it.
+///     </para>
 /// </summary>
 static class ProjectHookSetupTests
 {
@@ -29,8 +36,6 @@ static class ProjectHookSetupTests
 	// The hook file as it is committed in a repository: two-space indentation, line feeds, a
 	// final line break. Not the serializer's output on Windows, which has CRLF.
 	const string Committed = "{\n  \"version\": 1,\n  \"hooks\": {\n    \"postToolUse\": [\n      {\n        \"type\": \"command\",\n        \"powershell\": \"madq-roslynmcp hook\",\n        \"bash\": \"madq-roslynmcp hook\",\n        \"timeoutSec\": 5\n      }\n    ]\n  }\n}\n";
-	
-	static Assembly? serverAssembly;
 	
 	internal static TestGroup Build(TestContext ctx)
 	{
@@ -126,6 +131,36 @@ static class ProjectHookSetupTests
 					: $"outcome {outcome}, backup {backup ?? "none"}, content: {text}";
 			}),
 			
+			// RoslynMcp's entry stays where it is. The merge used to take it out and append it, so
+			// a file with somebody else's hook after it was reordered by the first rerun: a change
+			// nobody asked for, in a committed file. With the current command in first place the
+			// file is unchanged; with a command form of an earlier version there ("dotnet
+			// roslynmcp hook") it is rewritten, and the new entry is still first.
+			Case("the entry keeps its place before somebody else's hook", () => {
+				
+				const string current = "{ \"version\": 1, \"hooks\": { \"postToolUse\": [ { \"type\": \"command\", \"powershell\": \"madq-roslynmcp hook\", \"bash\": \"madq-roslynmcp hook\", \"timeoutSec\": 5 }, { \"type\": \"command\", \"bash\": \"lint.sh\" } ] } }";
+				
+				var path = Path.Combine(dir, "first.json");
+				
+				File.WriteAllText(path, current);
+				
+				var (outcome, _) = Install(ctx, path);
+				
+				if(outcome != "Unchanged" || File.ReadAllText(path) != current)
+					return $"current command first: outcome {outcome}, content: {File.ReadAllText(path)}";
+				
+				File.WriteAllText(path, current.Replace("madq-roslynmcp hook", "dotnet roslynmcp hook"));
+				
+				(outcome, _) = Install(ctx, path);
+				
+				return outcome == "Updated"
+					&& Entries(path, "postToolUse") is [JsonObject ours, JsonObject other]
+					&& ours["bash"]?.GetValue<string>() == HookCommand
+					&& other["bash"]?.GetValue<string>() == "lint.sh"
+					? null
+					: $"earlier command first: outcome {outcome}, content: {File.ReadAllText(path)}";
+			}),
+			
 			// A file that is not JSON cannot be merged into, and it cannot be "unchanged" either:
 			// it is replaced by a fresh hook file, and the backup keeps what was there.
 			Case("a file that is not JSON is replaced, and kept in the backup", () => {
@@ -147,10 +182,68 @@ static class ProjectHookSetupTests
 			}),
 		};
 		
+		// The whole command, as a user reruns it, on a repository that has both of its files
+		// committed: the hook file, and a server config written by hand, with a comment and without
+		// a final line break. Every prompt is answered with Enter. Neither file may change by a
+		// byte and no backup may appear, since that is exactly the state `git status` reports as
+		// modified. The config file is the reason this runs the process: its prompts read the
+		// console, so its logic cannot be called by reflection as InstallHook is.
+		tests.Add(Case("a rerun of setup-project with every answer left as it is changes no file", () => {
+			
+			const string config = "{\n  // team settings\n  \"version\": 1,\n  \"elicit\": false,\n  \"workspace\": \"sdk\"\n}";
+			
+			var repo       = Path.Combine(dir, "rerun-repo");
+			var hookPath   = Path.Combine(repo, ".github", "hooks", "roslynmcp.json");
+			var configPath = Path.Combine(repo, ".madq_roslynmcp.json");
+			
+			Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+			File.WriteAllText(hookPath, Committed);
+			File.WriteAllText(configPath, config);
+			
+			var exitCode = RunSetupProject(ctx, repo);
+			
+			return exitCode == 0
+				&& File.ReadAllText(hookPath) == Committed
+				&& File.ReadAllText(configPath) == config
+				&& Directory.GetFiles(repo, "*.bak", SearchOption.AllDirectories).Length == 0
+				? null
+				: $"exit code {exitCode}; hook: {File.ReadAllText(hookPath)}; config: {File.ReadAllText(configPath)}; backups: {string.Join(", ", Directory.GetFiles(repo, "*.bak", SearchOption.AllDirectories))}";
+		}));
+		
+		// The other side for the config file: one that lacks a setting the command always writes
+		// (elicit) is not what the answers come to, so it is written, with what it held kept
+		// (workspace), a final line break, and the old text in the backup. Guards against a
+		// comparison that calls every config unchanged.
+		tests.Add(Case("a config file that lacks a setting is written, with a backup and a final line break", () => {
+			
+			const string config = "{ \"version\": 1, \"workspace\": \"sdk\" }";
+			
+			var repo       = Path.Combine(dir, "change-repo");
+			var configPath = Path.Combine(repo, ".madq_roslynmcp.json");
+			
+			Directory.CreateDirectory(repo);
+			File.WriteAllText(configPath, config);
+			
+			var exitCode = RunSetupProject(ctx, repo);
+			var text     = File.ReadAllText(configPath);
+			var root     = JsonNode.Parse(text);
+			var backup   = configPath + ".roslynmcp.bak";
+			
+			return exitCode == 0
+				&& text.EndsWith('\n')
+				&& root?["elicit"]?.GetValue<bool>() == false
+				&& root["workspace"]?.GetValue<string>() == "sdk"
+				&& File.Exists(backup)
+				&& File.ReadAllText(backup) == config
+				? null
+				: $"exit code {exitCode}; config: {text}";
+		}));
+		
 		return new TestGroup($"Project Hook Setup ({tests.Count} tests)", tests, Teardown: () => {
 			
+			// Best effort: a file still held open, or one made read-only, must not abort the run.
 			try { Directory.Delete(dir, recursive: true); }
-			catch(IOException) { }
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
 			
 			return Task.CompletedTask;
 		});
@@ -173,7 +266,7 @@ static class ProjectHookSetupTests
 	// backup path); the outcome comes back as the enum member's name.
 	static (string Outcome, string? Backup) Install(TestContext ctx, string path)
 	{
-		var method = LoadServerAssembly(ctx)
+		var method = ServerAssembly.Load(ctx)
 			.GetType("RoslynMcp.Cli.SetupProjectCommand", throwOnError: true)!
 			.GetMethod("InstallHook", BindingFlags.Static | BindingFlags.NonPublic)!;
 		
@@ -185,17 +278,42 @@ static class ProjectHookSetupTests
 	// The entries of one hook event in the file, or null when the event is not there.
 	static JsonArray? Entries(string path, string eventName) => JsonNode.Parse(File.ReadAllText(path))?["hooks"]?[eventName] as JsonArray;
 	
-	// Same load as ClaudeHookSetupTests: the server assembly the harness just built.
-	static Assembly LoadServerAssembly(TestContext ctx)
+	/// <summary>
+	///     Runs <c>setup-project</c> on the already-built server in <paramref name="repo"/>, a
+	///     directory made to look like a repository root by an empty <c>.git</c> directory in it
+	///     (the command only looks for the name). Standard input is closed at once, so every prompt
+	///     reads end of input, which the command takes as Enter: each setting keeps its current
+	///     value. That is the rerun of #505, where nobody changes anything. Returns the exit code,
+	///     or -1 when the process did not exit within a minute.
+	/// </summary>
+	static int RunSetupProject(TestContext ctx, string repo)
 	{
-		if(serverAssembly is not null)
-			return serverAssembly;
+		Directory.CreateDirectory(Path.Combine(repo, ".git"));
 		
-		var projectDir   = Path.GetDirectoryName(ctx.ServerProj)!;
-		var assemblyPath = Path.Combine(projectDir, "bin", "Debug", "net10.0", "RoslynMcp.dll");
+		var psi = new ProcessStartInfo("dotnet") {
+			
+			Arguments              = $"run --no-build --no-launch-profile --project \"{ctx.ServerProj}\" -f net10.0 -- setup-project",
+			WorkingDirectory       = repo,
+			RedirectStandardInput  = true,
+			RedirectStandardOutput = true,
+			RedirectStandardError  = true,
+			UseShellExecute        = false,
+		};
 		
-		serverAssembly = Assembly.LoadFrom(assemblyPath);
+		using var process = Process.Start(psi)!;
 		
-		return serverAssembly;
+		// Both drained, so that the prompts the command prints can never fill a pipe and stall it.
+		process.OutputDataReceived += (_, _) => { };
+		process.ErrorDataReceived  += (_, _) => { };
+		process.BeginOutputReadLine();
+		process.BeginErrorReadLine();
+		process.StandardInput.Close();
+		
+		if(process.WaitForExit(TimeSpan.FromSeconds(60)))
+			return process.ExitCode;
+		
+		process.Kill(entireProcessTree: true);
+		
+		return -1;
 	}
 }

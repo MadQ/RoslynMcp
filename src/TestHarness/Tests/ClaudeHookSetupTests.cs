@@ -26,8 +26,6 @@ static class ClaudeHookSetupTests
 {
 	const string HookCommand = "madq-roslynmcp hook";
 	
-	static Assembly? serverAssembly;
-	
 	internal static TestGroup Build(TestContext ctx)
 	{
 		
@@ -521,7 +519,7 @@ static class ClaudeHookSetupTests
 	static bool Remove(TestContext ctx, string path) => (bool) Method(ctx, "RemoveHookFrom").Invoke(null, [path])!;
 	
 	static MethodInfo Method(TestContext ctx, string name)
-		=> LoadServerAssembly(ctx)
+		=> ServerAssembly.Load(ctx)
 			.GetType("RoslynMcp.Cli.ClaudeCodeClient", throwOnError: true)!
 			.GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic)!
 	;
@@ -549,18 +547,4 @@ static class ClaudeHookSetupTests
 			.SelectMany(group => group?["hooks"] as JsonArray ?? [])
 			.Select(hook => hook?["command"]?.GetValue<string>() ?? "")
 	;
-	
-	// Same load as VsVersionPinTests: the server assembly the harness just built.
-	static Assembly LoadServerAssembly(TestContext ctx)
-	{
-		if(serverAssembly is not null)
-			return serverAssembly;
-		
-		var projectDir   = Path.GetDirectoryName(ctx.ServerProj)!;
-		var assemblyPath = Path.Combine(projectDir, "bin", "Debug", "net10.0", "RoslynMcp.dll");
-		
-		serverAssembly = Assembly.LoadFrom(assemblyPath);
-		
-		return serverAssembly;
-	}
 }
