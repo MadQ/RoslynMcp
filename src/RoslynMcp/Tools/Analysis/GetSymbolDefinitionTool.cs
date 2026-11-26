@@ -12,7 +12,9 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 	[McpServerTool(Name = "roslyn_get_symbol_definition", ReadOnly = true, Title = "Get Symbol Definition", OpenWorld = false, Idempotent = true)]
 	[Description(
 		"Returns the declaration location and full signature of a symbol (type, method, property, field, event) — " +
-		"file path (project-relative), line, column, formatted signature, and extracted XML doc summary as plain text. " +
+		"file path (project-relative), line, column, formatted signature, and extracted XML doc summary as plain text, " +
+		"with the lines the declaration takes ('108-158': pass them to roslyn_read_file to read all of it) and at, where its node " +
+		"starts ('112:2': the line and column roslyn_replace_in_code takes; line and column are where its name is). " +
 		"Use this to locate a symbol before reading its source with roslyn_get_member_body, or to verify " +
 		"its signature without opening the file. " +
 		"For full parsed documentation (parameters, returns, remarks), use roslyn_get_symbol_documentation. " +
@@ -104,6 +106,9 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 				Error = "This symbol is defined in metadata (compiled assembly), not source code."
 			}, "defined in metadata");
 		
+		// The lines the declaration takes and where its node starts (#487): locating a symbol is
+		// followed by reading it or editing it.
+		var declared  = SourcePlace.Of(location, rootPath, cancellationToken).AsDeclared();
 		var span      = location.GetLineSpan();
 		var filePath  = span.Path;
 		var relative  = string.IsNullOrEmpty(filePath) ? "?" : Path.GetRelativePath(rootPath, filePath);
@@ -120,6 +125,10 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			signature,
 			docSummary)
 		{
+			// Not for a member the compiler declares (a record's ToString): its location is its
+			// type's name, and the lines and the start found there are the whole type's.
+			Lines   = symbol.IsImplicitlyDeclared ? null : declared.Lines,
+			At      = symbol.IsImplicitlyDeclared ? null : declared.At,
 			Caution = AdhocCaution(projectPath)
 		}, null);
 	}
