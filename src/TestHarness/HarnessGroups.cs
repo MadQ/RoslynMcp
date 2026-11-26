@@ -71,6 +71,7 @@ static class HarnessGroups
 		Group("Moved Directory",                           g => MovedDirectoryTests.Build(g.Ctx)),
 		Group("Hook Hint",                                 g => HookHintTests.Build(g.Ctx)),
 		Group("Claude Code Hook Setup",                    g => ClaudeHookSetupTests.Build(g.Ctx)),
+		Group("Project Hook Setup",                        g => ProjectHookSetupTests.Build(g.Ctx)),
 		AsyncGroup("Ignored Directories",                  g => IgnoredDirectoryTests.BuildAsync(g.Ctx)),
 		Group("Brace Globs",                               g => BraceGlobTests.Build(g.Ctx)),
 		AsyncGroup("Incremental Additional/AnalyzerConfig Doc", g => IncrementalAdditionalDocTests.BuildAsync(g.Ctx)),
