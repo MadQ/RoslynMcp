@@ -177,7 +177,11 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		var declared = first.AsDeclared();
 		
-		return new(name) { File = declared.File, Line = declared.Line, Lines = declared.Lines, At = declared.At };
+		// A member the compiler declares (a record's ToString) is written nowhere: its location
+		// is its type's name, and the lines and the start found there are the whole type's.
+		return symbol.IsImplicitlyDeclared
+			? new(name) { File = declared.File, Line = declared.Line }
+			: new(name) { File = declared.File, Line = declared.Line, Lines = declared.Lines, At = declared.At };
 	}
 	
 	private static string FormatMethod(IMethodSymbol method)

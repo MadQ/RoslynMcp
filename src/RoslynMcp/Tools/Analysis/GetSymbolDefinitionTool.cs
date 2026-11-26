@@ -125,8 +125,10 @@ internal sealed class GetSymbolDefinitionTool : RoslynMcpTool
 			signature,
 			docSummary)
 		{
-			Lines   = declared.Lines,
-			At      = declared.At,
+			// Not for a member the compiler declares (a record's ToString): its location is its
+			// type's name, and the lines and the start found there are the whole type's.
+			Lines   = symbol.IsImplicitlyDeclared ? null : declared.Lines,
+			At      = symbol.IsImplicitlyDeclared ? null : declared.At,
 			Caution = AdhocCaution(projectPath)
 		}, null);
 	}

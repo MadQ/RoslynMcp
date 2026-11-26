@@ -37,7 +37,8 @@ static class SemanticPlacesTests
 		"}\n";
 	
 	// Square takes lines 3 to 9 with its comment and starts on line 4; its unused field is on
-	// line 8. Derived overrides Size on line 15.
+	// line 8. Derived overrides Size on line 15. Pair declares two fields in one statement on
+	// line 20. Child, on line 26, is a record whose ToString the compiler writes.
 	const string Shapes =
 		"interface IShape { int Area(); }\n" +
 		"\n" +
@@ -54,7 +55,17 @@ static class SemanticPlacesTests
 		"class Derived : Base\n" +
 		"{\n" +
 		"\tpublic override int Size() => 1;\n" +
-		"}\n";
+		"}\n" +
+		"\n" +
+		"class Pair\n" +
+		"{\n" +
+		"\tint left, right;\n" +
+		"\tint Sum() => left + right;\n" +
+		"}\n" +
+		"\n" +
+		"abstract record Named { public override string ToString() => \"n\"; }\n" +
+		"\n" +
+		"record Child : Named;\n";
 	
 	// Bad takes lines 3 to 6; the unknown name is on line 5.
 	const string Broken = "class Broken\n{\n\tint Bad()\n\t{\n\t\treturn missing;\n\t}\n}\n";
@@ -255,6 +266,33 @@ static class SemanticPlacesTests
 					&& say?["line"]?.GetValue<int>() == 5
 					&& say["lines"]?.GetValue<string>() == "3-5"
 					&& say["at"]?.GetValue<string>() == "4:2", new JsonArray(one?.DeepClone(), several?.DeepClone()));
+			}),
+			
+			// One of two fields declared in one statement. The statement's lines and start are
+			// not the field's: removed or replaced there, the other field went with it. The
+			// answer says where the name is and leaves the rest out.
+			new("semantic places: a field declared with another has no lines and place of its own", async () => {
+				
+				var definition = await Call("roslyn_get_symbol_definition", new { symbolName = "right", containingType = "Pair", projectPath = fx.Csproj });
+				var references = await Call("roslyn_find_references", new { symbolName = "right", containingType = "Pair", projectPath = fx.Csproj });
+				var declared   = references?["declarations"]?.AsArray() is [var only] ? only : null;
+				
+				return Verdict(definition?["line"]?.GetValue<int>() == 20
+					&& definition["lines"] is null && definition["at"] is null
+					&& declared?["line"]?.GetValue<int>() == 20
+					&& declared["declaration"]?.GetValue<string>() == "field left, right"
+					&& declared["lines"] is null && declared["at"] is null, new JsonArray(definition?.DeepClone(), references?.DeepClone()));
+			}),
+			
+			// A record's ToString is written by the compiler: its place is the record's name, and
+			// the lines and start found there are the record's. Listed as an override, it says
+			// where the record is and no more.
+			new("semantic places: an override the compiler wrote does not borrow its type's lines and place", async () => {
+				
+				var answer = await Call("roslyn_find_implementations", new { symbolName = "ToString", containingType = "Named", projectPath = fx.Csproj });
+				var child  = answer?["overrides"]?.AsArray().FirstOrDefault(entry => (entry?["name"]?.GetValue<string>() ?? "").StartsWith("Child."));
+				
+				return Verdict(child?["line"]?.GetValue<int>() == 26 && child["lines"] is null && child["at"] is null, answer);
 			}),
 			
 			// The errors a build stops at are listed as roslyn_get_diagnostics lists them: under

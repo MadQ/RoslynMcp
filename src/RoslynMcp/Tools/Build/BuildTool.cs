@@ -270,7 +270,22 @@ internal sealed class BuildTool : RoslynMcpTool
 		
 		// What the build said, each place with the text of its line and the declaration it is
 		// in (#487). Without a boundary to ask, no file is read and the places stay bare.
-		var diagnostics = await LocateAsync(ParseMSBuildDiagnostics(output, rootPath), TryResolveFileContext(projectPath, out _, out var boundary, out _) ? boundary : null, rootPath, cancellationToken);
+		SecurityBoundary? boundary = null;
+		Solution?         loaded   = null;
+		
+		if(TryResolveFileContext(projectPath, out _, out var allowed, out _))
+			boundary = allowed;
+		else
+			scope.Record("the workspace's boundary could not be resolved: the build's places are listed without their lines' text");
+		
+		// The solution only says how a file is parsed (the symbols of its project's #if); a
+		// target outside the workspace has none, and its files are parsed without. The
+		// snapshot the workspace holds, not a current one: asking for that waits for a reload
+		// the build itself may have caused, and no reload changes how a file is parsed here.
+		if(boundary is not null && !outsideWorkspace)
+			loaded = workspace.PeekSolution(projectPath);
+		
+		var diagnostics = await LocateAsync(ParseMSBuildDiagnostics(output, rootPath), boundary, loaded, rootPath, cancellationToken);
 		
 		scope.Record(DiagnosticPlace.GroupingNote(diagnostics));
 		
@@ -469,7 +484,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	///     the project and not about a place in a file: it has no file, and the file MSBuild
 	///     named, the project's, is its <c>project</c>.
 	/// </summary>
-	static async Task<DiagnosticPlace[]> LocateAsync(DiagnosticItem[] items, SecurityBoundary? boundary, string rootPath, CancellationToken cancellationToken)
+	static async Task<DiagnosticPlace[]> LocateAsync(DiagnosticItem[] items, SecurityBoundary? boundary, Solution? solution, string rootPath, CancellationToken cancellationToken)
 	{
 		var places = new List<DiagnosticPlace>(items.Length);
 		
@@ -490,10 +505,8 @@ internal sealed class BuildTool : RoslynMcpTool
 			string?               text        = null;
 			EnclosingDeclaration? declaration = null;
 			
-			var fullPath = Path.GetFullPath(Path.Combine(rootPath, item.File));
-			
-			if(!sources.TryGetValue(fullPath, out var known))
-				sources[fullPath] = known = await ReadSourceAsync(fullPath, boundary, cancellationToken);
+			if(!sources.TryGetValue(item.File, out var known))
+				sources[item.File] = known = await ReadSourceAsync(item.File, rootPath, boundary, solution, cancellationToken);
 			
 			// A line past the end: the file changed since the build read it.
 			if(known is var (source, root) && item.Line <= source.Lines.Count) {
@@ -513,20 +526,35 @@ internal sealed class BuildTool : RoslynMcpTool
 	
 	// A C# file a build diagnostic names, parsed for its declarations; null when it is not
 	// C#, lies where the workspace may not read, or cannot be read. The path comes from the
-	// build's output, so the boundary is asked as for a path a caller gave.
-	static async Task<(SourceText Text, SyntaxNode Root)?> ReadSourceAsync(string fullPath, SecurityBoundary? boundary, CancellationToken cancellationToken)
+	// build's output, so the boundary is asked as for a path a caller gave, and a path that is
+	// none is a file not read, never a build's answer lost.
+	// Parsed as its project parses it, where the workspace has the file as a document: with
+	// no symbols defined, a member inside '#if DEBUG' or '#if NET10_0' is text the parser skips,
+	// and an error in it was listed under the type. A file of several target frameworks is
+	// parsed as the first of them does.
+	static async Task<(SourceText Text, SyntaxNode Root)?> ReadSourceAsync(string file, string rootPath, SecurityBoundary? boundary, Solution? solution, CancellationToken cancellationToken)
 	{
-		if(boundary is null || !IsCSharpSourcePath(fullPath) || !boundary.IsPathAllowed(fullPath))
+		if(boundary is null || !IsCSharpSourcePath(file))
 			
 			return null;
 		
 		try {
 			
+			var fullPath = Path.GetFullPath(Path.Combine(rootPath, file));
+			
+			if(!boundary.IsPathAllowed(fullPath))
+				
+				return null;
+			
+			var options = solution?.GetDocumentIdsWithFilePath(fullPath) is [var id, ..]
+				? solution.GetDocument(id)?.Project.ParseOptions as CSharpParseOptions
+				: null;
+			
 			var text = SourceText.From(await FileReader.ReadAllTextAsync(fullPath, FileReader.DocumentLimit));
 			
-			return (text, await CSharpSyntaxTree.ParseText(text, cancellationToken: cancellationToken).GetRootAsync(cancellationToken));
+			return (text, await CSharpSyntaxTree.ParseText(text, options, cancellationToken: cancellationToken).GetRootAsync(cancellationToken));
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException) {
 			
 			return null;
 		}

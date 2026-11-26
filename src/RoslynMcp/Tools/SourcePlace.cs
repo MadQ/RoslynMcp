@@ -29,6 +29,13 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 	public bool Declares { get; init; }
 	
 	/// <summary>
+	///     Whether <see cref="Declaration"/> declares several names (<c>int used, spare;</c>). Its
+	///     lines and its start are then the whole statement's, not those of the one name the place
+	///     is: an edit or a removal made with them would take the other names along.
+	/// </summary>
+	public bool DeclaresSeveral { get; init; }
+	
+	/// <summary>
 	///     What a tool found at the place beside its line, for the tools that say it: the syntax
 	///     context of a semantic search's match, the decoded value of a string literal.
 	/// </summary>
@@ -69,7 +76,8 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 			SearchFilesTool.Excerpt(text.ToString(line.Span), span.StartLinePosition.Character),
 			declaration)
 		{
-			Declares = names.Any(name => name.OverlapsWith(location.SourceSpan)),
+			Declares        = names.Any(name => name.OverlapsWith(location.SourceSpan)),
+			DeclaresSeveral = names.Length > 1,
 		};
 	}
 	
@@ -137,11 +145,14 @@ internal sealed record SourcePlace(string File, int Line, int Column, string Tex
 	///     Where a symbol is declared. What is declared, the lines it takes and where its node
 	///     starts are said only when the place is that declaration's own name: for a local or a
 	///     parameter they would be the enclosing method's, and an edit made with them would
-	///     replace the method.
+	///     replace the method. For one of several names declared together the lines and the start
+	///     are left out for the same reason: they are the whole statement's.
 	/// </summary>
 	public DeclaredAt AsDeclared()
 		=> Declares && Declaration is { } found
-			? new(File, Line) { Declaration = $"{found.Kind} {found.Name}".TrimEnd(), Lines = $"{found.FirstLine}-{found.EndLine}", At = $"{found.StartLine}:{found.StartColumn}" }
+			? DeclaresSeveral
+				? new(File, Line) { Declaration = $"{found.Kind} {found.Name}".TrimEnd() }
+				: new(File, Line) { Declaration = $"{found.Kind} {found.Name}".TrimEnd(), Lines = $"{found.FirstLine}-{found.EndLine}", At = $"{found.StartLine}:{found.StartColumn}" }
 			: new(File, Line)
 	;
 	

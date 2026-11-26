@@ -20,7 +20,8 @@ internal sealed class FindUnusedTool : RoslynMcpTool
 		"Conservatively skips generated symbols, attributed symbols, members of attributed or generated types, partial methods, protected members, interface implementations, and inheritance-dispatched members. " +
 		"Results are paged and include confidence, a reason and where each symbol is declared: file, line, its lines ('108-158': pass them to " +
 		"roslyn_read_file to read the whole declaration) and at ('112:2': the line and column roslyn_replace_in_code takes, with an empty " +
-		"replacement to remove it). Dynamic or reflection-based usage cannot be detected. " +
+		"replacement to remove it). A field declared together with others ('int used, spare;') has neither: they would be the whole statement's. " +
+		"Dynamic or reflection-based usage cannot be detected. " +
 		"For a solution (projectPath omitted with a solution as default workspace, or a .sln/.slnx given) the symbols of every project are checked, and each result names its project.")]
 	public async Task<object> FindUnused(
 		CancellationToken cancellationToken,
