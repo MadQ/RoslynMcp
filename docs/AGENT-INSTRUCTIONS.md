@@ -40,11 +40,11 @@ built-in tools only if a roslyn tool fails.
   strings, identifiers, XML docs, or code-only. Use when you need to find
   matches in a specific context (e.g., "TODO" in comments only).
 - `roslyn_find_string_literal` — Search C# string literals by pattern, returning
-  both the raw source text and the decoded value (quotes stripped, escape
-  sequences resolved). Supports glob matching (`mode: "glob"`) and decoded
+  each literal's source line and its decoded value (quotes stripped, escape
+  sequences resolved), under the declaration it is in. Supports glob matching (`mode: "glob"`) and decoded
   value matching (e.g., search for a tab character, not `\\t`). Use INSTEAD OF
   `roslyn_semantic_search` `context:"strings"` when you need glob patterns,
-  decoded-value matching, or the separate `text`/`value` fields per match.
+  decoded-value matching, or the decoded `value` of each literal.
 - `roslyn_list_files` — List files in the project with glob filtering. Use
   INSTEAD OF Glob for .NET project files.
 - `roslyn_list_types` — List all types in the project, optionally filtered by
@@ -57,7 +57,9 @@ built-in tools only if a roslyn tool fails.
   overloads, namespaces, and cross-project references.
 - `roslyn_find_callers` — Find all methods that call a named symbol. The inverse
   of `roslyn_find_references`. Semantically impossible with text search alone.
-  Filter by `isDirect` to exclude interface dispatch or delegate calls.
+  Each calling line comes under the declaration that calls, with the `lines`
+  to read that caller and the `at` to edit it. Filter by `isDirect` to exclude
+  interface dispatch or delegate calls.
 - `roslyn_find_unused` — Find private/internal source symbols with zero direct
   static references. Use before dead-code cleanup; attributed symbols and
   inheritance/interface-dispatched members are conservatively excluded.

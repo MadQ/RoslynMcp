@@ -18,20 +18,16 @@ static class FindStringLiteralTests
 					"roslyn_find_string_literal",
 					new { pattern = "roslyn_info", take = 5, projectPath = ctx.TargetPath },
 					data => data?["total_matches"]?.GetValue<int>() > 0
-						&& data?["matches"]?[0]?["file"]   is not null
-						&& data?["matches"]?[0]?["line"]   is not null
-						&& data?["matches"]?[0]?["column"] is not null
-						&& data?["matches"]?[0]?["text"]   is not null
-						&& data?["matches"]?[0]?["value"]  is not null)),
+						&& SearchHits.Of(data) is [{ File.Length: > 0, Line: > 0, Column: > 0, Text.Length: > 0, Value: not null }, ..])),
 
-			new("roslyn_find_string_literal: text is raw source (has quotes), value is decoded",
+			new("roslyn_find_string_literal: text is the source line (has quotes), value is decoded",
 				() => ctx.RunTestAsync(
 					"roslyn_find_string_literal",
 					// filePattern ensures we get a known regular string literal, not interpolated parts.
 					new { pattern = "roslyn_info", filePattern = "*InfoTool.cs", take = 1, projectPath = ctx.TargetPath },
 					data => {
-						var text  = data?["matches"]?[0]?["text"]?.GetValue<string>();
-						var value = data?["matches"]?[0]?["value"]?.GetValue<string>();
+						var text  = SearchHits.Of(data) is [var first, ..] ? first.Text : null;
+						var value = SearchHits.Of(data) is [var one, ..] ? one.Value : null;
 
 						return text is not null && value is not null
 							&& text.Contains('"') && !value.Contains('"') && text != value;
@@ -43,7 +39,7 @@ static class FindStringLiteralTests
 					// filePattern avoids matching "XYZZY..." as a literal in this test file itself.
 				new { pattern = "XYZZY_IMPOSSIBLE_PATTERN_12345_ZXYWQV", filePattern = "*InfoTool.cs", projectPath = ctx.TargetPath },
 					data => data?["total_matches"]?.GetValue<int>() == 0
-						&& data?["matches"]?.AsArray().Count == 0)),
+						&& data?["files"]?.AsArray().Count == 0)),
 
 			// -- caseSensitive -------------------------------------------------------------
 
@@ -173,8 +169,7 @@ static class FindStringLiteralTests
 					"roslyn_find_string_literal",
 					new { pattern = "roslyn_info", filePattern = "*InfoTool.cs", take = 20, projectPath = ctx.TargetPath },
 					data => data?["total_matches"]?.GetValue<int>() > 0
-						&& data?["matches"]?.AsArray()
-							.All(m => m?["file"]?.GetValue<string>()?.Contains("InfoTool") == true) == true)),
+						&& SearchHits.Of(data)?.All(m => m.File.Contains("InfoTool")) == true)),
 
 			new("roslyn_find_string_literal: filePattern with no matching filename returns empty",
 				() => ctx.RunTestAsync(
@@ -193,11 +188,12 @@ static class FindStringLiteralTests
 							
 							if(data?["has_more"]?.GetValue<bool>() != true)          return false;
 							if(data?["page_token"]?.GetValue<string>() is null)      return false;
-							if(data?["matches"]?.AsArray().Count != 2)               return false;
+							// take counts literals, not the groups they are listed in (#487).
+							if(SearchHits.Of(data) is not [var first, _])            return false;
 
 							paginationToken = data?["page_token"]?.GetValue<string>();
-							page1FirstFile  = data?["matches"]?[0]?["file"]?.GetValue<string>();
-							page1FirstLine  = data?["matches"]?[0]?["line"]?.GetValue<int>();
+							page1FirstFile  = first.File;
+							page1FirstLine  = first.Line;
 
 							return true;
 						}
@@ -218,17 +214,14 @@ static class FindStringLiteralTests
 						new { pattern = "roslyn_*", useGlob = true, page_token = paginationToken, projectPath = ctx.TargetPath },
 						data => {
 							
-							// A missing "matches" must fail. The old check compared a null count with 0,
+							// A missing "files" must fail. The old check compared a null count with 0,
 							// which is false, so a page in the wrong shape passed.
-							if(data?["matches"]?.AsArray().Count != 2) return false;
+							if(SearchHits.Of(data) is not [var first, _]) return false;
 
 							if(data?["page_token"]?.GetValue<string>() == paginationToken) return false;
 
 							// Page 2 must contain different results than page 1.
-							var file2 = data?["matches"]?[0]?["file"]?.GetValue<string>();
-							var line2 = data?["matches"]?[0]?["line"]?.GetValue<int>();
-
-							return file2 != page1FirstFile || line2 != page1FirstLine;
+							return first.File != page1FirstFile || first.Line != page1FirstLine;
 						}
 					);
 

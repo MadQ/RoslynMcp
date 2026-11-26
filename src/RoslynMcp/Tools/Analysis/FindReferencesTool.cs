@@ -88,7 +88,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 					Declarations    = references.Declarations,
 					SymbolsSearched = references.Searched,
 					TotalReferences = references.Locations.Length,
-					References      = SourcePlace.Group(references.Locations.Length > take ? references.Locations[..take] : references.Locations),
+					References      = SourcePlace.Group(references.Locations.Length > take ? references.Locations[..take] : references.Locations, sayDeclares: false),
 					HasMore         = references.Locations.Length > take ? true : null,
 				});
 			}
@@ -250,7 +250,7 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			TotalReferences: page.Total,
 			SymbolsSearched: symbolsSearched,
 			Skip: page.Skip, Take: page.Take,
-			References: SourcePlace.Group(page.Items),
+			References: SourcePlace.Group(page.Items, sayDeclares: false),
 			PageToken: page.PageToken,
 			HasMore:   page.HasMore)
 		{

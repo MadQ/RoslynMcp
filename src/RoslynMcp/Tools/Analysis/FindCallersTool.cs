@@ -16,8 +16,10 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		"Call this before refactoring or removing a method to discover every caller across the project — " +
 		"the inverse of roslyn_find_references, and semantically impossible with text search, which cannot " +
 		"distinguish overloads or track aliases. " +
-		"Returns all methods that invoke the named symbol, with fully qualified caller name, file path, " +
-		"and 1-based line number per call site. " +
+		"Returns every calling line, grouped by file and, within a file, by the declaration it is in, as roslyn_search_files lists its hits: " +
+		"callers[].in[] names the caller ('method Enqueue'), its lines ('108-158': pass them to roslyn_read_file to read the whole caller) " +
+		"and where its node starts ('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with each calling line and its text. " +
+		"So a call can be judged, its caller read in full or edited without another lookup. Two calls on one line are listed once; take counts calling lines. " +
 		"Without containingType, searches ALL symbols matching the name in the project; provide containingType to narrow to one type. " +
 		"With no projectPath, or a solution, the project is the one that declares the name: a name declared in several projects " +
 		"fails with the candidates and their projects, never a union across them. " +
@@ -33,8 +35,8 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
 		[Description("Optional containing type to disambiguate when multiple types share a method name, e.g. 'WorkspaceManager'.")] string? containingType = null,
 		[Description("When true (default), returns only direct callers. Set false to include indirect calls via interface dispatch or delegates.")] bool isDirect = true,
-		[Description("Number of callers to skip. Default: 0.")] int skip = 0,
-		[Description("Maximum number of callers to return. Default: 50, max: 200.")] int take = 50,
+		[Description("Number of calling lines to skip. Default: 0.")] int skip = 0,
+		[Description("Maximum number of calling lines to return. Default: 50, max: 200.")] int take = 50,
 		[Description(PageTokenDescription)] string? page_token = null,
 		[Description("Optional relative file path for position-based resolution, e.g. 'Core/Foo.cs'. Required when line is specified.")] string? filePath = null,
 		[Description("Optional 1-based line number. When > 0, resolves the symbol at filePath:line:column instead of by name.")] int line = 0,
@@ -46,7 +48,7 @@ internal sealed class FindCallersTool : RoslynMcpTool
 			
 			return scope.Error(refError!);
 		
-		if(scope.TryServeCachedPage<CallerEntry>(page_token, ref skip, ref take, 50, 200, out var cached))
+		if(scope.TryServeCachedPage<SourcePlace>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -96,37 +98,23 @@ internal sealed class FindCallersTool : RoslynMcpTool
 			
 			return scope.Failed("symbol not found", SymbolNotFoundError(symbolName, projectPath));
 		
-		var allCallers = new List<CallerEntry>();
+		var allCallers = new List<SourcePlace>();
 		
 		foreach(var sym in symbols) {
 			
 			var callerInfos = await RoslynSymbolFinder.FindCallersAsync(sym, solution, cancellationToken);
 			
+			// The caller is not kept by name: the declaration a calling line is in is the caller,
+			// and the answer names it once for all its calls (#487).
 			allCallers.AddRange(
 				callerInfos
 					.Where(c => !isDirect || c.IsDirect)
-					.SelectMany(c => c.Locations.Select(loc => {
-						
-						var span = loc.GetLineSpan();
-						var file = span.Path is { Length: > 0 } p
-							? Path.GetRelativePath(rootPath, p)
-							: "?";
-						
-						return new CallerEntry(
-							Caller: FormatSymbolName(c.CallingSymbol),
-							File:   file,
-							Line:   span.StartLinePosition.Line + 1
-						);
-					}))
+					.SelectMany(c => c.Locations)
+					.Select(location => SourcePlace.Of(location, rootPath, cancellationToken))
 			);
 		}
 		
-		var allResults = allCallers
-			.DistinctBy(c => (c.Caller, c.File, c.Line))
-			.OrderBy(c => c.File)
-			.ThenBy(c => c.Line)
-			.ToArray()
-		;
+		var allResults = SourcePlace.Sorted(allCallers);
 		
 		if(allResults.Length == 0)
 			
@@ -144,17 +132,20 @@ internal sealed class FindCallersTool : RoslynMcpTool
 		var shape  = PageShape(symbolName, AdhocCaution(projectPath));
 		var result = PaginateAndStore(allResults, ref skip, take, shape);
 		
-		return scope.Outcome($"{result.Items.Length}/{result.Total} caller(s)", shape(result));
+		// How the page grouped, and what the same places took as file:line strings (#487).
+		scope.Record(SourcePlace.GroupingNote(result.Items, "calling line(s)"));
+		
+		return scope.Outcome($"{result.Items.Length}/{result.Total} calling line(s)", shape(result));
 	}
 	
 	// Builds every page of one query, first and cached alike. A static factory taking plain values, so
 	// the function the pagination cache holds never captures a symbol, the compilation, or the solution.
-	static Func<PaginatedResult<CallerEntry>, object> PageShape(string symbolSearched, string? caution)
+	static Func<PaginatedResult<SourcePlace>, object> PageShape(string symbolSearched, string? caution)
 		=> page => new FindCallersResult(
 			SymbolSearched: symbolSearched,
 			TotalCallers:   page.Total,
 			Skip: page.Skip, Take: page.Take,
-			Callers:   page.Items,
+			Callers:   SourcePlace.Group(page.Items, sayDeclares: false),
 			PageToken: page.PageToken,
 			HasMore:   page.HasMore)
 		{

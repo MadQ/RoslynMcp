@@ -3,11 +3,22 @@ using System.Text.Json.Nodes;
 /// <summary>
 ///     The hits of a <c>roslyn_search_files</c> answer as a flat list. The answer groups them by file
 ///     and by the declaration each is in (#460); most tests ask only which files and lines matched.
+///     The semantic and string-literal searches answer in the same shape since #487.
 /// </summary>
 static class SearchHits
 {
 	/// <summary>One matching line, with the declaration group it was listed under.</summary>
-	internal sealed record Hit(string File, int Line, string Text, bool Declares, string? Declaration, string? Lines, string? At);
+	internal sealed record Hit(string File, int Line, string Text, bool Declares, string? Declaration, string? Lines, string? At)
+	{
+		/// <summary>What only some tools say of a match (#487): a string literal's column and decoded value, a semantic match's context.</summary>
+		public int? Column { get; init; }
+		
+		/// <inheritdoc cref="Column"/>
+		public string? Value { get; init; }
+		
+		/// <inheritdoc cref="Column"/>
+		public string? Context { get; init; }
+	}
 	
 	/// <summary>
 	///     Every hit of <paramref name="answer"/> in the order given, or null when it is no search
@@ -37,7 +48,12 @@ static class SearchHits
 						match?["declares"]?.GetValue<bool>() == true,
 						group?["declaration"]?.GetValue<string>(),
 						group?["lines"]?.GetValue<string>(),
-						group?["at"]?.GetValue<string>()));
+						group?["at"]?.GetValue<string>())
+					{
+						Column  = match?["column"]?.GetValue<int>(),
+						Value   = match?["value"]?.GetValue<string>(),
+						Context = match?["context"]?.GetValue<string>(),
+					});
 		
 		return [..hits];
 	}

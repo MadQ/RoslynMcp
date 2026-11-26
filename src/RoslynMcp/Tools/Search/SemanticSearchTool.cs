@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -27,7 +26,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		"Slower than roslyn_search_files due to syntax-tree parsing; use roslyn_search_files for fast " +
 		"cross-file content search when context filtering is not needed. " +
 		"For filename/path matching with no content search, use roslyn_list_files instead. " +
-		"Each result includes file, line number, matched text, and a context label. " +
+		"Returns the matching lines grouped as roslyn_search_files groups its hits: files[] by file, in[] by the declaration each match is in " +
+		"('method Enqueue'), with its lines ('108-158': pass them to roslyn_read_file to read the whole member) and where its node starts " +
+		"('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with line and text. A match on the declaration's own name " +
+		"has declares: true. Several matches on one line are listed once. The answer's context names the syntax context searched; " +
+		"with context 'all', each match names its own (comment, string, identifier, xmldoc, code). " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> SemanticSearch(
@@ -76,7 +79,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		context     ??= "all";
 		filePattern ??= "*.cs";
 		
-		if(scope.TryServeCachedPage<SemanticMatchResult>(page_token, ref skip, ref take, 50, 200, out var cached))
+		if(scope.TryServeCachedPage<SourcePlace>(page_token, ref skip, ref take, 50, 200, out var cached))
 			
 			return scope.Outcome("cached page", cached);
 		
@@ -128,7 +131,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		string? fallbackCaution = null;
 		string? fallbackHint    = null;
 		
-		if(allMatches.Count == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
+		if(allMatches.Length == 0 && HasChatSymbolRefPrefix(pattern, out var stripped)) {
 			
 			if(stripped.Length == 0)
 				fallbackHint = ChatRefTruncatedHint;
@@ -143,7 +146,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				
 				var retry = strippedRegex is null ? null : await CollectAsync(strippedRegex);
 				
-				if(retry is { Count: > 0 }) {
+				if(retry is { Length: > 0 }) {
 					
 					allMatches      = retry;
 					fallbackCaution = ChatRefFallbackCaution(pattern, stripped);
@@ -153,15 +156,19 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			}
 		}
 		
-		var allResults = allMatches.ToArray();
-		var shape      = PageShape(context, ComposeCautions(fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
-		var result     = PaginateAndStore(allResults, ref skip, take, shape);
+		var shape  = PageShape(context, ComposeCautions(fallbackCaution, AdhocCaution(projectPath)), fallbackHint);
+		var result = PaginateAndStore(allMatches, ref skip, take, shape);
+		
+		// How the page grouped, and what the same matches took listed flat (#487).
+		scope.Record(SourcePlace.GroupingNote(result.Items, "match(es)"));
 		
 		return scope.Outcome($"{result.Total} match(es)", shape(result));
 		
-		async Task<List<SemanticMatchResult>> CollectAsync(Regex rx)
+		// The matches as places, by file and line, one per line: the text of a match is its line,
+		// and several matches on a line said that line several times.
+		async Task<SourcePlace[]> CollectAsync(Regex rx)
 		{
-			var collected = new List<SemanticMatchResult>();
+			var collected = new List<SourcePlace>();
 			// seenPaths prevents searching the same physical file twice in multi-targeted projects
 			// (e.g., net8.0 + net10.0 each have their own Document for the same .cs file).
 			// The first TFM's parse wins; #if NET10_0 blocks may be absent in the skipped parse.
@@ -229,21 +236,36 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 						});
 					}
 					
-					var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
-					
-					foreach(var match in matches)
-						collected.Add(match with { File = relativePath });
+					// One place per line, made from the line's leftmost match: a place costs a
+					// walk up the tree for its declaration, and a broad pattern matches many times
+					// on a line. Any match of the line on the declaration's own name marks the
+					// place, as in a text search: in 'SearchResult BuildResult()' the pattern
+					// 'Result' matches the return type first.
+					foreach(var onLine in matches.GroupBy(match => text.Lines.GetLineFromPosition(match.Position).LineNumber)) {
+						
+						var first = onLine.MinBy(match => match.Position)!;
+						var names = EnclosingDeclaration.At(root, text, first.Position).Names;
+						
+						collected.Add(SourcePlace.Of(Location.Create(tree, new TextSpan(first.Position, first.Length)), rootPath, cancellationToken) with {
+							
+							Declares = onLine.Any(match => names.Any(name => name.OverlapsWith(new TextSpan(match.Position, match.Length)))),
+							
+							// Said per match only where it differs between them; a search of one
+							// context has it once, in the answer.
+							Context = context == "all" ? first.Context : null,
+						});
+					}
 				}
 			
-			return collected;
+			return SourcePlace.Sorted(collected);
 		}
 	}
 	
 	// Builds every page of one query, first and cached alike, so a cached page keeps the same fields
 	// — the context, caution, and hint included.
-	static Func<PaginatedResult<SemanticMatchResult>, object> PageShape(string context, string? caution, string? hint)
+	static Func<PaginatedResult<SourcePlace>, object> PageShape(string context, string? caution, string? hint)
 		=> page => new SemanticSearchResult(
-			page.Items,
+			SourcePlace.Group(page.Items, sayDeclares: true),
 			page.Total,
 			page.Items.Length,
 			page.PageToken,
@@ -315,14 +337,12 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				// so multiline block comments report the correct line number per occurrence.
 				var absPos  = span.Start + m.Index
 				;
-				var lineIdx = text.Lines.GetLinePosition(absPos).Line;
 				
 				yield return new SemanticMatchResult {
 					
-					Line     = lineIdx + 1,
-					Text     = text.Lines[lineIdx].ToString().Trim(),
 					Context  = "comment",
-					Position = absPos
+					Position = absPos,
+					Length   = m.Length
 				};
 			}
 		}
@@ -351,14 +371,12 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				// absPos is the absolute match position — handles multiline verbatim/raw strings.
 				var absPos  = span.Start + m.Index
 				;
-				var lineIdx = text.Lines.GetLinePosition(absPos).Line;
 				
 				yield return new SemanticMatchResult {
 					
-					Line     = lineIdx + 1,
-					Text     = text.Lines[lineIdx].ToString().Trim(),
 					Context  = "string",
-					Position = absPos
+					Position = absPos,
+					Length   = m.Length
 				};
 			}
 		}
@@ -372,21 +390,15 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				continue;
 			
 			var span      = token.Span;
-			var lineSpan  = text.Lines.GetLinePositionSpan(span);
 			var tokenText = token.ToString();
 			
 			if(regex.IsMatch(tokenText)) {
 				
-				// Get the containing line for context
-				var line     = text.Lines[lineSpan.Start.Line];
-				var lineText = line.ToString().Trim();
-				
 				yield return new SemanticMatchResult {
 					
-					Line     = lineSpan.Start.Line + 1,
-					Text     = lineText,
 					Context  = "identifier",
-					Position = span.Start
+					Position = span.Start,
+					Length   = span.Length
 				};
 			}
 		}
@@ -398,6 +410,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		// skipping positions that fall within a comment, xmldoc, or string span.
 		// All per-line matches are checked so a comment-excluded first match does not
 		// hide a later code match on the same line (e.g., `/* Foo */ var Foo = 1;`).
+		// Every code match is returned: the caller folds a line's matches into one place.
 		var lines    = text.Lines
 		;
 		var excluded = BuildExcludedSpans(root);
@@ -415,13 +428,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				
 				yield return new SemanticMatchResult {
 					
-					Line     = i + 1,
-					Text     = lineText.Trim(),
 					Context  = "code",
-					Position = matchPos
+					Position = matchPos,
+					Length   = m.Length
 				};
-				
-				break; // one result per line
 			}
 		}
 	}
@@ -439,14 +449,12 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			foreach(Match m in regex.Matches(triviaText)) {
 				
 				var absPos  = span.Start + m.Index;
-				var lineIdx = text.Lines.GetLinePosition(absPos).Line;
 				
 				yield return new SemanticMatchResult {
 					
-					Line     = lineIdx + 1,
-					Text     = text.Lines[lineIdx].ToString().Trim(),
 					Context  = "xmldoc",
-					Position = absPos
+					Position = absPos,
+					Length   = m.Length
 				};
 			}
 		}
@@ -461,20 +469,23 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		for(int i = 0; i < lines.Count; i++) {
 			
 			var lineText = lines[i].ToString();
-			var m        = regex.Match(lineText);
 			
-			if(m.Success) {
+			// Every match of the line: the caller folds them into one place, and needs them all
+			// to say whether one is the declaration's name.
+			foreach(Match m in regex.Matches(lineText)) {
 				
-				// Determine context by checking what's on this line
-				var lineSpan = lines[i].Span;
-				var context  = DetermineContext(root, lineSpan);
+				// What the match is in is asked at its first character that is not whitespace:
+				// a pattern such as '\s+// TODO' starts before the comment it is about.
+				var start = m.Index;
+				
+				while(start < m.Index + m.Length - 1 && char.IsWhiteSpace(lineText[start]))
+					start++;
 				
 				yield return new SemanticMatchResult {
 					
-					Line     = i + 1,
-					Text     = lineText.Trim(),
-					Context  = context,
-					Position = lines[i].Start + m.Index
+					Context  = DetermineContext(root, lines[i].Start + start),
+					Position = lines[i].Start + m.Index,
+					Length   = m.Length
 				};
 			}
 		}
@@ -537,57 +548,50 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	}
 	
 	
-	string DetermineContext(SyntaxNode root, TextSpan lineSpan)
+	// The context of one match of a search over all contexts: what the character at the position
+	// is in, which the caller takes from the match. By the match and not by its line: a line holds tokens of several kinds, and the first of
+	// them said "identifier" for a doc comment and for a string after a name.
+	static string DetermineContext(SyntaxNode root, int position)
 	{
-		// Find tokens/trivia that intersect with this line
-		var tokens = root.DescendantTokens(lineSpan, descendIntoTrivia: true);
+		var trivia = root.FindTrivia(position);
 		
-		foreach(var token in tokens) {
+		if(trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) || trivia.IsKind(SyntaxKind.MultiLineCommentTrivia))
 			
-			// Check trivia first (comments, xml docs)
-			foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia)) {
-				
-				if(!lineSpan.IntersectsWith(trivia.Span))
-					continue;
-				
-				if(trivia.IsKind(SyntaxKind.SingleLineCommentTrivia) || trivia.IsKind(SyntaxKind.MultiLineCommentTrivia))
-					
-					return "comment";
-				
-				if(trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) ||
-				   trivia.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
-					
-					return "xmldoc";
-			}
-			
-			// Check token kinds -- mirror the full set used in SearchInStrings/BuildExcludedSpans
-			if(token.IsKind(SyntaxKind.StringLiteralToken) ||
-			   token.IsKind(SyntaxKind.InterpolatedStringTextToken) ||
-			   token.IsKind(SyntaxKind.SingleLineRawStringLiteralToken) ||
-			   token.IsKind(SyntaxKind.MultiLineRawStringLiteralToken) ||
-			   token.IsKind(SyntaxKind.Utf8StringLiteralToken) ||
-			   token.IsKind(SyntaxKind.Utf8SingleLineRawStringLiteralToken) ||
-			   token.IsKind(SyntaxKind.Utf8MultiLineRawStringLiteralToken))
-				
-				return "string";
-			
-			if(token.IsKind(SyntaxKind.IdentifierToken))
-				
-				return "identifier";
-		}
+			return "comment";
 		
-		return "code";
+		if(trivia.IsKind(SyntaxKind.SingleLineDocumentationCommentTrivia) || trivia.IsKind(SyntaxKind.MultiLineDocumentationCommentTrivia))
+			
+			return "xmldoc";
+		
+		var token = root.FindToken(position);
+		
+		// A match in the whitespace between two tokens is in neither.
+		if(!token.Span.Contains(position))
+			
+			return "code";
+		
+		// The full set used in SearchInStrings and BuildExcludedSpans.
+		if(token.Kind() is SyntaxKind.StringLiteralToken or
+		                   SyntaxKind.InterpolatedStringTextToken or
+		                   SyntaxKind.SingleLineRawStringLiteralToken or
+		                   SyntaxKind.MultiLineRawStringLiteralToken or
+		                   SyntaxKind.Utf8StringLiteralToken or
+		                   SyntaxKind.Utf8SingleLineRawStringLiteralToken or
+		                   SyntaxKind.Utf8MultiLineRawStringLiteralToken)
+			
+			return "string";
+		
+		return token.IsKind(SyntaxKind.IdentifierToken) ? "identifier" : "code";
 	}
 	
+	// One match as a search of a file finds it; the answer lists it as a SourcePlace.
 	sealed record SemanticMatchResult
 	{
-		public string File    { get; init; } = "";
-		public int    Line    { get; init; }
-		public string Text    { get; init; } = "";
 		public string Context { get; init; } = "";
 		
-		// Internal cursor for containingKind filtering — not exposed in the JSON response.
-		[JsonIgnore]
+		// Where the match starts in the file and how long it is: what containingKind is checked
+		// at, and what the place and its declaration are found from.
 		public int Position { get; init; }
+		public int Length   { get; init; }
 	}
 }
