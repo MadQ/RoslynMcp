@@ -1,0 +1,17 @@
+<Project>
+  <!-- global.json pins the SDK as a floor and lets a newer 10.0.x feature band run
+       (rollForward: latestFeature), so a local build needs no exact SDK. The committed
+       packages.lock.json files stay the pinned SDK's: another SDK brings its own version of the
+       packages it adds itself (ILLink.Tasks), and would rewrite the lock at every restore. Such an
+       SDK keeps a lock of its own under obj\, which is not committed.
+
+       CI installs the pinned SDK and fails when another one is resolved
+       (.github/actions/setup-pinned-dotnet), so locked mode there always checks the committed files.
+
+       Here and not in Directory.Build.props: NETCoreSdkVersion is not set yet when that file is
+       read. The pinned version is read from global.json, the one place it is written. -->
+  <PropertyGroup>
+    <PinnedSdkVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)global.json')), '"version"\s*:\s*"([^"]+)"').Groups.get_Item(1).Value)</PinnedSdkVersion>
+    <NuGetLockFilePath Condition="'$(PinnedSdkVersion)' != '' and '$(NETCoreSdkVersion)' != '' and '$(NETCoreSdkVersion)' != '$(PinnedSdkVersion)'">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', 'obj', 'packages.sdk-$(NETCoreSdkVersion).lock.json'))</NuGetLockFilePath>
+  </PropertyGroup>
+</Project>

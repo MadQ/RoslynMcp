@@ -1,0 +1,37 @@
+name: Setup the pinned .NET SDK
+description: >-
+  Installs the SDK version global.json names and makes the job use exactly that version.
+  Needs the repository checked out.
+
+# global.json lets a newer 10.0.x feature band run (rollForward: latestFeature), so that a local
+# build needs no exact SDK. A runner has other SDKs preinstalled, in the directory setup-dotnet
+# installs into, and one of them would be picked the same way: the build would pass on an SDK
+# nobody chose, and every project would restore against a lock file of that SDK's own instead of
+# the committed one (Directory.Build.targets). So the job's checkout gets the strict pin back, and
+# the last step fails if dotnet still resolves anything else. The version is read from
+# global.json, the one place it is written.
+runs:
+  using: composite
+  steps:
+    - name: Read the pinned SDK version and forbid any other
+      id: pin
+      shell: bash
+      run: |
+        version=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' global.json | head -n 1)
+        [ -n "$version" ] || { echo "::error::global.json names no SDK version."; exit 1; }
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        # Not sed -i: its argument differs between GNU and macOS sed.
+        sed 's/"rollForward"[[:space:]]*:[[:space:]]*"[^"]*"/"rollForward": "disable"/' global.json > global.json.pinned
+        mv global.json.pinned global.json
+        grep -q '"rollForward": "disable"' global.json || { echo "::error::global.json has no rollForward to set to disable."; exit 1; }
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ steps.pin.outputs.version }}
+
+    - name: Check that dotnet resolves the pinned SDK
+      shell: bash
+      run: |
+        resolved=$(dotnet --version)
+        [ "$resolved" = "${{ steps.pin.outputs.version }}" ] || { echo "::error::dotnet resolved SDK $resolved, but global.json pins ${{ steps.pin.outputs.version }}. CI builds and publishes with the pinned SDK only."; exit 1; }

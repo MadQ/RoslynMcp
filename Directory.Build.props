@@ -19,8 +19,9 @@
         
         <!-- In CI, fail on a stale/incomplete lock file instead of silently regenerating it —
              genuinely enforced (force-evaluate removed). This is durable because the restore graph
-             is stable: global.json pins the SDK (10.0.302), so SDK-versioned packages like
-             ILLink.Tasks don't drift, and RuntimeIdentifiers in RoslynMcp.csproj makes the graph
+             is stable: CI runs the SDK global.json pins and no other (an SDK that is not the pinned
+             one keeps a lock of its own, see Directory.Build.targets), so SDK-versioned packages
+             like ILLink.Tasks don't drift, and RuntimeIdentifiers in RoslynMcp.csproj makes the graph
              platform-independent (win-x64;linux-x64;osx-arm64), so one committed multi-RID
              packages.lock.json satisfies every matrix platform. GITHUB_ACTIONS auto-fires in
              every Actions workflow; ContinuousIntegrationBuild covers any non-Actions CI. -->
