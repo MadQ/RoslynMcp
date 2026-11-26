@@ -946,6 +946,12 @@ internal sealed record ReplaceInCodeResult(
 	[JsonPropertyName("candidates")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public ReplaceInCodeCandidate[]? Candidates { get; init; }
+	
+	// The snapshot of the file as it was before the write (#513): what roslyn_local_history
+	// restores it from in one call. Absent when nothing was written.
+	[JsonPropertyName("backup_token")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? BackupToken { get; init; }
 }
 
 /// <summary>A node <c>roslyn_replace_in_code</c> could have been pointed at: its declared name, or the start of its text, and where it starts.</summary>
@@ -1042,6 +1048,13 @@ internal sealed record ReplaceInFileResult : ToolResult
 	[JsonPropertyName("matches")]
 	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	public SearchDeclarationGroup[]? Matches { get; init; }
+	
+	// The snapshot of the file as it was before the write (#513): what roslyn_local_history
+	// restores it from in one call. The tool agents edit with is the one whose edits are undone
+	// most, and it answered no handle for that. Absent when nothing was written.
+	[JsonPropertyName("backup_token")]
+	[JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+	public string? BackupToken { get; init; }
 }
 
 /// <summary>
