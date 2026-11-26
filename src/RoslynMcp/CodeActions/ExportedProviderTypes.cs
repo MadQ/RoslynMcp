@@ -39,11 +39,12 @@ internal static class ExportedProviderTypes
 	/// </summary>
 	// IL3000 flags Assembly.Location because an assembly bundled into a single-file executable
 	// has none. The assembly here is never one of the server's own: the one caller hands in an
-	// analyzer assembly that ShadowCopyAnalyzerLoader loaded from a copy on disk, which always
-	// has a path. Should it ever be empty, the read throws like any other failed read, and the
-	// caller reports the types by count (#485). The attribute and not a pragma: it is what the
-	// publish-time tooling reads as well as the compiler.
-	[UnconditionalSuppressMessage("SingleFile", "IL3000:Avoid accessing Assembly file path when publishing as a single file", Justification = "The assembly is an analyzer assembly loaded from a shadow copy on disk, never one bundled into the executable; an empty path fails the read, which the caller handles.")]
+	// analyzer or provider assembly that a ShadowCopyAnalyzerLoader loaded from a copy on disk,
+	// which always has a path. Should it ever be empty, the read throws like any other failed
+	// read, and the caller reports the types by count (#485). The attribute and not a pragma:
+	// it carries its reason and stays in the assembly, where a pragma is gone after the compiler.
+	// In this project only the compiler's single-file analyzer reports IL3000.
+	[UnconditionalSuppressMessage("SingleFile", "IL3000:Avoid accessing Assembly file path when publishing as a single file", Justification = "The assembly is an analyzer or provider assembly loaded from a shadow copy on disk, never one bundled into the executable; an empty path fails the read, which the caller handles.")]
 	internal static ImmutableArray<string> Read(Assembly assembly)
 	{
 		// The reader takes the bytes as they are; wrapping the array does not copy it.
