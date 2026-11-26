@@ -214,7 +214,7 @@ static class FindStringLiteralTests
 						new { pattern = "roslyn_*", useGlob = true, page_token = paginationToken, projectPath = ctx.TargetPath },
 						data => {
 							
-							// A missing "matches" must fail. The old check compared a null count with 0,
+							// A missing "files" must fail. The old check compared a null count with 0,
 							// which is false, so a page in the wrong shape passed.
 							if(SearchHits.Of(data) is not [var first, _]) return false;
 

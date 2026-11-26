@@ -25,7 +25,7 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 		"The matches are grouped as roslyn_search_files groups its hits: files[] by file, in[] by the declaration each literal is in " +
 		"('method Enqueue'), with its lines ('108-158': pass them to roslyn_read_file to read the whole member) and where its node starts " +
 		"('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with line, column (where the literal starts: " +
-		"a line can hold several), text (the source line, cut around the literal when long) and value. " +
+		"a line can hold several), text (the source line the literal starts on, cut around it when long) and value. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> FindStringLiteral(
@@ -187,7 +187,8 @@ internal sealed class FindStringLiteralTool : RoslynMcpTool
 						if(!rx.IsMatch(candidate))
 							continue;
 
-						// The raw token is not kept: it is on the line, whose text the place has.
+						// The raw token is not kept: the place has the text of the line the literal
+						// starts on, which holds it whole unless the literal spans lines.
 						matches.Add(SourcePlace.Of(token.GetLocation(), rootPath, cancellationToken) with { Value = token.ValueText, ColumnMatters = true });
 					}
 				}

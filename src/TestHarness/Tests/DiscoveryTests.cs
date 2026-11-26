@@ -47,8 +47,11 @@ static class DiscoveryTests
 				() => ctx.RunTestAsync(
 					"roslyn_semantic_search",
 					new { pattern = "TODO", context = "comments", take = 10, projectPath = ctx.TargetPath },
-					// The context of a search for one is said once, in the answer (#487).
-					data => SearchHits.Of(data)?.Length > 0 && data?["context"]?.GetValue<string>() == "comments")),
+					// The context of a search for one is said once, in the answer (#487); that the
+					// matches are comments is seen on their lines.
+					data => SearchHits.Of(data) is { Length: > 0 } hits
+						&& hits.All(hit => hit.Text.Contains("//") || hit.Text.Contains("/*") || hit.Text.Contains('*'))
+						&& data?["context"]?.GetValue<string>() == "comments")),
 			
 			new("roslyn_list_types: enumerate types in RoslynMcp.Tools namespace",
 				() => ctx.RunTestAsync(

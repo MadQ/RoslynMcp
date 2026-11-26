@@ -131,6 +131,29 @@ static class SemanticPlacesTests
 					&& hits.All(hit => hit.Context is null), answer);
 			}),
 			
+			// A line's matches are one place, made from the leftmost; the place still declares when
+			// a later match of the line is the name. 's' matches 'class' before 'Calls' on line 1
+			// and 'static' and 'string' before 'Say' on line 5; no other declaration's name has
+			// the letter. Line 9 has it many times and is one place.
+			new("semantic places: a line declares when any of its matches is the name, not only the leftmost", async () => {
+				
+				var all  = await Call("roslyn_semantic_search", new { pattern = "s", projectPath = fx.Csproj });
+				var code = await Call("roslyn_semantic_search", new { pattern = "s", context = "code", projectPath = fx.Csproj });
+				
+				return Verdict(SearchHits.Of(all)?.Where(hit => hit.Declares).Select(hit => hit.Line).SequenceEqual(new[] { 1, 5 }) == true
+					&& SearchHits.Of(code)?.Where(hit => hit.Declares).Select(hit => hit.Line).SequenceEqual(new[] { 1, 5 }) == true
+					&& SearchHits.Of(all)?.Count(hit => hit.Line == 9) == 1, new JsonArray(all?.DeepClone(), code?.DeepClone()));
+			}),
+			
+			// The label of a match is what its first character that is not whitespace is in: a
+			// pattern that starts in the indentation before a doc comment is about the comment.
+			new("semantic places: a match that starts in whitespace is labelled by what follows it", async () => {
+				
+				var answer = await Call("roslyn_semantic_search", new { pattern = @"\s+/// <summary>", projectPath = fx.Csproj });
+				
+				return Verdict(SearchHits.Of(answer) is [{ Line: 3, Context: "xmldoc" }], answer);
+			}),
+			
 			// A search over all contexts finds matches of several kinds, so each says its own: what
 			// the match itself is in, not what its line begins with. The doc comment's line and
 			// the line with the string both used to say "identifier".

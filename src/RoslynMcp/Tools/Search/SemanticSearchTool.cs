@@ -236,13 +236,25 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 						});
 					}
 					
-					// The context is said per match only where it differs between them; a search
-					// of one context has it once, in the answer.
-					foreach(var match in matches)
-						collected.Add(SourcePlace.Of(Location.Create(tree, new TextSpan(match.Position, match.Length)), rootPath, cancellationToken) with {
+					// One place per line, made from the line's leftmost match: a place costs a
+					// walk up the tree for its declaration, and a broad pattern matches many times
+					// on a line. Any match of the line on the declaration's own name marks the
+					// place, as in a text search: in 'SearchResult BuildResult()' the pattern
+					// 'Result' matches the return type first.
+					foreach(var onLine in matches.GroupBy(match => text.Lines.GetLineFromPosition(match.Position).LineNumber)) {
+						
+						var first = onLine.MinBy(match => match.Position)!;
+						var names = EnclosingDeclaration.At(root, text, first.Position).Names;
+						
+						collected.Add(SourcePlace.Of(Location.Create(tree, new TextSpan(first.Position, first.Length)), rootPath, cancellationToken) with {
 							
-							Context = context == "all" ? match.Context : null,
+							Declares = onLine.Any(match => names.Any(name => name.OverlapsWith(new TextSpan(match.Position, match.Length)))),
+							
+							// Said per match only where it differs between them; a search of one
+							// context has it once, in the answer.
+							Context = context == "all" ? first.Context : null,
 						});
+					}
 				}
 			
 			return SourcePlace.Sorted(collected);
@@ -398,6 +410,7 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		// skipping positions that fall within a comment, xmldoc, or string span.
 		// All per-line matches are checked so a comment-excluded first match does not
 		// hide a later code match on the same line (e.g., `/* Foo */ var Foo = 1;`).
+		// Every code match is returned: the caller folds a line's matches into one place.
 		var lines    = text.Lines
 		;
 		var excluded = BuildExcludedSpans(root);
@@ -419,8 +432,6 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 					Position = matchPos,
 					Length   = m.Length
 				};
-				
-				break; // one result per line
 			}
 		}
 	}
@@ -458,15 +469,21 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		for(int i = 0; i < lines.Count; i++) {
 			
 			var lineText = lines[i].ToString();
-			var m        = regex.Match(lineText);
 			
-			if(m.Success) {
+			// Every match of the line: the caller folds them into one place, and needs them all
+			// to say whether one is the declaration's name.
+			foreach(Match m in regex.Matches(lineText)) {
 				
-				var context = DetermineContext(root, lines[i].Start + m.Index);
+				// What the match is in is asked at its first character that is not whitespace:
+				// a pattern such as '\s+// TODO' starts before the comment it is about.
+				var start = m.Index;
+				
+				while(start < m.Index + m.Length - 1 && char.IsWhiteSpace(lineText[start]))
+					start++;
 				
 				yield return new SemanticMatchResult {
 					
-					Context  = context,
+					Context  = DetermineContext(root, lines[i].Start + start),
 					Position = lines[i].Start + m.Index,
 					Length   = m.Length
 				};
@@ -531,8 +548,8 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 	}
 	
 	
-	// The context of one match of a search over all contexts: what the match's first character is
-	// in. By the match and not by its line: a line holds tokens of several kinds, and the first of
+	// The context of one match of a search over all contexts: what the character at the position
+	// is in, which the caller takes from the match. By the match and not by its line: a line holds tokens of several kinds, and the first of
 	// them said "identifier" for a doc comment and for a string after a name.
 	static string DetermineContext(SyntaxNode root, int position)
 	{
