@@ -44,30 +44,17 @@ internal class SetupProjectCommand : CliCommand
 		// and not an absolute path — this file is committed and shared across contributors).
 		const string hookCommand = ToolCommand.HookCommand;
 		
-		string? backupPath = null;
-		bool    isNew      = !File.Exists(hookFile);
-		string  json;
-		
-		if(!isNew) {
-			
-			// Backup first, then merge our entry into the existing file.
-			backupPath = hookFile + ".roslynmcp.bak";
-			File.Copy(hookFile, backupPath, overwrite: true);
-			json = MergeHookEntry(hookFile, hookCommand) ?? BuildFreshJson(hookCommand);
-		}
-		else {
-			
-			json = BuildFreshJson(hookCommand);
-		}
-		
-		File.WriteAllText(hookFile, json);
+		var (hookOutcome, backupPath) = InstallHook(hookFile, hookCommand);
 		
 		var relativePath = Path.GetRelativePath(Environment.CurrentDirectory, hookFile);
 		
 		Console.WriteLine();
-		Console.WriteLine(isNew
-			? $"  ✓ Wrote project hook: {relativePath}"
-			: $"  ✓ Updated project hook: {relativePath}");
+		Console.WriteLine(hookOutcome switch {
+			
+			HookFileOutcome.Created   => $"  ✓ Wrote project hook: {relativePath}",
+			HookFileOutcome.Unchanged => $"  ✓ Project hook is up to date: {relativePath}",
+			_                         => $"  ✓ Updated project hook: {relativePath}",
+		});
 		
 		if(backupPath is not null)
 			Console.WriteLine($"      Backup: {Path.GetRelativePath(Environment.CurrentDirectory, backupPath)}");
@@ -449,6 +436,39 @@ internal class SetupProjectCommand : CliCommand
 		return current;
 	}
 	
+	// What a run did to the hook file.
+	enum HookFileOutcome { Created, Updated, Unchanged }
+	
+	/// <summary>
+	///     Puts RoslynMcp's entry into the hook file and says what that took. A file that already
+	///     says what the run would write is left as it is, byte for byte, and gets no backup
+	///     (#505): the file is committed, and a rerun that wrote it again in the serializer's own
+	///     form, without the line break at its end, showed as a change in every checkout it ran in.
+	/// </summary>
+	static (HookFileOutcome Outcome, string? BackupPath) InstallHook(string hookFile, string hookCommand)
+	{
+		if(!File.Exists(hookFile)) {
+			
+			File.WriteAllText(hookFile, BuildFreshJson(hookCommand));
+			
+			return (HookFileOutcome.Created, null);
+		}
+		
+		var merged = MergeHookEntry(hookFile, hookCommand, out var unchanged);
+		
+		if(unchanged)
+			return (HookFileOutcome.Unchanged, null);
+		
+		// Backup first, then write: the merged file, or a fresh one when the existing file could
+		// not be read as a hook file.
+		var backupPath = hookFile + ".roslynmcp.bak";
+		
+		File.Copy(hookFile, backupPath, overwrite: true);
+		File.WriteAllText(hookFile, merged ?? BuildFreshJson(hookCommand));
+		
+		return (HookFileOutcome.Updated, backupPath);
+	}
+	
 	// Builds a fresh hook config JSON string.
 	static string BuildFreshJson(string hookCommand)
 	{
@@ -458,8 +478,12 @@ internal class SetupProjectCommand : CliCommand
 			["hooks"]   = new JsonObject { [HookEvent] = new JsonArray { HookEntry(hookCommand) } },
 		};
 		
-		return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+		return HookFileText(root);
 	}
+	
+	// The hook file as it is written: indented, and ending with a line break, as a text file does
+	// and as an editor or a formatter would leave it.
+	static string HookFileText(JsonObject root) => root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + Environment.NewLine;
 	
 	// The event the hook is registered for (#310). Copilot CLI takes guidance from a postToolUse
 	// hook, as additionalContext appended to the tool's result; a preToolUse hook can only decide
@@ -477,15 +501,20 @@ internal class SetupProjectCommand : CliCommand
 	
 	// Reads the existing hook file, upserts our hook entry under postToolUse, removes one a
 	// version before #310 left under preToolUse, and returns the merged JSON. Returns null on
-	// parse failure — caller falls back to BuildFreshJson.
-	static string? MergeHookEntry(string hookFile, string hookCommand)
+	// parse failure — caller falls back to BuildFreshJson. unchanged: the file already holds
+	// what the merge comes to, whatever its formatting, so there is nothing to write.
+	static string? MergeHookEntry(string hookFile, string hookCommand, out bool unchanged)
 	{
+		unchanged = false;
+		
 		try {
 			
 			var root = JsonNode.Parse(FileReader.ReadAllText(hookFile, FileReader.ConfigLimit)) as JsonObject;
 			
 			if(root is null)
 				return null;
+			
+			var before = root.DeepClone();
 			
 			if(root["hooks"] is not JsonObject hooksObj) {
 				
@@ -507,7 +536,13 @@ internal class SetupProjectCommand : CliCommand
 			
 			entries.Add(HookEntry(hookCommand));
 			
-			return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+			var merged = HookFileText(root);
+			
+			// Compared as parsed text on both sides: a value built here and one read from a file
+			// are held differently, and only two that were read are sure to compare by content.
+			unchanged = JsonNode.DeepEquals(before, JsonNode.Parse(merged));
+			
+			return merged;
 		}
 		catch {
 			

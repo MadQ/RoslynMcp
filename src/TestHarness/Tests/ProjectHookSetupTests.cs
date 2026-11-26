@@ -1,0 +1,201 @@
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Text.Json.Nodes;
+
+/// <summary>
+///     Covers what <c>setup-project</c> does to the Copilot CLI hook file,
+///     <c>.github/hooks/roslynmcp.json</c> (#505). That file is committed, so a run must not
+///     leave it changed when it had nothing to change: a rerun used to write the file again as
+///     the JSON serializer formats it, without the line break at its end, and every checkout
+///     the command ran in showed the file as modified.
+///     <para>
+///         The tests call the real method, <c>SetupProjectCommand.InstallHook</c>, by reflection
+///         on the server assembly the harness built, against files in a temp directory. Nothing
+///         is mocked: each test writes a file, runs the method, and reads the file and its
+///         backup back. The method returns a tuple of what it did and the backup's path, read
+///         here through <see cref="ITuple"/> because the outcome's enum is private to the server.
+///     </para>
+///     <para>
+///         The inputs are the states a repository can be in: no hook file; the file a previous
+///         run wrote and somebody committed, with and without a final line break and in another
+///         indentation than the serializer's; a file from before #310 with the entry under the
+///         old event, beside somebody else's hook; and a file that is not JSON.
+///     </para>
+/// </summary>
+static class ProjectHookSetupTests
+{
+	const string HookCommand = "madq-roslynmcp hook";
+	
+	// The hook file as it is committed in a repository: two-space indentation, line feeds, a
+	// final line break. Not the serializer's output on Windows, which has CRLF.
+	const string Committed = "{\n  \"version\": 1,\n  \"hooks\": {\n    \"postToolUse\": [\n      {\n        \"type\": \"command\",\n        \"powershell\": \"madq-roslynmcp hook\",\n        \"bash\": \"madq-roslynmcp hook\",\n        \"timeoutSec\": 5\n      }\n    ]\n  }\n}\n";
+	
+	static Assembly? serverAssembly;
+	
+	internal static TestGroup Build(TestContext ctx)
+	{
+		var dir = Path.Combine(TestFixtures.TempRoot, $"ProjectHookSetup.{Guid.NewGuid():N}");
+		
+		Directory.CreateDirectory(dir);
+		
+		var tests = new List<TestCase> {
+			
+			// No hook file: the run creates one entry under postToolUse, makes no backup (there
+			// is nothing to back up), and the file ends with a line break, which is what keeps a
+			// formatter or an editor from changing it later.
+			Case("a new hook file has one entry and ends with a line break", () => {
+				
+				var path = Path.Combine(dir, "fresh.json");
+				
+				var (outcome, backup) = Install(ctx, path);
+				var text              = File.ReadAllText(path);
+				
+				return outcome == "Created"
+					&& backup is null
+					&& !File.Exists(path + ".roslynmcp.bak")
+					&& text.EndsWith('\n')
+					&& Entries(path, "postToolUse") is [JsonObject entry]
+					&& entry["powershell"]?.GetValue<string>() == HookCommand
+					&& entry["bash"]?.GetValue<string>() == HookCommand
+					? null
+					: $"outcome {outcome}, backup {backup ?? "none"}, content: {text}";
+			}),
+			
+			// The case of #505: the committed file already says everything the run would write.
+			// It must come back byte for byte (the bytes are compared, since a rewrite with CRLF
+			// or without the final line break parses the same), with no backup beside it.
+			Case("a rerun leaves a file that already holds the hook byte for byte, without a backup", () => {
+				
+				var path = Path.Combine(dir, "rerun.json");
+				
+				File.WriteAllText(path, Committed);
+				
+				var before            = File.ReadAllBytes(path);
+				var (outcome, backup) = Install(ctx, path);
+				
+				return outcome == "Unchanged"
+					&& backup is null
+					&& !File.Exists(path + ".roslynmcp.bak")
+					&& File.ReadAllBytes(path).AsSpan().SequenceEqual(before)
+					? null
+					: $"outcome {outcome}, backup {backup ?? "none"}, content: {File.ReadAllText(path)}";
+			}),
+			
+			// "Unchanged" is about what the file says, not how it is written: one line, no final
+			// line break, keys in another order. A run that normalised such a file would be the
+			// same unasked-for diff in a repository that formats its JSON differently.
+			Case("a file that says the same in another form is left as it is", () => {
+				
+				const string compact = "{\"hooks\":{\"postToolUse\":[{\"timeoutSec\":5,\"bash\":\"madq-roslynmcp hook\",\"powershell\":\"madq-roslynmcp hook\",\"type\":\"command\"}]},\"version\":1}";
+				
+				var path = Path.Combine(dir, "compact.json");
+				
+				File.WriteAllText(path, compact);
+				
+				var (outcome, _) = Install(ctx, path);
+				
+				return outcome == "Unchanged" && File.ReadAllText(path) == compact
+					? null
+					: $"outcome {outcome}, content: {File.ReadAllText(path)}";
+			}),
+			
+			// A file that does need a change is still changed: the entry a version before #310
+			// left under preToolUse moves to postToolUse, somebody else's hook beside it stays,
+			// the backup holds the file as it was, and the new file ends with a line break. This
+			// guards the other side of the fix, a comparison that calls everything unchanged.
+			Case("a file with the entry under the old event is rewritten, with a backup", () => {
+				
+				const string legacy = "{ \"version\": 1, \"hooks\": { \"preToolUse\": [ { \"type\": \"command\", \"bash\": \"lint.sh\" }, { \"type\": \"command\", \"powershell\": \"madq-roslynmcp hook\", \"bash\": \"madq-roslynmcp hook\" } ] } }";
+				
+				var path = Path.Combine(dir, "legacy.json");
+				
+				File.WriteAllText(path, legacy);
+				
+				var (outcome, backup) = Install(ctx, path);
+				var text              = File.ReadAllText(path);
+				
+				return outcome == "Updated"
+					&& backup == path + ".roslynmcp.bak"
+					&& File.ReadAllText(backup) == legacy
+					&& text.EndsWith('\n')
+					&& Entries(path, "preToolUse") is [JsonObject other]
+					&& other["bash"]?.GetValue<string>() == "lint.sh"
+					&& Entries(path, "postToolUse") is [JsonObject ours]
+					&& ours["bash"]?.GetValue<string>() == HookCommand
+					? null
+					: $"outcome {outcome}, backup {backup ?? "none"}, content: {text}";
+			}),
+			
+			// A file that is not JSON cannot be merged into, and it cannot be "unchanged" either:
+			// it is replaced by a fresh hook file, and the backup keeps what was there.
+			Case("a file that is not JSON is replaced, and kept in the backup", () => {
+				
+				const string broken = "{ \"hooks\": ";
+				
+				var path = Path.Combine(dir, "broken.json");
+				
+				File.WriteAllText(path, broken);
+				
+				var (outcome, backup) = Install(ctx, path);
+				
+				return outcome == "Updated"
+					&& backup is not null
+					&& File.ReadAllText(backup) == broken
+					&& Entries(path, "postToolUse") is [JsonObject]
+					? null
+					: $"outcome {outcome}, backup {backup ?? "none"}, content: {File.ReadAllText(path)}";
+			}),
+		};
+		
+		return new TestGroup($"Project Hook Setup ({tests.Count} tests)", tests, Teardown: () => {
+			
+			try { Directory.Delete(dir, recursive: true); }
+			catch(IOException) { }
+			
+			return Task.CompletedTask;
+		});
+	}
+	
+	// A test body returns null on success or a description of what was wrong.
+	static TestCase Case(string name, Func<string?> body)
+		=> new($"project hook setup: {name}", () => {
+			
+			string? failure;
+			
+			try { failure = body(); }
+			catch(Exception ex) { failure = $"{ex.GetType().Name}: {ex.Message}"; }
+			
+			return Task.FromResult(failure is null ? (true, "PASS") : (false, $"FAIL  ({failure})"));
+		})
+	;
+	
+	// Runs SetupProjectCommand.InstallHook on the file. Its result is (HookFileOutcome, string?
+	// backup path); the outcome comes back as the enum member's name.
+	static (string Outcome, string? Backup) Install(TestContext ctx, string path)
+	{
+		var method = LoadServerAssembly(ctx)
+			.GetType("RoslynMcp.Cli.SetupProjectCommand", throwOnError: true)!
+			.GetMethod("InstallHook", BindingFlags.Static | BindingFlags.NonPublic)!;
+		
+		var result = (ITuple) method.Invoke(null, [path, HookCommand])!;
+		
+		return (result[0]!.ToString()!, (string?) result[1]);
+	}
+	
+	// The entries of one hook event in the file, or null when the event is not there.
+	static JsonArray? Entries(string path, string eventName) => JsonNode.Parse(File.ReadAllText(path))?["hooks"]?[eventName] as JsonArray;
+	
+	// Same load as ClaudeHookSetupTests: the server assembly the harness just built.
+	static Assembly LoadServerAssembly(TestContext ctx)
+	{
+		if(serverAssembly is not null)
+			return serverAssembly;
+		
+		var projectDir   = Path.GetDirectoryName(ctx.ServerProj)!;
+		var assemblyPath = Path.Combine(projectDir, "bin", "Debug", "net10.0", "RoslynMcp.dll");
+		
+		serverAssembly = Assembly.LoadFrom(assemblyPath);
+		
+		return serverAssembly;
+	}
+}
