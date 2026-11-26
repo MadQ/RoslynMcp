@@ -234,9 +234,14 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 		
 		DeclaredAt[] declarations = [..
 			SourcePlace.Sorted(
-				symbols.SelectMany(symbol => symbol.Locations)
+				symbols.SelectMany(symbol => symbol.Locations
 					.Where(location => location.IsInSource)
-					.Select(location => SourcePlace.Of(location, rootPath, cancellationToken)))
+					.Select(location => SourcePlace.Of(location, rootPath, cancellationToken) is var place && symbol.IsImplicitlyDeclared
+						// A member the compiler declares (a record's ToString) is written nowhere:
+						// its location is its type's name, which it does not declare, and the
+						// lines and the start found there are the whole type's.
+						? place with { Declares = false }
+						: place)))
 				.Select(place => place.AsDeclared())
 		];
 		

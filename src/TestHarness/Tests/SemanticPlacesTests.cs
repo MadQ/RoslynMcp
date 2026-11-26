@@ -292,7 +292,14 @@ static class SemanticPlacesTests
 				var answer = await Call("roslyn_find_implementations", new { symbolName = "ToString", containingType = "Named", projectPath = fx.Csproj });
 				var child  = answer?["overrides"]?.AsArray().FirstOrDefault(entry => (entry?["name"]?.GetValue<string>() ?? "").StartsWith("Child."));
 				
-				return Verdict(child?["line"]?.GetValue<int>() == 26 && child["lines"] is null && child["at"] is null, answer);
+				// The same where a reference search says where the member is declared: not as
+				// "record Child" with the record's lines.
+				var references = await Call("roslyn_find_references", new { symbolName = "ToString", containingType = "Child", projectPath = fx.Csproj });
+				var declared   = references?["declarations"]?.AsArray() is [var only] ? only : null;
+				
+				return Verdict(child?["line"]?.GetValue<int>() == 26 && child["lines"] is null && child["at"] is null
+					&& declared?["line"]?.GetValue<int>() == 26
+					&& declared["declaration"] is null && declared["lines"] is null && declared["at"] is null, new JsonArray(answer?.DeepClone(), references?.DeepClone()));
 			}),
 			
 			// The errors a build stops at are listed as roslyn_get_diagnostics lists them: under

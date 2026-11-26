@@ -488,8 +488,10 @@ internal sealed class BuildTool : RoslynMcpTool
 	{
 		var places = new List<DiagnosticPlace>(items.Length);
 		
-		// Each file once, however many diagnostics name it; null for one that is not read.
-		var sources = new Dictionary<string, (SourceText Text, SyntaxNode Root)?>(SecurityBoundary.PathComparer);
+		// Each file once, however many diagnostics name it; null for one that is not read. By
+		// the name as the build wrote it, exactly: two names that differ in case are two files
+		// where the directory says so, and one file read twice is all a stricter key costs.
+		var sources = new Dictionary<string, (SourceText Text, SyntaxNode Root)?>(StringComparer.Ordinal);
 		
 		foreach(var item in items) {
 			
