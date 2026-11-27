@@ -267,10 +267,14 @@ static class IgnoredDirectoryTests
 			
 			// An adopted directory is listed again half a second and three seconds after its
 			// adoption (#339), for a file that landed before its watcher delivered. That look
-			// back must report nothing the first listing or the reload already took: here the
-			// reload it caused is serviced, and no second one may be flagged while the look
-			// back runs. What it is for, a file no watcher saw, cannot be staged from outside
-			// the server; that it costs nothing when there is no such file can.
+			// back must report nothing that a listing or a watcher reported before it. The props
+			// file is what makes this a test: a source file is a document once the reload it
+			// caused is made, and said again it is a text compared and found the same, whereas
+			// a props file flags a reload every time it is said. So the reload is serviced, and
+			// no second one may be flagged while the look back runs. Where the reload is not
+			// done before the second look back, the test passes without having shown it; it
+			// never fails for that. What the look back is for, a file no watcher saw, cannot be
+			// staged from outside the server.
 			new("ignored dirs: the look back at an adopted directory flags no second reload",
 				async () => {
 					
@@ -279,6 +283,7 @@ static class IgnoredDirectoryTests
 						return (false, "FAIL  (precondition: reload_pending never cleared)");
 					
 					fx.Write("later/Inside.cs", "class InsideLater { }\n");
+					fx.Write("later/Extra.props", "<Project />\n");
 					
 					if(!await BecomesPendingAsync(TimeSpan.FromSeconds(10)))
 						
