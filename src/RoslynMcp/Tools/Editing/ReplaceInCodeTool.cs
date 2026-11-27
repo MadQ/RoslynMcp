@@ -223,12 +223,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		if(!string.IsNullOrWhiteSpace(textPattern)) {
 			
 			matchedNodes = matchedNodes
-				.Where(n => {
-					
-					var name = GetDeclaredName(n);
-					
-					return name.Contains(textPattern, StringComparison.OrdinalIgnoreCase);
-				})
+				.Where(n => DeclaredNames(n) is { Length: > 0 } names
+					? names.Any(name => name.Contains(textPattern, StringComparison.OrdinalIgnoreCase))
+					: n.ToString().Contains(textPattern, StringComparison.OrdinalIgnoreCase))
 				.ToArray()
 			;
 			
@@ -248,7 +245,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				void Named(StringComparison comparison)
 				{
-					if(matchedNodes.Length > 1 && matchedNodes.Where(n => DeclaredName(n) is { } name && name.Equals(pattern, comparison)).ToArray() is { Length: > 0 } exact)
+					if(matchedNodes.Length > 1 && matchedNodes.Where(n => DeclaredNames(n).Any(name => name.Equals(pattern, comparison))).ToArray() is { Length: > 0 } exact)
 						matchedNodes = exact;
 				}
 			}
@@ -261,8 +258,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			if(matchedNodes.Length == 0 && EnclosingDeclaration.NameSegments(textPattern) is { Length: > 0 } segments) {
 				
 				matchedNodes = ofKind
-					.Where(n => DeclaredName(n) is { } name
-						&& name.Equals(segments[^1], StringComparison.OrdinalIgnoreCase)
+					.Where(n => DeclaredNames(n).Any(name => name.Equals(segments[^1], StringComparison.OrdinalIgnoreCase))
 						&& (segments.Length == 1
 							|| n.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault()?.Identifier.Text.Equals(segments[^2], StringComparison.OrdinalIgnoreCase) == true
 							|| string.Equals(EnclosingDeclaration.ExplicitInterface(n), segments[^2], StringComparison.OrdinalIgnoreCase)))
@@ -303,7 +299,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			ReplaceInCodeCandidate[] candidates = [..there.Take(MaxCandidates).Select(n => {
 				
 				var start = StartOf(n);
-				var name  = DeclaredName(n) ?? Brief(n.ToString());
+				var name  = DeclaredNames(n) is { Length: > 0 } names ? string.Join(", ", names) : Brief(n.ToString());
 				
 				return new ReplaceInCodeCandidate(name, start.Line + 1, start.Character + 1);
 			})];
@@ -384,8 +380,21 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			: replacement
 		;
 		
-		if(isDeletion)
+		if(isDeletion) {
+			
 			newRoot = root.RemoveNodes(matchedNodes, SyntaxRemoveOptions.KeepNoTrivia)!;
+			
+			foreach(var matchedNode in matchedNodes) {
+				
+				if(DroppedVariables(matchedNode, null) is not { } dropped)
+					continue;
+				
+				if(!unapplied.TryGetValue(dropped, out var lines))
+					unapplied[dropped] = lines = [];
+				
+				lines.Add(StartOf(matchedNode).Line + 1);
+			}
+		}
 		
 		else {
 			
@@ -414,6 +423,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				var notes = new List<string>();
 				
 				var placed = WithTriviaOf(matchedNode, parsed, replacementTokens, notes);
+				
+				if(DroppedVariables(matchedNode, placed) is { } dropped)
+					notes.Add(dropped);
 				
 				if(placed.Length > 1) {
 					
@@ -758,8 +770,42 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		return -1;
 	}
 	
+	// The variables of a field declaration that the nodes put in its place no longer declare.
+	// A field of several variables is found by any of them (#533) and replaced whole, since a
+	// variable is not a member of its own: a replacement written for the one variable named
+	// would drop the others without a word, and the syntax check has nothing to object to.
+	// A deletion (placed null) takes them all, which the pattern may not have named.
+	private static string? DroppedVariables(SyntaxNode original, IEnumerable<SyntaxNode>? placed)
+	{
+		if(original is not BaseFieldDeclarationSyntax { Declaration.Variables.Count: > 1 } field)
+			
+			return null;
+		
+		var all = field.Declaration.Variables.Select(variable => variable.Identifier.Text).ToArray();
+		
+		if(placed is null)
+			
+			return $"The declaration of {string.Join(", ", all)} was deleted whole, as a field's variables are: all of them are gone. To delete one, replace the declaration with the others.";
+		
+		var kept = placed.SelectMany(DeclaredNames).ToHashSet(StringComparer.Ordinal);
+		var lost = all.Where(name => !kept.Contains(name)).ToArray();
+		
+		return lost.Length == 0
+			? null
+			: $"The declaration of {string.Join(", ", all)} was replaced whole, as a field's variables are, and {string.Join(", ", lost)} {(lost.Length == 1 ? "is" : "are")} no longer declared. To keep {(lost.Length == 1 ? "it" : "them")}, give the replacement every variable."
+		;
+	}
 	
-	private static string GetDeclaredName(SyntaxNode node) => DeclaredName(node) ?? node.ToString();
+
+	// Every name a declaration declares: one for most, each variable for a field or an event
+	// field (int a, Problem;), which a pattern naming any of them finds. DeclaredName gave the
+	// first only, so Problem found nothing there (#533). The node is still the whole
+	// declaration: a variable is not a member of its own.
+	private static string[] DeclaredNames(SyntaxNode node) => node switch {
+		
+		BaseFieldDeclarationSyntax f => [..f.Declaration.Variables.Select(v => v.Identifier.Text)],
+		_                            => DeclaredName(node) is { } name ? [name] : []
+	};
 	
 	// The name a declaration is found by, or null for a node that declares nothing and is found by
 	// its text.
