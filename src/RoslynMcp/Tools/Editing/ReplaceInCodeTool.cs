@@ -915,6 +915,11 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			if(number < first || inside.Contains(number) || line.Length == 0 || IsDirective(number))
 				moved.Append(line);
+			
+			// The comment before the first line of code is the node's, wherever its lines were
+			// written: all of them go to the node's indentation, as its first line always did.
+			else if(number < code && !string.IsNullOrWhiteSpace(line))
+				moved.Append(target).Append(line.AsSpan().TrimStart([' ', '\t']));
 			else if(line.StartsWith(start, StringComparison.Ordinal))
 				moved.Append(target).Append(line, start.Length, line.Length - start.Length);
 			else {

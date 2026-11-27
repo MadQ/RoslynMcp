@@ -314,16 +314,16 @@ static class EditSafetyTests
 			// as one in the branch compiled: the branch moves with the block, the string's inner
 			// lines do not. And a line commented out at column 0 above a member written one tab in
 			// is no left edge: the member's first line of code is, so the block moves by one tab,
-			// not by two.
+			// not by two, and every line of the comment before it goes to the member's indentation.
 			new("edit safety: a moved replacement keeps a string in a left-out #if branch, and takes its left edge from code", async () => {
 				
 				var branch = await InCode(new { filePath = "code_indent_off.cs", nodeKind = "method", textPattern = "Text", replacement = "string Text()\n{\n#if NEVER_DEFINED_531\n\treturn @\"a\n  b\";\n#else\n\treturn @\"c\n  d\";\n#endif\n}", projectPath = fx.Csproj });
-				var edge   = await InCode(new { filePath = "code_indent_off.cs", nodeKind = "method", textPattern = "Plain", replacement = "//int Old() { return 0; }\n\tint Plain()\n\t{\n\t\treturn 1;\n\t}", projectPath = fx.Csproj });
+				var edge   = await InCode(new { filePath = "code_indent_off.cs", nodeKind = "method", textPattern = "Plain", replacement = "//int Old() { return 0; }\n// Kept for now.\n\tint Plain()\n\t{\n\t\treturn 1;\n\t}", projectPath = fx.Csproj });
 				var after  = Read("code_indent_off.cs");
 				
 				return Verdict(after == "class IndentOff\n{\n\tclass Inner\n\t{\n"
 					+ "\t\tstring Text()\n\t\t{\n#if NEVER_DEFINED_531\n\t\t\treturn @\"a\n  b\";\n#else\n\t\t\treturn @\"c\n  d\";\n#endif\n\t\t}\n\n"
-					+ "\t\t//int Old() { return 0; }\n\t\tint Plain()\n\t\t{\n\t\t\treturn 1;\n\t\t}\n\t}\n}\n"
+					+ "\t\t//int Old() { return 0; }\n\t\t// Kept for now.\n\t\tint Plain()\n\t\t{\n\t\t\treturn 1;\n\t\t}\n\t}\n}\n"
 					&& branch?["_caution"] is null
 					&& edge?["_caution"] is null, new JsonArray(branch?.DeepClone(), edge?.DeepClone()), after);
 			}),
