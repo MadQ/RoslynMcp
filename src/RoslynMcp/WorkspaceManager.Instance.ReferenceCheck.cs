@@ -42,14 +42,28 @@ internal sealed partial class WorkspaceManager
 			///     The projects of <paramref name="solution"/> that lack a compile-time assembly of
 			///     their packages. <paramref name="compared"/> counts the projects that could be
 			///     compared, <paramref name="assetsFiles"/> the files read for them: the targets of a
-			///     multi-targeted project share one.
+			///     multi-targeted project share one. <paramref name="foreign"/> counts the projects left
+			///     out because their assets file names another project file: the right answer for two
+			///     project files in one directory, and the sign of a check that is off for a workspace
+			///     opened under another spelling of its path than the restore saw (a substituted drive,
+			///     a junction, a copied tree).
 			/// </summary>
-			public static PartialReferences[] Find(Solution solution, out int compared, out int assetsFiles)
+			public static PartialReferences[] Find(Solution solution, out int compared, out int assetsFiles, out int foreign)
 			{
 				var read  = new Dictionary<string, AssetsFile?>(SecurityBoundary.PathComparer);
 				var found = new List<PartialReferences>();
 				
 				compared = 0;
+				foreign  = 0;
+				
+				// The project files that are several projects: one per target framework.
+				var multiTargeted = solution.Projects
+					.Where(project => project.FilePath is not null)
+					.GroupBy(project => project.FilePath!, SecurityBoundary.PathComparer)
+					.Where(group => group.Skip(1).Any())
+					.Select(group => group.Key)
+					.ToHashSet(SecurityBoundary.PathComparer)
+				;
 				
 				foreach(var project in solution.Projects) {
 					
@@ -66,10 +80,17 @@ internal sealed partial class WorkspaceManager
 					// The file found is the one in the project's directory or above its output, and two
 					// project files can share a directory: one that restores elsewhere would be compared
 					// with the other's packages. A file that names its project must name this one.
-					if(assets is null || assets.ProjectPath is { } owner && !SecurityBoundary.PathComparer.Equals(owner, project.FilePath))
+					if(assets is null)
 						continue;
 					
-					if(assets.TargetOf(project.Name) is not { } expected)
+					if(assets.ProjectPath is { } owner && !SecurityBoundary.PathComparer.Equals(owner, project.FilePath)) {
+						
+						foreign++;
+						
+						continue;
+					}
+					
+					if(assets.TargetOf(project.Name, multiTargeted.Contains(project.FilePath!)) is not { } expected)
 						continue;
 					
 					compared++;
@@ -196,27 +217,30 @@ internal sealed partial class WorkspaceManager
 				/// <summary>
 				///     The assemblies of the target a project is built for, or null when the file does
 				///     not say which that is. A multi-targeted project is one project per framework,
-				///     named <c>Foo(net8.0)</c>; a project with one framework has the file's one target,
-				///     whatever its name ends in (<c>Foo (Legacy)</c>).
+				///     named <c>Foo(net8.0)</c>, and gets the target of that name or none: a file from
+				///     before a framework was added holds one target, which is not that framework's. A
+				///     project with one framework has the file's one target, whatever its name ends in
+				///     (<c>Foo (Legacy)</c>).
 				/// </summary>
-				public Assembly[]? TargetOf(string projectName)
+				public Assembly[]? TargetOf(string projectName, bool multiTargeted)
 				{
+					if(!multiTargeted)
+						
+						return targets.Count == 1 ? targets.Values.First() : null;
+					
 					var open = projectName.LastIndexOf('(');
 					
-					if(open >= 0 && projectName.EndsWith(')')) {
+					if(open < 0 || !projectName.EndsWith(')'))
 						
-						var framework = projectName[(open + 1)..^1];
-						
-						if(targets.TryGetValue(framework, out var named))
-							
-							return named;
-						
-						if(aliases.TryGetValue(framework, out var target))
-							
-							return targets[target];
-					}
+						return null;
 					
-					return targets.Count == 1 ? targets.Values.First() : null;
+					var framework = projectName[(open + 1)..^1];
+					
+					if(targets.TryGetValue(framework, out var named))
+						
+						return named;
+					
+					return aliases.TryGetValue(framework, out var target) ? targets[target] : null;
 				}
 				
 				/// <summary>

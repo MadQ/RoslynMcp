@@ -14,7 +14,6 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 	private static readonly TimeSpan DriftTolerance = TimeSpan.FromSeconds(2);
 	
 	private const int MaxReportedFiles = 200;
-
 	
 	[McpServerTool(Name = "roslyn_check_drift", ReadOnly = true, Title = "Check Drift", OpenWorld = false, Idempotent = true)]
 	[Description(

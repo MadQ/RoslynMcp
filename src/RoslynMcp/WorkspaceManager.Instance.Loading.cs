@@ -226,12 +226,16 @@ internal sealed partial class WorkspaceManager
 		LoadFindings FindingsOf(Workspace ws)
 		{
 			var sw      = System.Diagnostics.Stopwatch.StartNew();
-			var partial = ReferenceCheck.Find(ws.CurrentSolution, out var compared, out var assetsFiles);
+			var partial = ReferenceCheck.Find(ws.CurrentSolution, out var compared, out var assetsFiles, out var foreign);
 			
 			// Nothing to say for a workspace without a restored project: a load of unrestored
 			// projects is common (a new checkout), and the line would only repeat itself.
-			if(compared > 0)
-				logger.LogInfo("Load", $"Package references of {compared} project(s) compared with {assetsFiles} assets file(s) in {sw.ElapsedMilliseconds} ms: {(partial.Length == 0 ? "none missing" : PartialReferences.Describe(partial))}");
+			if(compared > 0 || foreign > 0) {
+				
+				var leftOut = foreign > 0 ? $"; {foreign} project(s) not compared, their assets file names another project file" : "";
+				
+				logger.LogInfo("Load", $"Package references of {compared} project(s) compared with {assetsFiles} assets file(s) in {sw.ElapsedMilliseconds} ms: {(partial.Length == 0 ? "none missing" : PartialReferences.Describe(partial))}{leftOut}");
+			}
 			
 			return new(LoadFailedProjects(ws), ProjectsNotRestored(ws.CurrentSolution), partial);
 		}
