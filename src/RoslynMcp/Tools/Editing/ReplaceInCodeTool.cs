@@ -234,10 +234,24 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			// A declaration whose name is the pattern is the one meant: 'Problem' is the property
 			// Problem, not HasProblem beside it, which matched as well and took a call with a line
-			// to tell apart, or both with force (#530). A pattern that is no declaration's whole
-			// name still matches every name it is part of, as before.
-			if(matchedNodes.Where(n => DeclaredName(n) is { } name && name.Equals(textPattern, StringComparison.OrdinalIgnoreCase)).ToArray() is { Length: > 0 } exact)
-				matchedNodes = exact;
+			// to tell apart, or both with force (#530). The name as written first, then in any case,
+			// so 'Foo' is Foo where a foo stands beside it. A pattern that is no declaration's whole
+			// name still matches every name it is part of, as before. Not where a line is given: the
+			// position says which node is meant, and the answer that asked for it listed the longer
+			// names too.
+			if(line == 0) {
+				
+				var pattern = textPattern;
+				
+				Named(StringComparison.Ordinal);
+				Named(StringComparison.OrdinalIgnoreCase);
+				
+				void Named(StringComparison comparison)
+				{
+					if(matchedNodes.Length > 1 && matchedNodes.Where(n => DeclaredName(n) is { } name && name.Equals(pattern, comparison)).ToArray() is { Length: > 0 } exact)
+						matchedNodes = exact;
+				}
+			}
 			
 			// A declaration is found by its name, and an agent writes the name as it read it: with
 			// the return type before it, the parameter list behind it, or its type in front
