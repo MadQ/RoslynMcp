@@ -79,7 +79,12 @@ record LogEntry
     [JsonPropertyName("detail")]
     public string? Detail { get; init; }
 
-    /// <summary>For TOOL entries: workspace cache result — 'HIT', 'MISS', or null.</summary>
+    /// <summary>
+    ///     For TOOL entries: what the page cache did (#498) — 'STORED' (a page computed by its
+    ///     query, whose result was kept for the next), 'HIT' (a page cut from a kept result), 'MISS'
+    ///     (a page token whose result was no longer kept, so the query ran again; it wins when both
+    ///     apply), or null when no paging was in play.
+    /// </summary>
     [JsonPropertyName("cache_tag")]
     public string? CacheTag { get; init; }
 

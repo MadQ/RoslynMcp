@@ -116,7 +116,7 @@ internal abstract partial class RoslynMcpTool
 		internal string? FileInNoProject { get; set; }
 		
 		/// <summary>
-		///     Records that the answer is a first page and the rest of its result was kept for the next
+		///     Records that the answer is a page computed by its query, with the rest of the result kept for the next
 		///     (#498): <c>STORED</c> in the log, unless the call already missed a token's entry, which
 		///     says more. An answer that fits one page keeps nothing and is not tagged at all: the tag
 		///     used to say <c>MISS</c> on every call of a tool that can page, which read as a failure on
