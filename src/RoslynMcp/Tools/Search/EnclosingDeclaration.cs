@@ -57,6 +57,71 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 		return (null, []);
 	}
 	
+	// How many matches of a line beyond the leftmost are asked for a declaration of their own.
+	// A line of code holds one declaration, rarely two; a pattern of one letter matches a line
+	// dozens of times, and each question is a walk up the tree.
+	const int OtherMatchesAsked = 8;
+	
+	/// <summary>
+	///     The declaration the matches of one line are listed under, whether one of them is on a
+	///     declaration's own name, and which match that is (#515). A line is one place in an
+	///     answer however often the pattern matches it, so one of its matches has to say where
+	///     that place is:
+	///     <list type="bullet">
+	///         <item>
+	///             the leftmost, with any match of the line on the name of the leftmost's
+	///             declaration marking it: in <c>SearchResult BuildResult()</c> the pattern
+	///             <c>Result</c> matches the return type first;
+	///         </item>
+	///         <item>
+	///             or, when none is, the first match that is the name of a declaration of its
+	///             own. A line can hold two declarations (<c>int A; int Foo;</c>), and a match on
+	///             <c>Foo</c> was filed under <c>A</c> and declared nothing.
+	///         </item>
+	///     </list>
+	///     Two names on one line that both match are still one place, under the first.
+	///     <paramref name="matches"/> are positions in the file, in the order they occur, and not
+	///     empty.
+	/// </summary>
+	public static (EnclosingDeclaration? Declaration, bool Declares, int Match) Among(SyntaxNode root, SourceText text, ReadOnlySpan<TextSpan> matches)
+	{
+		var (first, names) = At(root, text, matches[0].Start);
+		
+		for(var index = 0; index < matches.Length; index++)
+			if(Overlaps(names, matches[index]))
+				
+				return (first, true, index);
+		
+		// Most hits are lines inside the body of a member, where no other declaration can
+		// start: nothing is asked there, and a search pays for one lookup a line as before.
+		if(first is { Kind: "method" or "constructor" or "destructor" or "property" or "indexer" or "event" or "operator" } body
+		   && text.Lines.GetLineFromPosition(matches[0].Start).LineNumber + 1 is var line
+		   && body.StartLine < line && line < body.EndLine)
+			
+			return (first, false, 0);
+		
+		for(var index = 1; index < matches.Length && index <= OtherMatchesAsked; index++) {
+			
+			var (other, otherNames) = At(root, text, matches[index].Start);
+			
+			if(other != first && Overlaps(otherNames, matches[index]))
+				
+				return (other, true, index);
+		}
+		
+		return (first, false, 0);
+		
+		static bool Overlaps(TextSpan[] names, TextSpan match)
+		{
+			foreach(var name in names)
+				if(name.OverlapsWith(match))
+					
+					return true;
+			
+			return false;
+		}
+	}
+	
 	/// <summary>
 	///     The declarations of a file that <paramref name="name"/> names, each with the span it takes
 	///     from the start of its first line (its attached comment's, when it has one) to its end:

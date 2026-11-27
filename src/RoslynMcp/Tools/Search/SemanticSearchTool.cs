@@ -30,7 +30,9 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		"('method Enqueue'), with its lines ('108-158': pass them to roslyn_read_file to read the whole member) and where its node starts " +
 		"('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with line and text. A match on the declaration's own name " +
 		"has declares: true. Several matches on one line are listed once. The answer's context names the syntax context searched; " +
-		"with context 'all', each match names its own (comment, string, identifier, xmldoc, code). " +
+		"with context 'all', each listed line names the contexts its matches are in (comment, string, identifier, xmldoc, code; " +
+		"'identifier, comment' for a line with matches in both). A pattern that can match nothing ('^', 'x*') finds no place where " +
+		"it matched nothing: use roslyn_search_files for empty lines. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> SemanticSearch(
@@ -236,23 +238,31 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 						});
 					}
 					
-					// One place per line, made from the line's leftmost match: a place costs a
-					// walk up the tree for its declaration, and a broad pattern matches many times
-					// on a line. Any match of the line on the declaration's own name marks the
-					// place, as in a text search: in 'SearchResult BuildResult()' the pattern
-					// 'Result' matches the return type first.
+					var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
+					
+					// One place per line, as in a text search, and by the same rule for which of
+					// the line's matches says where the place is (EnclosingDeclaration.Among):
+					// the leftmost, unless a later one is a declaration's name. The declaration
+					// is looked up there and nowhere else, once a line (#515).
 					foreach(var onLine in matches.GroupBy(match => text.Lines.GetLineFromPosition(match.Position).LineNumber)) {
 						
-						var first = onLine.MinBy(match => match.Position)!;
-						var names = EnclosingDeclaration.At(root, text, first.Position).Names;
+						SemanticMatchResult[] found = [..onLine.OrderBy(match => match.Position)];
+						TextSpan[]            spans = [..found.Select(match => new TextSpan(match.Position, match.Length))];
 						
-						collected.Add(SourcePlace.Of(Location.Create(tree, new TextSpan(first.Position, first.Length)), rootPath, cancellationToken) with {
+						var (declaration, declares, at) = EnclosingDeclaration.Among(root, text, spans);
+						
+						var line   = text.Lines[onLine.Key];
+						var column = found[at].Position - line.Start;
+						
+						collected.Add(new(relativePath, onLine.Key + 1, column + 1, SearchFilesTool.Excerpt(text.ToString(line.Span), column), declaration) {
 							
-							Declares = onLine.Any(match => names.Any(name => name.OverlapsWith(new TextSpan(match.Position, match.Length)))),
+							Declares = declares,
 							
-							// Said per match only where it differs between them; a search of one
-							// context has it once, in the answer.
-							Context = context == "all" ? first.Context : null,
+							// Said per place only in a search over all contexts, where it differs
+							// between them; a search of one context has it once, in the answer. Every
+							// context the line's matches are in, in their order: 'Foo(); // Foo' is
+							// one place, and the first match alone said nothing of the comment.
+							Context = context == "all" ? string.Join(", ", found.Select(match => match.Context).Distinct()) : null,
 						});
 					}
 				}
@@ -333,6 +343,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(triviaText)) {
 				
+				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
+				// say what it is in, and no place to show.
+				if(m.Length == 0)
+					continue;
+				
 				// absPos is the absolute source position of the match — not the block start —
 				// so multiline block comments report the correct line number per occurrence.
 				var absPos  = span.Start + m.Index
@@ -367,6 +382,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			var tokenText = token.ToString();
 			
 			foreach(Match m in regex.Matches(tokenText)) {
+				
+				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
+				// say what it is in, and no place to show.
+				if(m.Length == 0)
+					continue;
 				
 				// absPos is the absolute match position — handles multiline verbatim/raw strings.
 				var absPos  = span.Start + m.Index
@@ -421,6 +441,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(lineText)) {
 				
+				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
+				// say what it is in, and no place to show.
+				if(m.Length == 0)
+					continue;
+				
 				var matchPos = lines[i].Start + m.Index;
 				
 				if(IsInExcludedSpan(excluded, matchPos))
@@ -448,6 +473,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(triviaText)) {
 				
+				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
+				// say what it is in, and no place to show.
+				if(m.Length == 0)
+					continue;
+				
 				var absPos  = span.Start + m.Index;
 				
 				yield return new SemanticMatchResult {
@@ -473,6 +503,11 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			// Every match of the line: the caller folds them into one place, and needs them all
 			// to say whether one is the declaration's name.
 			foreach(Match m in regex.Matches(lineText)) {
+				
+				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
+				// say what it is in, and no place to show.
+				if(m.Length == 0)
+					continue;
 				
 				// What the match is in is asked at its first character that is not whitespace:
 				// a pattern such as '\s+// TODO' starts before the comment it is about.
