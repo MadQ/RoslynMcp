@@ -262,6 +262,16 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	// An overflow rarely comes alone: a checkout raises one after another.
 	static readonly TimeSpan CatchUpDelay = TimeSpan.FromSeconds(1);
 	
+	// When an adopted directory is listed again, counted from its adoption (#339). Twice: soon,
+	// for the file written right behind the directory, and once more for a watcher that took
+	// its time to come up on a loaded machine.
+	static readonly TimeSpan[] AdoptedLookBack = [TimeSpan.FromMilliseconds(500), TimeSpan.FromSeconds(3)];
+	
+	// The adopted directories that are still to be listed again, each with the files reported
+	// from it so far: by the listings, and by the watchers, which note theirs here (Note) so
+	// that a look back does not say them a second time. Read and written under the gate.
+	readonly Dictionary<string, HashSet<string>> lookingBack = new(WatchPlanner.PathComparer);
+	
 	bool    disposed;
 	string? scopeKey;
 	
@@ -673,6 +683,10 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	void Report(string fullPath, bool deleted)
 	{
 		try {
+			
+			if(!deleted)
+				Note(fullPath);
+			
 			onChange(fullPath, deleted);
 		}
 		catch(Exception ex) {
@@ -851,10 +865,13 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				
 				// Already covered by this watcher, so only its files are news.
 				if(!IsLeftAlone(fullPath))
-					ReportFilesOf(fullPath);
+					_ = ReportFilesOf(fullPath, null);
 			}
-			else
+			else {
+				
+				Note(fullPath);
 				onChange(fullPath, false);
+			}
 		}
 		catch(Exception ex) {
 			logger.LogError("Watch", $"Change callback failed for '{fullPath}': {ex.GetType().Name}: {ex.Message}");
@@ -919,7 +936,125 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			Replan();
 		}
 		
-		ReportFilesOf(directory);
+		var seen = new HashSet<string>(WatchPlanner.PathComparer);
+		
+		FileSystemWatcher? watcher;
+		
+		// Before the listing: what the new watcher reports while the directory is listed is
+		// noted from here on. No watcher of its own (a new plan covers the directory another
+		// way) means no look back either.
+		lock(gate) {
+			
+			watcher = watchers.TryGetValue(directory, out var entry) ? entry.Watcher : null;
+			
+			if(watcher is not null)
+				lookingBack[directory] = seen;
+		}
+		
+		int reported;
+		
+		// A directory removed again at once, a temporary one, fails the listing: its entry
+		// must not stay, or every later event would be compared with it for nothing.
+		try {
+			reported = ReportFilesOf(directory, seen);
+		}
+		catch {
+			
+			Forget(directory, seen);
+			
+			throw;
+		}
+		
+		// Said in the log (#339): a directory that was made and not adopted, and one adopted
+		// before its files were there, looked the same from outside, a new file nobody saw.
+		logger.LogInfo("Watch", $"Adopted '{directory}', created under a watched root: {reported} file(s) in it reported");
+		
+		// A directory past the limit is not listed again: what was left out the first time
+		// would be reported in the next ten thousand, and the limit would bound nothing.
+		if(watcher is not null && reported < AdoptedFileLimit)
+			LookBackAt(directory, watcher, seen);
+		else
+			Forget(directory, seen);
+	}
+	
+	// Notes a file a watcher reported, for the directories still to be listed again.
+	void Note(string fullPath)
+	{
+		lock(gate) {
+			
+			if(lookingBack.Count == 0)
+				
+				return;
+			
+			foreach(var (directory, seen) in lookingBack)
+				if(WatchPlanner.IsUnderOrEqual(fullPath, directory))
+					seen.Add(fullPath);
+		}
+	}
+	
+	// Ends the look back at a directory, unless a later adoption of the same path has begun its own.
+	void Forget(string directory, HashSet<string> seen)
+	{
+		lock(gate)
+			if(lookingBack.TryGetValue(directory, out var current) && ReferenceEquals(current, seen))
+				lookingBack.Remove(directory);
+	}
+	
+	/// <summary>
+	///     Lists an adopted directory again a moment later and reports what has appeared since
+	///     (#339). A directory is often adopted before its first file is there: the event for the
+	///     directory comes, the listing finds nothing, and the file written the next instant is
+	///     the new watcher's to see. Whether a watcher delivers from the instant it was started
+	///     is the system's affair, and where it does not, that file was seen by nobody: not by
+	///     the listing, which was before it, and not by the watcher, which was not up. A new
+	///     source file then stayed unknown until something else caused a reload.
+	///     <para>
+	///         Only what nobody reported yet is reported: not what an earlier listing said, and
+	///         not what a watcher said in between (<see cref="Note"/>). Said a second time, a
+	///         project file, a props file or a source file no project compiles flags a reload
+	///         of its own, after the one the first report caused has been made.
+	///     </para>
+	///     <para>
+	///         For this watcher only: a directory removed and made again within the three
+	///         seconds has a new watcher and a look back of its own.
+	///     </para>
+	/// </summary>
+	void LookBackAt(string directory, FileSystemWatcher watcher, HashSet<string> seen)
+	{
+		_ = Task.Run(async () => {
+			
+			// Nothing is above this on a pool thread.
+			try {
+				
+				var waited = TimeSpan.Zero;
+				
+				foreach(var at in AdoptedLookBack) {
+					
+					await Task.Delay(at - waited);
+					
+					waited = at;
+					
+					// A directory this watcher no longer watches is no longer this look back's to
+					// report on: it went away, or a new plan covers it another way.
+					lock(gate)
+						if(disposed || !watchers.TryGetValue(directory, out var entry) || !ReferenceEquals(entry.Watcher, watcher))
+							
+							return;
+					
+					if(ReportFilesOf(directory, seen) is > 0 and var late)
+						logger.LogInfo("Watch", $"'{directory}' held {late} more file(s) {at.TotalMilliseconds:0} ms after it was adopted that no watcher had reported — reported");
+				}
+			}
+			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+				// The directory went away between the check and the listing.
+			}
+			catch(Exception ex) {
+				logger.LogError("Watch", $"Looking back at the adopted '{directory}' failed: {ex.GetType().Name}: {ex.Message}");
+			}
+			finally {
+				Forget(directory, seen);
+			}
+		});
 	}
 	
 	bool IsLeftAlone(string directory)
@@ -927,21 +1062,40 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			|| WorkspaceWalker.IsLink(new DirectoryInfo(directory))
 	;
 	
-	void ReportFilesOf(string directory)
+	// Reports the files in a directory that arrived, and returns how many. With a set, only the
+	// files that are not in it yet are reported, and they are added to it; without one the
+	// files are noted for a look back that may be under way above the directory.
+	int ReportFilesOf(string directory, HashSet<string>? seen)
 	{
 		var reported = 0;
 		
 		foreach(var file in WorkspaceWalker.EnumerateFiles(directory, "*", recursive: true, (ref FileSystemEntry entry) => rules.IsNeverInput(entry.FileName))) {
 			
-			if(++reported > AdoptedFileLimit) {
+			// Asked and taken in one step, with a set: between the two a watcher could note and
+			// report the same file. At the limit nothing is taken, so the file it stops at
+			// stays unsaid.
+			if(seen is not null) {
+				
+				lock(gate)
+					if(seen.Contains(file) || reported < AdoptedFileLimit && !seen.Add(file))
+						continue;
+			}
+			
+			if(reported == AdoptedFileLimit) {
 				
 				logger.LogInfo("Watch", $"WARN: '{directory}' appeared with more than {AdoptedFileLimit} files — the rest were not reported; roslyn_check_drift cannot see new files, so reload with roslyn_respawn if sources are missing");
 				
 				break;
 			}
 			
+			if(seen is null)
+				Note(file);
+			
+			reported++;
 			onChange(file, false);
 		}
+		
+		return reported;
 	}
 	
 	public void Dispose()

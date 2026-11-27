@@ -27,7 +27,7 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class IgnoredDirectoryTests
 {
-	internal static async Task<TestGroup> BuildAsync(TestContext ctx)
+	internal static async Task<TestGroup> BuildAsync(TestContext ctx, string serverLogDir, string serverLogGlob)
 	{
 		
 		var fx     = TestFixtures.NewMsBuildProject("IgnoredDirs");
@@ -130,6 +130,40 @@ static class IgnoredDirectoryTests
 			return false;
 		}
 		
+		// What the server's log says about watching this fixture, for a failure's message (#339).
+		// The adoption test failed on macOS now and then, and the log of the run that failed was
+		// gone: whether the new directory was never seen, or seen before its file was there, or
+		// the watchers were not live yet, is in these lines and nowhere else.
+		string WatchLog()
+		{
+			if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var lines, out var failure))
+				
+				return $"the server's log could not be read: {failure}";
+			
+			// The fixture by its directory's name: a path in a log line is JSON, its separators escaped.
+			var name = Path.GetFileName(fx.Dir);
+			
+			string[] said = [..
+				lines.Where(line => line.Contains(name, StringComparison.Ordinal) && (line.Contains("Watch", StringComparison.Ordinal) || line.Contains("Reload", StringComparison.Ordinal)))
+					.Select(line => {
+						
+						try {
+							
+							var entry = JsonNode.Parse(line);
+							
+							return $"{entry?["timestamp"]?.GetValue<string>()} {entry?["message"]?.GetValue<string>()}";
+						}
+						catch(System.Text.Json.JsonException) {
+							
+							return line;
+						}
+					})
+					.TakeLast(15)
+			];
+			
+			return said.Length == 0 ? "the server's log has no line about watching this fixture" : string.Join(" | ", said);
+		}
+		
 		await fx.WarmAsync(ctx);
 		
 		var tests = new List<TestCase> {
@@ -222,11 +256,51 @@ static class IgnoredDirectoryTests
 						
 						return (false, "FAIL  (precondition: reload_pending never cleared)");
 					
+					var written = DateTime.UtcNow;
+					
 					fx.Write("fresh/Inside.cs", "class InsideFresh { }\n");
 					
 					return await BecomesPendingAsync(TimeSpan.FromSeconds(10))
 						? (true,  "PASS  (reload_pending=True after fresh/Inside.cs appeared)")
-						: (false, "FAIL  (reload_pending stayed False for 10 s — the new directory was not adopted)");
+						: (false, $"FAIL  (reload_pending stayed False for 10 s after fresh/Inside.cs was written at {written:O}. The server's log: {WatchLog()})");
+				}),
+			
+			// An adopted directory is listed again half a second and three seconds after its
+			// adoption (#339), for a file that landed before its watcher delivered. That look
+			// back must report nothing that a listing or a watcher reported before it. The props
+			// file is what makes this a test: a source file is a document once the reload it
+			// caused is made, and said again it is a text compared and found the same, whereas
+			// a props file flags a reload every time it is said. So the reload is serviced, and
+			// no second one may be flagged while the look back runs. Where the reload is not
+			// done before the second look back, the test passes without having shown it; it
+			// never fails for that. What the look back is for, a file no watcher saw, cannot be
+			// staged from outside the server.
+			new("ignored dirs: the look back at an adopted directory flags no second reload",
+				async () => {
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (precondition: reload_pending never cleared)");
+					
+					fx.Write("later/Inside.cs", "class InsideLater { }\n");
+					fx.Write("later/Extra.props", "<Project />\n");
+					
+					if(!await BecomesPendingAsync(TimeSpan.FromSeconds(10)))
+						
+						return (false, $"FAIL  (reload_pending stayed False for 10 s after later/Inside.cs was written. The server's log: {WatchLog()})");
+					
+					if(!await SettleAsync())
+						
+						return (false, "FAIL  (the reload for later/Inside.cs was not serviced)");
+					
+					// Past the second look back, counted generously from the write.
+					await Task.Delay(4000);
+					
+					var pending = await ReloadPendingAsync();
+					
+					return pending == false
+						? (true,  "PASS  (no reload flagged by the look back)")
+						: (false, $"FAIL  (expected reload_pending=False after the look back, got {pending?.ToString() ?? "no result"}. The server's log: {WatchLog()})");
 				}),
 			
 			// The watcher must not see ignored trees. A new .cs anywhere it does watch flags a
