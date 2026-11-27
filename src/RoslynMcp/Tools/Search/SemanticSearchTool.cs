@@ -460,6 +460,12 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(triviaText)) {
 				
+				// A doc comment's text takes the line break that ends it along. A match of no
+				// length at its very end ('$', '\z') is behind that break, on the line of the
+				// declaration, which is no line of the comment.
+				if(m.Length == 0 && m.Index == triviaText.Length && triviaText.EndsWith('\n'))
+					continue;
+				
 				var absPos  = span.Start + m.Index;
 				
 				yield return new SemanticMatchResult {

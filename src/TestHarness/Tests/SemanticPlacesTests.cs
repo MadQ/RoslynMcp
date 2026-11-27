@@ -290,8 +290,13 @@ static class SemanticPlacesTests
 				var names = await Call("roslyn_semantic_search", new { pattern = "^(?!T)", context = "identifiers", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
 				var lines = await Call("roslyn_semantic_search", new { pattern = @"^(?=\s*///)", filePattern = "Calls.cs", projectPath = fx.Csproj });
 				
+				// The end of a doc comment's text is behind the line break that ends it: a match
+				// there was listed on the declaration's line, line 4, which is no doc line.
+				var docEnd = await Call("roslyn_semantic_search", new { pattern = @"\z", context = "xmldocs", filePattern = "Calls.cs", projectPath = fx.Csproj });
+				
 				return Verdict(SearchHits.Of(names)?.Select(hit => hit.Line).SequenceEqual(new[] { 3, 4, 5 }) == true
-					&& SearchHits.Of(lines) is [{ Line: 3, Context: "xmldoc" }], new JsonArray(names?.DeepClone(), lines?.DeepClone()));
+					&& SearchHits.Of(lines) is [{ Line: 3, Context: "xmldoc" }]
+					&& docEnd?["error"] is null && SearchHits.Of(docEnd) is { Length: 0 }, new JsonArray(names?.DeepClone(), lines?.DeepClone(), docEnd?.DeepClone()));
 			}),
 			
 			// An implementation is a declaration: the answer says where it is, the lines to read
