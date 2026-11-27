@@ -61,6 +61,8 @@ static class EditSafetyTests
 		fx.Write("code_fields.cs", "class Fields\n{\n\tint a, Problem;\n\tint Total;\n}\n");
 		// Members one tab in, to be replaced by texts written at other indentations (#531).
 		fx.Write("code_indent.cs", "class Indent\n{\n\t/// <summary>Old.</summary>\n\tint Value { get; set; }\n\n\tint Other() { return 0; }\n\n\tint Third() { return 3; }\n}\n");
+		fx.Write("code_indent_old.cs", "class IndentOld\n{\n\tvoid M() { }\n}\n");
+		fx.Write("code_indent_deep.cs", "class IndentDeep\n{\n\tint Twin() { return 0; }\n\n\tclass Inner\n\t{\n\t\tint Twin() { return 0; }\n\t}\n}\n");
 		fx.Write("code_indent_text.cs", "class IndentText\n{\n\tstring Text() { return \"\"; }\n}\n");
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
@@ -285,6 +287,26 @@ static class EditSafetyTests
 					&& commented?["_caution"] is null
 					&& several?["_caution"] is null
 					&& asBefore?["_caution"] is null, new JsonArray(commented?.DeepClone(), several?.DeepClone(), asBefore?.DeepClone()), after);
+			}),
+			
+			// The old convention with lines at column 0 that are no code: a directive and a line
+			// commented out. They say nothing about which way the text is written; counted, they
+			// made it a block at column 0 and its body was written twice as deep. The text is
+			// written as given, to the byte. And one text for nodes at two depths (force) is moved
+			// to each node's own indentation.
+			new("edit safety: a directive or a comment at column 0 does not make a replacement a block; a forced one is moved per node", async () => {
+				
+				const string old = "void M()\n\t{\n#if DEBUG\n\t\tSystem.Console.WriteLine();\n#endif\n//\t\tSystem.Console.Beep();\n\t}";
+				
+				var kept    = await InCode(new { filePath = "code_indent_old.cs", nodeKind = "method", textPattern = "M", replacement = old, projectPath = fx.Csproj });
+				var forced  = await InCode(new { filePath = "code_indent_deep.cs", nodeKind = "method", textPattern = "Twin", replacement = "int Twin()\n{\n#if DEBUG\n\treturn 1;\n#endif\n}", force = true, projectPath = fx.Csproj });
+				var oldFile = Read("code_indent_old.cs");
+				var deep    = Read("code_indent_deep.cs");
+				
+				return Verdict(oldFile == "class IndentOld\n{\n\t" + old + "\n}\n"
+					&& kept?["_caution"] is null
+					&& deep == "class IndentDeep\n{\n\tint Twin()\n\t{\n#if DEBUG\n\t\treturn 1;\n#endif\n\t}\n\n\tclass Inner\n\t{\n\t\tint Twin()\n\t\t{\n#if DEBUG\n\t\t\treturn 1;\n#endif\n\t\t}\n\t}\n}\n"
+					&& forced?["_caution"] is null, new JsonArray(kept?.DeepClone(), forced?.DeepClone()), oldFile + "\n---\n" + deep);
 			}),
 			
 			// What a string holds is a value: the lines inside a verbatim, an interpolated verbatim

@@ -35,12 +35,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors, quoting the parser's message and its line in the replacement text. " +
 		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
 		"One exception: a member of a class, struct, interface or record may be replaced by several members, written one after another " +
-		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow as written. " +
+		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow, moved with it when the text is moved as a block. " +
 		"The same holds for a type or delegate declared in a namespace or at file level, which several type declarations may replace. " +
-		"The node keeps its place: the blank lines before it and its indentation come from the file. The replacement text can be written at column 0 throughout, or at any one indentation: it is moved to the node's indentation as a block, a comment before the node and further members included. A text whose first line is unindented and whose further lines are already at the file's indentation is written as it is. Lines inside a multi-line string or block comment are never moved, and a line indented less than the text's first line is written as given and named in _caution. " +
+		"The node keeps its place: the blank lines before it and its indentation come from the file. The replacement text can be written at column 0 throughout, or at any one indentation: it is moved to the node's indentation as a block, a comment before the node and further members included. A text whose first line is unindented and whose further lines of code are already at the file's indentation is written as it is; so is one whose further lines are all indented under an unindented first line (a call's arguments, a '=>' body), so indent the first line too, or put the closing line at the text's left edge, when such a text is meant as a block. Lines inside a multi-line string or block comment and preprocessor directives are never moved, and a line indented less than the text's first line is written as given and named in _caution. " +
 		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
 		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
-		"In a list of members, what stands between two of them (blank lines, comments, a directive) is written as given. " +
+		"In a list of members, what stands between two of them (blank lines, comments, a directive) is kept, at the indentation the text is written at or moved to. " +
 		"To pick one of several similar nodes, such as the third if statement in a method, pass line (and column for several on one line): where the node starts, as a read of the file or a dry run's changed_nodes shows it. A declaration starts at its first attribute or modifier, not at its name. These narrow nodeKind and textPattern. " +
 		"A position is only as good as the read it came from: after an edit moves lines it can land on a different node of the same kind, so re-read first, or add textPattern so that only a node with that text can match. " +
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern, pass line and column, or set force=true to proceed. " +
@@ -796,9 +796,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	///         named in <paramref name="leftBehind"/>, by its number in the text.
 	///     </para>
 	///     A line that begins inside a token or a comment that spans lines (a verbatim or raw
-	///     string, a block comment, text an #if leaves out) is never touched: what it holds is a
-	///     value. The lines of a doc comment are lines of their own and move. An empty line stays
-	///     empty.
+	///     string, a block comment) is never touched: what it holds is a value. Neither is a
+	///     directive, whose column is its own. The lines of a doc comment are lines of their own
+	///     and move, and so does text an #if leaves out. An empty line stays empty.
 	/// </summary>
 	private static string Reindent(string text, string target, CSharpParseOptions options, out int[] leftBehind)
 	{
@@ -811,27 +811,42 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			return text;
 		
 		var inside = new HashSet<int>();
+		var texts  = lines.Select(line => line.ToString()).ToArray();
 		
+		// The lines a span goes on into; its first line is the code's.
 		void Cover(TextSpan span)
 		{
-			var last = lines.GetLineFromPosition(span.End).LineNumber;
+			if(span.IsEmpty)
+				return;
+			
+			var last = lines.GetLineFromPosition(span.End - 1).LineNumber;
 			
 			for(var number = lines.GetLineFromPosition(span.Start).LineNumber + 1; number <= last; number++)
 				inside.Add(number);
 		}
 		
+		// Text an #if leaves out is not among these: it is code like the rest, and which branch
+		// is left out is a matter of the project's symbols. Left where it was, one branch of every
+		// #if in a moved block would stay behind.
 		foreach(var token in SyntaxFactory.ParseTokens(text, options: options)) {
 			
 			Cover(token.Span);
 			
 			foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia))
-				if(trivia.Kind() is SyntaxKind.MultiLineCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia or SyntaxKind.DisabledTextTrivia)
+				if(trivia.Kind() is SyntaxKind.MultiLineCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia)
 					Cover(trivia.Span);
 		}
 		
+		// A directive's column is a matter of its own, and column 0 its usual place whatever
+		// stands around it: such a line is never moved, and says nothing about the block.
+		bool IsDirective(int number) => !inside.Contains(number) && texts[number].AsSpan().TrimStart([' ', '\t']).StartsWith("#");
+		
+		// A line that is a comment and nothing else moves with a block, but does not make one: a
+		// line of code commented out stands at column 0 in a text of either kind.
+		bool IsCommentOnly(int number) => texts[number].AsSpan().TrimStart([' ', '\t']).StartsWith("//");
+		
 		static string IndentOf(string line) => line[..(line.Length - line.AsSpan().TrimStart([' ', '\t']).Length)];
 		
-		var texts = lines.Select(line => line.ToString()).ToArray();
 		var first = Array.FindIndex(texts, line => !string.IsNullOrWhiteSpace(line));
 		
 		if(first < 0)
@@ -840,12 +855,15 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		var start = IndentOf(texts[first]);
 		
-		// What the later lines have in common: where the block's left edge is, bar its first line.
+		// What the later lines of code have in common: where the block's left edge is, bar its
+		// first line. Directives and comments are left out: one '#if' or one line commented out
+		// at column 0 made a text of the old convention look like a block at column 0, and its
+		// body was written twice as deep.
 		string? later = null;
 		
 		for(var number = first + 1; number < texts.Length; number++) {
 			
-			if(inside.Contains(number) || string.IsNullOrWhiteSpace(texts[number]))
+			if(inside.Contains(number) || string.IsNullOrWhiteSpace(texts[number]) || IsDirective(number) || IsCommentOnly(number))
 				continue;
 			
 			var indent = IndentOf(texts[number]);
@@ -875,7 +893,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			var line = texts[number];
 			
-			if(number < first || inside.Contains(number) || line.Length == 0)
+			if(number < first || inside.Contains(number) || line.Length == 0 || IsDirective(number))
 				moved.Append(line);
 			else if(line.StartsWith(start, StringComparison.Ordinal))
 				moved.Append(target).Append(line, start.Length, line.Length - start.Length);
