@@ -1190,7 +1190,60 @@ internal static class CodeFixTests
 		}
 		
 
+		// An attribute that does not bind reports CS0246 twice over one span, for 'JsonIgnore' and for
+		// 'JsonIgnoreAttribute' (#529). The preview asked for the diagnosticId it had been given, and
+		// nothing could tell the two apart. One id over one span is one finding: the add-using fix is
+		// offered. Two of one id at different places of the line, asked for by line only, get the
+		// columns they start at, and a column picks one.
+		async Task<(bool pass, string msg)> RunSameIdDiagnosticsAtOnePlace()
+		{
+			using var fixture = TestFixtures.NewMsBuildProject("CodeFixSameId");
+			var sw = Stopwatch.StartNew();
+			
+			fixture.Write("Probe.cs", "class AttributeFixture\n{\n\t[JsonIgnore] public int Value;\n}\n");
+			fixture.Write("Two.cs", "class TwoFixture { Foo a; Bar b; }\n");
+			await fixture.WarmAsync(ctx);
+			
+			var (same, sameText) = await Call("roslyn_preview_code_fix", new {
+				projectPath = fixture.Csproj,
+				filePath = "Probe.cs",
+				line = 3,
+				column = 3,
+				diagnosticId = "CS0246"
+			});
+			
+			if(same?["error"]?.GetValue<string>() is { } error || !sameText.Contains("System.Text.Json.Serialization", StringComparison.Ordinal))
+				return (false, $"FAIL  (one id over one span: expected the add-using fix, got {sameText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (apart, apartText) = await Call("roslyn_preview_code_fix", new {
+				projectPath = fixture.Csproj,
+				filePath = "Two.cs",
+				line = 1,
+				column = 1,
+				diagnosticId = "CS0246"
+			});
+			var message = apart?["message"]?.GetValue<string>() ?? apart?["error"]?.GetValue<string>() ?? "";
+			
+			if(!message.Contains("Several CS0246 diagnostics", StringComparison.Ordinal) || !message.Contains("1:20", StringComparison.Ordinal) || !message.Contains("1:27", StringComparison.Ordinal))
+				return (false, $"FAIL  (two places on a line: expected the columns 1:20 and 1:27, got {apartText}) [{sw.ElapsedMilliseconds}ms]");
+			
+			var (picked, pickedText) = await Call("roslyn_preview_code_fix", new {
+				projectPath = fixture.Csproj,
+				filePath = "Two.cs",
+				line = 1,
+				column = 27,
+				diagnosticId = "CS0246"
+			});
+			
+			var pass = picked?["error"] is null && pickedText.Contains("Bar", StringComparison.Ordinal) && !pickedText.Contains("ambiguous", StringComparison.Ordinal);
+			
+			return (pass, pass
+				? $"PASS  (one span: fixed; two places: '{message}'; a column picks one) [{sw.ElapsedMilliseconds}ms]"
+				: $"FAIL  (the column named did not pick the diagnostic: {pickedText}) [{sw.ElapsedMilliseconds}ms]");
+		}
+		
 		List<TestCase> tests = [
+			new("one diagnostic id twice over one span is one finding; at two places, the columns are named", RunSameIdDiagnosticsAtOnePlace),
 			new("a diagnostic without a fixer is rejected without a token, naming the provider sources that had a problem", RunUnbundledDiagnosticRejected),
 			new("Roslyn's own fixers are offered unless the project file turns them off", RunBuiltInFixersOffered),
 			new("Roslyn's IDE analyzers surface IDE0005 and its fixer removes the using", RunIdeAnalyzerFixOffered),
