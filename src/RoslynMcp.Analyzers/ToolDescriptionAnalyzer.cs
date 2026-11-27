@@ -21,6 +21,8 @@ namespace RoslynMcp.Analyzers;
 ///     RMCP009 — A <c>projectPath</c> parameter is not declared <c>string? projectPath = null</c> with
 ///               <c>OptionalProjectPathDescription</c>: it is required, lacks the <c>= null</c> default, or
 ///               describes itself inline.
+///     RMCP011 — A <c>mode</c> parameter does not describe itself with <c>MatchModeDescription</c>,
+///               optionally followed by the tool's own default (<c>MatchModeDescription + "Default: 'regex'."</c>).
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
@@ -67,7 +69,23 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 			"diverge across tools, and a nullable projectPath without '= null' is still advertised to agents as required."
 	);
 	
-	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule007, Rule008, Rule009];
+	private static readonly DiagnosticDescriptor Rule011 = new(
+		"RMCP011",
+		"mode must use MatchModeDescription",
+		"[McpServerTool] method '{0}': parameter 'mode' must use [Description(MatchModeDescription)], optionally + its default",
+		Category,
+		DiagnosticSeverity.Error,
+		isEnabledByDefault: true,
+		description:
+			"A mode parameter says how a pattern is read: 'literal', 'regex' or 'glob'. Its description is the shared " +
+			"constant MatchModeDescription in RoslynMcpTool, followed by nothing or by the tool's own default as text " +
+			"('MatchModeDescription + \"Default: 'regex'.\"'). An inline description drifts from the others, and an " +
+			"agent that reads two tools describing one mode differently cannot tell whether they differ. The name is " +
+			"reserved for that meaning: a string parameter named mode is checked whatever it selects, so a setting of " +
+			"another kind takes another name."
+	);
+	
+	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule007, Rule008, Rule009, Rule011];
 	
 	public override void Initialize(AnalysisContext context)
 	{
@@ -122,6 +140,12 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 				if(shape is not ProjectPathKind.Optional || !nullDefault || !UsesDescriptionConstant(param, ExpectedConstant))
 					context.ReportDiagnostic(Diagnostic.Create(Rule009, param.Identifier.GetLocation(), methodName, ShapeText, ExpectedConstant));
 			}
+			
+			// RMCP011 — a mode parameter describes itself with MatchModeDescription, the one wording of
+			// literal, regex and glob (#255). The tool's default may follow it as text; nothing may
+			// come before it, so the shared wording is always what an agent reads first.
+			if(param.Identifier.Text == "mode" && IsStringType(param.Type) && !DescribesModeShared(param))
+				context.ReportDiagnostic(Diagnostic.Create(Rule011, param.Identifier.GetLocation(), methodName));
 		}
 	}
 	
@@ -191,6 +215,52 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 				return false;
 			
 			return args.Value[0].Expression is IdentifierNameSyntax constant && constant.Identifier.Text == constantName;
+		}
+		
+		return false;
+	}
+	
+	private static bool IsStringType(TypeSyntax? type) => type switch {
+		
+		PredefinedTypeSyntax { Keyword.RawKind: (int) SyntaxKind.StringKeyword }                                     => true,
+		NullableTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword.RawKind: (int) SyntaxKind.StringKeyword } } => true,
+		_                                                                                                            => false
+	};
+	
+	// The [Description] argument of a mode parameter is MatchModeDescription alone, or a chain of
+	// '+' whose leftmost operand is MatchModeDescription and whose other operands are string
+	// literals. A constant of another name is refused as well: it could hold anything.
+	private static bool DescribesModeShared(ParameterSyntax param)
+	{
+		foreach(var attrList in param.AttributeLists)
+		foreach(var attr in attrList.Attributes) {
+			
+			var name = attr.Name switch {
+				
+				IdentifierNameSyntax id              => id.Identifier.Text,
+				QualifiedNameSyntax { Right: var r } => r.Identifier.Text,
+				_                                    => null
+			};
+			
+			if(name is not ("Description" or "DescriptionAttribute"))
+				continue;
+			
+			if(attr.ArgumentList?.Arguments is not { Count: > 0 } args)
+				
+				return false;
+			
+			var expression = args[0].Expression;
+			
+			while(expression is BinaryExpressionSyntax { RawKind: (int) SyntaxKind.AddExpression } sum) {
+				
+				if(sum.Right is not LiteralExpressionSyntax { RawKind: (int) SyntaxKind.StringLiteralExpression })
+					
+					return false;
+				
+				expression = sum.Left;
+			}
+			
+			return expression is IdentifierNameSyntax { Identifier.Text: "MatchModeDescription" };
 		}
 		
 		return false;

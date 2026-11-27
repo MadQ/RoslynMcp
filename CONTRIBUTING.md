@@ -131,7 +131,7 @@ There is no project-wide formatting standard, and no style script or linter enfo
 
 **PRs that add `.editorconfig` files will not be approved.** A committed one would impose one person's preferences on everyone. The file is gitignored: keep a private one if you like.
 
-**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal, RMCP005: `BeginTool` name mismatch, RMCP007: missing `[Description]` on tool method, RMCP008: missing `[Description]` on tool parameter, RMCP009: `string projectPath` must use `[Description(ProjectPathDescription)]`) and warning-severity rules (RMCP001/RMCP002: prefer `nint`/`nuint` over `IntPtr`/`UIntPtr`, RMCP006: `TODO` placeholder in `scope.Outcome`/`scope.Failed` detail strings). New analyzer contributions follow the same pattern.
+**Custom analyzers are acceptable** if they enforce narrow, high-value rules. `RoslynMcp.Analyzers` includes error-severity rules (RMCP003: missing `BeginTool` scope, RMCP004: return bypasses scope terminal, RMCP005: `BeginTool` name mismatch, RMCP007: missing `[Description]` on tool method, RMCP008: missing `[Description]` on tool parameter, RMCP009: `projectPath` must be `string? projectPath = null` with `[Description(OptionalProjectPathDescription)]`, RMCP011: `mode` must use `[Description(MatchModeDescription)]`, optionally followed by its default) and warning-severity rules (RMCP001/RMCP002: prefer `nint`/`nuint` over `IntPtr`/`UIntPtr`, RMCP006: `TODO` placeholder in `scope.Outcome`/`scope.Failed` detail strings, RMCP010: a string literal names a tool without its `roslyn_` prefix). New analyzer contributions follow the same pattern.
 
 ---
 
@@ -173,7 +173,8 @@ return scope.Error(error!);
    - `using var scope = BeginTool(...)` must be the **first statement** — ensures every exit path logs timing (RMCP003)
    - Every return must flow through `scope.Error(error)`, `scope.Outcome(detail, value)`, or `scope.Failed(reason, value)` — bare `return` bypasses logging (RMCP004)
    - `[Description("...")]` is required on the tool method and every parameter (RMCP007/RMCP008)
-   - `string projectPath` must use `[Description(ProjectPathDescription)]`, not an inline string (RMCP009)
+   - `projectPath` must be declared `string? projectPath = null` with `[Description(OptionalProjectPathDescription)]`, not an inline string (RMCP009)
+   - A `mode` parameter must use `[Description(MatchModeDescription + "Default: '<mode>'.")]` (or the constant alone), not an inline string (RMCP011)
 
 2. **No manual DI registration needed** — `WithToolsFromAssembly()` in `src/RoslynMcp/Program.cs` auto-discovers all `[McpServerToolType]` classes
 
