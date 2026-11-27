@@ -185,13 +185,14 @@ internal readonly record struct ProjectKey(string File, string Name)
 /// <param name="Expected">How many compile-time assemblies its packages have for its target framework.</param>
 /// <param name="Missing">The file names of those no metadata reference has, sorted.</param>
 /// <param name="PackagesGone">
-///     None of the missing files is in a package folder any more: the cache lost them, and a restore brings
-///     them back where a reload cannot.
+///     At least one of the missing files is in no package folder any more: the cache lost it, and a restore
+///     brings it back where a reload cannot. One is enough: a lost package can cost a project the assemblies
+///     of its other packages too, and the reload a restore flags heals the rest.
 /// </param>
 internal sealed record PartialReferences(ProjectKey Project, int Expected, string[] Missing, bool PackagesGone)
 {
-	// How many missing assemblies a message names before it counts the rest.
-	const int NamedAssemblies = 5;
+	/// <summary>How many missing assemblies a message or an answer names before it counts the rest.</summary>
+	public const int NamedAssemblies = 5;
 	
 	/// <summary>The project and what it lacks, for a message: <c>Foo (2 of 57 missing: A.dll, B.dll)</c>.</summary>
 	public string Description {

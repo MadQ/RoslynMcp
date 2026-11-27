@@ -202,7 +202,12 @@ it when it does not recover. When the hint says the packages are no longer in th
 
 A project is also reported when its own build takes a package's assembly out of the references on
 purpose (a target that removes `Reference` items): the restore still lists the assembly. The
-finding is then true and harmless, at the cost of one extra load at startup.
+finding is then true, and it is not free. The workspace counts as unhealthy for as long as the
+project is loaded: the first load runs twice, `roslyn_build_project` runs a real build without
+its quick Roslyn check, and the hints of `roslyn_get_diagnostics` and of "not found" answers name
+the missing assembly. When the removal appears while the server runs (a branch switch), reloads
+are held back for about a minute before the new state is taken. There is no setting that excludes
+a project from the comparison; open an issue if a project of yours is one.
 
 ### Hundreds of nullable warnings (CS8632), but the project enables `Nullable`
 

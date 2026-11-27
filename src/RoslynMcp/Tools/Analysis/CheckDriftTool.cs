@@ -14,9 +14,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 	private static readonly TimeSpan DriftTolerance = TimeSpan.FromSeconds(2);
 	
 	private const int MaxReportedFiles = 200;
-	
-	// The missing assemblies named per project; missing_count says how many there are.
-	private const int MaxReportedAssemblies = 5;
+
 	
 	[McpServerTool(Name = "roslyn_check_drift", ReadOnly = true, Title = "Check Drift", OpenWorld = false, Idempotent = true)]
 	[Description(
@@ -156,7 +154,7 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			ProjectsWithLoadFailures:  health is { ProjectsWithLoadFailures: { Length: > 0 } failed } ? [..failed.Select(key => key.Name)] : null,
 			ProjectsNotRestored:       health is { ProjectsNotRestored: { Length: > 0 } unrestored } ? [..unrestored.Select(key => key.Name)] : null,
 			ProjectsWithMissingReferences: health is { ProjectsWithMissingReferences: { Length: > 0 } partial }
-				? [..partial.Select(project => new MissingReferencesInfo(project.Project.Name, project.Missing.Length, project.Expected, project.Missing[..Math.Min(project.Missing.Length, MaxReportedAssemblies)]))]
+				? [..partial.Select(project => new MissingReferencesInfo(project.Project.Name, project.Missing.Length, project.Expected, project.Missing[..Math.Min(project.Missing.Length, PartialReferences.NamedAssemblies)]))]
 				: null,
 			LastUnhealthyLoad:         health?.LastUnhealthyLoad,
 			ReloadPending:             reloadPending)

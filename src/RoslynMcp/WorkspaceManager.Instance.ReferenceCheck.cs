@@ -63,7 +63,13 @@ internal sealed partial class WorkspaceManager
 					if(!read.TryGetValue(path, out var assets))
 						read[path] = assets = AssetsFile.TryRead(path);
 					
-					if(assets?.TargetOf(project.Name) is not { } expected)
+					// The file found is the one in the project's directory or above its output, and two
+					// project files can share a directory: one that restores elsewhere would be compared
+					// with the other's packages. A file that names its project must name this one.
+					if(assets is null || assets.ProjectPath is { } owner && !SecurityBoundary.PathComparer.Equals(owner, project.FilePath))
+						continue;
+					
+					if(assets.TargetOf(project.Name) is not { } expected)
 						continue;
 					
 					compared++;
@@ -86,7 +92,10 @@ internal sealed partial class WorkspaceManager
 					
 					var expectedNames = expected.Select(assembly => assembly.FileName).Distinct(StringComparer.OrdinalIgnoreCase).Count();
 					
-					found.Add(new(ProjectKey.Of(project), expectedNames, names, missing.All(assets.IsGone)));
+					// One file gone is enough for "restore": a package the cache lost can cost a project
+					// the assemblies of its other packages too, and the reload after a restore heals
+					// whatever else was short.
+					found.Add(new(ProjectKey.Of(project), expectedNames, names, missing.Any(assets.IsGone)));
 				}
 				
 				assetsFiles = read.Count;
@@ -108,6 +117,9 @@ internal sealed partial class WorkspaceManager
 				readonly Dictionary<string, string> aliases = new(StringComparer.OrdinalIgnoreCase);
 				
 				readonly List<string> packageFolders = [];
+				
+				/// <summary>The project file the restore that wrote the file was for, where the file says.</summary>
+				public string? ProjectPath { get; private set; }
 				
 				/// <summary>
 				///     The file, or null when it cannot be read or is not what an assets file looks
@@ -166,6 +178,9 @@ internal sealed partial class WorkspaceManager
 								if(String(framework.Value, "targetAlias", out var alias) && file.targets.ContainsKey(framework.Name))
 									file.aliases[alias] = framework.Name;
 						
+						if(Object(root, "project", out project) && Object(project, "restore", out var restore) && String(restore, "projectPath", out var projectPath))
+							file.ProjectPath = projectPath;
+						
 						if(Object(root, "packageFolders", out var folders))
 							foreach(var folder in folders.EnumerateObject())
 								file.packageFolders.Add(folder.Name);
@@ -181,28 +196,32 @@ internal sealed partial class WorkspaceManager
 				/// <summary>
 				///     The assemblies of the target a project is built for, or null when the file does
 				///     not say which that is. A multi-targeted project is one project per framework,
-				///     named <c>Foo(net8.0)</c>; a project with one framework has the file's one target.
+				///     named <c>Foo(net8.0)</c>; a project with one framework has the file's one target,
+				///     whatever its name ends in (<c>Foo (Legacy)</c>).
 				/// </summary>
 				public Assembly[]? TargetOf(string projectName)
 				{
 					var open = projectName.LastIndexOf('(');
 					
-					if(open < 0 || !projectName.EndsWith(')'))
+					if(open >= 0 && projectName.EndsWith(')')) {
 						
-						return targets.Count == 1 ? targets.Values.First() : null;
-					
-					var framework = projectName[(open + 1)..^1];
-					
-					if(targets.TryGetValue(framework, out var named))
+						var framework = projectName[(open + 1)..^1];
 						
-						return named;
+						if(targets.TryGetValue(framework, out var named))
+							
+							return named;
+						
+						if(aliases.TryGetValue(framework, out var target))
+							
+							return targets[target];
+					}
 					
-					return aliases.TryGetValue(framework, out var target) ? targets[target] : null;
+					return targets.Count == 1 ? targets.Values.First() : null;
 				}
 				
 				/// <summary>
 				///     Whether an assembly is in no package folder any more. Unknown counts as still
-				///     there: "gone" changes the advice from a reload to a restore.
+				///     there: "gone" changes the advice from a reload to a restore, and ends the retries.
 				/// </summary>
 				public bool IsGone(Assembly assembly)
 				{

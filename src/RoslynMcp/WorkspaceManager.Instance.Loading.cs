@@ -238,13 +238,14 @@ internal sealed partial class WorkspaceManager
 		
 		/// <summary>
 		///     The unhealthy projects of <paramref name="ws"/> that a reload might heal — all of them but those
-		///     never restored, and those whose missing references are gone from the package cache: only a
-		///     restore heals either. What the retries and the healing retries decide on.
+		///     never restored, and those short of files the package cache lost: only a restore heals either.
+		///     A project of the latter kind whose project file also failed is still one: that failure a reload
+		///     can heal. What the retries and the healing retries decide on.
 		/// </summary>
 		static ProjectKey[] RetryableUnhealthy(Workspace ws, LoadFindings findings) =>
 			[..UnhealthyProjects(ws, findings)
 				.Except(findings.NotRestored)
-				.Except(findings.Partial.Where(partial => partial.PackagesGone).Select(partial => partial.Project))];
+				.Except(findings.Partial.Where(partial => partial.PackagesGone).Select(partial => partial.Project).Except(findings.Failed))];
 		
 		/// <summary>
 		///     Projects of <paramref name="solution"/> that one of the load's <c>WorkspaceFailed</c> failures is

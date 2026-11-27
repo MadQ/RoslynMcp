@@ -21,6 +21,8 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class PartialReferenceTests
 {
+	// A version the server itself depends on (through Roslyn's workspaces), so the restore that built
+	// the harness has it in the package cache already and the fixture's restore needs no feed.
 	const string Package = """<ItemGroup><PackageReference Include="Humanizer.Core" Version="2.14.1" /></ItemGroup>""";
 	
 	// Runs in a design-time build as in a real one: the package's Reference items exist once the
