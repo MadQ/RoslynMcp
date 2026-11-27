@@ -518,6 +518,7 @@ Parameter descriptions follow the same principle — write for the AI to underst
 - **RMCP008** — every parameter on a `[McpServerTool]` method must have `[Description]`, except `CancellationToken` (Error)
 - **RMCP009** — a `projectPath` parameter must be declared `string? projectPath = null` (a literal `null` default) and use `[Description(OptionalProjectPathDescription)]` — a required `projectPath` is a tool that does not find its project on its own (#296), and inline strings drift; the constant is the single source of truth (Error)
 - **RMCP010** — a string literal (descriptions, hints, messages) must not name a tool without its `roslyn_` prefix: an agent calls what it reads, and `apply_rename` is an unknown tool (Warning, #326). The names checked are the compilation's own `[McpServerTool(Name = …)]` values with an underscore after the prefix, so a new tool is covered at once, one-word names (`info`, `respawn`) are not matched, and the TestHarness, which declares no tools, is never checked. Comments are not checked
+- **RMCP011** — a `mode` parameter must use `[Description(MatchModeDescription)]`, optionally followed by its default as string literals (`MatchModeDescription + "Default: 'regex'."`) — the one wording of `literal`, `regex` and `glob`; an inline description drifts, and an agent cannot tell two wordings of one mode apart from two modes (Error, #255)
 
 **Always use `OptionalProjectPathDescription`** for the `projectPath` parameter — the constant with the canonical, full description. Inline text drifts and diverges. Never duplicate it.
 
