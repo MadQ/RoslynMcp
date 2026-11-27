@@ -59,6 +59,9 @@ static class EditSafetyTests
 		fx.Write("code_exact.cs", "class Exact\n{\n\tint Problem { get; set; }\n\tbool HasProblem => Problem > 0;\n\tint problem { get; set; }\n}\n");
 		// A field of several variables (#533).
 		fx.Write("code_fields.cs", "class Fields\n{\n\tint a, Problem;\n\tint Total;\n}\n");
+		// Members one tab in, to be replaced by texts written at other indentations (#531).
+		fx.Write("code_indent.cs", "class Indent\n{\n\t/// <summary>Old.</summary>\n\tint Value { get; set; }\n\n\tint Other() { return 0; }\n\n\tint Third() { return 3; }\n}\n");
+		fx.Write("code_indent_text.cs", "class IndentText\n{\n\tstring Text() { return \"\"; }\n}\n");
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
 		fx.Write("twice_regex.txt", "same\nother\nsame\n");
@@ -257,6 +260,48 @@ static class EditSafetyTests
 					&& lost?["_caution"]?.GetValue<string>().Contains("a is no longer declared", StringComparison.Ordinal) == true
 					&& kept?["_caution"] is null
 					&& gone?["_caution"]?.GetValue<string>().Contains("deleted whole", StringComparison.Ordinal) == true, new JsonArray(later?.DeepClone(), first?.DeepClone(), listed?.DeepClone(), lost?.DeepClone(), kept?.DeepClone(), gone?.DeepClone()), null);
+			}),
+			
+			// A replacement written at column 0 throughout is one block and moves to the node's
+			// indentation as one (#531). Only its first line used to: a comment before the node left
+			// the declaration under it short, a second member of several stood at column 0, and a
+			// body was one level short, each in a call that succeeded. A text whose later lines are
+			// already at the file's indentation is the convention the tool always had, and is
+			// written as it always was.
+			new("edit safety: roslyn_replace_in_code moves a replacement written at column 0 as a block", async () => {
+				
+				var commented = await InCode(new { filePath = "code_indent.cs", nodeKind = "property", textPattern = "Value", replacement = "/// <summary>New.</summary>\nint Value\n{\n\tget;\n\tset;\n}", projectPath = fx.Csproj });
+				var several   = await InCode(new { filePath = "code_indent.cs", nodeKind = "method", textPattern = "Other", replacement = "/// <summary>One.</summary>\nint Other() { return 1; }\n\n/// <summary>Two.</summary>\nint Added()\n{\n\treturn 2;\n}", projectPath = fx.Csproj });
+				var asBefore  = await InCode(new { filePath = "code_indent.cs", nodeKind = "method", textPattern = "Third", replacement = "int Third()\n\t{\n\t\treturn 30;\n\t}", projectPath = fx.Csproj });
+				var after     = Read("code_indent.cs");
+				
+				const string expected =
+					"class Indent\n{\n"
+					+ "\t/// <summary>New.</summary>\n\tint Value\n\t{\n\t\tget;\n\t\tset;\n\t}\n\n"
+					+ "\t/// <summary>One.</summary>\n\tint Other() { return 1; }\n\n\t/// <summary>Two.</summary>\n\tint Added()\n\t{\n\t\treturn 2;\n\t}\n\n"
+					+ "\tint Third()\n\t{\n\t\treturn 30;\n\t}\n}\n";
+				
+				return Verdict(after == expected
+					&& commented?["_caution"] is null
+					&& several?["_caution"] is null
+					&& asBefore?["_caution"] is null, new JsonArray(commented?.DeepClone(), several?.DeepClone(), asBefore?.DeepClone()), after);
+			}),
+			
+			// What a string holds is a value: the lines inside a verbatim, an interpolated verbatim
+			// and a raw string are not moved with the block around them. And a line indented less
+			// than the text's first cannot be moved with it: it is written as given, and named.
+			new("edit safety: a moved replacement leaves the lines inside a string alone, and names a line it could not move", async () => {
+				
+				const string body = "return @\"a\n  b\" + $@\"c\n  {1}d\" + \"\"\"\n    raw\n    \"\"\";";
+				
+				var strings = await InCode(new { filePath = "code_indent_text.cs", nodeKind = "method", textPattern = "Text", replacement = "string Text()\n{\n\t" + body + "\n}", projectPath = fx.Csproj });
+				var after   = Read("code_indent_text.cs");
+				var shorter = await InCode(new { filePath = "code_indent.cs", nodeKind = "method", textPattern = "Third", replacement = "  int Third()\n    => 30\n+ 0;", dryRun = true, projectPath = fx.Csproj });
+				var caution = shorter?["_caution"]?.GetValue<string>() ?? "";
+				
+				return Verdict(after == "class IndentText\n{\n\tstring Text()\n\t{\n\t\t" + body + "\n\t}\n}\n"
+					&& strings?["_caution"] is null
+					&& caution.Contains("its line 3 is indented less than its first line", StringComparison.Ordinal), new JsonArray(strings?.DeepClone(), shorter?.DeepClone()), after);
 			}),
 			
 			// Second half: a pattern that matches nothing lists what is there, with positions that

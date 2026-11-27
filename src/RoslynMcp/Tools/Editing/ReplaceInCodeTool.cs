@@ -37,7 +37,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"One exception: a member of a class, struct, interface or record may be replaced by several members, written one after another " +
 		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow as written. " +
 		"The same holds for a type or delegate declared in a namespace or at file level, which several type declarations may replace. " +
-		"The node keeps its place: the blank lines before it and the indentation of the first line of the replacement text come from the file, further lines are written as given. " +
+		"The node keeps its place: the blank lines before it and its indentation come from the file. The replacement text can be written at column 0 throughout, or at any one indentation: it is moved to the node's indentation as a block, a comment before the node and further members included. A text whose first line is unindented and whose further lines are already at the file's indentation is written as it is. Lines inside a multi-line string or block comment are never moved, and a line indented less than the text's first line is written as given and named in _caution. " +
 		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
 		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
 		"In a list of members, what stands between two of them (blank lines, comments, a directive) is written as given. " +
@@ -411,7 +411,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 
 			foreach(var matchedNode in matchedNodes) {
 				
-				var (parsed, parseError) = ParseReplacement(matchedNode, effectiveReplacement);
+				var placedText = Reindent(effectiveReplacement, IndentationAt(matchedNode), (CSharpParseOptions) syntaxTree.Options, out var leftBehind);
+				
+				var (parsed, parseError) = ParseReplacement(matchedNode, placedText);
 				
 				if(parsed is null)
 					
@@ -421,6 +423,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 					}, logNotes);
 				
 				var notes = new List<string>();
+				
+				if(leftBehind.Length > 0)
+					notes.Add($"The replacement text was moved to the node's indentation as a block, but its line {string.Join(", ", leftBehind)} {(leftBehind.Length == 1 ? "is" : "are")} indented less than its first line and {(leftBehind.Length == 1 ? "was" : "were")} written as given.");
 				
 				var placed = WithTriviaOf(matchedNode, parsed, replacementTokens, notes);
 				
@@ -770,6 +775,135 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		return -1;
 	}
 	
+	/// <summary>
+	///     The replacement text, moved to the indentation the node has in the file where the text
+	///     is written relative to itself (#531).
+	///     <para>
+	///         The first line of a replacement always took the node's indentation from the file, and
+	///         every further line was written as given. That suits a text whose further lines are
+	///         already at the file's indentation, and nothing else: a text written at column 0
+	///         throughout had its body one level short, a comment before the node left the
+	///         declaration under it short, and so was every member after the first of several. The
+	///         call succeeded each time.
+	///     </para>
+	///     <para>
+	///         Which of the two a text is, its lines say. Where the later lines start where the
+	///         first does, the text is one block and moves as one. Where they are already at
+	///         <paramref name="target"/> and the first line is not, it is the old convention and
+	///         is written as before, so nothing that was written right is written differently.
+	///         Anything else (a continuation line indented under a first line at column 0) is a
+	///         block too; a line of it indented less than the first cannot be moved with it and is
+	///         named in <paramref name="leftBehind"/>, by its number in the text.
+	///     </para>
+	///     A line that begins inside a token or a comment that spans lines (a verbatim or raw
+	///     string, a block comment, text an #if leaves out) is never touched: what it holds is a
+	///     value. The lines of a doc comment are lines of their own and move. An empty line stays
+	///     empty.
+	/// </summary>
+	private static string Reindent(string text, string target, CSharpParseOptions options, out int[] leftBehind)
+	{
+		leftBehind = [];
+		
+		var lines = SourceText.From(text).Lines;
+		
+		if(lines.Count < 2)
+			
+			return text;
+		
+		var inside = new HashSet<int>();
+		
+		void Cover(TextSpan span)
+		{
+			var last = lines.GetLineFromPosition(span.End).LineNumber;
+			
+			for(var number = lines.GetLineFromPosition(span.Start).LineNumber + 1; number <= last; number++)
+				inside.Add(number);
+		}
+		
+		foreach(var token in SyntaxFactory.ParseTokens(text, options: options)) {
+			
+			Cover(token.Span);
+			
+			foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia))
+				if(trivia.Kind() is SyntaxKind.MultiLineCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia or SyntaxKind.DisabledTextTrivia)
+					Cover(trivia.Span);
+		}
+		
+		static string IndentOf(string line) => line[..(line.Length - line.AsSpan().TrimStart([' ', '\t']).Length)];
+		
+		var texts = lines.Select(line => line.ToString()).ToArray();
+		var first = Array.FindIndex(texts, line => !string.IsNullOrWhiteSpace(line));
+		
+		if(first < 0)
+			
+			return text;
+		
+		var start = IndentOf(texts[first]);
+		
+		// What the later lines have in common: where the block's left edge is, bar its first line.
+		string? later = null;
+		
+		for(var number = first + 1; number < texts.Length; number++) {
+			
+			if(inside.Contains(number) || string.IsNullOrWhiteSpace(texts[number]))
+				continue;
+			
+			var indent = IndentOf(texts[number]);
+			
+			if(later is null)
+				later = indent;
+			else {
+				
+				var common = 0;
+				
+				while(common < later.Length && common < indent.Length && later[common] == indent[common])
+					common++;
+				
+				later = later[..common];
+			}
+		}
+		
+		// One line of text, a text already where it belongs, or the old convention.
+		if(later is null || start == target || later != start && later.StartsWith(target, StringComparison.Ordinal))
+			
+			return text;
+		
+		var moved = new StringBuilder(text.Length + target.Length * texts.Length);
+		var behind = new List<int>();
+		
+		for(var number = 0; number < texts.Length; number++) {
+			
+			var line = texts[number];
+			
+			if(number < first || inside.Contains(number) || line.Length == 0)
+				moved.Append(line);
+			else if(line.StartsWith(start, StringComparison.Ordinal))
+				moved.Append(target).Append(line, start.Length, line.Length - start.Length);
+			else {
+				
+				moved.Append(line);
+				
+				if(!string.IsNullOrWhiteSpace(line))
+					behind.Add(number + 1);
+			}
+			
+			moved.Append(text, lines[number].End, lines[number].EndIncludingLineBreak - lines[number].End);
+		}
+		
+		leftBehind = [..behind];
+		
+		return moved.ToString();
+	}
+	
+	// The indentation of the line a node starts on: where a replacement of it belongs.
+	private static string IndentationAt(SyntaxNode node)
+	{
+		var line = node.SyntaxTree.GetText().Lines.GetLineFromPosition(node.SpanStart).ToString();
+		
+		return line[..(line.Length - line.AsSpan().TrimStart([' ', '\t']).Length)];
+	}
+	
+
 	// The variables of a field declaration that the nodes put in its place no longer declare.
 	// A field of several variables is found by any of them (#533) and replaced whole, since a
 	// variable is not a member of its own: a replacement written for the one variable named
