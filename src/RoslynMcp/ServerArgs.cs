@@ -122,6 +122,18 @@ internal sealed class ServerArgs
     public string? VsVersionRejected { get; }
 
     /// <summary>
+    ///     One line per setting from the command line or a <c>ROSLYNMCP_*</c> variable whose value was
+    ///     not understood, saying what was used instead (#232). The fallback is unchanged — a typo must
+    ///     not keep the server from starting — but it used to be silent: <c>ROSLYNMCP_WORKSPACE=skd</c>
+    ///     was auto-detection with nothing to say why. Built here, before the logger exists, and
+    ///     logged by <c>Program</c> as <c>Config — WARN: …</c> once the logger does.
+    /// </summary>
+    public string[] Warnings { get; }
+
+    // Filled while the constructor reads the settings; Warnings is its copy.
+    readonly List<string> warnings = [];
+
+    /// <summary>
     ///     Disables pinning the out-of-process Roslyn BuildHost to the Visual Studio MSBuild
     ///     instance the server resolved. CLI: <c>--no-buildhost-pin</c> (bare flag).
     ///     Env: <c>ROSLYNMCP_NO_BUILDHOST_PIN</c> = <c>true</c>. Default: <c>false</c> (pinning on).
@@ -359,6 +371,9 @@ internal sealed class ServerArgs
         // unspecified so a project file's mode may still apply (see the property doc).
         WorkspaceModeSpecified = WorkspaceMode != WorkspaceMode.Auto;
 
+        WarnUnlessWorkspaceMode("--workspace", workspaceFlag);
+        WarnUnlessWorkspaceMode("ROSLYNMCP_WORKSPACE", Env("ROSLYNMCP_WORKSPACE"));
+
         PreloadPaths = [..preload];
 
         // The CLI list beats the env var as a whole, like every other setting — but only when it
@@ -418,6 +433,9 @@ internal sealed class ServerArgs
 
             ElicitSpecified = bool.TryParse(Env("ROSLYNMCP_ELICIT"), out var envElicit);
             Elicit          = ElicitSpecified && envElicit;
+
+            if(!ElicitSpecified && !string.IsNullOrWhiteSpace(Env("ROSLYNMCP_ELICIT")))
+                warnings.Add($"ROSLYNMCP_ELICIT='{Env("ROSLYNMCP_ELICIT")}' is not true or false — ignored, so the project file or the default decides");
         }
 
         BackupPath = Env("ROSLYNMCP_BACKUP_PATH");
@@ -469,6 +487,9 @@ internal sealed class ServerArgs
 
             CodeActionsSpecified = envCodeActions is not null;
             CodeActions          = envCodeActions ?? true;
+
+            if(envCodeActions is null && !string.IsNullOrWhiteSpace(Env("ROSLYNMCP_CODE_ACTIONS")))
+                warnings.Add($"ROSLYNMCP_CODE_ACTIONS='{Env("ROSLYNMCP_CODE_ACTIONS")}' is not on or off — ignored, so the config files or the default decide");
         }
 
         // A grant from either source, as for the pin above: `--trust-project-providers false` is
@@ -483,6 +504,24 @@ internal sealed class ServerArgs
         LoadTimeoutSeconds = int.TryParse(Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS"), out var loadTimeout)
             ? (loadTimeout <= 0 ? 0 : Math.Max(10, loadTimeout))
             : 300;
+
+        if(!int.TryParse(Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS"), out _) && !string.IsNullOrWhiteSpace(Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS")))
+            warnings.Add($"ROSLYNMCP_LOAD_TIMEOUT_SECONDS='{Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS")}' is not a whole number — using 300");
+
+        Warnings = [..warnings];
+    }
+
+    // A --workspace or ROSLYNMCP_WORKSPACE value that names no mode. The value is ignored either
+    // way; the other source, the project file or auto-detection decides.
+    void WarnUnlessWorkspaceMode(string source, string? value)
+    {
+        if(string.IsNullOrWhiteSpace(value) || value.ToLowerInvariant() is "sdk" or "vs" or "adhoc" or "auto")
+
+            return;
+
+        warnings.Add(source.StartsWith('-')
+            ? $"{source} '{value}' is not sdk, vs, adhoc or auto — ignored"
+            : $"{source}='{value}' is not sdk, vs, adhoc or auto — ignored");
     }
 
     static WorkspaceMode ParseWorkspaceMode(string? value) => value?.ToLowerInvariant() switch {
@@ -525,11 +564,44 @@ internal sealed class ServerArgs
 
     static string? NullIfEmpty(string? value) => string.IsNullOrEmpty(value) ? null : value;
 
-    /// <summary>Parses an int env var, clamping to <paramref name="min"/>; unset or unparseable → <paramref name="fallback"/>.</summary>
-    static int EnvInt(string name, int min, int fallback) =>
-        int.TryParse(Env(name), out var value) ? Math.Max(min, value) : fallback;
+    /// <summary>
+    ///     Parses an int env var, clamping to <paramref name="min"/>; unset or unparseable →
+    ///     <paramref name="fallback"/>. A value that is not a number, or is below the minimum, is
+    ///     said in <see cref="Warnings"/>.
+    /// </summary>
+    int EnvInt(string name, int min, int fallback)
+    {
+        var raw = Env(name);
 
-    /// <summary>True only when the env var is set to the literal "true" (case-insensitive).</summary>
-    static bool EnvTrue(string name) =>
-        string.Equals(Env(name), "true", StringComparison.OrdinalIgnoreCase);
+        if(int.TryParse(raw, out var value)) {
+
+            if(value < min)
+                warnings.Add($"{name}='{raw}' is below {min} — using {min}");
+
+            return Math.Max(min, value);
+        }
+
+        if(!string.IsNullOrWhiteSpace(raw))
+            warnings.Add($"{name}='{raw}' is not a whole number — using {fallback}");
+
+        return fallback;
+    }
+
+    /// <summary>
+    ///     True only when the env var is set to the literal "true" (case-insensitive). Any other value
+    ///     but "false" is said in <see cref="Warnings"/>: <c>1</c> and <c>yes</c> read as on and are off.
+    /// </summary>
+    bool EnvTrue(string name)
+    {
+        var raw = Env(name);
+
+        if(string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase))
+
+            return true;
+
+        if(!string.IsNullOrWhiteSpace(raw) && !string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase))
+            warnings.Add($"{name}='{raw}' is not true or false — only true turns it on, so it is off");
+
+        return false;
+    }
 }

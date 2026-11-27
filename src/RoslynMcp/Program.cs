@@ -262,6 +262,10 @@ lifetime.ApplicationStarted.Register(() => {
 	if(ServerArgs.Current.VsVersionRejected is not null)
 		logger.LogInfo("Workspace", $"WARN: --vs-version / ROSLYNMCP_VS_VERSION value '{ServerArgs.Current.VsVersionRejected}' is not a major (17), major.minor (17.14), or vswhere range ([17.0,18.0)) — ignored");
 	
+	// The settings that were not understood and what was used instead (#232).
+	foreach(var warning in ServerArgs.Current.Warnings)
+		logger.LogInfo("Config", $"WARN: {warning}");
+	
 	ServerHeartbeat.Initialize();
 	ThreadPoolProbe.Start(logger);
 	
