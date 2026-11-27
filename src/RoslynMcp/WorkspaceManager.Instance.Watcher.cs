@@ -709,6 +709,15 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		// The text a document holds, also when it is not at hand. Waited for in place: the flush
+		// runs on a thread of its own with no context to come back to, and the text comes from
+		// Roslyn's store or from one file.
+		static SourceText HeldText(TextDocument document)
+			=> document.TryGetText(out var held)
+				? held
+				: document.GetTextAsync(CancellationToken.None).GetAwaiter().GetResult()
+		;
+
 		/// <summary>
 		///     Applies a debounced batch of file changes to an MSBuild workspace.
 		///     Returns <see langword="true"/> when the workspace is left behind disk — it could only
@@ -865,13 +874,19 @@ internal sealed partial class WorkspaceManager
 					// without the text, and that record outlived the write whenever its report
 					// came while the write was still running — which ignoredPaths drops — so it
 					// went on to swallow the next outside edit of the same length (#358).
-					// TryGetText deliberately: it reads already-materialized text rather than
-					// forcing a load, and falls through to apply when none is available.
+					// The document's text is asked for when it is not at hand (#522). Roslyn holds
+					// a text weakly once it was read, and not at all before: compared only when
+					// TryGetText had it, a file saved without a change, or handed over by the
+					// catch-up scan after a load, was applied again whenever nobody had read it
+					// or the garbage collector had taken it, and every compilation and kept page
+					// went for a change that was none. A text that was let go comes back from
+					// Roslyn's own store, not from the file, so it is still what the workspace
+					// last answered from; one never read comes from the file, and is then the
+					// same as what was read here a moment ago. Either costs one read, for a file
+					// that was reported changed.
 					var existingDoc = info.GetDocument(newSolution);
 
-					if(existingDoc is not null
-					   && existingDoc.TryGetText(out var currentText)
-					   && currentText.ContentEquals(text))
+					if(existingDoc is not null && HeldText(existingDoc).ContentEquals(text))
 
 						continue;
 

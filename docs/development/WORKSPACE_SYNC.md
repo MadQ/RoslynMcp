@@ -27,6 +27,22 @@ that were already applied (by `TryApplyChanges`) but not yet observed by the nex
 
 ---
 
+## A file saved without a change (#522)
+
+The watcher flush reads a reported file and leaves the workspace alone when the document
+already holds that text. Applying it anyway moves the solution on: the compilations go, and
+the change counter that ties a kept page to its workspace (#435) moves, for a change that was
+none. The comparison asks the document for its text also when the text is not at hand
+(`HeldText`). Roslyn holds a text weakly once it was read and not at all before, and the
+comparison used to be made only when `TryGetText` had it, so a file nobody had read, or one
+whose text the garbage collector had taken, was applied again: after every load, whose
+catch-up scan hands the flush the files written shortly before it, and at every save that
+changed nothing. A text that was let go comes back from Roslyn's own store and not from the
+file (checked against Roslyn 5.9.0 with a loader that counts its loads), so it is still what
+the workspace last answered from; a text never read comes from the file.
+
+---
+
 ## Source drift after owned writes (#299)
 
 `roslyn_check_drift` uses the last workspace sync plus a two-second tolerance as a cheap

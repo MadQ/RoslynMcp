@@ -58,6 +58,13 @@ static class PaginationTests
 		
 		diagnosed.Write("Warned.cs", "class Warned\n{\n\tvoid Run()\n\t{\n" + string.Concat(Enumerable.Range(1, 7).Select(n => $"\t\tint unused{n};\n")) + "\t}\n}\n");
 		
+		// A project of its own for the test of a file saved without a change (#522): no test before
+		// it may have read its files, since a text nobody read is the case under test.
+		var quiet = TestFixtures.NewMsBuildProject("PaginationQuiet");
+		
+		for(int i = 1; i <= 3; i++)
+			quiet.Write($"Quiet{i}.cs", $"class Quiet{i} {{ }}\n");
+		
 		// Captured by the earlier tests, consumed by the later ones — the tests run in order.
 		string?   token1 = null;
 		string?   token2 = null;
@@ -459,8 +466,61 @@ static class PaginationTests
 					return Verdict(tags.SequenceEqual(["STORED", "MISS", "none"]),
 						$"cache_tag of the last three searches: [{string.Join(", ", tags)}], expected [STORED, MISS, none]");
 				}),
+			
+			// A file saved without a change is no change to the workspace (#522). The watcher's
+			// flush left such a file alone only while the workspace had its text at hand, and
+			// Roslyn holds a document's text weakly: for a text nobody had read, or one the garbage
+			// collector had taken, the same text was applied again, which counted as a change. Every
+			// kept page was then refused and every compilation dropped, also right after a load,
+			// whose catch-up scan hands the flush every file written shortly before it. The first
+			// page of a file listing is taken, which reads no source text; one file is written again
+			// with the text it has; and once the sync clock says the flush has run, the token must
+			// still be answered from the kept result, which shows in the next token having the same
+			// id. The wait before the first look at the clock keeps roslyn_check_drift, which reads
+			// the text of a file newer than the clock, from reading it before the flush does.
+			new("pagination: a file saved without a change leaves a kept page usable",
+				async () => {
+					
+					static string? Id(string? token) => token?.Split('.')[0];
+					
+					var first = await Call("roslyn_list_files", new { pattern = "Quiet*.cs", take = 1, projectPath = quiet.Csproj });
+					
+					if(Token(first) is not { } token)
+						
+						return (false, $"FAIL  (the first page has no token: {first?.ToJsonString() ?? "no answer"})");
+					
+					var path = quiet.PathOf("Quiet2.cs");
+					
+					File.WriteAllText(path, File.ReadAllText(path));
+					
+					var saved    = DateTimeOffset.UtcNow;
+					var deadline = DateTime.UtcNow.AddSeconds(15);
+					var flushed  = false;
+					
+					await Task.Delay(1000);
+					
+					while(DateTime.UtcNow < deadline && !flushed) {
+						
+						var drift = await Call("roslyn_check_drift", new { projectPath = quiet.Csproj });
+						
+						flushed = DateTimeOffset.TryParse(drift?["last_synced_utc"]?.GetValue<string>(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out var synced)
+							&& synced > saved;
+						
+						if(!flushed)
+							await Task.Delay(250);
+					}
+					
+					if(!flushed)
+						
+						return (false, "FAIL  (Quiet2.cs was written fifteen seconds ago and the sync clock has not passed that moment)");
+					
+					var second = await Call("roslyn_list_files", new { pattern = "Quiet*.cs", page_token = token, projectPath = quiet.Csproj });
+					
+					return Verdict(Id(Token(second)) is { } id && id == Id(token),
+						$"the next token is {Token(second) ?? "absent"} after {token}: another id means the query ran again, so the save counted as a change");
+				}),
 		};
 		
-		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); diagnosed.Dispose(); return Task.CompletedTask; });
+		return new TestGroup($"Pagination Cursor ({tests.Count} tests)", tests, Teardown: () => { fx.Dispose(); otherProject.Dispose(); diagnosed.Dispose(); quiet.Dispose(); return Task.CompletedTask; });
 	}
 }
