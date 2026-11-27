@@ -424,6 +424,14 @@ internal sealed class ServerArgs
         // below — it needs to distinguish "parsed" from "false". Plain on/off flags use EnvTrue.
         // The CLI value is read as the argument loop took it (ParseOnOff): `--elicit off` must
         // not come out as on.
+        // The env var is checked whichever source wins, as every setting's is: a typo is worth
+        // saying also while the command line happens to cover it.
+        var envElicitRaw    = Env("ROSLYNMCP_ELICIT");
+        var envElicitParsed = bool.TryParse(envElicitRaw, out var envElicit);
+
+        if(!envElicitParsed && !string.IsNullOrWhiteSpace(envElicitRaw))
+            warnings.Add($"ROSLYNMCP_ELICIT='{envElicitRaw}' is not true or false — ignored");
+
         if(ParseOnOff(elicitFlag) is { } cliElicit) {
 
             ElicitSpecified = true;
@@ -431,11 +439,8 @@ internal sealed class ServerArgs
         }
         else {
 
-            ElicitSpecified = bool.TryParse(Env("ROSLYNMCP_ELICIT"), out var envElicit);
+            ElicitSpecified = envElicitParsed;
             Elicit          = ElicitSpecified && envElicit;
-
-            if(!ElicitSpecified && !string.IsNullOrWhiteSpace(Env("ROSLYNMCP_ELICIT")))
-                warnings.Add($"ROSLYNMCP_ELICIT='{Env("ROSLYNMCP_ELICIT")}' is not true or false — ignored, so the project file or the default decides");
         }
 
         BackupPath = Env("ROSLYNMCP_BACKUP_PATH");
@@ -471,11 +476,18 @@ internal sealed class ServerArgs
 
         DisablePathCache = EnvTrue("ROSLYNMCP_DISABLE_PATH_CACHE");
 
-        // CLI flag OR env var disables the pin. A plain on/off flag — no tri-state needed.
-        NoBuildHostPin = noBuildHostPin || EnvTrue("ROSLYNMCP_NO_BUILDHOST_PIN");
+        // CLI flag OR env var disables the pin. A plain on/off flag — no tri-state needed. The env
+        // var is read first so that a value it does not understand is said also when the flag is set.
+        NoBuildHostPin = EnvTrue("ROSLYNMCP_NO_BUILDHOST_PIN") || noBuildHostPin;
 
         // Tri-state like --elicit: a source binds only when it parses, so a typo cannot mask the env
         // var, and a value from neither leaves the decision to the project and user config files.
+        var envCodeActionsRaw = Env("ROSLYNMCP_CODE_ACTIONS");
+        var envCodeActions    = ParseOnOff(envCodeActionsRaw);
+
+        if(envCodeActions is null && !string.IsNullOrWhiteSpace(envCodeActionsRaw))
+            warnings.Add($"ROSLYNMCP_CODE_ACTIONS='{envCodeActionsRaw}' is not on or off — ignored");
+
         if(ParseOnOff(codeActionsFlag) is { } cliCodeActions) {
 
             CodeActionsSpecified = true;
@@ -483,30 +495,34 @@ internal sealed class ServerArgs
         }
         else {
 
-            var envCodeActions   = ParseOnOff(Env("ROSLYNMCP_CODE_ACTIONS"));
-
             CodeActionsSpecified = envCodeActions is not null;
             CodeActions          = envCodeActions ?? true;
-
-            if(envCodeActions is null && !string.IsNullOrWhiteSpace(Env("ROSLYNMCP_CODE_ACTIONS")))
-                warnings.Add($"ROSLYNMCP_CODE_ACTIONS='{Env("ROSLYNMCP_CODE_ACTIONS")}' is not on or off — ignored, so the config files or the default decide");
         }
 
         // A grant from either source, as for the pin above: `--trust-project-providers false` is
         // no grant of its own, and does not take back one the env var or the user's file gives.
-        TrustProjectProviders = trustProjectProviders || EnvTrue("ROSLYNMCP_TRUST_PROJECT_PROVIDERS");
+        TrustProjectProviders = EnvTrue("ROSLYNMCP_TRUST_PROJECT_PROVIDERS") || trustProjectProviders;
         UserConfigPath        = NullIfEmpty(Env("ROSLYNMCP_USER_CONFIG"));
 
         MaxCachedWorkspaces = EnvInt("ROSLYNMCP_MAX_CACHED_WORKSPACES", 1, 5);
 
         // Not EnvInt: the clamp is two-sided — 0 or negative disables the timeout outright,
         // while 1–9 raise to a 10s floor. A single minimum cannot express both.
-        LoadTimeoutSeconds = int.TryParse(Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS"), out var loadTimeout)
+        var loadTimeoutRaw = Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS");
+
+        var loadTimeoutParsed = int.TryParse(loadTimeoutRaw, out var loadTimeout);
+
+        LoadTimeoutSeconds = loadTimeoutParsed
             ? (loadTimeout <= 0 ? 0 : Math.Max(10, loadTimeout))
             : 300;
 
-        if(!int.TryParse(Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS"), out _) && !string.IsNullOrWhiteSpace(Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS")))
-            warnings.Add($"ROSLYNMCP_LOAD_TIMEOUT_SECONDS='{Env("ROSLYNMCP_LOAD_TIMEOUT_SECONDS")}' is not a whole number — using 300");
+        if(loadTimeoutParsed) {
+
+            if(loadTimeout is > 0 and < 10)
+                warnings.Add($"ROSLYNMCP_LOAD_TIMEOUT_SECONDS='{loadTimeoutRaw}' is below 10 — using 10");
+        }
+        else if(!string.IsNullOrWhiteSpace(loadTimeoutRaw))
+            warnings.Add($"ROSLYNMCP_LOAD_TIMEOUT_SECONDS='{loadTimeoutRaw}' is not a whole number — using 300");
 
         Warnings = [..warnings];
     }
@@ -589,7 +605,9 @@ internal sealed class ServerArgs
 
     /// <summary>
     ///     True only when the env var is set to the literal "true" (case-insensitive). Any other value
-    ///     but "false" is said in <see cref="Warnings"/>: <c>1</c> and <c>yes</c> read as on and are off.
+    ///     but "false" is said in <see cref="Warnings"/>: <c>1</c> and <c>yes</c> look like on but are
+    ///     ignored. The warning does not say what the setting ends up as: a flag on the command line
+    ///     may still turn it on.
     /// </summary>
     bool EnvTrue(string name)
     {
@@ -600,7 +618,7 @@ internal sealed class ServerArgs
             return true;
 
         if(!string.IsNullOrWhiteSpace(raw) && !string.Equals(raw, "false", StringComparison.OrdinalIgnoreCase))
-            warnings.Add($"{name}='{raw}' is not true or false — only true turns it on, so it is off");
+            warnings.Add($"{name}='{raw}' is not true or false — ignored, only true turns it on");
 
         return false;
     }

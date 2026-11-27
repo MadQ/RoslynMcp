@@ -114,7 +114,9 @@ static partial class DefaultWorkspaceTests
 			// was off, and a number that is no number was the default, all without a word. A
 			// server is started with one bad value of each kind, from the command line and from
 			// the environment, and must start and answer as before; its log must name each of
-			// them once in a "Config — WARN:" line, and must name nothing that was valid.
+			// them once in a "Config — WARN:" line, and must not name the valid one. Only these
+			// settings are counted: the server inherits the harness's environment, and a developer's
+			// shell may hold a ROSLYNMCP_* value of its own that is warned about as well.
 			new("DefaultWorkspace: a setting that is not understood is named in the log, and the server starts as before", async () => {
 				
 				var logPath = Path.Combine(TestFixtures.TempRoot, "logs", $"defaultws-badconfig-{Guid.NewGuid():N}.log");
@@ -127,9 +129,11 @@ static partial class DefaultWorkspaceTests
 					["ROSLYNMCP_ELICIT"]                = "maybe",
 					["ROSLYNMCP_CODE_ACTIONS"]          = "sometimes",
 					["ROSLYNMCP_LOG_MAX_AGE_DAYS"]      = "14",
+					// Covered by --no-buildhost-pin on the command line, and still to be named.
+					["ROSLYNMCP_NO_BUILDHOST_PIN"]      = "yes",
 				};
 				
-				var (process, server) = await StartServerWithArgsAsync(ctx, fx.Dir, logPath, environment, $"--workspace sdkk --root \"{fx.Dir}\"");
+				var (process, server) = await StartServerWithArgsAsync(ctx, fx.Dir, logPath, environment, $"--workspace sdkk --no-buildhost-pin --root \"{fx.Dir}\"");
 				
 				string[] log;
 				bool     ok;
@@ -147,11 +151,13 @@ static partial class DefaultWorkspaceTests
 					return (false, failure);
 				
 				var warned   = log.Where(line => line.Contains("\"message\":\"Config — WARN:", StringComparison.Ordinal)).ToArray();
-				string[] bad = ["--workspace 'sdkk'", "ROSLYNMCP_WORKSPACE='skd'", "ROSLYNMCP_LOAD_TIMEOUT_SECONDS='five'", "ROSLYNMCP_DISABLE_PATH_CACHE='1'", "ROSLYNMCP_MAX_CACHED_WORKSPACES='0'", "ROSLYNMCP_ELICIT='maybe'", "ROSLYNMCP_CODE_ACTIONS='sometimes'"];
+				string[] bad = ["--workspace 'sdkk'", "ROSLYNMCP_WORKSPACE='skd'", "ROSLYNMCP_LOAD_TIMEOUT_SECONDS='five'", "ROSLYNMCP_DISABLE_PATH_CACHE='1'", "ROSLYNMCP_MAX_CACHED_WORKSPACES='0'", "ROSLYNMCP_ELICIT='maybe'", "ROSLYNMCP_CODE_ACTIONS='sometimes'", "ROSLYNMCP_NO_BUILDHOST_PIN='yes'"];
 				var missing  = bad.Where(name => warned.Count(line => line.Contains(name, StringComparison.Ordinal)) != 1).ToArray();
 				
-				return Verdict(ok && missing.Length == 0 && warned.Length == bad.Length,
-					$"server answered: {ok}; not named once: [{string.Join(", ", missing)}]; {warned.Length} warning line(s), expected {bad.Length} (ROSLYNMCP_LOG_MAX_AGE_DAYS=14 is valid): {string.Join(" | ", warned)}");
+				var validWarned = warned.Any(line => line.Contains("ROSLYNMCP_LOG_MAX_AGE_DAYS", StringComparison.Ordinal));
+				
+				return Verdict(ok && missing.Length == 0 && !validWarned,
+					$"server answered: {ok}; not named once: [{string.Join(", ", missing)}]; the valid ROSLYNMCP_LOG_MAX_AGE_DAYS=14 named: {validWarned}; warnings: {string.Join(" | ", warned)}");
 			}),
 			
 
