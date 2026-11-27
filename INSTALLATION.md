@@ -489,6 +489,8 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 | `ROSLYNMCP_ELICIT` | `false` | Set to `true` to enable interactive elicitation on ambiguous symbol matches (same as `--elicit`). Not all MCP clients support elicitation; unsupported clients fall back to the structured candidate list. |
 | `ROSLYNMCP_NO_BUILDHOST_PIN` | `false` | Set to `true` to disable pinning the MSBuild BuildHost to the resolved Visual Studio instance (same as `--no-buildhost-pin`). |
 
+A value that is not understood (`ROSLYNMCP_WORKSPACE=skd`, `ROSLYNMCP_DISABLE_PATH_CACHE=1`, a number that is no number) never stops the server: it falls back as described above, and the server's log says so at startup, one `Config — WARN:` line per value, with what was used instead.
+
 **Ambiguous symbol handling.** By default, when a name in `roslyn_preview_rename` or `roslyn_change_signature` matches multiple symbols, the tool returns a structured `candidates` list and the agent retries with a `containingType` (or `filePath`+`line`) on its own — no interruption. Enabling `--elicit` (or `ROSLYNMCP_ELICIT=true`) instead prompts you to pick interactively via MCP elicitation, in clients that support it (Claude Code/Desktop do; many others don't and fall back to the candidate list). The `madq-roslynmcp setup` wizard offers this as an opt-in prompt; you can also add it by hand to the server entry's args: `"args": ["--elicit"]`. A committed project file can also enable it per repo — see the next section.
 
 ### Tool-use hooks

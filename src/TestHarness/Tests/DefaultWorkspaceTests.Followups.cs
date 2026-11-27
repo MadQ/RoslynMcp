@@ -109,6 +109,58 @@ static partial class DefaultWorkspaceTests
 				return Verdict(failures.Count == 0, $"expected DefaultWs.slnx from the positional argument; got {string.Join("; ", failures)}");
 			}),
 			
+			// A setting whose value is not understood falls back as it always did, and says so
+			// (#232): ROSLYNMCP_WORKSPACE=skd was auto-detection, ROSLYNMCP_DISABLE_PATH_CACHE=1
+			// was off, and a number that is no number was the default, all without a word. A
+			// server is started with one bad value of each kind, from the command line and from
+			// the environment, and must start and answer as before; its log must name each of
+			// them once in a "Config — WARN:" line, and must not name the valid one. Only these
+			// settings are counted: the server inherits the harness's environment, and a developer's
+			// shell may hold a ROSLYNMCP_* value of its own that is warned about as well.
+			new("DefaultWorkspace: a setting that is not understood is named in the log, and the server starts as before", async () => {
+				
+				var logPath = Path.Combine(TestFixtures.TempRoot, "logs", $"defaultws-badconfig-{Guid.NewGuid():N}.log");
+				
+				var environment = new Dictionary<string, string> {
+					["ROSLYNMCP_WORKSPACE"]             = "skd",
+					["ROSLYNMCP_LOAD_TIMEOUT_SECONDS"]  = "five",
+					["ROSLYNMCP_DISABLE_PATH_CACHE"]    = "1",
+					["ROSLYNMCP_MAX_CACHED_WORKSPACES"] = "0",
+					["ROSLYNMCP_ELICIT"]                = "maybe",
+					["ROSLYNMCP_CODE_ACTIONS"]          = "sometimes",
+					["ROSLYNMCP_LOG_MAX_AGE_DAYS"]      = "14",
+					// Covered by --no-buildhost-pin on the command line, and still to be named.
+					["ROSLYNMCP_NO_BUILDHOST_PIN"]      = "yes",
+				};
+				
+				var (process, server) = await StartServerWithArgsAsync(ctx, fx.Dir, logPath, environment, $"--workspace sdkk --no-buildhost-pin --root \"{fx.Dir}\"");
+				
+				string[] log;
+				bool     ok;
+				
+				try {
+					
+					(ok, _) = await Call(server, "roslyn_info", new { });
+				}
+				finally {
+					await StopServerAsync(process, server);
+				}
+				
+				if(!ServerLog.TryRead(Path.GetDirectoryName(logPath)!, Path.GetFileNameWithoutExtension(logPath) + "*", 1, out log, out var failure))
+					
+					return (false, failure);
+				
+				var warned   = log.Where(line => line.Contains("\"message\":\"Config — WARN:", StringComparison.Ordinal)).ToArray();
+				string[] bad = ["--workspace 'sdkk'", "ROSLYNMCP_WORKSPACE='skd'", "ROSLYNMCP_LOAD_TIMEOUT_SECONDS='five'", "ROSLYNMCP_DISABLE_PATH_CACHE='1'", "ROSLYNMCP_MAX_CACHED_WORKSPACES='0'", "ROSLYNMCP_ELICIT='maybe'", "ROSLYNMCP_CODE_ACTIONS='sometimes'", "ROSLYNMCP_NO_BUILDHOST_PIN='yes'"];
+				var missing  = bad.Where(name => warned.Count(line => line.Contains(name, StringComparison.Ordinal)) != 1).ToArray();
+				
+				var validWarned = warned.Any(line => line.Contains("ROSLYNMCP_LOG_MAX_AGE_DAYS", StringComparison.Ordinal));
+				
+				return Verdict(ok && missing.Length == 0 && !validWarned,
+					$"server answered: {ok}; not named once: [{string.Join(", ", missing)}]; the valid ROSLYNMCP_LOG_MAX_AGE_DAYS=14 named: {validWarned}; warnings: {string.Join(" | ", warned)}");
+			}),
+			
+
 			// dotnet build of a solution with -f fails for every project that does not target
 			// that framework. Sln/Apart.slnx lists Apart (net10.0 only) and Multi (net10.0 and
 			// net10.0-windows); built for net10.0-windows, only Multi may be built, and the
