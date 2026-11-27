@@ -40,7 +40,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		[Description("1-based column number near or inside the diagnostic span.")] int column,
 		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Optional diagnostic ID to disambiguate when multiple diagnostics are on the same line, e.g. 'RMCP001'. Diagnostics of one ID over one span (CS0246 for 'Foo' and 'FooAttribute') are one finding; two of one ID at different places of the line are told apart by the column the answer names.")] string? diagnosticId = null,
+		[Description("Optional diagnostic ID to disambiguate when multiple diagnostics are on the same line, e.g. 'RMCP001'. Diagnostics of one ID that start at one place (CS0246 for 'Foo' and 'FooAttribute') are one finding; two of one ID starting at different places are told apart by the line and column the answer names.")] string? diagnosticId = null,
 		[Description("Optional zero-based code action index. Required when multiple fixes are available.")] int? actionIndex = null)
 	{
 		using var scope = BeginTool("roslyn_preview_code_fix", filePath, new { line, column, diagnosticId, actionIndex });
