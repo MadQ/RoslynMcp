@@ -709,9 +709,12 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
-		// The text a document holds, also when it is not at hand. Waited for in place: the flush
-		// runs on a thread of its own with no context to come back to, and the text comes from
-		// Roslyn's store or from one file.
+		// The text a document holds, also when it is not at hand. Waited for in place, since Roslyn
+		// has no synchronous way to ask. For the watcher's flush only: a timer callback on a pool
+		// thread, with no context to come back to and no lock held, so the wait is one read, from
+		// Roslyn's store or from one file, and on a starved pool it lasts until the pool has a
+		// thread for it. Never under a lock that pool threads queue on, where it may not end:
+		// HasCurrentText runs under one and does not ask.
 		static SourceText HeldText(TextDocument document)
 			=> document.TryGetText(out var held)
 				? held
@@ -779,6 +782,9 @@ internal sealed partial class WorkspaceManager
 			var modified        = false;
 			var behindDisk      = false;
 			string? applyFailed = null;
+			
+			// The files whose text this flush takes into the workspace, for the log.
+			List<string> taken = [];
 			
 			// MSBuildWorkspace.TryApplyChanges doesn't support RemoveDocument, and clearing
 			// document text then calling TryApplyChanges writes an empty file back to disk,
@@ -894,6 +900,7 @@ internal sealed partial class WorkspaceManager
 
 					applyFailed ??= path;
 					modified = true;
+					taken.Add(path);
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
@@ -925,7 +932,14 @@ internal sealed partial class WorkspaceManager
 			
 			// Into the workspace only. The texts were read from the files a moment ago, and
 			// written back there they would replace whatever someone has saved since (#403).
-			if(modified && !ApplyTextsInMemory(newSolution, currentSolution, ws)) {
+			var applied = modified && ApplyTextsInMemory(newSolution, currentSolution, ws);
+			
+			// Said in the log (#522): a change taken in drops the compilations and every kept page,
+			// and nothing showed which file a flush had found changed, or that it had found one.
+			if(applied)
+				logger.LogInfo("Sync", $"Took in {taken.Count} file(s) changed on disk: {string.Join(", ", taken.Take(10).Select(Path.GetFileName))}{(taken.Count > 10 ? ", …" : string.Empty)}");
+			
+			if(modified && !applied) {
 				
 				// The apply fails when the solution has moved on since the snapshot above — an
 				// ApplyChangesToDisk that finished after the snapshot was taken, possibly before

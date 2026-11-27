@@ -38,8 +38,13 @@ comparison used to be made only when `TryGetText` had it, so a file nobody had r
 whose text the garbage collector had taken, was applied again: after every load, whose
 catch-up scan hands the flush the files written shortly before it, and at every save that
 changed nothing. A text that was let go comes back from Roslyn's own store and not from the
-file (checked against Roslyn 5.9.0 with a loader that counts its loads), so it is still what
-the workspace last answered from; a text never read comes from the file.
+file (checked against Roslyn 5.9.0: a loader that counts its loads is not asked again, and with
+`FileTextLoader` a text taken by the collector reads as it was after the file changed), so it is still what
+the workspace last answered from; a text never read comes from the file. `HasCurrentText`,
+which keeps a file written through a link from being applied a second time, compares only
+while the text is at hand, on purpose: it runs inside a tool's write, which can hold the
+manager's cache lock, and a wait for Roslyn under a lock that pool threads queue on may not
+end on a starved pool. A flush that takes a text in logs `Sync — Took in N file(s) changed on disk: …`.
 
 ---
 

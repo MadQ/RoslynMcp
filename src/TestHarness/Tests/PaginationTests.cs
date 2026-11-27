@@ -476,8 +476,13 @@ static class PaginationTests
 			// page of a file listing is taken, which reads no source text; one file is written again
 			// with the text it has; and once the sync clock says the flush has run, the token must
 			// still be answered from the kept result, which shows in the next token having the same
-			// id. The wait before the first look at the clock keeps roslyn_check_drift, which reads
-			// the text of a file newer than the clock, from reading it before the flush does.
+			// id. roslyn_check_drift, which is asked for the clock, reads the text of a file only
+			// when it is more than two seconds newer than the clock, so it does not read this one
+			// before the flush does; the second waited first covers a save that came later than that
+			// after the load. The clock shows that a flush ran, not that it was the one with this
+			// file, so the test ends with a proof that does not depend on time: a new file is
+			// written, whose reload the log names, and by then the flush has had the report of the
+			// save before it. No line of the log may say that the saved file's text was taken in.
 			new("pagination: a file saved without a change leaves a kept page usable",
 				async () => {
 					
@@ -516,8 +521,40 @@ static class PaginationTests
 					
 					var second = await Call("roslyn_list_files", new { pattern = "Quiet*.cs", page_token = token, projectPath = quiet.Csproj });
 					
-					return Verdict(Id(Token(second)) is { } id && id == Id(token),
-						$"the next token is {Token(second) ?? "absent"} after {token}: another id means the query ran again, so the save counted as a change");
+					if(Id(Token(second)) is not { } id || id != Id(token))
+						
+						return (false, $"FAIL  (the next token is {Token(second) ?? "absent"} after {token}: another id means the query ran again, so the save counted as a change)");
+					
+					quiet.Write("QuietLater.cs", "class QuietLater { }\n");
+					
+					string[] log = [];
+					var reported = false;
+					
+					for(deadline = DateTime.UtcNow.AddSeconds(15); DateTime.UtcNow < deadline && !reported; ) {
+						
+						await Task.Delay(250);
+						
+						if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out log, out var logFailure))
+							
+							return (false, logFailure);
+						
+						reported = log.Any(line => line.Contains("Flagged (new document)", StringComparison.Ordinal) && line.Contains("QuietLater.cs", StringComparison.Ordinal));
+					}
+					
+					if(!reported)
+						
+						return (false, "FAIL  (QuietLater.cs was written fifteen seconds ago and the log names no reload for it, so nothing shows that the flush has run)");
+					
+					// The flush writes what it took in after it has gone through its batch.
+					await Task.Delay(250);
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out log, out var readFailure))
+						
+						return (false, readFailure);
+					
+					var tookIn = log.FirstOrDefault(line => line.Contains("Took in", StringComparison.Ordinal) && line.Contains("Quiet2.cs", StringComparison.Ordinal));
+					
+					return Verdict(tookIn is null, $"the flush took in the text of a file that was saved without a change: {tookIn}");
 				}),
 		};
 		

@@ -469,7 +469,11 @@ internal sealed partial class WorkspaceManager
 		
 		// Whether the workspace's document at this path already holds what is on disk — whatever
 		// kind of document it is: source, an AdditionalFiles item, analyzer config. False when
-		// there is no such document, its text is not loaded, or the file cannot be read.
+		// there is no such document, its text is not at hand, or the file cannot be read. The
+		// text is not asked for when it is not at hand, as the watcher's flush does (HeldText,
+		// #522): this runs inside a tool's write, which can hold the manager's cache lock, and a
+		// wait for Roslyn there may not end on a starved pool whose threads queue on that lock.
+		// The price is a second apply of the same text now and then, after the server's own write.
 		static bool HasCurrentText(Solution solution, string path)
 		{
 			try {
