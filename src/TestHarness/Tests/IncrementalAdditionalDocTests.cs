@@ -348,6 +348,62 @@ static class IncrementalAdditionalDocTests
 					return (false, "FAIL  (new AdditionalFiles item: expected reload_pending=True, got False)");
 				}),
 			
+			// The declared items are kept per project file and read again only when the file's
+			// write time or length changes (#323). The .cfg written first is checked against the
+			// declared items, which has them read and kept, and shows that such a file flags
+			// nothing while no include declares it. A cache that did not notice the project
+			// file's change would still hold the old items afterwards, and the .cfg only the new
+			// include declares would flag nothing; so the reload at the end is the new include's.
+			new("incremental additional doc: an include added to the project file counts for the next new file",
+				async () => {
+					
+					if(!await SettleAsync())
+						return (false, "FAIL  (precondition: reload_pending never cleared before the write)");
+					
+					Directory.CreateDirectory(fx.PathOf("MoreInputs"));
+					
+					await File.WriteAllTextAsync(fx.PathOf("MoreInputs/Before.cfg"), "before = 1\n");
+					await Task.Delay(1500);
+					
+					if(await ReloadPendingAsync() != false)
+						return (false, "FAIL  (precondition: a .cfg no include declares flagged a reload)");
+					
+					var project = await File.ReadAllTextAsync(csproj);
+					
+					await File.WriteAllTextAsync(csproj, project.Replace("</Project>",
+						"  <ItemGroup>\n    <AdditionalFiles Include=\"MoreInputs/*.cfg\" />\n  </ItemGroup>\n</Project>", StringComparison.Ordinal));
+					
+					// The edit must be seen before the settle, or the settle can pass before the
+					// watcher has delivered it, and the project file and the .cfg written next would
+					// then arrive in one batch whose reload proves nothing about the .cfg.
+					var seen = DateTime.UtcNow.AddSeconds(5);
+					
+					while(await ReloadPendingAsync() != true) {
+						
+						if(DateTime.UtcNow > seen)
+							return (false, "FAIL  (the project file edit never flagged a reload)");
+						
+						await Task.Delay(100);
+					}
+					
+					if(!await SettleAsync())
+						return (false, "FAIL  (the reload for the project file edit never completed)");
+					
+					await File.WriteAllTextAsync(fx.PathOf("MoreInputs/After.cfg"), "after = 1\n");
+					
+					var deadline = DateTime.UtcNow.AddSeconds(5);
+					
+					while(DateTime.UtcNow < deadline) {
+						
+						if(await ReloadPendingAsync() == true)
+							return (true, "PASS  (a .cfg the new include declares: reload_pending=True)");
+						
+						await Task.Delay(100);
+					}
+					
+					return (false, "FAIL  (a .cfg the new include declares: expected reload_pending=True, got False)");
+				}),
+			
 			// MSBuildWorkspace.CanApplyChange(ChangeAnalyzerConfigDocument) is false, so this must
 			// still take the full-reload path — but cleanly. Pre-fix this called WithDocumentText on
 			// an analyzer-config DocumentId, throwing InvalidOperationException uncaught by the
