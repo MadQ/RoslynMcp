@@ -80,7 +80,9 @@ public sealed class ToolDescriptionAnalyzer : DiagnosticAnalyzer
 			"A mode parameter says how a pattern is read: 'literal', 'regex' or 'glob'. Its description is the shared " +
 			"constant MatchModeDescription in RoslynMcpTool, followed by nothing or by the tool's own default as text " +
 			"('MatchModeDescription + \"Default: 'regex'.\"'). An inline description drifts from the others, and an " +
-			"agent that reads two tools describing one mode differently cannot tell whether they differ."
+			"agent that reads two tools describing one mode differently cannot tell whether they differ. The name is " +
+			"reserved for that meaning: a string parameter named mode is checked whatever it selects, so a setting of " +
+			"another kind takes another name."
 	);
 	
 	public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics => [Rule007, Rule008, Rule009, Rule011];
