@@ -321,15 +321,15 @@ static class PaginationTests
 					
 					// One run and two slices of it: the first call is the only one that computed.
 					var hits   = Tagged(after, "HIT") - Tagged(before, "HIT");
-					var misses = Tagged(after, "MISS") - Tagged(before, "MISS");
+					var stored = Tagged(after, "STORED") - Tagged(before, "STORED");
 					
 					return Verdict(
 						total == 7
 							&& sizes.SequenceEqual([3, 3, 1])
 							&& seen.Distinct().Count() == 7
 							&& hits == 2
-							&& misses == 1,
-						$"total {total}, expected 7; page sizes [{string.Join(", ", sizes)}], expected [3, 3, 1]; distinct findings {seen.Distinct().Count()} of {seen.Count}; pages served from the cache: {hits}, expected 2; calls that computed: {misses}, expected 1");
+							&& stored == 1,
+						$"total {total}, expected 7; page sizes [{string.Join(", ", sizes)}], expected [3, 3, 1]; distinct findings {seen.Distinct().Count()} of {seen.Count}; pages served from the cache: {hits}, expected 2; calls that computed and kept the result: {stored}, expected 1");
 				}),
 			
 			// A page kept from an earlier call must not outlive a change to the code (#435). Only
@@ -418,6 +418,46 @@ static class PaginationTests
 					}
 					
 					return Verdict(total == before + 1, $"the page after the file was added: total {total}, expected {before + 1} ({before} is the result from before it)");
+				}),
+			
+			// The log's cache_tag says what the cache did, and only where paging is in play (#498).
+			// It said MISS on every call of a tool that can page, also for an answer of one page,
+			// which read as a failure on hundreds of calls that never asked for a second page. Three
+			// calls, one per case: a first page of two with more to come keeps the rest (STORED); an
+			// edit clears the cache, so its token then finds nothing and the query runs again (MISS);
+			// all five matches on one page keep nothing and look for nothing (no tag). A page cut
+			// from the cache (HIT) is checked by the diagnostics test above.
+			new("pagination: the log tags a stored first page, a token whose entry was gone, and nothing for one page",
+				async () => {
+					
+					var first = await Call("roslyn_search_files", new { pattern = "PAGEMARK", take = 2, projectPath = csproj });
+					
+					if(Token(first) is not { } token)
+						
+						return (false, $"FAIL  (the first page has no token: {first?.ToJsonString() ?? "no answer"})");
+					
+					var edit = await Call("roslyn_insert_lines", new { filePath = "Other.cs", atLine = 1, text = "// touched again", projectPath = csproj });
+					
+					if(edit?["applied"]?.GetValue<bool>() != true)
+						
+						return (false, "FAIL  (the cache-clearing edit was not applied)");
+					
+					await Call("roslyn_search_files", new { pattern = "PAGEMARK", page_token = token, projectPath = csproj });
+					await Call("roslyn_search_files", new { pattern = "PAGEMARK", take = 10, projectPath = csproj });
+					
+					if(!ServerLog.TryRead(serverLogDir, serverLogGlob, 1, out var log, out var logFailure))
+						
+						return (false, logFailure);
+					
+					string[] tags = [..log
+						.Select(line => { try { return JsonNode.Parse(line); } catch(System.Text.Json.JsonException) { return null; } })
+						.Where(entry => entry?["tool_name"]?.GetValue<string>() == "search_files")
+						.TakeLast(3)
+						.Select(entry => entry?["cache_tag"]?.GetValue<string>() ?? "none")
+					];
+					
+					return Verdict(tags.SequenceEqual(["STORED", "MISS", "none"]),
+						$"cache_tag of the last three searches: [{string.Join(", ", tags)}], expected [STORED, MISS, none]");
 				}),
 		};
 		
