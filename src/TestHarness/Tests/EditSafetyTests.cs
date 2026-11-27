@@ -247,6 +247,7 @@ static class EditSafetyTests
 				var listed = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Missing", dryRun = true, projectPath = fx.Csproj });
 				var lost   = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Problem", replacement = "int Problem = 5;", dryRun = true, projectPath = fx.Csproj });
 				var kept   = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Problem", replacement = "int a, Problem = 5;", dryRun = true, projectPath = fx.Csproj });
+				var gone   = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Problem", dryRun = true, projectPath = fx.Csproj });
 				
 				static int? LineOf(JsonNode? answer) => answer?["change_count"]?.GetValue<int>() == 1 ? answer["changed_nodes"]?[0]?["line"]?.GetValue<int>() : null;
 				
@@ -254,7 +255,8 @@ static class EditSafetyTests
 					&& LineOf(first) == 3
 					&& listed?["candidates"]?[0]?["name"]?.GetValue<string>() == "a, Problem"
 					&& lost?["_caution"]?.GetValue<string>().Contains("a is no longer declared", StringComparison.Ordinal) == true
-					&& kept?["_caution"] is null, new JsonArray(later?.DeepClone(), first?.DeepClone(), listed?.DeepClone(), lost?.DeepClone(), kept?.DeepClone()), null);
+					&& kept?["_caution"] is null
+					&& gone?["_caution"]?.GetValue<string>().Contains("deleted whole", StringComparison.Ordinal) == true, new JsonArray(later?.DeepClone(), first?.DeepClone(), listed?.DeepClone(), lost?.DeepClone(), kept?.DeepClone(), gone?.DeepClone()), null);
 			}),
 			
 			// Second half: a pattern that matches nothing lists what is there, with positions that

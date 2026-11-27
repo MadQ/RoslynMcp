@@ -384,9 +384,16 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			newRoot = root.RemoveNodes(matchedNodes, SyntaxRemoveOptions.KeepNoTrivia)!;
 			
-			foreach(var matchedNode in matchedNodes)
-				if(DroppedVariables(matchedNode, []) is { } dropped)
-					unapplied[dropped] = [StartOf(matchedNode).Line + 1];
+			foreach(var matchedNode in matchedNodes) {
+				
+				if(DroppedVariables(matchedNode, null) is not { } dropped)
+					continue;
+				
+				if(!unapplied.TryGetValue(dropped, out var lines))
+					unapplied[dropped] = lines = [];
+				
+				lines.Add(StartOf(matchedNode).Line + 1);
+			}
 		}
 		
 		else {
@@ -767,14 +774,20 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 	// A field of several variables is found by any of them (#533) and replaced whole, since a
 	// variable is not a member of its own: a replacement written for the one variable named
 	// would drop the others without a word, and the syntax check has nothing to object to.
-	private static string? DroppedVariables(SyntaxNode original, IEnumerable<SyntaxNode> placed)
+	// A deletion (placed null) takes them all, which the pattern may not have named.
+	private static string? DroppedVariables(SyntaxNode original, IEnumerable<SyntaxNode>? placed)
 	{
 		if(original is not BaseFieldDeclarationSyntax { Declaration.Variables.Count: > 1 } field)
 			
 			return null;
 		
+		var all = field.Declaration.Variables.Select(variable => variable.Identifier.Text).ToArray();
+		
+		if(placed is null)
+			
+			return $"The declaration of {string.Join(", ", all)} was deleted whole, as a field's variables are: all of them are gone. To delete one, replace the declaration with the others.";
+		
 		var kept = placed.SelectMany(DeclaredNames).ToHashSet(StringComparer.Ordinal);
-		var all  = field.Declaration.Variables.Select(variable => variable.Identifier.Text).ToArray();
 		var lost = all.Where(name => !kept.Contains(name)).ToArray();
 		
 		return lost.Length == 0
