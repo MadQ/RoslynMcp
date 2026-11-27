@@ -1502,10 +1502,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	/// </summary>
 	protected PaginatedResult<T> PaginateAndStore<T>(T[] allResults, ref int skip, int take, Func<PaginatedResult<T>, object> shape)
 	{
-		activeScope.Value?.SetCacheTag(hit: false);
-		
 		var page    = Paginate(allResults, ref skip, take);
 		var hasMore = skip + page.Length < allResults.Length;
+		
+		if(hasMore)
+			activeScope.Value?.NoteStored();
 		
 		var token = hasMore
 			? new PageCursor(paginationCache.Store(allResults, shape, activeScope.Value?.PaginationKey, activeScope.Value?.WorkspaceUnchanged), skip + page.Length, take).ToString()

@@ -29,7 +29,7 @@ internal abstract partial class RoslynMcpTool
 		string? notes;             // Record() annotations — kept apart so a terminal's detail cannot erase them.
 		string? responsePeek;
 		bool    isMSBuild = true;  // Default MSBuild (95% case); SetWorkspaceMode overrides.
-		string? cacheTag;          // null = not paginated, "HIT" or "MISS"
+		string? cacheTag;          // null = no paging in play, else "STORED", "HIT" or "MISS" (#498)
 		int     estimatedTokens;
 		string? args;              // Serialized input args; included in log only on failure.
 		string? _pendingHint
@@ -115,8 +115,14 @@ internal abstract partial class RoslynMcpTool
 		/// </summary>
 		internal string? FileInNoProject { get; set; }
 		
-		/// <summary>Records whether a pagination cache hit or miss occurred.</summary>
-		internal void SetCacheTag(bool hit) => cacheTag = hit ? "HIT" : "MISS";
+		/// <summary>
+		///     Records that the answer is a page computed by its query, with the rest of the result kept for the next
+		///     (#498): <c>STORED</c> in the log, unless the call already missed a token's entry, which
+		///     says more. An answer that fits one page keeps nothing and is not tagged at all: the tag
+		///     used to say <c>MISS</c> on every call of a tool that can page, which read as a failure on
+		///     hundreds of calls that never asked for a second page.
+		/// </summary>
+		internal void NoteStored() => cacheTag ??= "STORED";
 		
 		/// <summary>Stores a hint to be merged into the next <see cref="Outcome{T}"/> result (only if that result has no hint of its own).</summary>
 		public void SetHint(string hint) => _pendingHint = hint;
@@ -161,15 +167,19 @@ internal abstract partial class RoslynMcpTool
 			
 			if(!hasCursor || !paginationCache.TryGet<T>(cursor.Id, PaginationKey, out var cached, out var shape)) {
 				
-				if(hasCursor)
+				if(hasCursor) {
+					
+					// The one case where a page was looked for and not found.
+					cacheTag = "MISS";
 					Record("page token not cached for this query — query re-run");
+				}
 				
 				result = null;
 				
 				return false;
 			}
 			
-			SetCacheTag(hit: true);
+			cacheTag = "HIT";
 			
 			skip = Math.Clamp(skip, 0, cached.Length);
 			
