@@ -31,8 +31,8 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		"('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with line and text. A match on the declaration's own name " +
 		"has declares: true. Several matches on one line are listed once. The answer's context names the syntax context searched; " +
 		"with context 'all', each listed line names the contexts its matches are in (comment, string, identifier, xmldoc, code; " +
-		"'identifier, comment' for a line with matches in both). A pattern that can match nothing ('^', 'x*') finds no place where " +
-		"it matched nothing: use roslyn_search_files for empty lines. " +
+		"'identifier, comment' for a line with matches in both). A pattern of assertions alone ('^(?!.*TODO)', '^(?!I)') matches at a " +
+		"position and selects lines, comments or names by what they do not hold. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> SemanticSearch(
@@ -343,11 +343,6 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(triviaText)) {
 				
-				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
-				// say what it is in, and no place to show.
-				if(m.Length == 0)
-					continue;
-				
 				// absPos is the absolute source position of the match — not the block start —
 				// so multiline block comments report the correct line number per occurrence.
 				var absPos  = span.Start + m.Index
@@ -383,11 +378,6 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(tokenText)) {
 				
-				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
-				// say what it is in, and no place to show.
-				if(m.Length == 0)
-					continue;
-				
 				// absPos is the absolute match position — handles multiline verbatim/raw strings.
 				var absPos  = span.Start + m.Index
 				;
@@ -411,7 +401,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			var span = token.Span;
 			
-			if(MatchesSomething(regex, token.Text)) {
+			// Asked of the name as a whole, so a pattern of assertions alone selects names:
+			// '^(?!I)' the ones that do not start with I. Such a match has no length, and is a
+			// match all the same (#515).
+			if(regex.IsMatch(token.Text)) {
 				
 				yield return new SemanticMatchResult {
 					
@@ -421,19 +414,6 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				};
 			}
 		}
-	}
-	
-	// Whether the pattern matches some text of the name, and not nothing alone: a pattern that
-	// can match nothing ('^', 'x*') matches every name at a position, and every identifier of
-	// the solution was a place. Every match is asked: of 'x*' in 'axb' the first is empty.
-	static bool MatchesSomething(Regex regex, string name)
-	{
-		foreach(var match in regex.EnumerateMatches(name))
-			if(match.Length > 0)
-				
-				return true;
-		
-		return false;
 	}
 	
 	IEnumerable<SemanticMatchResult> SearchInCode(SyntaxNode root, SourceText text, Regex regex)
@@ -452,11 +432,6 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			var lineText = lines[i].ToString();
 			
 			foreach(Match m in regex.Matches(lineText)) {
-				
-				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
-				// say what it is in, and no place to show.
-				if(m.Length == 0)
-					continue;
 				
 				var matchPos = lines[i].Start + m.Index;
 				
@@ -485,11 +460,6 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(triviaText)) {
 				
-				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
-				// say what it is in, and no place to show.
-				if(m.Length == 0)
-					continue;
-				
 				var absPos  = span.Start + m.Index;
 				
 				yield return new SemanticMatchResult {
@@ -516,16 +486,15 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			// to say whether one is the declaration's name.
 			foreach(Match m in regex.Matches(lineText)) {
 				
-				// A pattern that can match nothing ('^', 'x*') matches a position: no text to
-				// say what it is in, and no place to show.
-				if(m.Length == 0)
-					continue;
-				
 				// What the match is in is asked at its first character that is not whitespace:
-				// a pattern such as '\s+// TODO' starts before the comment it is about.
+				// a pattern such as '\s+// TODO' starts before the comment it is about. A match
+				// of no length, which a pattern of assertions alone makes ('^(?!.*TODO)'), is
+				// a position and is in what follows it on the line (#515): asked where it
+				// stands, at the start of an indented line, it was "code" whatever the line held.
 				var start = m.Index;
+				var last  = m.Length == 0 ? lineText.Length : m.Index + m.Length - 1;
 				
-				while(start < m.Index + m.Length - 1 && char.IsWhiteSpace(lineText[start]))
+				while(start < last && char.IsWhiteSpace(lineText[start]))
 					start++;
 				
 				yield return new SemanticMatchResult {

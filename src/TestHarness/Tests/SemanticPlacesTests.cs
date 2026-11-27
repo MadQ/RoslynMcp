@@ -279,22 +279,19 @@ static class SemanticPlacesTests
 				return Verdict(SearchHits.Of(answer) is [{ Line: 3, Context: "identifier" }, { Line: 4, Context: "identifier, comment" }], answer);
 			}),
 			
-			// A pattern that can match nothing matches every position. Each of those was a
-			// place: every line of the file, labelled by whatever stood at its start.
-			new("semantic places: a match of nothing is no place", async () => {
+			// A pattern of assertions alone matches at a position, with no length: the way to
+			// ask for what something does not hold. Such a match is a place like any other
+			// (#515). In the identifiers context the pattern is asked of each name: the names of
+			// Twins.cs that do not start with T are on lines 3 to 5, and 'Twins' on line 1 is
+			// left out. Over all contexts the place is labelled by what follows the position:
+			// asked where it stands, in the indentation, the doc comment's line was "code".
+			new("semantic places: a pattern of assertions alone finds its places, labelled by what follows", async () => {
 				
-				var nothing = await Call("roslyn_semantic_search", new { pattern = "q*", filePattern = "Twins.cs", projectPath = fx.Csproj });
-				var some    = await Call("roslyn_semantic_search", new { pattern = "w*", filePattern = "Twins.cs", projectPath = fx.Csproj });
+				var names = await Call("roslyn_semantic_search", new { pattern = "^(?!T)", context = "identifiers", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				var lines = await Call("roslyn_semantic_search", new { pattern = @"^(?=\s*///)", filePattern = "Calls.cs", projectPath = fx.Csproj });
 				
-				// The names are asked one at a time, by a check of their own.
-				var noName   = await Call("roslyn_semantic_search", new { pattern = "q*", context = "identifiers", filePattern = "Twins.cs", projectPath = fx.Csproj });
-				var someName = await Call("roslyn_semantic_search", new { pattern = "w*", context = "identifiers", filePattern = "Twins.cs", projectPath = fx.Csproj });
-				
-				// 'w' is in the file once, in 'Twins'; 'q' nowhere.
-				return Verdict(nothing?["error"] is null && nothing?["total_matches"]?.GetValue<int>() == 0
-					&& SearchHits.Of(some) is [{ Line: 1 }]
-					&& noName?["error"] is null && noName?["total_matches"]?.GetValue<int>() == 0
-					&& SearchHits.Of(someName) is [{ Line: 1 }], new JsonArray(nothing?.DeepClone(), some?.DeepClone(), noName?.DeepClone(), someName?.DeepClone()));
+				return Verdict(SearchHits.Of(names)?.Select(hit => hit.Line).SequenceEqual(new[] { 3, 4, 5 }) == true
+					&& SearchHits.Of(lines) is [{ Line: 3, Context: "xmldoc" }], new JsonArray(names?.DeepClone(), lines?.DeepClone()));
 			}),
 			
 			// An implementation is a declaration: the answer says where it is, the lines to read
