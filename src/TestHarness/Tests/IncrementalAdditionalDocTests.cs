@@ -349,11 +349,11 @@ static class IncrementalAdditionalDocTests
 				}),
 			
 			// The declared items are kept per project file and read again only when the file's
-			// write time or length changes (#323). The test before this one had them read, so a
-			// cache that did not notice the project file's change would still hold the old items
-			// here, and a file only the new include declares would flag nothing. The .cfg written
-			// first shows that such a file flags nothing while no include declares it, so the
-			// reload at the end is the new include's.
+			// write time or length changes (#323). The .cfg written first is checked against the
+			// declared items, which has them read and kept, and shows that such a file flags
+			// nothing while no include declares it. A cache that did not notice the project
+			// file's change would still hold the old items afterwards, and the .cfg only the new
+			// include declares would flag nothing; so the reload at the end is the new include's.
 			new("incremental additional doc: an include added to the project file counts for the next new file",
 				async () => {
 					

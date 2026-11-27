@@ -266,7 +266,11 @@ internal sealed partial class WorkspaceManager
 			// and a regex per wildcard, per project and per change. An entry stands while the
 			// file has the write time and length it was read at; a stat costs far less than
 			// the parse. The stat comes before the read, so a write in between leaves an entry
-			// whose stamp is already old, and the next call reads the file again.
+			// whose stamp is already old, and the next call reads the file again. An edit that
+			// keeps the file's length within the resolution of its write time (100 ns on NTFS,
+			// a nanosecond on ext4 and APFS, up to two seconds on FAT) goes unseen until the
+			// next write; that is accepted, since anything that told it apart would read the
+			// file at every check, which is the cost this removes.
 			sealed record DeclaredAdditionalFiles(DateTime WrittenUtc, long Length, string[] Paths, Regex[] Globs);
 			
 			readonly ConcurrentDictionary<string, DeclaredAdditionalFiles> declaredAdditionalFiles = new(SecurityBoundary.PathComparer);
@@ -308,7 +312,7 @@ internal sealed partial class WorkspaceManager
 						if(normalizedInclude.IndexOfAny(['*', '?']) < 0)
 							paths.Add(Path.GetFullPath(Path.Combine(projectDir, include)));
 						else
-							globs.Add(new Regex(BuildPathGlobRegex(normalizedInclude), RegexOptions.IgnoreCase));
+							globs.Add(new Regex(BuildPathGlobRegex(normalizedInclude), RegexOptions.IgnoreCase | RegexOptions.NonBacktracking));
 					}
 					
 					var declared = new DeclaredAdditionalFiles(writtenUtc, length, [.. paths], [.. globs]);
