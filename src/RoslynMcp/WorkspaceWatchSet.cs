@@ -951,7 +951,19 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 				lookingBack[directory] = seen;
 		}
 		
-		var reported = ReportFilesOf(directory, seen);
+		int reported;
+		
+		// A directory removed again at once, a temporary one, fails the listing: its entry
+		// must not stay, or every later event would be compared with it for nothing.
+		try {
+			reported = ReportFilesOf(directory, seen);
+		}
+		catch {
+			
+			Forget(directory, seen);
+			
+			throw;
+		}
 		
 		// Said in the log (#339): a directory that was made and not adopted, and one adopted
 		// before its files were there, looked the same from outside, a new file nobody saw.
@@ -1052,18 +1064,20 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 	
 	// Reports the files in a directory that arrived, and returns how many. With a set, only the
 	// files that are not in it yet are reported, and they are added to it; without one the
-	// files are noted for a look back that may be under way above the directory. A file is
-	// put in a set only when it is reported: the one the limit stops at stays unsaid.
+	// files are noted for a look back that may be under way above the directory.
 	int ReportFilesOf(string directory, HashSet<string>? seen)
 	{
 		var reported = 0;
 		
 		foreach(var file in WorkspaceWalker.EnumerateFiles(directory, "*", recursive: true, (ref FileSystemEntry entry) => rules.IsNeverInput(entry.FileName))) {
 			
+			// Asked and taken in one step, with a set: between the two a watcher could note and
+			// report the same file. At the limit nothing is taken, so the file it stops at
+			// stays unsaid.
 			if(seen is not null) {
 				
 				lock(gate)
-					if(seen.Contains(file))
+					if(seen.Contains(file) || reported < AdoptedFileLimit && !seen.Add(file))
 						continue;
 			}
 			
@@ -1076,9 +1090,6 @@ internal sealed class WorkspaceWatchSet(string rootPath, IgnoreRules rules, Acti
 			
 			if(seen is null)
 				Note(file);
-			else
-				lock(gate)
-					seen.Add(file);
 			
 			reported++;
 			onChange(file, false);
