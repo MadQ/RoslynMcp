@@ -217,7 +217,7 @@ internal sealed partial class WorkspaceManager
 
 			// The projects the live workspace is already unhealthy on. Stable for this attempt: only a
 			// reload replaces the workspace, and this one holds reloadGate.
-			ProjectKey[] liveUnhealthy = [..ProjectsWithoutReferences(PeekSolution()).Union(projectsWithLoadFailures)];
+			ProjectKey[] liveUnhealthy = [..ProjectsWithoutReferences(PeekSolution()).Union(projectsWithLoadFailures).Union(projectsShortOfReferences.Select(partial => partial.Project))];
 
 			// Contended design-time builds can silently drop a project's references, or fail on a
 			// project file and leave its options at defaults (#300) — results would be wrong, not
@@ -351,6 +351,7 @@ internal sealed partial class WorkspaceManager
 				physicalIndex            = newPhysicalIndex;
 				projectsWithLoadFailures = newFindings.Failed;
 				projectsNotRestored      = newFindings.NotRestored;
+				projectsShortOfReferences = newFindings.Partial;
 
 				// Only clear the version counter if no new invalidation arrived between
 				// our load and the write-lock CAS — if one did, we'll reload again next call.
@@ -393,7 +394,7 @@ internal sealed partial class WorkspaceManager
 				// Pending, as it is: the deferred retry only runs while a reload is.
 				Interlocked.Increment(ref reloadVersion);
 
-				logger.LogInfo("Reload", $"Still unhealthy ({UnhealthyReason(workspace, new LoadFindings(projectsWithLoadFailures, projectsNotRestored))}); healing retry in {MaxDeferMs} ms, {healingRetriesLeft} left after it");
+				logger.LogInfo("Reload", $"Still unhealthy ({UnhealthyReason(workspace, new LoadFindings(projectsWithLoadFailures, projectsNotRestored, projectsShortOfReferences))}); healing retry in {MaxDeferMs} ms, {healingRetriesLeft} left after it");
 
 				ScheduleDeferredRetry(MaxDeferMs);
 			}

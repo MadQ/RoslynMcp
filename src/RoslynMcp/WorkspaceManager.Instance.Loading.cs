@@ -166,39 +166,49 @@ internal sealed partial class WorkspaceManager
 		///     (<c>BaseIntermediateOutputPath</c>) is then given the benefit of the doubt (#399 review), as is a
 		///     project with no file path, or one whose files cannot be checked.
 		/// </summary>
-		static bool HasAssetsFile(Project project)
+		static bool HasAssetsFile(Project project) => FindAssetsFile(project) is not (null, true);
+		
+		/// <summary>
+		///     The assets file of <paramref name="project"/>, and whether the places it belongs in could be
+		///     looked at: no path with <c>Looked</c> set is a project that was not restored, no path without
+		///     it one nothing can be said about. The search is the one <see cref="HasAssetsFile"/> describes.
+		/// </summary>
+		static (string? Path, bool Looked) FindAssetsFile(Project project)
 		{
 			if(Path.GetDirectoryName(project.FilePath) is not { Length: > 0 } projectDirectory)
 				
-				return true;
+				return (null, false);
 			
 			try {
 				
 				var defaultObj = Path.Combine(projectDirectory, "obj");
+				var inDefault  = Path.Combine(defaultObj, "project.assets.json");
 				
-				if(File.Exists(Path.Combine(defaultObj, "project.assets.json")))
+				if(File.Exists(inDefault))
 					
-					return true;
+					return (inDefault, true);
 				
 				if(Path.GetDirectoryName(project.CompilationOutputInfo.AssemblyPath) is not { } directory)
 					
-					return !Directory.Exists(defaultObj);
+					return (null, Directory.Exists(defaultObj));
 				
 				// At most a few levels: configuration, target framework, runtime identifier, project name.
 				for(var level = 0; directory is not null && level < 5; level++, directory = Path.GetDirectoryName(directory)) {
 					
-					if(File.Exists(Path.Combine(directory, "project.assets.json")))
+					var candidate = Path.Combine(directory, "project.assets.json");
+					
+					if(File.Exists(candidate))
 						
-						return true;
+						return (candidate, true);
 					
 					if(SecurityBoundary.PathComparer.Equals(directory, projectDirectory))
 						break;
 				}
 				
-				return false;
+				return (null, true);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or ArgumentException) {
-				return true;
+				return (null, false);
 			}
 		}
 		
@@ -207,19 +217,39 @@ internal sealed partial class WorkspaceManager
 		///     workspace it describes: the projects a <c>WorkspaceFailed</c> failure names, and those that were
 		///     never restored. Taken at load, not read from disk when asked: between a restore and the reload it
 		///     flags, the disk already has the assets file the load did not, and every decision about one reload
-		///     must see the same answer (#399 review).
+		///     must see the same answer (#399 review). <c>Partial</c>: the projects that resolved only part of
+		///     their package references (#456, <see cref="ReferenceCheck"/>), taken at load for the same reason.
 		/// </summary>
-		readonly record struct LoadFindings(ProjectKey[] Failed, ProjectKey[] NotRestored);
+		readonly record struct LoadFindings(ProjectKey[] Failed, ProjectKey[] NotRestored, PartialReferences[] Partial);
 		
 		/// <summary>The <see cref="LoadFindings"/> of the load that just produced <paramref name="ws"/> — see <see cref="LoadFailedProjects"/>.</summary>
-		LoadFindings FindingsOf(Workspace ws) => new(LoadFailedProjects(ws), ProjectsNotRestored(ws.CurrentSolution));
+		LoadFindings FindingsOf(Workspace ws)
+		{
+			var sw      = System.Diagnostics.Stopwatch.StartNew();
+			var partial = ReferenceCheck.Find(ws.CurrentSolution, out var compared, out var assetsFiles, out var foreign);
+			
+			// Nothing to say for a workspace without a restored project: a load of unrestored
+			// projects is common (a new checkout), and the line would only repeat itself.
+			if(compared > 0 || foreign > 0) {
+				
+				var leftOut = foreign > 0 ? $"; {foreign} project(s) not compared, their assets file names another project file" : "";
+				
+				logger.LogInfo("Load", $"Package references of {compared} project(s) compared with {assetsFiles} assets file(s) in {sw.ElapsedMilliseconds} ms: {(partial.Length == 0 ? "none missing" : PartialReferences.Describe(partial))}{leftOut}");
+			}
+			
+			return new(LoadFailedProjects(ws), ProjectsNotRestored(ws.CurrentSolution), partial);
+		}
 		
 		/// <summary>
 		///     The unhealthy projects of <paramref name="ws"/> that a reload might heal — all of them but those
-		///     never restored, which only a restore heals. What the retries and the healing retries decide on.
+		///     never restored, and those short of files the package cache lost: only a restore heals either.
+		///     A project of the latter kind whose project file also failed is still one: that failure a reload
+		///     can heal. What the retries and the healing retries decide on.
 		/// </summary>
 		static ProjectKey[] RetryableUnhealthy(Workspace ws, LoadFindings findings) =>
-			[..UnhealthyProjects(ws, findings).Except(findings.NotRestored)];
+			[..UnhealthyProjects(ws, findings)
+				.Except(findings.NotRestored)
+				.Except(findings.Partial.Where(partial => partial.PackagesGone).Select(partial => partial.Project).Except(findings.Failed))];
 		
 		/// <summary>
 		///     Projects of <paramref name="solution"/> that one of the load's <c>WorkspaceFailed</c> failures is
@@ -314,16 +344,19 @@ internal sealed partial class WorkspaceManager
 		
 		/// <summary>Every project of <paramref name="ws"/> that is unhealthy for any reason, deduplicated.</summary>
 		static ProjectKey[] UnhealthyProjects(Workspace ws, LoadFindings findings) =>
-			[..ProjectsWithoutReferences(ws).Union(findings.Failed)];
+			[..ProjectsWithoutReferences(ws).Union(findings.Failed).Union(findings.Partial.Select(partial => partial.Project))];
 		
 		/// <summary>Why <paramref name="ws"/> is unhealthy, for a log line: one clause per reason that applies.</summary>
 		static string UnhealthyReason(Workspace ws, LoadFindings findings)
 		{
 			var dropped = ProjectsWithoutReferences(ws).Except(findings.NotRestored).ToArray();
-			var parts   = new List<string>(3);
+			var parts   = new List<string>(4);
 			
 			if(dropped.Length > 0)
 				parts.Add($"no metadata references on: {ProjectKey.Names(dropped)}");
+			
+			if(findings.Partial.Length > 0)
+				parts.Add($"package references missing on: {PartialReferences.Describe(findings.Partial)}");
 			
 			if(findings.NotRestored.Length > 0)
 				parts.Add($"never restored (no project.assets.json): {ProjectKey.Names(findings.NotRestored)}");
@@ -377,6 +410,12 @@ internal sealed partial class WorkspaceManager
 				RecordUnhealthyLoad(
 					$"Projects never restored, so their design-time build resolved no metadata references: {ProjectKey.Names(findings.NotRestored)} "
 					+ "— no project.assets.json. Call roslyn_restore_packages: it restores them and reloads the workspace; a reload alone does not help"
+				);
+			
+			if(findings.Partial.Length > 0)
+				RecordUnhealthyLoad(
+					$"Projects loaded with only part of their package references: {PartialReferences.Describe(findings.Partial)} "
+					+ "— types of the missing assemblies are not found, and diagnostics that name them can be phantom"
 				);
 			
 			if(findings.Failed.Length > 0)

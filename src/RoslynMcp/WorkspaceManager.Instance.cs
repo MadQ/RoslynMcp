@@ -84,6 +84,10 @@ internal sealed partial class WorkspaceManager
 		// Projects of the live workspace that the load that produced it found never restored (#399). Taken
 		// at load and swapped in with the workspace, like projectsWithLoadFailures (see LoadFindings).
 		private volatile ProjectKey[] projectsNotRestored = [];
+		
+		// Projects of the live workspace that the load that produced it found short of package references
+		// (#456). Taken at load and swapped in with the workspace, like the two above.
+		private volatile PartialReferences[] projectsShortOfReferences = [];
 
 		// ── Reload scheduling ────────────────────────────────────────────────
 		//
@@ -164,12 +168,16 @@ internal sealed partial class WorkspaceManager
 				ProjectKey[] loadFailed;
 				ProjectKey[] notRestored;
 				
+				PartialReferences[] shortOfReferences;
+				
 				@lock.EnterReadLock();
 				
 				try {
 					solution    = workspace.CurrentSolution;
 					loadFailed  = projectsWithLoadFailures;
 					notRestored = projectsNotRestored;
+					
+					shortOfReferences = projectsShortOfReferences;
 				}
 				finally {
 					@lock.ExitReadLock();
@@ -186,7 +194,7 @@ internal sealed partial class WorkspaceManager
 					[..loadWarnings],
 					lastUnhealthyLoad,
 					ReloadPending
-				) { Watching = watchSet?.Status };
+				) { Watching = watchSet?.Status, ProjectsWithMissingReferences = isMSBuild ? shortOfReferences : [] };
 			}
 		}
 		
@@ -317,6 +325,7 @@ internal sealed partial class WorkspaceManager
 					WarnIfUnhealthy(workspace, slnFindings);
 					projectsWithLoadFailures = slnFindings.Failed;
 					projectsNotRestored      = slnFindings.NotRestored;
+					projectsShortOfReferences = slnFindings.Partial;
 					isMSBuild = true;
 					
 					foreach(var kvp in BuildProjectMapFor(workspace))
@@ -361,6 +370,7 @@ internal sealed partial class WorkspaceManager
 					WarnIfUnhealthy(msbuildWs, projFindings);
 					projectsWithLoadFailures = projFindings.Failed;
 					projectsNotRestored      = projFindings.NotRestored;
+					projectsShortOfReferences = projFindings.Partial;
 					workspace        = msbuildWs;
 					defaultProjectId = projectId;
 					isMSBuild        = true;

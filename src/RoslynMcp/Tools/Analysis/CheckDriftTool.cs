@@ -29,6 +29,9 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 		"which can leave its compilation options at defaults — Nullable off in a project that enables it. " +
 		"A project without references that has no project.assets.json is listed in projects_not_restored as " +
 		"well: it was never restored, and roslyn_restore_packages (not a reload) fixes it. " +
+		"A project that has references but not every compile-time assembly its restored packages list is in " +
+		"projects_with_missing_references, with the count and the first file names: a load that came up short, " +
+		"where a type of a missing assembly reads as 'not found'. " +
 		"That state makes symbol results wrong-but-plausible and makes roslyn_get_diagnostics report phantom " +
 		"CS0246/CS0234 errors or CS8632 warnings for code that builds fine — source can be perfectly in sync " +
 		"while this is broken. " +
@@ -149,6 +152,9 @@ internal sealed class CheckDriftTool : RoslynMcpTool
 			ProjectsWithoutReferences: health is { ProjectsWithoutReferences: { Length: > 0 } dropped } ? [..dropped.Select(key => key.Name)] : null,
 			ProjectsWithLoadFailures:  health is { ProjectsWithLoadFailures: { Length: > 0 } failed } ? [..failed.Select(key => key.Name)] : null,
 			ProjectsNotRestored:       health is { ProjectsNotRestored: { Length: > 0 } unrestored } ? [..unrestored.Select(key => key.Name)] : null,
+			ProjectsWithMissingReferences: health is { ProjectsWithMissingReferences: { Length: > 0 } partial }
+				? [..partial.Select(project => new MissingReferencesInfo(project.Project.Name, project.Missing.Length, project.Expected, project.Missing[..Math.Min(project.Missing.Length, PartialReferences.NamedAssemblies)]))]
+				: null,
 			LastUnhealthyLoad:         health?.LastUnhealthyLoad,
 			ReloadPending:             reloadPending)
 		{
