@@ -233,22 +233,24 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 						// is EnclosingDeclaration.Among's rule: the first, unless a later one is a
 						// declaration's name ('logger' matches inside 'FileLogger' before it
 						// matches the field's name on the same line).
-						var found = MatchesOf(rx, source.AsSpan(line.Start, line.Span.Length), line.Start);
-						
-						if(found.Length == 0)
+						// The rest of the line's matches are looked for only where the rule needs
+						// them, which is not on a line inside a member's body: most hits.
+						if(FirstMatch(rx, source.AsSpan(line.Start, line.Span.Length)) is not { } hit)
 							continue;
 						
 						root ??= await document.GetSyntaxRootAsync(cancellationToken);
 						
+						var leftmost = new TextSpan(line.Start + hit.Index, hit.Length);
+						
 						var (declaration, declares, at) = root is null
-							? (null, false, 0)
-							: EnclosingDeclaration.Among(root, text, found);
+							? (null, false, leftmost)
+							: EnclosingDeclaration.Among(root, text, leftmost, (Regex: rx, Source: source, Line: line), static found => MatchesOf(found.Regex, found.Source.AsSpan(found.Line.Start, found.Line.Span.Length), found.Line.Start));
 						
 						matches.Add(new MatchResult {
 							
 							File        = Path.GetRelativePath(rootPath, document.FilePath),
 							Line        = i + 1,
-							Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), found[at].Start - line.Start),
+							Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), at.Start - line.Start),
 							Declaration = declaration,
 							Declares    = declares,
 						});
@@ -468,25 +470,17 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		return null;
 	}
 	
-	// How many matches of one line are kept. A pattern of one letter matches a long line hundreds
-	// of times, and the question asked of them is only whether one is a declaration's name.
-	const int MatchesKept = 256;
-	
 	// The matches of the pattern in one line as positions in the file, in order: the line starts
-	// at lineStart. Empty for a line without a match.
+	// at lineStart. All of them, as the check for a declaration's name always had them: asked
+	// for only on the few lines where one of them can be such a name.
 	static TextSpan[] MatchesOf(Regex regex, ReadOnlySpan<char> line, int lineStart)
 	{
-		List<TextSpan>? found = null;
+		var found = new List<TextSpan>();
 		
-		foreach(var match in regex.EnumerateMatches(line)) {
-			
-			(found ??= []).Add(new(lineStart + match.Index, match.Length));
-			
-			if(found.Count == MatchesKept)
-				break;
-		}
+		foreach(var match in regex.EnumerateMatches(line))
+			found.Add(new(lineStart + match.Index, match.Length));
 		
-		return found is null ? [] : [..found];
+		return [..found];
 	}
 	
 	/// <summary>

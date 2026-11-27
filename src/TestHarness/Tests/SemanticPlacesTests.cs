@@ -80,8 +80,9 @@ static class SemanticPlacesTests
 		fx.Write("Lonely.cs", "interface ILonely { }\n");
 		
 		// Two fields declared on line 3, each in a statement of its own, and on line 4 a name
-		// once in code and once in a comment (#515).
-		fx.Write("Twins.cs", "class Twins\n{\n\tint alpha; int beta;\n\tvoid Use() { alpha = beta; } // beta\n}\n");
+		// once in code and once in a comment (#515). Line 5 has two fields again, with nine
+		// ones between the first match and the second field's name.
+		fx.Write("Twins.cs", "class Twins\n{\n\tint alpha; int beta;\n\tvoid Use() { alpha = beta; } // beta\n\tint gamma = 1+1+1+1+1+1+1+1+1; int delta;\n}\n");
 		
 		// A project reached through a link above its directory (#516): 'link' leads to 'real',
 		// and the project is given as link/proj. A build prints a source file by the path
@@ -252,6 +253,23 @@ static class SemanticPlacesTests
 				return Verdict(UnderBeta(semantic) && UnderBeta(textual), new JsonArray(semantic?.DeepClone(), textual?.DeepClone()));
 			}),
 			
+			// The two limits of that rule, which keep a search at one lookup a line. Inside the
+			// body of a member no declaration can start, so a line there is listed under the
+			// member whatever it matches: line 9 of Calls.cs, with three matches, under Twice.
+			// And only the eight matches after the first are asked for a declaration of their
+			// own: on line 5 of Twins.cs 'delta' is the tenth, and the line stays under gamma.
+			new("semantic places: a line in a member's body, and a name beyond the eighth match, stay under the first declaration", async () => {
+				
+				var body     = await Call("roslyn_search_files", new { pattern = "Say|first", caseSensitive = true, filePattern = "Calls.cs", projectPath = fx.Csproj });
+				var textual  = await Call("roslyn_search_files", new { pattern = "1|delta", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				var semantic = await Call("roslyn_semantic_search", new { pattern = "1|delta", context = "code", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				
+				static bool UnderGamma(JsonNode? answer) => SearchHits.Of(answer)?.FirstOrDefault(hit => hit.Line == 5) is { Declaration: "field gamma", Declares: false };
+				
+				return Verdict(SearchHits.Of(body)?.FirstOrDefault(hit => hit.Line == 9) is { Declaration: "method Twice", Declares: false }
+					&& UnderGamma(textual) && UnderGamma(semantic), new JsonArray(body?.DeepClone(), textual?.DeepClone(), semantic?.DeepClone()));
+			}),
+			
 			// A line whose matches are in two contexts is one place that names both, in their
 			// order. It named the first alone, as if that were what the line is.
 			new("semantic places: a line with matches in two contexts names both", async () => {
@@ -268,9 +286,15 @@ static class SemanticPlacesTests
 				var nothing = await Call("roslyn_semantic_search", new { pattern = "q*", filePattern = "Twins.cs", projectPath = fx.Csproj });
 				var some    = await Call("roslyn_semantic_search", new { pattern = "w*", filePattern = "Twins.cs", projectPath = fx.Csproj });
 				
+				// The names are asked one at a time, by a check of their own.
+				var noName   = await Call("roslyn_semantic_search", new { pattern = "q*", context = "identifiers", filePattern = "Twins.cs", projectPath = fx.Csproj });
+				var someName = await Call("roslyn_semantic_search", new { pattern = "w*", context = "identifiers", filePattern = "Twins.cs", projectPath = fx.Csproj });
+				
 				// 'w' is in the file once, in 'Twins'; 'q' nowhere.
 				return Verdict(nothing?["error"] is null && nothing?["total_matches"]?.GetValue<int>() == 0
-					&& SearchHits.Of(some) is [{ Line: 1 }], new JsonArray(nothing?.DeepClone(), some?.DeepClone()));
+					&& SearchHits.Of(some) is [{ Line: 1 }]
+					&& noName?["error"] is null && noName?["total_matches"]?.GetValue<int>() == 0
+					&& SearchHits.Of(someName) is [{ Line: 1 }], new JsonArray(nothing?.DeepClone(), some?.DeepClone(), noName?.DeepClone(), someName?.DeepClone()));
 			}),
 			
 			// An implementation is a declaration: the answer says where it is, the lines to read

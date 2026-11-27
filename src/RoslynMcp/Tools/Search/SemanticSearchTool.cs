@@ -249,10 +249,10 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 						SemanticMatchResult[] found = [..onLine.OrderBy(match => match.Position)];
 						TextSpan[]            spans = [..found.Select(match => new TextSpan(match.Position, match.Length))];
 						
-						var (declaration, declares, at) = EnclosingDeclaration.Among(root, text, spans);
+						var (declaration, declares, at) = EnclosingDeclaration.Among(root, text, spans[0], spans, static all => all);
 						
 						var line   = text.Lines[onLine.Key];
-						var column = found[at].Position - line.Start;
+						var column = at.Start - line.Start;
 						
 						collected.Add(new(relativePath, onLine.Key + 1, column + 1, SearchFilesTool.Excerpt(text.ToString(line.Span), column), declaration) {
 							
@@ -409,10 +409,9 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			if(!token.IsKind(SyntaxKind.IdentifierToken))
 				continue;
 			
-			var span      = token.Span;
-			var tokenText = token.ToString();
+			var span = token.Span;
 			
-			if(regex.IsMatch(tokenText)) {
+			if(MatchesSomething(regex, token.Text)) {
 				
 				yield return new SemanticMatchResult {
 					
@@ -422,6 +421,19 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 				};
 			}
 		}
+	}
+	
+	// Whether the pattern matches some text of the name, and not nothing alone: a pattern that
+	// can match nothing ('^', 'x*') matches every name at a position, and every identifier of
+	// the solution was a place. Every match is asked: of 'x*' in 'axb' the first is empty.
+	static bool MatchesSomething(Regex regex, string name)
+	{
+		foreach(var match in regex.EnumerateMatches(name))
+			if(match.Length > 0)
+				
+				return true;
+		
+		return false;
 	}
 	
 	IEnumerable<SemanticMatchResult> SearchInCode(SyntaxNode root, SourceText text, Regex regex)

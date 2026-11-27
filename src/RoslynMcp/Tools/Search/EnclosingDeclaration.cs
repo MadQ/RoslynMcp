@@ -80,36 +80,58 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 	///         </item>
 	///     </list>
 	///     Two names on one line that both match are still one place, under the first.
-	///     <paramref name="matches"/> are positions in the file, in the order they occur, and not
-	///     empty.
+	///     <para>
+	///         <paramref name="leftmost"/> is the line's first match, a position in the file. The
+	///         line's other matches are asked for (<paramref name="all"/>, every match in order,
+	///         the leftmost included) only where one of them can change the answer: on a line
+	///         that holds a name of the leftmost's declaration, or one that can hold a second
+	///         declaration. Most hits of a search are lines inside the body of a member, which
+	///         are neither, and cost the one lookup they always did. The state is handed through
+	///         so that a caller in a loop need not allocate a closure a line.
+	///     </para>
 	/// </summary>
-	public static (EnclosingDeclaration? Declaration, bool Declares, int Match) Among(SyntaxNode root, SourceText text, ReadOnlySpan<TextSpan> matches)
+	public static (EnclosingDeclaration? Declaration, bool Declares, TextSpan Match) Among<TState>(SyntaxNode root, SourceText text, TextSpan leftmost, TState state, Func<TState, TextSpan[]> all)
 	{
-		var (first, names) = At(root, text, matches[0].Start);
+		var (first, names) = At(root, text, leftmost.Start);
 		
-		for(var index = 0; index < matches.Length; index++)
-			if(Overlaps(names, matches[index]))
+		if(Overlaps(names, leftmost))
+			
+			return (first, true, leftmost);
+		
+		var line      = text.Lines.GetLineFromPosition(leftmost.Start);
+		var holdsName = false;
+		
+		foreach(var name in names)
+			holdsName |= name.Start < line.End && name.End > line.Start;
+		
+		// Inside the body of a member no other declaration can start: accessors, local
+		// functions and lambdas are no declarations of their own here.
+		var inBody = first is { Kind: "method" or "constructor" or "destructor" or "property" or "indexer" or "event" or "operator" } body
+			&& body.StartLine < line.LineNumber + 1 && line.LineNumber + 1 < body.EndLine;
+		
+		if(!holdsName && inBody)
+			
+			return (first, false, leftmost);
+		
+		var matches = all(state);
+		
+		if(holdsName)
+			foreach(var match in matches)
+				if(Overlaps(names, match))
+					
+					return (first, true, match);
+		
+		if(!inBody)
+			for(var index = 1; index < matches.Length && index <= OtherMatchesAsked; index++) {
 				
-				return (first, true, index);
-		
-		// Most hits are lines inside the body of a member, where no other declaration can
-		// start: nothing is asked there, and a search pays for one lookup a line as before.
-		if(first is { Kind: "method" or "constructor" or "destructor" or "property" or "indexer" or "event" or "operator" } body
-		   && text.Lines.GetLineFromPosition(matches[0].Start).LineNumber + 1 is var line
-		   && body.StartLine < line && line < body.EndLine)
-			
-			return (first, false, 0);
-		
-		for(var index = 1; index < matches.Length && index <= OtherMatchesAsked; index++) {
-			
-			var (other, otherNames) = At(root, text, matches[index].Start);
-			
-			if(other != first && Overlaps(otherNames, matches[index]))
+				var (other, otherNames) = At(root, text, matches[index].Start);
 				
-				return (other, true, index);
-		}
+				if(other != first && Overlaps(otherNames, matches[index]))
+					
+					return (other, true, matches[index]);
+			}
 		
-		return (first, false, 0);
+		return (first, false, leftmost);
 		
 		static bool Overlaps(TextSpan[] names, TextSpan match)
 		{
