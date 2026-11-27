@@ -380,8 +380,14 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			: replacement
 		;
 		
-		if(isDeletion)
+		if(isDeletion) {
+			
 			newRoot = root.RemoveNodes(matchedNodes, SyntaxRemoveOptions.KeepNoTrivia)!;
+			
+			foreach(var matchedNode in matchedNodes)
+				if(DroppedVariables(matchedNode, []) is { } dropped)
+					unapplied[dropped] = [StartOf(matchedNode).Line + 1];
+		}
 		
 		else {
 			
@@ -410,6 +416,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				var notes = new List<string>();
 				
 				var placed = WithTriviaOf(matchedNode, parsed, replacementTokens, notes);
+				
+				if(DroppedVariables(matchedNode, placed) is { } dropped)
+					notes.Add(dropped);
 				
 				if(placed.Length > 1) {
 					
@@ -754,6 +763,27 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		return -1;
 	}
 	
+	// The variables of a field declaration that the nodes put in its place no longer declare.
+	// A field of several variables is found by any of them (#533) and replaced whole, since a
+	// variable is not a member of its own: a replacement written for the one variable named
+	// would drop the others without a word, and the syntax check has nothing to object to.
+	private static string? DroppedVariables(SyntaxNode original, IEnumerable<SyntaxNode> placed)
+	{
+		if(original is not BaseFieldDeclarationSyntax { Declaration.Variables.Count: > 1 } field)
+			
+			return null;
+		
+		var kept = placed.SelectMany(DeclaredNames).ToHashSet(StringComparer.Ordinal);
+		var all  = field.Declaration.Variables.Select(variable => variable.Identifier.Text).ToArray();
+		var lost = all.Where(name => !kept.Contains(name)).ToArray();
+		
+		return lost.Length == 0
+			? null
+			: $"The declaration of {string.Join(", ", all)} was replaced whole, as a field's variables are, and {string.Join(", ", lost)} {(lost.Length == 1 ? "is" : "are")} no longer declared. To keep {(lost.Length == 1 ? "it" : "them")}, give the replacement every variable."
+		;
+	}
+	
+
 	// Every name a declaration declares: one for most, each variable for a field or an event
 	// field (int a, Problem;), which a pattern naming any of them finds. DeclaredName gave the
 	// first only, so Problem found nothing there (#533). The node is still the whole

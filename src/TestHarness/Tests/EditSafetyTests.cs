@@ -238,18 +238,23 @@ static class EditSafetyTests
 			// A field declared with several variables is found by any of them (#533): it was named
 			// by its first only, so 'Problem' found nothing in 'int a, Problem;'. 'a' is that
 			// declaration's exact name too, and wins over Total, which holds an 'a'. A list of the
-			// candidates names every variable.
+			// candidates names every variable. A replacement that leaves out a variable it replaced
+			// says so: the declaration is replaced whole.
 			new("edit safety: roslyn_replace_in_code finds a field of several variables by any of them", async () => {
 				
 				var later  = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Problem", dryRun = true, projectPath = fx.Csproj });
 				var first  = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "a", dryRun = true, projectPath = fx.Csproj });
 				var listed = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Missing", dryRun = true, projectPath = fx.Csproj });
+				var lost   = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Problem", replacement = "int Problem = 5;", dryRun = true, projectPath = fx.Csproj });
+				var kept   = await InCode(new { filePath = "code_fields.cs", nodeKind = "field", textPattern = "Problem", replacement = "int a, Problem = 5;", dryRun = true, projectPath = fx.Csproj });
 				
 				static int? LineOf(JsonNode? answer) => answer?["change_count"]?.GetValue<int>() == 1 ? answer["changed_nodes"]?[0]?["line"]?.GetValue<int>() : null;
 				
 				return Verdict(LineOf(later) == 3
 					&& LineOf(first) == 3
-					&& listed?["candidates"]?[0]?["name"]?.GetValue<string>() == "a, Problem", new JsonArray(later?.DeepClone(), first?.DeepClone(), listed?.DeepClone()), null);
+					&& listed?["candidates"]?[0]?["name"]?.GetValue<string>() == "a, Problem"
+					&& lost?["_caution"]?.GetValue<string>().Contains("a is no longer declared", StringComparison.Ordinal) == true
+					&& kept?["_caution"] is null, new JsonArray(later?.DeepClone(), first?.DeepClone(), listed?.DeepClone(), lost?.DeepClone(), kept?.DeepClone()), null);
 			}),
 			
 			// Second half: a pattern that matches nothing lists what is there, with positions that
