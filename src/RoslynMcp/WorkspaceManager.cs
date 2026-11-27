@@ -65,17 +65,25 @@ internal sealed record WorkspaceHealth(
 	/// </summary>
 	public WatchStatus? Watching { get; init; }
 	
-	/// <summary>True when every loaded project resolved metadata references and loaded without an MSBuild failure.</summary>
-	public bool IsHealthy => ProjectsWithoutReferences.Length == 0 && ProjectsWithLoadFailures.Length == 0;
+	/// <summary>
+	///     The projects that resolved only part of their package references (#456), as the load that
+	///     produced the workspace found them.
+	/// </summary>
+	public PartialReferences[] ProjectsWithMissingReferences { get; init; } = [];
+	
+	/// <summary>True when every loaded project resolved its metadata references, all of them, and loaded without an MSBuild failure.</summary>
+	public bool IsHealthy => ProjectsWithoutReferences.Length == 0 && ProjectsWithLoadFailures.Length == 0 && ProjectsWithMissingReferences.Length == 0;
 	
 	/// <summary>
 	///     Unhealthy only for want of a restore: every project without references is one that was never
-	///     restored, and nothing failed. The advice is then <c>roslyn_restore_packages</c>, not a reload.
+	///     restored, every project short of references is short of files the package cache lost, and
+	///     nothing failed. The advice is then <c>roslyn_restore_packages</c>, not a reload.
 	/// </summary>
 	public bool OnlyNeedsRestore =>
-		ProjectsNotRestored.Length > 0
+		(ProjectsNotRestored.Length > 0 || ProjectsWithMissingReferences.Length > 0)
 		&& ProjectsWithLoadFailures.Length == 0
 		&& ProjectsWithoutReferences.All(ProjectsNotRestored.Contains)
+		&& ProjectsWithMissingReferences.All(partial => partial.PackagesGone)
 	;
 	
 	/// <summary>
@@ -109,6 +117,8 @@ internal sealed record WorkspaceHealth(
 			ProjectsWithoutReferences = [..ProjectsWithoutReferences.Where(covered.Contains)],
 			ProjectsWithLoadFailures  = [..ProjectsWithLoadFailures.Where(covered.Contains)],
 			ProjectsNotRestored       = [..ProjectsNotRestored.Where(covered.Contains)],
+			
+			ProjectsWithMissingReferences = [..ProjectsWithMissingReferences.Where(partial => covered.Contains(partial.Project))],
 		};
 	}
 	
@@ -120,10 +130,17 @@ internal sealed record WorkspaceHealth(
 	public string Problem {
 		get {
 			var dropped = ProjectsWithoutReferences.Except(ProjectsNotRestored).ToArray();
-			var parts   = new List<string>(3);
+			var parts   = new List<string>(4);
 			
 			if(dropped.Length > 0)
 				parts.Add($"loaded without metadata references on: {ProjectKey.Names(dropped)}");
+			
+			// Two clauses, as for the projects without references: the remedy differs.
+			if(ProjectsWithMissingReferences.Where(partial => !partial.PackagesGone).ToArray() is { Length: > 0 } loadedShort)
+				parts.Add($"loaded with only part of its package references on: {PartialReferences.Describe(loadedShort)}");
+			
+			if(ProjectsWithMissingReferences.Where(partial => partial.PackagesGone).ToArray() is { Length: > 0 } gone)
+				parts.Add($"holds projects whose packages are no longer in the package cache: {PartialReferences.Describe(gone)} (roslyn_restore_packages downloads them again and reloads the workspace)");
 			
 			if(ProjectsNotRestored.Length > 0)
 				parts.Add($"holds projects that were never restored, so they have no metadata references: {ProjectKey.Names(ProjectsNotRestored)} (no project.assets.json — roslyn_restore_packages restores them and reloads the workspace)");
@@ -156,6 +173,38 @@ internal readonly record struct ProjectKey(string File, string Name)
 		SecurityBoundary.PathComparer.Equals(File, other.File) && string.Equals(Name, other.Name, StringComparison.Ordinal);
 	
 	public override int GetHashCode() => HashCode.Combine(SecurityBoundary.PathComparer.GetHashCode(File), StringComparer.Ordinal.GetHashCode(Name));
+}
+
+/// <summary>
+///     A project that loaded with only part of its package references (#456): its assets file lists
+///     compile-time assemblies that none of its metadata references is. The two health findings before this
+///     one know a project with no references and one whose project file failed; a project short of a few
+///     was healthy to both, and a type of a missing assembly was "not found" as a misspelled name is.
+/// </summary>
+/// <param name="Project">The project that came up short.</param>
+/// <param name="Expected">How many compile-time assemblies its packages have for its target framework.</param>
+/// <param name="Missing">The file names of those no metadata reference has, sorted.</param>
+/// <param name="PackagesGone">
+///     None of the missing files is in a package folder any more: the cache lost them, and a restore brings
+///     them back where a reload cannot.
+/// </param>
+internal sealed record PartialReferences(ProjectKey Project, int Expected, string[] Missing, bool PackagesGone)
+{
+	// How many missing assemblies a message names before it counts the rest.
+	const int NamedAssemblies = 5;
+	
+	/// <summary>The project and what it lacks, for a message: <c>Foo (2 of 57 missing: A.dll, B.dll)</c>.</summary>
+	public string Description {
+		get {
+			var names = string.Join(", ", Missing.Take(NamedAssemblies));
+			var more  = Missing.Length > NamedAssemblies ? $", and {Missing.Length - NamedAssemblies} more" : "";
+			
+			return $"{Project.Name} ({Missing.Length} of {Expected} missing: {names}{more})";
+		}
+	}
+	
+	/// <summary>The descriptions of several, joined for a message or a hint.</summary>
+	public static string Describe(IEnumerable<PartialReferences> projects) => string.Join("; ", projects.Select(project => project.Description));
 }
 
 /// <summary>

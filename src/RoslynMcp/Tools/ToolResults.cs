@@ -618,6 +618,10 @@ internal sealed record CheckDriftResult(
 	[property: JsonPropertyName("projects_not_restored")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string[]?                                            ProjectsNotRestored,
+	// Have references, but not every compile-time assembly of their packages: a load that came up
+	// short, which neither of the lists above can show (#456).
+	[property: JsonPropertyName("projects_with_missing_references")]
+	MissingReferencesInfo[]?                             ProjectsWithMissingReferences,
 	[property: JsonPropertyName("last_unhealthy_load")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string?                                              LastUnhealthyLoad,
@@ -644,6 +648,16 @@ internal sealed record CheckDriftResult(
 	[JsonPropertyName("degraded_roots")]
 	public WatchRootProblemInfo[]? DegradedRoots { get; init; }
 }
+
+/// <summary>
+///     A project of <c>projects_with_missing_references</c>: how many of its packages' compile-time
+///     assemblies it has no reference to, of how many, and the first of their file names.
+/// </summary>
+internal sealed record MissingReferencesInfo(
+	[property: JsonPropertyName("project")]        string   Project,
+	[property: JsonPropertyName("missing_count")]  int      MissingCount,
+	[property: JsonPropertyName("expected_count")] int      ExpectedCount,
+	[property: JsonPropertyName("missing")]        string[] Missing);
 
 internal sealed record GetTriviaNoMatchResult(
 	[property: JsonPropertyName("message")]       string   Message,

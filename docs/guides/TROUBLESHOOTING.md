@@ -175,6 +175,35 @@ for a project without `obj\project.assets.json`, and reports no failure.
 or `roslyn_respawn` alone repeats the same load. A `global.json` that pins an older SDK also avoids
 it, but a restore is the fix.
 
+### A type from a package is "not found", but the project builds fine
+
+**Symptom:** a tool answers "not found" for a type of a NuGet package, or `roslyn_get_diagnostics`
+reports `CS0246` / `CS0234` for the namespaces of one or a few packages only, while `dotnet build`
+succeeds.
+
+**Cause:** the project loaded with **only part of its package references**. It has its framework
+references and most of its packages, so it is not the state above, but the design-time build
+handed on fewer assemblies than the restore lists. The server compares each project's references
+with the compile-time assemblies in `obj\project.assets.json` after every load.
+
+**Confirm it:**
+
+```
+roslyn_check_drift  →  "workspace_healthy": false,
+                       "projects_with_missing_references": [
+                         { "project": "YourProject", "missing_count": 2, "expected_count": 57,
+                           "missing": ["Some.Package.dll", "Other.Package.dll"] } ]
+```
+
+**Fix:** usually none is needed: the server loads such a project once more by itself, and does not
+replace a workspace that had all its references with one that does not. `roslyn_respawn` reloads
+it when it does not recover. When the hint says the packages are no longer in the package cache,
+`roslyn_restore_packages` is the fix.
+
+A project is also reported when its own build takes a package's assembly out of the references on
+purpose (a target that removes `Reference` items): the restore still lists the assembly. The
+finding is then true and harmless, at the cost of one extra load at startup.
+
 ### Hundreds of nullable warnings (CS8632), but the project enables `Nullable`
 
 **Symptom:** `roslyn_get_diagnostics` reports a flood of `CS8632` ("The annotation for nullable
