@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -36,7 +37,9 @@ internal sealed partial class WorkspaceManager
 		///         A type of its own because the decision needs no state of the workspace: only
 		///         where its root is and which directories it stays out of, both fixed when the
 		///         workspace is constructed, plus the solution the caller is looking at. It
-		///         takes no lock and changes nothing. It is given what it needs and has no way
+		///         takes no lock and changes nothing of the workspace; what it keeps are answers
+		///         of its own (the last <c>LoadsFrom</c>, each project file's declared
+		///         <c>AdditionalFiles</c>). It is given what it needs and has no way
 		///         back to the <see cref="WorkspaceInstance"/> that owns it.
 		///     </para>
 		/// </summary>
@@ -231,19 +234,66 @@ internal sealed partial class WorkspaceManager
 			
 			bool MatchesDeclaredAdditionalFile(Project project, string fullPath)
 			{
-				if(project.FilePath is null)
+				if(project.FilePath is not { } projectFile || Path.GetDirectoryName(projectFile) is not { } projectDir)
 					
 					return false;
 				
+				if(DeclaredIn(projectFile, projectDir) is not { } declared)
+					
+					return false;
+				
+				foreach(var path in declared.Paths)
+					if(PathEquals(path, fullPath))
+						return true;
+				
+				if(declared.Globs.Length == 0)
+					
+					return false;
+				
+				var relativePath = NormalizeProjectRelativePath(Path.GetRelativePath(projectDir, fullPath));
+				
+				foreach(var glob in declared.Globs)
+					if(glob.IsMatch(relativePath))
+						return true;
+				
+				return false;
+			}
+			
+			// The AdditionalFiles items a project file declares, as full paths and as patterns
+			// (#323). A path that is neither source nor an evaluation input is checked against
+			// every project, at each change of such a file (a .md, a .txt, an unrelated .json),
+			// and reading and parsing each project file every time cost a read, an XML parse
+			// and a regex per wildcard, per project and per change. An entry stands while the
+			// file has the write time and length it was read at; a stat costs far less than
+			// the parse. The stat comes before the read, so a write in between leaves an entry
+			// whose stamp is already old, and the next call reads the file again.
+			sealed record DeclaredAdditionalFiles(DateTime WrittenUtc, long Length, string[] Paths, Regex[] Globs);
+			
+			readonly ConcurrentDictionary<string, DeclaredAdditionalFiles> declaredAdditionalFiles = new(SecurityBoundary.PathComparer);
+			
+			// Only the project file itself is read: an AdditionalFiles item declared in an
+			// imported .props or .targets is not seen, and an Include holding a property
+			// ($(...)) is skipped, since neither can be resolved without MSBuild.
+			DeclaredAdditionalFiles? DeclaredIn(string projectFile, string projectDir)
+			{
 				try {
 					
-					var projectDir = Path.GetDirectoryName(project.FilePath);
+					var info = new FileInfo(projectFile);
 					
-					if(projectDir is null)
-						return false;
+					if(!info.Exists)
+						
+						return null;
 					
-					var relativePath = NormalizeProjectRelativePath(Path.GetRelativePath(projectDir, fullPath));
-					var doc = FileReader.LoadXml(project.FilePath);
+					var writtenUtc = info.LastWriteTimeUtc;
+					var length     = info.Length;
+					
+					if(declaredAdditionalFiles.TryGetValue(projectFile, out var known) && known.WrittenUtc == writtenUtc && known.Length == length)
+						
+						return known;
+					
+					var doc       = FileReader.LoadXml(projectFile);
+					var paths     = new List<string>();
+					var globs     = new List<Regex>();
 					
 					foreach(var include in doc
 						.Descendants()
@@ -255,23 +305,22 @@ internal sealed partial class WorkspaceManager
 						
 						var normalizedInclude = NormalizeProjectRelativePath(include);
 						
-						if(normalizedInclude.IndexOfAny(['*', '?']) < 0) {
-							
-							var includePath = Path.GetFullPath(Path.Combine(projectDir, include));
-							
-							if(PathEquals(includePath, fullPath))
-								return true;
-							
-							continue;
-						}
-						
-						if(Regex.IsMatch(relativePath, BuildPathGlobRegex(normalizedInclude), RegexOptions.IgnoreCase))
-							return true;
+						if(normalizedInclude.IndexOfAny(['*', '?']) < 0)
+							paths.Add(Path.GetFullPath(Path.Combine(projectDir, include)));
+						else
+							globs.Add(new Regex(BuildPathGlobRegex(normalizedInclude), RegexOptions.IgnoreCase));
 					}
+					
+					var declared = new DeclaredAdditionalFiles(writtenUtc, length, [.. paths], [.. globs]);
+					
+					declaredAdditionalFiles[projectFile] = declared;
+					
+					return declared;
 				}
-				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) { }
-				
-				return false;
+				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or System.Xml.XmlException) {
+					
+					return null;
+				}
 			}
 			
 			static IEnumerable<string> SplitMsbuildIncludeList(string? include) =>
