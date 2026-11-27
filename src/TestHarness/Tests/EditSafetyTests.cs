@@ -55,6 +55,8 @@ static class EditSafetyTests
 			linked = true;
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		// A name and a longer name that holds it (#530).
+		fx.Write("code_exact.cs", "class Exact\n{\n\tint Problem { get; set; }\n\tbool HasProblem => Problem > 0;\n}\n");
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
 		fx.Write("twice_regex.txt", "same\nother\nsame\n");
@@ -207,6 +209,22 @@ static class EditSafetyTests
 				return Verdict(typed?["change_count"]?.GetValue<int>() == 1
 					&& qualified?["change_count"]?.GetValue<int>() == 1
 					&& elsewhere?["change_count"]?.GetValue<int>() == 0, new JsonArray(typed?.DeepClone(), qualified?.DeepClone(), elsewhere?.DeepClone()), null);
+			}),
+			
+			// A pattern that is a declaration's whole name is that declaration, not every name that
+			// holds it (#530): 'Problem' matched HasProblem too, and the call needed a line. A
+			// pattern that is no whole name still matches every name it is part of.
+			new("edit safety: roslyn_replace_in_code takes the declaration named exactly over one whose name holds it", async () => {
+				
+				var part  = await InCode(new { filePath = "code_exact.cs", nodeKind = "property", textPattern = "Prob", replacement = "int Problem { get; init; }", projectPath = fx.Csproj });
+				var whole = await InCode(new { filePath = "code_exact.cs", nodeKind = "property", textPattern = "Problem", replacement = "int Problem { get; init; }", projectPath = fx.Csproj });
+				var after = Read("code_exact.cs");
+				
+				return Verdict(part?["applied"]?.GetValue<bool>() == false
+					&& part["change_count"]?.GetValue<int>() == 2
+					&& whole?["applied"]?.GetValue<bool>() == true
+					&& after.Contains("\tint Problem { get; init; }\n", StringComparison.Ordinal)
+					&& after.Contains("\tbool HasProblem => Problem > 0;\n", StringComparison.Ordinal), new JsonArray(part?.DeepClone(), whole?.DeepClone()), after);
 			}),
 			
 			// Second half: a pattern that matches nothing lists what is there, with positions that

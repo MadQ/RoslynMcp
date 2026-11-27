@@ -53,7 +53,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		[Description("Syntax node kind to match (e.g., 'MethodDeclaration', 'ConstructorDeclaration', 'FieldDeclaration', 'IdentifierName'). Common aliases accepted: 'method', 'constructor', 'ctor', 'field', 'property', 'class', 'interface', 'struct', 'enum', 'identifier'.")] string nodeKind,
 		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Constructor/Property/Field/Class etc.) matches the DECLARED NAME ('Foo'; 'void Foo', 'Foo(int a)' and 'Type.Foo' are read as that name). For other nodes matches full text.")] string? textPattern = null,
+		[Description("Optional pattern to filter matched nodes. For declaration nodes (Method/Constructor/Property/Field/Class etc.) matches the DECLARED NAME ('Foo'; 'void Foo', 'Foo(int a)' and 'Type.Foo' are read as that name): a declaration named exactly so is the one meant, else every name that contains the pattern matches. For other nodes matches full text.")] string? textPattern = null,
 		[Description("Replacement text for the matched node. Must be valid C# syntax for the target node kind. Default: empty string — omitting this deletes the matched node.")] string replacement = "",
 		[Description("Preview changes without writing. Returns what would change, after the same parse and validation a real write performs. Default: false.")] bool dryRun = false,
 		[Description("Apply even when multiple nodes match. Default: false — returns matches for review instead.")] bool force = false,
@@ -231,6 +231,13 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				})
 				.ToArray()
 			;
+			
+			// A declaration whose name is the pattern is the one meant: 'Problem' is the property
+			// Problem, not HasProblem beside it, which matched as well and took a call with a line
+			// to tell apart, or both with force (#530). A pattern that is no declaration's whole
+			// name still matches every name it is part of, as before.
+			if(matchedNodes.Where(n => DeclaredName(n) is { } name && name.Equals(textPattern, StringComparison.OrdinalIgnoreCase)).ToArray() is { Length: > 0 } exact)
+				matchedNodes = exact;
 			
 			// A declaration is found by its name, and an agent writes the name as it read it: with
 			// the return type before it, the parameter list behind it, or its type in front
