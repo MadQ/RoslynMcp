@@ -40,7 +40,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 		[Description("1-based column number near or inside the diagnostic span.")] int column,
 		CancellationToken cancellationToken,
 		[Description(OptionalProjectPathDescription)] string? projectPath = null,
-		[Description("Optional diagnostic ID to disambiguate when multiple diagnostics are on the same line, e.g. 'RMCP001'.")] string? diagnosticId = null,
+		[Description("Optional diagnostic ID to disambiguate when multiple diagnostics are on the same line, e.g. 'RMCP001'. Diagnostics of one ID over one span (CS0246 for 'Foo' and 'FooAttribute') are one finding; two of one ID at different places of the line are told apart by the column the answer names.")] string? diagnosticId = null,
 		[Description("Optional zero-based code action index. Required when multiple fixes are available.")] int? actionIndex = null)
 	{
 		using var scope = BeginTool("roslyn_preview_code_fix", filePath, new { line, column, diagnosticId, actionIndex });
@@ -96,7 +96,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			;
 			
 			var message = matches.Length > 1
-				? "Multiple diagnostics matched this location. Re-run with diagnosticId."
+				? AmbiguousMessage(matches, text)
 				: "No diagnostic was found at the requested location."
 			;
 			
@@ -392,7 +392,47 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			: sameFile.Where(d => text.Lines.GetLinePosition(d.Location.SourceSpan.Start).Line + 1 == line).ToArray()
 		;
 		
-		return matches.Length == 1 ? matches[0] : null;
+		if(matches.Length == 0)
+			
+			return null;
+		
+		// One id over one span is one finding to a fixer, reported more than once: CS0246 comes
+		// twice for an attribute that does not bind, once for 'JsonIgnore' and once for
+		// 'JsonIgnoreAttribute', and the same 'using' fixes both. Nothing the caller could pass
+		// tells them apart, so asking for more was a dead end (#529).
+		var first = matches[0];
+		
+		if(matches.All(d => d.Id == first.Id && d.Location.SourceSpan == first.Location.SourceSpan))
+			
+			return first;
+		
+		// Spans of one id that nest both contain a column inside the inner one; the column a
+		// diagnostic starts at, which the ambiguity message names, then picks it.
+		return matches.Where(d => d.Location.SourceSpan.Start == position).ToArray() is [var starting]
+			&& matches.All(d => d.Id == starting.Id)
+			? starting
+			: null;
+	}
+	
+	/// <summary>
+	///     What tells the <paramref name="matches"/> apart, as the request to make next: the
+	///     id where they differ in it, else the column each starts at. Never an argument the
+	///     call already passed (#529).
+	/// </summary>
+	private static string AmbiguousMessage(Diagnostic[] matches, SourceText text)
+	{
+		if(matches.Select(d => d.Id).Distinct(StringComparer.OrdinalIgnoreCase).Skip(1).Any())
+			
+			return "Several diagnostics matched this location. Re-run with the diagnosticId of the one meant, as listed in actions.";
+		
+		var starts = matches
+			.Select(d => text.Lines.GetLinePosition(d.Location.SourceSpan.Start))
+			.Distinct()
+			.Order()
+			.Select(p => $"{p.Line + 1}:{p.Character + 1}")
+		;
+		
+		return $"Several {matches[0].Id} diagnostics matched this location, at different places of the line. Re-run with the line and column of the one meant: they start at {string.Join(", ", starts)}.";
 	}
 	
 	private async Task<ImmutableArray<Diagnostic>> GetDocumentDiagnosticsAsync(Project project, Document document, CancellationToken cancellationToken)
