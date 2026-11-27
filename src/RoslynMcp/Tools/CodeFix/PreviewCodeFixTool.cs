@@ -396,21 +396,25 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			
 			return null;
 		
-		// One id over one span is one finding to a fixer, reported more than once: CS0246 comes
+		// Diagnostics of different ids are told apart by the id.
+		var id = matches[0].Id;
+		
+		if(matches.Any(d => d.Id != id))
+			
+			return null;
+		
+		// One id at one start is one finding to a fixer, reported more than once: CS0246 comes
 		// twice for an attribute that does not bind, once for 'JsonIgnore' and once for
 		// 'JsonIgnoreAttribute', and the same 'using' fixes both. Nothing the caller could pass
-		// tells them apart, so asking for more was a dead end (#529).
-		var first = matches[0];
+		// tells such diagnostics apart, so asking for more was a dead end (#529); the shortest
+		// span is taken, as for a companion (CompanionsAt). Where they start at different places,
+		// the one that starts at the position given is meant: the column the ambiguity message
+		// names for it. Spans that nest both contain a column inside the inner one.
+		var starting = matches.Where(d => d.Location.SourceSpan.Start == position).ToArray();
+		var pool     = starting.Length > 0 ? starting : matches;
 		
-		if(matches.All(d => d.Id == first.Id && d.Location.SourceSpan == first.Location.SourceSpan))
-			
-			return first;
-		
-		// Spans of one id that nest both contain a column inside the inner one; the column a
-		// diagnostic starts at, which the ambiguity message names, then picks it.
-		return matches.Where(d => d.Location.SourceSpan.Start == position).ToArray() is [var starting]
-			&& matches.All(d => d.Id == starting.Id)
-			? starting
+		return pool.All(d => d.Location.SourceSpan.Start == pool[0].Location.SourceSpan.Start)
+			? pool.MinBy(d => d.Location.SourceSpan.Length)
 			: null;
 	}
 	
@@ -432,7 +436,7 @@ internal sealed class PreviewCodeFixTool : RoslynMcpTool
 			.Select(p => $"{p.Line + 1}:{p.Character + 1}")
 		;
 		
-		return $"Several {matches[0].Id} diagnostics matched this location, at different places of the line. Re-run with the line and column of the one meant: they start at {string.Join(", ", starts)}.";
+		return $"Several {matches[0].Id} diagnostics matched this location, starting at different places. Re-run with the line and column of the one meant: they start at {string.Join(", ", starts)}.";
 	}
 	
 	private async Task<ImmutableArray<Diagnostic>> GetDocumentDiagnosticsAsync(Project project, Document document, CancellationToken cancellationToken)

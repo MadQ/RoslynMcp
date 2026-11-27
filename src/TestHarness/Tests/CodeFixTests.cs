@@ -1224,7 +1224,7 @@ internal static class CodeFixTests
 			});
 			var message = apart?["message"]?.GetValue<string>() ?? apart?["error"]?.GetValue<string>() ?? "";
 			
-			if(!apartText.Contains("1:20", StringComparison.Ordinal) || !apartText.Contains("1:27", StringComparison.Ordinal) || apartText.Contains("Re-run with diagnosticId", StringComparison.Ordinal))
+			if(!message.Contains("Several CS0246 diagnostics", StringComparison.Ordinal) || !message.Contains("1:20", StringComparison.Ordinal) || !message.Contains("1:27", StringComparison.Ordinal))
 				return (false, $"FAIL  (two places on a line: expected the columns 1:20 and 1:27, got {apartText}) [{sw.ElapsedMilliseconds}ms]");
 			
 			var (picked, pickedText) = await Call("roslyn_preview_code_fix", new {
