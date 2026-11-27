@@ -57,6 +57,93 @@ internal readonly record struct EnclosingDeclaration(string Kind, string Name, i
 		return (null, []);
 	}
 	
+	// How many matches of a line beyond the leftmost are asked for a declaration of their own.
+	// A line of code holds one declaration, rarely two; a pattern of one letter matches a line
+	// dozens of times, and each question is a walk up the tree.
+	const int OtherMatchesAsked = 8;
+	
+	/// <summary>
+	///     The declaration the matches of one line are listed under, whether one of them is on a
+	///     declaration's own name, and which match that is (#515). A line is one place in an
+	///     answer however often the pattern matches it, so one of its matches has to say where
+	///     that place is:
+	///     <list type="bullet">
+	///         <item>
+	///             the leftmost, with any match of the line on the name of the leftmost's
+	///             declaration marking it: in <c>SearchResult BuildResult()</c> the pattern
+	///             <c>Result</c> matches the return type first;
+	///         </item>
+	///         <item>
+	///             or, when none is, the first match that is the name of a declaration of its
+	///             own. A line can hold two declarations (<c>int A; int Foo;</c>), and a match on
+	///             <c>Foo</c> was filed under <c>A</c> and declared nothing.
+	///         </item>
+	///     </list>
+	///     Two names on one line that both match are still one place, under the first.
+	///     <para>
+	///         <paramref name="leftmost"/> is the line's first match, a position in the file. The
+	///         line's other matches are asked for (<paramref name="all"/>, every match in order,
+	///         the leftmost included) only where one of them can change the answer: on a line
+	///         that holds a name of the leftmost's declaration, or one that can hold a second
+	///         declaration. Most hits of a search are lines inside the body of a member, which
+	///         are neither, and cost the one lookup they always did. The state is handed through
+	///         so that a caller in a loop need not allocate a closure a line.
+	///     </para>
+	/// </summary>
+	public static (EnclosingDeclaration? Declaration, bool Declares, TextSpan Match) Among<TState>(SyntaxNode root, SourceText text, TextSpan leftmost, TState state, Func<TState, TextSpan[]> all)
+	{
+		var (first, names) = At(root, text, leftmost.Start);
+		
+		if(Overlaps(names, leftmost))
+			
+			return (first, true, leftmost);
+		
+		var line      = text.Lines.GetLineFromPosition(leftmost.Start);
+		var holdsName = false;
+		
+		foreach(var name in names)
+			holdsName |= name.Start < line.End && name.End > line.Start;
+		
+		// Inside the body of a member no other declaration can start: accessors, local
+		// functions and lambdas are no declarations of their own here.
+		var inBody = first is { Kind: "method" or "constructor" or "destructor" or "property" or "indexer" or "event" or "operator" } body
+			&& body.StartLine < line.LineNumber + 1 && line.LineNumber + 1 < body.EndLine;
+		
+		if(!holdsName && inBody)
+			
+			return (first, false, leftmost);
+		
+		var matches = all(state);
+		
+		if(holdsName)
+			foreach(var match in matches)
+				if(Overlaps(names, match))
+					
+					return (first, true, match);
+		
+		if(!inBody)
+			for(var index = 1; index < matches.Length && index <= OtherMatchesAsked; index++) {
+				
+				var (other, otherNames) = At(root, text, matches[index].Start);
+				
+				if(other != first && Overlaps(otherNames, matches[index]))
+					
+					return (other, true, matches[index]);
+			}
+		
+		return (first, false, leftmost);
+		
+		static bool Overlaps(TextSpan[] names, TextSpan match)
+		{
+			foreach(var name in names)
+				if(name.OverlapsWith(match))
+					
+					return true;
+			
+			return false;
+		}
+	}
+	
 	/// <summary>
 	///     The declarations of a file that <paramref name="name"/> names, each with the span it takes
 	///     from the start of its first line (its attached comment's, when it has one) to its end:

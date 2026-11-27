@@ -79,6 +79,11 @@ static class SemanticPlacesTests
 		fx.Write("Broken.cs", Broken);
 		fx.Write("Lonely.cs", "interface ILonely { }\n");
 		
+		// Two fields declared on line 3, each in a statement of its own, and on line 4 a name
+		// once in code and once in a comment (#515). Line 5 has two fields again, with nine
+		// ones between the first match and the second field's name.
+		fx.Write("Twins.cs", "class Twins\n{\n\tint alpha; int beta;\n\tvoid Use() { alpha = beta; } // beta\n\tint gamma = 1+1+1+1+1+1+1+1+1; int delta;\n}\n");
+		
 		// A project reached through a link above its directory (#516): 'link' leads to 'real',
 		// and the project is given as link/proj. A build prints a source file by the path
 		// the link leads to, where the system resolves the working directory (Linux, macOS),
@@ -232,6 +237,66 @@ static class SemanticPlacesTests
 				var answer = await Call("roslyn_semantic_search", new { pattern = "Says hello|single", caseSensitive = true, projectPath = fx.Csproj });
 				
 				return Verdict(SearchHits.Of(answer) is [{ Line: 3, Context: "xmldoc", Declaration: "method Say" }, { Line: 13, Context: "string", Declaration: "method Once" }], answer);
+			}),
+			
+			// A line with two declarations is one place, and it is the declaration a match names
+			// that the place is listed under (#515). 'int' matches first, in the statement of
+			// alpha, and the line was filed under alpha with nothing declared; beta is the name
+			// the pattern asks for. The text search goes by the same rule.
+			new("semantic places: a line with two declarations is listed under the one a match names, in both searches", async () => {
+				
+				var semantic = await Call("roslyn_semantic_search", new { pattern = "int|beta", context = "code", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				var textual  = await Call("roslyn_search_files", new { pattern = "int|beta", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				
+				static bool UnderBeta(JsonNode? answer) => SearchHits.Of(answer)?.FirstOrDefault(hit => hit.Line == 3) is { Declaration: "field beta", Declares: true };
+				
+				return Verdict(UnderBeta(semantic) && UnderBeta(textual), new JsonArray(semantic?.DeepClone(), textual?.DeepClone()));
+			}),
+			
+			// The two limits of that rule, which keep a search at one lookup a line. Inside the
+			// body of a member no declaration can start, so a line there is listed under the
+			// member whatever it matches: line 9 of Calls.cs, with three matches, under Twice.
+			// And only the eight matches after the first are asked for a declaration of their
+			// own: on line 5 of Twins.cs 'delta' is the tenth, and the line stays under gamma.
+			new("semantic places: a line in a member's body, and a name beyond the eighth match, stay under the first declaration", async () => {
+				
+				var body     = await Call("roslyn_search_files", new { pattern = "Say|first", caseSensitive = true, filePattern = "Calls.cs", projectPath = fx.Csproj });
+				var textual  = await Call("roslyn_search_files", new { pattern = "1|delta", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				var semantic = await Call("roslyn_semantic_search", new { pattern = "1|delta", context = "code", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				
+				static bool UnderGamma(JsonNode? answer) => SearchHits.Of(answer)?.FirstOrDefault(hit => hit.Line == 5) is { Declaration: "field gamma", Declares: false };
+				
+				return Verdict(SearchHits.Of(body)?.FirstOrDefault(hit => hit.Line == 9) is { Declaration: "method Twice", Declares: false }
+					&& UnderGamma(textual) && UnderGamma(semantic), new JsonArray(body?.DeepClone(), textual?.DeepClone(), semantic?.DeepClone()));
+			}),
+			
+			// A line whose matches are in two contexts is one place that names both, in their
+			// order. It named the first alone, as if that were what the line is.
+			new("semantic places: a line with matches in two contexts names both", async () => {
+				
+				var answer = await Call("roslyn_semantic_search", new { pattern = "beta", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				
+				return Verdict(SearchHits.Of(answer) is [{ Line: 3, Context: "identifier" }, { Line: 4, Context: "identifier, comment" }], answer);
+			}),
+			
+			// A pattern of assertions alone matches at a position, with no length: the way to
+			// ask for what something does not hold. Such a match is a place like any other
+			// (#515). In the identifiers context the pattern is asked of each name: the names of
+			// Twins.cs that do not start with T are on lines 3 to 5, and 'Twins' on line 1 is
+			// left out. Over all contexts the place is labelled by what follows the position:
+			// asked where it stands, in the indentation, the doc comment's line was "code".
+			new("semantic places: a pattern of assertions alone finds its places, labelled by what follows", async () => {
+				
+				var names = await Call("roslyn_semantic_search", new { pattern = "^(?!T)", context = "identifiers", caseSensitive = true, filePattern = "Twins.cs", projectPath = fx.Csproj });
+				var lines = await Call("roslyn_semantic_search", new { pattern = @"^(?=\s*///)", filePattern = "Calls.cs", projectPath = fx.Csproj });
+				
+				// The end of a doc comment's text is behind the line break that ends it: a match
+				// there was listed on the declaration's line, line 4, which is no doc line.
+				var docEnd = await Call("roslyn_semantic_search", new { pattern = @"\z", context = "xmldocs", filePattern = "Calls.cs", projectPath = fx.Csproj });
+				
+				return Verdict(SearchHits.Of(names)?.Select(hit => hit.Line).SequenceEqual(new[] { 3, 4, 5 }) == true
+					&& SearchHits.Of(lines) is [{ Line: 3, Context: "xmldoc" }]
+					&& docEnd?["error"] is null && SearchHits.Of(docEnd) is { Length: 0 }, new JsonArray(names?.DeepClone(), lines?.DeepClone(), docEnd?.DeepClone()));
 			}),
 			
 			// An implementation is a declaration: the answer says where it is, the lines to read

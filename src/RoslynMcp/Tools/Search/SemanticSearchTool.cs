@@ -30,7 +30,9 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 		"('method Enqueue'), with its lines ('108-158': pass them to roslyn_read_file to read the whole member) and where its node starts " +
 		"('112:2': the line and column roslyn_replace_in_code takes), followed by matches[] with line and text. A match on the declaration's own name " +
 		"has declares: true. Several matches on one line are listed once. The answer's context names the syntax context searched; " +
-		"with context 'all', each match names its own (comment, string, identifier, xmldoc, code). " +
+		"with context 'all', each listed line names the contexts its matches are in (comment, string, identifier, xmldoc, code; " +
+		"'identifier, comment' for a line with matches in both). A pattern of assertions alone ('^(?!.*TODO)', '^(?!I)') matches at a " +
+		"position and selects lines, comments or names by what they do not hold. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page."
 	)]
 	public async Task<object> SemanticSearch(
@@ -236,23 +238,31 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 						});
 					}
 					
-					// One place per line, made from the line's leftmost match: a place costs a
-					// walk up the tree for its declaration, and a broad pattern matches many times
-					// on a line. Any match of the line on the declaration's own name marks the
-					// place, as in a text search: in 'SearchResult BuildResult()' the pattern
-					// 'Result' matches the return type first.
+					var relativePath = Path.GetRelativePath(rootPath, document.FilePath);
+					
+					// One place per line, as in a text search, and by the same rule for which of
+					// the line's matches says where the place is (EnclosingDeclaration.Among):
+					// the leftmost, unless a later one is a declaration's name. The declaration
+					// is looked up there and nowhere else, once a line (#515).
 					foreach(var onLine in matches.GroupBy(match => text.Lines.GetLineFromPosition(match.Position).LineNumber)) {
 						
-						var first = onLine.MinBy(match => match.Position)!;
-						var names = EnclosingDeclaration.At(root, text, first.Position).Names;
+						SemanticMatchResult[] found = [..onLine.OrderBy(match => match.Position)];
+						TextSpan[]            spans = [..found.Select(match => new TextSpan(match.Position, match.Length))];
 						
-						collected.Add(SourcePlace.Of(Location.Create(tree, new TextSpan(first.Position, first.Length)), rootPath, cancellationToken) with {
+						var (declaration, declares, at) = EnclosingDeclaration.Among(root, text, spans[0], spans, static all => all);
+						
+						var line   = text.Lines[onLine.Key];
+						var column = at.Start - line.Start;
+						
+						collected.Add(new(relativePath, onLine.Key + 1, column + 1, SearchFilesTool.Excerpt(text.ToString(line.Span), column), declaration) {
 							
-							Declares = onLine.Any(match => names.Any(name => name.OverlapsWith(new TextSpan(match.Position, match.Length)))),
+							Declares = declares,
 							
-							// Said per match only where it differs between them; a search of one
-							// context has it once, in the answer.
-							Context = context == "all" ? first.Context : null,
+							// Said per place only in a search over all contexts, where it differs
+							// between them; a search of one context has it once, in the answer. Every
+							// context the line's matches are in, in their order: 'Foo(); // Foo' is
+							// one place, and the first match alone said nothing of the comment.
+							Context = context == "all" ? string.Join(", ", found.Select(match => match.Context).Distinct()) : null,
 						});
 					}
 				}
@@ -389,10 +399,12 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			if(!token.IsKind(SyntaxKind.IdentifierToken))
 				continue;
 			
-			var span      = token.Span;
-			var tokenText = token.ToString();
+			var span = token.Span;
 			
-			if(regex.IsMatch(tokenText)) {
+			// Asked of the name as a whole, so a pattern of assertions alone selects names:
+			// '^(?!I)' the ones that do not start with I. Such a match has no length, and is a
+			// match all the same (#515).
+			if(regex.IsMatch(token.Text)) {
 				
 				yield return new SemanticMatchResult {
 					
@@ -448,6 +460,12 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			
 			foreach(Match m in regex.Matches(triviaText)) {
 				
+				// A doc comment's text takes the line break that ends it along. A match of no
+				// length at its very end ('$', '\z') is behind that break, on the line of the
+				// declaration, which is no line of the comment.
+				if(m.Length == 0 && m.Index == triviaText.Length && triviaText.EndsWith('\n'))
+					continue;
+				
 				var absPos  = span.Start + m.Index;
 				
 				yield return new SemanticMatchResult {
@@ -475,10 +493,14 @@ internal sealed class SemanticSearchTool : RoslynMcpTool
 			foreach(Match m in regex.Matches(lineText)) {
 				
 				// What the match is in is asked at its first character that is not whitespace:
-				// a pattern such as '\s+// TODO' starts before the comment it is about.
+				// a pattern such as '\s+// TODO' starts before the comment it is about. A match
+				// of no length, which a pattern of assertions alone makes ('^(?!.*TODO)'), is
+				// a position and is in what follows it on the line (#515): asked where it
+				// stands, at the start of an indented line, it was "code" whatever the line held.
 				var start = m.Index;
+				var last  = m.Length == 0 ? lineText.Length : m.Index + m.Length - 1;
 				
-				while(start < m.Index + m.Length - 1 && char.IsWhiteSpace(lineText[start]))
+				while(start < last && char.IsWhiteSpace(lineText[start]))
 					start++;
 				
 				yield return new SemanticMatchResult {

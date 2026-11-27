@@ -228,31 +228,29 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 						
 						var line = lines[i];
 						
-						// The first match of the line says where on it the hit is; the line is one hit
-						// however often the pattern matches it.
-						var hit = FirstMatch(rx, source.AsSpan(line.Start, line.Span.Length));
-						
-						if(hit is null)
+						// The line is one hit however often the pattern matches it. Which of its
+						// matches says where the hit is, and under which declaration it is listed,
+						// is EnclosingDeclaration.Among's rule: the first, unless a later one is a
+						// declaration's name ('logger' matches inside 'FileLogger' before it
+						// matches the field's name on the same line).
+						// The rest of the line's matches are looked for only where the rule needs
+						// them, which is not on a line inside a member's body: most hits.
+						if(FirstMatch(rx, source.AsSpan(line.Start, line.Span.Length)) is not { } hit)
 							continue;
 						
 						root ??= await document.GetSyntaxRootAsync(cancellationToken);
 						
-						var (declaration, names) = root is null
-							? (null, [])
-							: EnclosingDeclaration.At(root, text, line.Start + hit.Value.Index);
+						var leftmost = new TextSpan(line.Start + hit.Index, hit.Length);
 						
-						// Any match of the line, not the first alone: 'logger' matches inside
-						// 'FileLogger' before it matches the field's name on the same line.
-						// Looked for only on a line that holds a name: most hits are lines of a body,
-						// where no match can be on one.
-						var declares = Array.Exists(names, name => name.Start < line.End && name.End > line.Start)
-							&& MatchesAny(rx, source.AsSpan(line.Start, line.Span.Length), line.Start, names);
+						var (declaration, declares, at) = root is null
+							? (null, false, leftmost)
+							: EnclosingDeclaration.Among(root, text, leftmost, (Regex: rx, Source: source, Line: line), static found => MatchesOf(found.Regex, found.Source.AsSpan(found.Line.Start, found.Line.Span.Length), found.Line.Start));
 						
 						matches.Add(new MatchResult {
 							
 							File        = Path.GetRelativePath(rootPath, document.FilePath),
 							Line        = i + 1,
-							Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), hit.Value.Index),
+							Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), at.Start - line.Start),
 							Declaration = declaration,
 							Declares    = declares,
 						});
@@ -472,21 +470,17 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		return null;
 	}
 	
-	// Whether any match of the pattern in one line overlaps one of the spans, which are positions in
-	// the file: the line starts at lineStart.
-	static bool MatchesAny(Regex regex, ReadOnlySpan<char> line, int lineStart, TextSpan[] spans)
+	// The matches of the pattern in one line as positions in the file, in order: the line starts
+	// at lineStart. All of them, as the check for a declaration's name always had them: asked
+	// for only on the few lines where one of them can be such a name.
+	static TextSpan[] MatchesOf(Regex regex, ReadOnlySpan<char> line, int lineStart)
 	{
-		foreach(var match in regex.EnumerateMatches(line)) {
-			
-			var found = new TextSpan(lineStart + match.Index, match.Length);
-			
-			foreach(var span in spans)
-				if(span.OverlapsWith(found))
-					
-					return true;
-		}
+		var found = new List<TextSpan>();
 		
-		return false;
+		foreach(var match in regex.EnumerateMatches(line))
+			found.Add(new(lineStart + match.Index, match.Length));
+		
+		return [..found];
 	}
 	
 	/// <summary>
