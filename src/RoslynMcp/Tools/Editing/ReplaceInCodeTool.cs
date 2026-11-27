@@ -37,7 +37,7 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"One exception: a member of a class, struct, interface or record may be replaced by several members, written one after another " +
 		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow, moved with it when the text is moved as a block. " +
 		"The same holds for a type or delegate declared in a namespace or at file level, which several type declarations may replace. " +
-		"The node keeps its place: the blank lines before it and its indentation come from the file. The replacement text can be written at column 0 throughout, or at any one indentation: it is moved to the node's indentation as a block, a comment before the node and further members included. A text whose first line is unindented and whose further lines of code are already at the file's indentation is written as it is; so is one whose further lines are all indented under an unindented first line (a call's arguments, a '=>' body), so indent the first line too, or put the closing line at the text's left edge, when such a text is meant as a block. Lines inside a multi-line string or block comment and preprocessor directives are never moved, and a line indented less than the text's first line is written as given and named in _caution. " +
+		"The node keeps its place: the blank lines before it and its indentation come from the file. The replacement text can be written at column 0 throughout, or at any one indentation: it is moved to the node's indentation as a block, a comment before the node and further members included. A text whose first line is unindented and whose further lines of code are already at the file's indentation is written as it is; so is one whose further lines are all indented at least as deep as the node under an unindented first line (a call's arguments, a '=>' body one level in), so indent the first line too, or put the closing line at the text's left edge, when such a text is meant as a block. Lines inside a multi-line string or block comment and preprocessor directives are never moved, and a line indented less than the text's first line is written as given and named in _caution. " +
 		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
 		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
 		"In a list of members, what stands between two of them (blank lines, comments, a directive) is kept, at the indentation the text is written at or moved to. " +
@@ -827,15 +827,27 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		
 		// Text an #if leaves out is not among these: it is code like the rest, and which branch
 		// is left out is a matter of the project's symbols. Left where it was, one branch of every
-		// #if in a moved block would stay behind.
-		foreach(var token in SyntaxFactory.ParseTokens(text, options: options)) {
-			
-			Cover(token.Span);
-			
-			foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia))
-				if(trivia.Kind() is SyntaxKind.MultiLineCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia)
-					Cover(trivia.Span);
+		// #if in a moved block would stay behind. It is read as code in its turn, for the strings
+		// and comments it holds: they are values as much as those of the branch compiled.
+		void CoverIn(string code, int offset)
+		{
+			foreach(var token in SyntaxFactory.ParseTokens(code, options: options)) {
+				
+				Cover(new(token.SpanStart + offset, token.Span.Length));
+				
+				foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia)) {
+					
+					if(trivia.Kind() is SyntaxKind.MultiLineCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia)
+						Cover(new(trivia.SpanStart + offset, trivia.Span.Length));
+					
+					// Never the whole text again: what is left out is shorter than what held it.
+					if(trivia.IsKind(SyntaxKind.DisabledTextTrivia) && trivia.Span.Length < code.Length)
+						CoverIn(trivia.ToString(), trivia.SpanStart + offset);
+				}
+			}
 		}
+		
+		CoverIn(text, 0);
 		
 		// A directive's column is a matter of its own, and column 0 its usual place whatever
 		// stands around it: such a line is never moved, and says nothing about the block.
@@ -853,10 +865,18 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 			
 			return text;
 		
-		var start = IndentOf(texts[first]);
+		// Where the text starts is said by its first line of code. A comment before it may stand
+		// anywhere: the file's indentation takes the place of what is before the first comment,
+		// and a line commented out at column 0 above an indented member is no left edge.
+		var code = first;
 		
-		// What the later lines of code have in common: where the block's left edge is, bar its
-		// first line. Directives and comments are left out: one '#if' or one line commented out
+		while(code < texts.Length && (inside.Contains(code) || string.IsNullOrWhiteSpace(texts[code]) || IsDirective(code) || IsCommentOnly(code)))
+			code++;
+		
+		var start = IndentOf(texts[code < texts.Length ? code : first]);
+		
+		// What the later lines of code have in common: where the block's left edge is, bar the
+		// text's first line. Directives and comments are left out: one '#if' or one line commented out
 		// at column 0 made a text of the old convention look like a block at column 0, and its
 		// body was written twice as deep.
 		string? later = null;
@@ -901,7 +921,8 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 				
 				moved.Append(line);
 				
-				if(!string.IsNullOrWhiteSpace(line))
+				// Not the text's first line: what is before it is the file's in any case.
+				if(!string.IsNullOrWhiteSpace(line) && number > first)
 					behind.Add(number + 1);
 			}
 			

@@ -63,6 +63,7 @@ static class EditSafetyTests
 		fx.Write("code_indent.cs", "class Indent\n{\n\t/// <summary>Old.</summary>\n\tint Value { get; set; }\n\n\tint Other() { return 0; }\n\n\tint Third() { return 3; }\n}\n");
 		fx.Write("code_indent_old.cs", "class IndentOld\n{\n\tvoid M() { }\n}\n");
 		fx.Write("code_indent_deep.cs", "class IndentDeep\n{\n\tint Twin() { return 0; }\n\n\tclass Inner\n\t{\n\t\tint Twin() { return 0; }\n\t}\n}\n");
+		fx.Write("code_indent_off.cs", "class IndentOff\n{\n\tclass Inner\n\t{\n\t\tstring Text() { return \"\"; }\n\n\t\tint Plain() { return 0; }\n\t}\n}\n");
 		fx.Write("code_indent_text.cs", "class IndentText\n{\n\tstring Text() { return \"\"; }\n}\n");
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
@@ -307,6 +308,24 @@ static class EditSafetyTests
 					&& kept?["_caution"] is null
 					&& deep == "class IndentDeep\n{\n\tint Twin()\n\t{\n#if DEBUG\n\t\treturn 1;\n#endif\n\t}\n\n\tclass Inner\n\t{\n\t\tint Twin()\n\t\t{\n#if DEBUG\n\t\t\treturn 1;\n#endif\n\t\t}\n\t}\n}\n"
 					&& forced?["_caution"] is null, new JsonArray(kept?.DeepClone(), forced?.DeepClone()), oldFile + "\n---\n" + deep);
+			}),
+			
+			// Two more of the same kind. A string in the branch an #if leaves out is a value as much
+			// as one in the branch compiled: the branch moves with the block, the string's inner
+			// lines do not. And a line commented out at column 0 above a member written one tab in
+			// is no left edge: the member's first line of code is, so the block moves by one tab,
+			// not by two.
+			new("edit safety: a moved replacement keeps a string in a left-out #if branch, and takes its left edge from code", async () => {
+				
+				var branch = await InCode(new { filePath = "code_indent_off.cs", nodeKind = "method", textPattern = "Text", replacement = "string Text()\n{\n#if NEVER_DEFINED_531\n\treturn @\"a\n  b\";\n#else\n\treturn @\"c\n  d\";\n#endif\n}", projectPath = fx.Csproj });
+				var edge   = await InCode(new { filePath = "code_indent_off.cs", nodeKind = "method", textPattern = "Plain", replacement = "//int Old() { return 0; }\n\tint Plain()\n\t{\n\t\treturn 1;\n\t}", projectPath = fx.Csproj });
+				var after  = Read("code_indent_off.cs");
+				
+				return Verdict(after == "class IndentOff\n{\n\tclass Inner\n\t{\n"
+					+ "\t\tstring Text()\n\t\t{\n#if NEVER_DEFINED_531\n\t\t\treturn @\"a\n  b\";\n#else\n\t\t\treturn @\"c\n  d\";\n#endif\n\t\t}\n\n"
+					+ "\t\t//int Old() { return 0; }\n\t\tint Plain()\n\t\t{\n\t\t\treturn 1;\n\t\t}\n\t}\n}\n"
+					&& branch?["_caution"] is null
+					&& edge?["_caution"] is null, new JsonArray(branch?.DeepClone(), edge?.DeepClone()), after);
 			}),
 			
 			// What a string holds is a value: the lines inside a verbatim, an interpolated verbatim
