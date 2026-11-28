@@ -1430,7 +1430,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return true;
 		
-		if(SolutionSet.Above(fullPath, root, out var severalIn) is { } solution)
+		var rules = IgnoreRules.ForRoot(root, logger);
+		
+		if(SolutionSet.Above(fullPath, root, rules, out var severalIn) is { } solution)
 			owner = (Path.GetFullPath(solution), true, fullPath);
 		
 		// Said in the log, since the call goes on by the project or the root and the answer
@@ -1438,7 +1440,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		else if(severalIn is not null)
 			activeScope.Value?.Record($"several solutions in {Path.GetRelativePath(root, severalIn)}, none picked");
 		
-		if(owner is null && SolutionSet.ProjectAbove(fullPath, root) is { } project)
+		if(owner is null && SolutionSet.ProjectAbove(fullPath, root, rules) is { } project)
 			owner = (Path.GetFullPath(project), false, fullPath);
 		
 		return true;
@@ -1699,6 +1701,53 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return false;
 		}
+		
+		/// <summary>
+		///     Whether <paramref name="relativeDirectory"/> is a directory that was asked for by
+		///     name, or lies inside one. What is asked for by name is walked as if nothing above
+		///     it were ignored (#543): a configured path hides a directory and all below it, so
+		///     without this a named directory would be entered and found empty.
+		/// </summary>
+		public bool Covers(ReadOnlySpan<char> relativeDirectory)
+		{
+			for(var rest = relativeDirectory; !rest.IsEmpty; rest = Path.GetDirectoryName(rest))
+				if(Contains(Path.GetDirectoryName(rest), Path.GetFileName(rest)))
+					
+					return true;
+			
+			return false;
+		}
+	}
+	
+	/// <summary>
+	///     Whether a walk that lists or looks up files leaves out the directory called
+	///     <paramref name="name"/> in <paramref name="parent"/>: by the rules of a solution set
+	///     where there is one, else by the root's own.
+	///     <para>
+	///         One case is walked by names alone, the configured paths left aside (#543): a
+	///         directory inside one that was asked for by name (<paramref name="parentCovered"/>)
+	///         and that the rules had hidden. A configured path hides a directory and all below
+	///         it, so one that is named and entered would otherwise list nothing. Only there.
+	///         Below a named directory that was visible anyway (<c>src</c> in <c>src/**/*.cs</c>)
+	///         every rule holds as it does without the name, or naming a directory would switch
+	///         off the entries below it. And a directory that is only walked through, on the way
+	///         to an exception, opens nothing by being named: it is named by every path to that
+	///         exception, and its hidden children are each to be named themselves. Its own
+	///         files are the caller's to show (<see cref="IgnoreRules.HidesFilesOf(string?)"/>).
+	///     </para>
+	/// </summary>
+	protected static bool PrunedFromWalk(IgnoreRules rules, SolutionSet.Listing? set, ReadOnlySpan<char> parent, ReadOnlySpan<char> name, bool parentCovered)
+	{
+		// A hidden directory is reached only through a name, so a parent that is hidden and
+		// inside what was named is the named directory or lies below it.
+		var overridden = parentCovered && !parent.IsEmpty && ByRules(rules, set, Path.GetDirectoryName(parent), Path.GetFileName(parent));
+		
+		return overridden
+			? set?.IsPrunedByName(parent, name) ?? rules.IsPrunedByName(parent, name)
+			: ByRules(rules, set, parent, name);
+		
+		static bool ByRules(IgnoreRules rules, SolutionSet.Listing? set, ReadOnlySpan<char> parent, ReadOnlySpan<char> name)
+			=> set?.IsPruned(parent, name) ?? rules.IsPrunedFromListing(parent, name);
 	}
 	
 	/// <summary>
@@ -1801,7 +1850,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				recursive: true,
 				(ref FileSystemEntry directory) =>
 					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& (set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
+					&& PrunedFromWalk(rules, set, WorkspaceWalker.RelativeParent(ref directory), directory.FileName, named.Covers(WorkspaceWalker.RelativeParent(ref directory)))
 			);
 			
 			// Not stopped at the first match: that would report a match as unique without
@@ -1812,6 +1861,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				try {
 					if(!boundary.IsPathAllowed(candidate))
+						continue;
+					
+					// The files of a directory that is ignored and only walked through (#543),
+					// unless the path names that directory.
+					if(Path.GetDirectoryName(Path.GetRelativePath(rootPath, candidate)) is { Length: > 0 } parent
+						&& !named.Contains(Path.GetDirectoryName(parent.AsSpan()), Path.GetFileName(parent.AsSpan()))
+						&& (set?.HidesFilesOf(parent) ?? rules.HidesFilesOf(parent)))
 						continue;
 					
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {

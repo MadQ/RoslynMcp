@@ -35,9 +35,13 @@ internal static class SolutionSet
 					root,
 					["*.sln", "*.slnx"],
 					recursive: true,
-					(ref FileSystemEntry directory) => rules.IsExcluded(directory.FileName) || Levels(WorkspaceWalker.RelativeParent(ref directory)) >= Depth)
+					(ref FileSystemEntry directory) => rules.IsExcludedAt(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) || Levels(WorkspaceWalker.RelativeParent(ref directory)) >= Depth)
 				.Where(WorkspaceManager.IsSolutionPath)
 				.Where(path => !SecurityBoundary.PathComparer.Equals(Path.GetDirectoryName(path), root))
+				
+				// A solution file directly in a directory that is only walked through, on the way
+				// to an exception below it, is that ignored directory's own (#543).
+				.Where(path => !rules.IsHidden(Path.GetRelativePath(root, Path.GetDirectoryName(path)!)))
 				.Order(StringComparer.OrdinalIgnoreCase)];
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -65,11 +69,16 @@ internal static class SolutionSet
 	///     existing directory does. Not held to <see cref="Depth"/>: that bounds the walk down from
 	///     the root, and the way up from a file is as long as its path.
 	/// </summary>
-	public static string? Above(string path, string root, out string? severalIn)
+	public static string? Above(string path, string root, IgnoreRules rules, out string? severalIn)
 	{
 		severalIn = null;
 		
 		for(var directory = Path.GetDirectoryName(path); directory is not null && IsBelow(directory, root); directory = Path.GetDirectoryName(directory)) {
+			
+			// A solution in a directory the server stays out of is no member of the set (#543):
+			// the way up passes it as the walk down from the root never reaches it.
+			if(rules.IsHidden(Path.GetRelativePath(root, directory)))
+				continue;
 			
 			string[] solutions;
 			
@@ -100,9 +109,12 @@ internal static class SolutionSet
 	///     above it: the one project file in the nearest directory above the path that holds
 	///     any. <see langword="null"/> as for <see cref="Above"/>.
 	/// </summary>
-	public static string? ProjectAbove(string path, string root)
+	public static string? ProjectAbove(string path, string root, IgnoreRules rules)
 	{
 		for(var directory = Path.GetDirectoryName(path); directory is not null && IsBelow(directory, root); directory = Path.GetDirectoryName(directory)) {
+			
+			if(rules.IsHidden(Path.GetRelativePath(root, directory)))
+				continue;
 			
 			string[] projects;
 			
@@ -144,17 +156,71 @@ internal static class SolutionSet
 		/// <summary>As <see cref="IgnoreRules.IsPrunedFromListing"/>, for a directory called <paramref name="name"/> in <paramref name="relativeDirectory"/> under the root.</summary>
 		public bool IsPruned(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
 		{
+			// The root's configured paths at every depth (#543): the rules of a directory below
+			// the root may come from a config file of its own, which knows nothing of them.
+			if(rootRules.DecidedByPaths(relativeDirectory, name) is { } decided)
+				
+				return decided;
+			
 			if(relativeDirectory.IsEmpty)
 				
 				return rootRules.IsExcludedOrWorktree(relativeDirectory, name);
 			
-			var cut   = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-			var first = (cut < 0 ? relativeDirectory : relativeDirectory[..cut]).ToString();
+			var cut = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 			
-			if(!below.TryGetValue(first, out var rules))
-				below[first] = rules = IgnoreRules.ForRoot(Path.Combine(root, first), logger);
+			return RulesBelow(cut < 0 ? relativeDirectory : relativeDirectory[..cut]).IsPrunedFromListing(cut < 0 ? [] : relativeDirectory[(cut + 1)..], name);
+		}
+		
+		/// <summary>
+		///     <see cref="IsPruned"/> by names alone, the configured paths left aside, in the same
+		///     two steps: the root's names without its <c>.gitignore</c> at the top level, the
+		///     rules of the directory's own tree below it. For a directory inside one that was
+		///     asked for by name though the rules hide it.
+		/// </summary>
+		public bool IsPrunedByName(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
+		{
+			if(relativeDirectory.IsEmpty)
+				
+				return rootRules.IsPrunedByName(IgnoreRules.Tier.ExcludedOrWorktree, relativeDirectory, name);
 			
-			return rules.IsPrunedFromListing(cut < 0 ? [] : relativeDirectory[(cut + 1)..], name);
+			var cut = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+			
+			return RulesBelow(cut < 0 ? relativeDirectory : relativeDirectory[..cut]).IsPrunedByName(cut < 0 ? [] : relativeDirectory[(cut + 1)..], name);
+		}
+		
+		// The rules of one directory directly under the root, taken as a tree of its own.
+		IgnoreRules RulesBelow(ReadOnlySpan<char> first)
+		{
+			var name = first.ToString();
+			
+			if(!below.TryGetValue(name, out var rules))
+				below[name] = rules = IgnoreRules.ForRoot(Path.Combine(root, name), logger);
+			
+			return rules;
+		}
+		
+		/// <summary>
+		///     As <see cref="IgnoreRules.HidesFilesOf(string?)"/>, by the rules <see cref="IsPruned"/>
+		///     walked with: the root's paths as the top level asks them, without its
+		///     <c>.gitignore</c>, and then the rules of the directory's own tree. Asked any other
+		///     way, a directory the walk took for visible could lose its files, and one it
+		///     entered as a passage by its own tree's rules could keep them.
+		/// </summary>
+		public bool HidesFilesOf(string? relativeDirectory)
+		{
+			if(string.IsNullOrEmpty(relativeDirectory))
+				
+				return false;
+			
+			if(rootRules.HidesFilesOf(relativeDirectory, IgnoreRules.Tier.ExcludedOrWorktree))
+				
+				return true;
+			
+			var path = relativeDirectory.AsSpan();
+			var cut  = path.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+			
+			// A directory directly under the root is the root of its own tree, and no passage there.
+			return cut >= 0 && RulesBelow(path[..cut]).HidesFilesOf(path[(cut + 1)..].ToString());
 		}
 	}
 }

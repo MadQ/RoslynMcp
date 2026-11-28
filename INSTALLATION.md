@@ -474,7 +474,7 @@ Where a variable has an equivalent CLI flag, the **flag wins** — the full orde
 |----------|---------|-------------|
 | `ROSLYNMCP_ROOT` | *(server working directory)* | Same as `--root` (which, like a bare positional root, takes precedence) — the default workspace for tool calls that omit `projectPath`. |
 | `ROSLYNMCP_WORKSPACE` | `auto` | Same as `--workspace` flag — `sdk`, `vs`, `adhoc`, or `auto` |
-| `ROSLYNMCP_IGNORE` | *(none)* | Same as `--ignore` — extra directory names to skip, separated by commas or semicolons. |
+| `ROSLYNMCP_IGNORE` | *(none)* | Same as `--ignore` — extra directory names to skip, separated by commas or semicolons. Names only: paths and exceptions (`"ignore": ["Libs/*", "!Libs/Keep"]`) go in `.madq_roslynmcp.json`, whose list this replaces when set. |
 | `ROSLYNMCP_LOG_PATH` | `%LOCALAPPDATA%\RoslynMcp\logs\roslynmcp.{pid}.log` | Log file base path. PID is always injected before the extension. Set to empty string to disable logging. |
 | `ROSLYNMCP_BACKUP_PATH` | `%LOCALAPPDATA%\RoslynMcp\backups` | Backup store root for `roslyn_write_file` / `roslyn_local_history`. Set to empty to disable backups. |
 | `ROSLYNMCP_LOG_MAX_AGE_DAYS` | `30` | Delete old per-PID log files after this many days. |
