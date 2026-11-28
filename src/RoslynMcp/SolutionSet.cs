@@ -128,7 +128,8 @@ internal static class SolutionSet
 	
 	/// <summary>
 	///     Which directories a listing, a search or a file lookup over the whole root leaves out.
-	///     At the top level only the directories no workspace reads, and never the root's own
+	///     At the top level only the directories no workspace reads and the root's linked
+	///     worktrees, and never the root's own
 	///     <c>.gitignore</c>: the root is often a repository that ignores every repository in it,
 	///     by name, and those are what the set is made of. Below that, each directory directly
 	///     under the root is taken as a tree of its own, with its own <c>.gitignore</c>: what a
@@ -145,7 +146,7 @@ internal static class SolutionSet
 		{
 			if(relativeDirectory.IsEmpty)
 				
-				return rootRules.IsExcluded(name);
+				return rootRules.IsExcludedOrWorktree(relativeDirectory, name);
 			
 			var cut   = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 			var first = (cut < 0 ? relativeDirectory : relativeDirectory[..cut]).ToString();

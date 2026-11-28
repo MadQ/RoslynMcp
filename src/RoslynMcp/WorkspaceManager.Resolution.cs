@@ -126,7 +126,9 @@ internal sealed partial class WorkspaceManager
 	// When the search for a default workspace last came up empty. The search lists directories and
 	// walks up to the drive root, and RootedPath asks several times per tool call, so an empty
 	// answer is kept for a moment. Not for good: a solution may be created while the server runs,
-	// and an omitted projectPath, which always searches, would find it.
+	// and an omitted projectPath, which always searches, would find it. One created in the root
+	// or above it is found by the next call; one created below a root that had none is found
+	// within a minute, since the walk down is kept longer (NothingBelowRetryMs).
 	const int NoDefaultRetryMs = 2_000;
 	
 	// Starts one interval before any tick count, so the first question always searches.
@@ -459,7 +461,7 @@ internal sealed partial class WorkspaceManager
 		// every two seconds while there is no default, by whichever tool call comes next, and the
 		// walk is what costs: the steps above list a few directories, this one a tree.
 		if(nothingBelow is (var walked, var at) && SecurityBoundary.PathComparer.Equals(walked, root) && Environment.TickCount64 - at < NothingBelowRetryMs)
-			throw new NoDefaultWorkspaceException(root, source, $"no .sln, .slnx, or .csproj was found in it, no solution above it, and none in the {SolutionSet.Depth} directory levels below it");
+			throw new NoDefaultWorkspaceException(root, source, $"no .sln, .slnx, or .csproj was found in it, no solution above it, and none in the {SolutionSet.Depth} directory levels below it (looked for below it less than a minute ago, and again once a minute)");
 		
 		var below = SolutionSet.Find(root, logger);
 		

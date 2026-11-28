@@ -245,6 +245,27 @@ internal sealed class IgnoreRules
 	public bool IsExcluded(ReadOnlySpan<char> name) => excluded.Contains(name);
 	
 	/// <summary>
+	///     <see cref="IsExcluded"/> plus the linked worktrees below the root, and not the root
+	///     <c>.gitignore</c>: for the top level of a solution set (#501), whose root often ignores
+	///     the very repositories the set is made of, while a worktree of the root is still a
+	///     second copy of it (#511).
+	/// </summary>
+	public bool IsExcludedOrWorktree(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
+	{
+		if(excluded.Contains(name))
+			
+			return true;
+		
+		if(!hasWorktrees)
+			
+			return false;
+		
+		return worktreePaths.Contains(relativeDirectory.IsEmpty
+			? name.ToString()
+			: string.Concat(relativeDirectory, "/", name).Replace('\\', '/'));
+	}
+	
+	/// <summary>
 	///     <see cref="IsExcluded"/> plus the root <c>.gitignore</c> and the linked worktrees below
 	///     the root, for walks that list or look up files. <paramref name="relativeDirectory"/> is the parent of the directory called
 	///     <paramref name="name"/>, relative to the workspace root (empty for a top-level directory).

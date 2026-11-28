@@ -652,8 +652,14 @@ internal sealed partial class WorkspaceManager : IDisposable
 				
 				return;
 			
+			// And a workspace the file is inside, or that holds it already from wherever it is:
+			// a source a project compiles from beside its own directory, a props file imported
+			// by its path. Those are the workspace's own to classify, as before.
 			foreach(var instance in held)
-				if(SecurityBoundary.StartsWithPath(instance.RootPath, directory) || instance.ProjectPaths.Any(project => SecurityBoundary.StartsWithPath(project, directory)))
+				if(SecurityBoundary.StartsWithPath(fullPath, instance.RootPath)
+					|| SecurityBoundary.StartsWithPath(instance.RootPath, directory)
+					|| instance.ProjectPaths.Any(project => SecurityBoundary.StartsWithPath(project, directory))
+					|| instance.PeekSolution().GetDocumentIdsWithFilePath(fullPath).Length > 0)
 					instance.InvalidateFile(fullPath);
 			
 			return;
