@@ -378,6 +378,7 @@ Accepts `17`, `17.14`, or a vswhere range like `[17.0,18.0)`. The version pin al
 
 **Solution:**
 1. **`missing_project_path` on a call that omitted `projectPath`** means the server has no default workspace — its root (`--root`, `ROSLYNMCP_ROOT`, or its working directory) holds no solution or project, holds several solutions, or is a drive root/system directory. The error message says which. Pass `projectPath`, or start the server with `--root <repo dir>`; with several solutions, pin one with `"solution": "Foo.slnx"` in `.madq_roslynmcp.json`
+   - **`root_needs_solution`** is the answer where the root holds several solutions below it and none itself (a directory of repositories, named with `--root`). The root is no workspace: pass one of `found_solutions` as `projectPath`, or name a file, and the call lands in the solution above that file. Listing, text search and reading files work on the whole root without one
 2. **Prefer the `.csproj` (or `.sln`/`.slnx`) path directly** when you have one
 3. **If you pass a source file path,** RoslynMcp walks upward looking for exactly one `.csproj`
 4. **If you pass a directory,** RoslynMcp checks that directory for `.csproj`; no match means AdhocWorkspace

@@ -64,6 +64,10 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			// how an agent reaches bin/ or obj/ on purpose. With braces, a directory one expansion
 			// names ('{bin,src}/**') counts as named.
 			var rules = IgnoreRules.ForRoot(rootPath, logger);
+			
+			// Over the root of a solution set, each directory below it has ignore rules of its own (#501).
+			var set   = workspace.IsSolutionSet(projectPath) ? new SolutionSet.Listing(rootPath, logger) : null;
+			
 			NamedDirectorySet[] named = [.. patterns.Select(expanded => NamedDirectories(expanded, anchorLeadingSegments: true))];
 			
 			// Materialize relative paths upfront — reused by close-match hint on miss.
@@ -73,7 +77,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 				recursive,
 				(ref FileSystemEntry directory) =>
 					!IsNamed(named, WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+					&& (set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
 				.ToArray()

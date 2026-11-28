@@ -33,7 +33,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 	{
 		using var scope = BeginTool("roslyn_read_file", filePath, new { startLine, endLine });
 		
-		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError))
+		if(!TryResolveProjectArg(projectPath, filePath, out projectPath, out var projectError, reads: true))
 			
 			return scope.Error(projectError);
 		
@@ -103,7 +103,7 @@ internal sealed class ReadFileTool : RoslynMcpTool
 				source        = "disk";
 			}
 		}
-		else if(IsCSharpSourcePath(normalized)) {
+		else if(IsCSharpSourcePath(normalized) && !workspace.IsSolutionSet(projectPath)) {
 			
 			// Source files can exist in Roslyn's workspace even when the direct disk lookup misses.
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
@@ -127,7 +127,8 @@ internal sealed class ReadFileTool : RoslynMcpTool
 		else {
 			
 			// A C# file was looked for in the compilation above, where the project may hold one
-			// of the files a path ends; for any other file the files on disk are all there is.
+			// of the files a path ends; for any other file the files on disk are all there is,
+			// and so they are for the root of a solution set, which has no compilation (#501).
 			return ambiguousOnDisk is not null
 				? scope.Error(ambiguousOnDisk)
 				: scope.Failed("file not found", new ErrorResult($"File not found: {filePath}"));

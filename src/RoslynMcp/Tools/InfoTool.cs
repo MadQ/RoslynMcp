@@ -20,7 +20,8 @@ internal sealed class InfoTool : RoslynMcpTool
 	[Description(
 		"Returns server metadata: version, build hash, process ID, uptime, and MSBuild discovery method; the default workspace " +
 		"(default_workspace: the solution or project an omitted projectPath stands for, or why there is none, and which setting " +
-		"chose its root); and the code-action " +
+		"chose its root; for a root that holds several solutions below it, solutions lists them and which are loaded: a call " +
+		"then lands in the solution above the file it names); and the code-action " +
 		"provider sources loaded so far (built-in, bundled, the projects' analyzer references, configured entries) with what " +
 		"each yielded and any load problems — the place to look when a configured refactoring or fix provider does not show up. " +
 		"Analyzer references that loaded without a problem and hold no refactoring or fix are only counted " +

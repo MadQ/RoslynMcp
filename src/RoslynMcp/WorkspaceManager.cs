@@ -18,6 +18,8 @@ enum ResolutionKind
 	InferredFromCache,
 	/// <summary>No .csproj found — running in AdhocWorkspace with reduced functionality.</summary>
 	Adhoc,
+	/// <summary>The root of the session's solution set (#501): no workspace, a place files are listed, searched and read in.</summary>
+	SolutionSet,
 }
 
 /// <summary>
@@ -268,10 +270,15 @@ internal sealed partial class WorkspaceManager : IDisposable
 	{
 		var normalizedPath = Path.GetFullPath(resolvedPath);
 		
+		// The root of a solution set is no workspace (#501). Whatever asks for one by it gets the
+		// solutions to choose from, and never an AdhocWorkspace over all of them.
+		if(IsSolutionSetRoot(normalizedPath))
+			throw new Tools.SolutionSetNeedsSolutionException(SolutionSetRoot!, SolutionSetMembers());
+		
 		// Fast path: cache hit under short lock — doesn't block on workspace loading.
 		lock(cacheLock) {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey) && cache.TryGetValue(mappedKey, out var mappedEntry)) {
+			if(TryMapped(normalizedPath, out var mappedKey) && cache.TryGetValue(mappedKey, out var mappedEntry)) {
 				
 				cache[mappedKey] = mappedEntry with { LastAccess = DateTime.UtcNow };
 				
@@ -350,6 +357,35 @@ internal sealed partial class WorkspaceManager : IDisposable
 		return instance;
 	}
 	
+	/// <summary>
+	///     The cache key a project file is answered under. Callers hold <see cref="cacheLock"/>.
+	///     A project file can be part of several loaded solutions (a contracts project its consumers
+	///     reference as a project), and the index knows only the one loaded last. So a call that has
+	///     settled on a solution (<see cref="CallLanding"/>) is answered from that solution wherever
+	///     it holds the project: by every lookup alike, since the read that found a file and the
+	///     write that changes it must not be two workspaces (#501).
+	///     <para>
+	///         The landing is the call's, read from an <see cref="AsyncLocal{T}"/>. Work that
+	///         outlives the call (a timer, a watcher thread, a load another call waits on) captures
+	///         it too, so nothing that runs in the background may come through here: it would be
+	///         answered for a call that has ended. The watcher flush and the reload work on their
+	///         own instance and never look one up.
+	///     </para>
+	/// </summary>
+	bool TryMapped(string normalizedPath, out string key)
+	{
+		if(CallLanding.Current?.Solution is { } landed
+			&& cache.TryGetValue(landed, out var entry)
+			&& entry.Instance.HoldsProject(normalizedPath)) {
+			
+			key = landed;
+			
+			return true;
+		}
+		
+		return projectToCacheKey.TryGetValue(normalizedPath, out key!);
+	}
+	
 	// Callers hold cacheLock. Marks the entry used and lets the path find it directly next time.
 	void TouchAndAlias(string cacheKey, CacheEntry entry, string normalizedPath)
 	{
@@ -381,7 +417,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 				if(pendingLoads.TryGetValue(cacheKey, out var current) && ReferenceEquals(current, pending))
 					pendingLoads.Remove(cacheKey);
 				
-				if(projectToCacheKey.TryGetValue(normalizedPath, out var raceKey)
+				if(TryMapped(normalizedPath, out var raceKey)
 					&& cache.TryGetValue(raceKey, out var raceEntry)) {
 					
 					doomed         = [instance];
@@ -547,7 +583,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		lock(cacheLock) {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+			if(TryMapped(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var mapped))
 				
 				return mapped.Boundary;
@@ -563,7 +599,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		lock(cacheLock) {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey2)
+			if(TryMapped(normalizedPath, out var mappedKey2)
 				&& cache.TryGetValue(mappedKey2, out var mapped2))
 				
 				return mapped2.Boundary;
@@ -587,7 +623,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		lock(cacheLock) {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey) && cache.TryGetValue(mappedKey, out var entry))
+			if(TryMapped(normalizedPath, out var mappedKey) && cache.TryGetValue(mappedKey, out var entry))
 				entry.Instance.RequestReload(reason);
 			else if(cache.TryGetValue(normalizedPath, out var directEntry))
 				directEntry.Instance.RequestReload(reason);
@@ -599,10 +635,40 @@ internal sealed partial class WorkspaceManager : IDisposable
 	{
 		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
 		
+		// Written through the root of a solution set (#501): a file no solution is above, which a
+		// loaded one may still be evaluated from (a Directory.Build.props beside the repositories).
+		// Only a workspace with something at or below the file's directory can be: MSBuild
+		// imports upward, and a source file is a project's from its directory down. Passed to
+		// every workspace, a new source file or a props file anywhere under the root would flag
+		// a full reload of all of them, since each takes an unknown one for its own.
+		if(IsSolutionSetRoot(normalizedPath)) {
+			
+			WorkspaceInstance[] held;
+			
+			lock(cacheLock)
+				held = [..cache.Values.Select(entry => entry.Instance)];
+			
+			if(Path.GetDirectoryName(Path.GetFullPath(fullPath)) is not { } directory)
+				
+				return;
+			
+			// And a workspace the file is inside, or that holds it already from wherever it is:
+			// a source a project compiles from beside its own directory, a props file imported
+			// by its path. Those are the workspace's own to classify, as before.
+			foreach(var instance in held)
+				if(SecurityBoundary.StartsWithPath(fullPath, instance.RootPath)
+					|| SecurityBoundary.StartsWithPath(instance.RootPath, directory)
+					|| instance.ProjectPaths.Any(project => SecurityBoundary.StartsWithPath(project, directory))
+					|| instance.PeekSolution().GetDocumentIdsWithFilePath(fullPath).Length > 0)
+					instance.InvalidateFile(fullPath);
+			
+			return;
+		}
+		
 		lock(cacheLock) {
 			
 			// Check secondary index (solution-level entries).
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+			if(TryMapped(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry)) {
 				
 				entry.Instance.InvalidateFile(fullPath);
@@ -628,7 +694,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		lock(cacheLock) {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+			if(TryMapped(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry)) {
 				
 				if(entry.Instance.ApplyChangesToDisk(newSolution))
@@ -661,7 +727,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		lock(cacheLock) {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+			if(TryMapped(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry))
 				
 				return entry.Instance.TryApplyTextChange(fullPath, text);
@@ -685,7 +751,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 		// Grab the instance reference under the lock but await the write outside it.
 		lock(cacheLock) {
 			
-			if(projectToCacheKey.TryGetValue(normalizedPath, out var mappedKey)
+			if(TryMapped(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry))
 				
 				instance = entry.Instance;
@@ -702,6 +768,10 @@ internal sealed partial class WorkspaceManager : IDisposable
 			// is self-healing: the debounce timer re-reads the (correct) file from disk.
 			await write()
 			;
+		
+		// Through the root of a solution set no instance was looked up; see InvalidateFile.
+		if(instance is null && IsSolutionSetRoot(normalizedPath))
+			InvalidateFile(normalizedPath, fullPath);
 	}
 	
 	

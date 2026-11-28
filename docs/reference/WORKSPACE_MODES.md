@@ -290,7 +290,20 @@ A tool call that omits `projectPath` uses the session's **default workspace**, r
 1. **Root:** `--root <path>` (or a bare positional path) > `ROSLYNMCP_ROOT` > the server's working directory.
 2. **Workspace:** a `.sln`/`.slnx`/`.csproj` root is used as-is. A directory resolves to the solution named by `"solution"` in `.madq_roslynmcp.json`, else the one `.sln`/`.slnx` in it, else the nearest solution above it, else its single `.csproj`.
 3. **Relative paths:** a relative `projectPath` is resolved against the default workspace's directory when it names something there, and against the server's working directory otherwise. Tools report paths relative to the workspace root, so those can be passed back as they are. `roslyn_info` reports the default workspace and which setting chose its root.
-4. **Guards:** drive roots and system directories are rejected, the search never goes downward, and the default is never an AdhocWorkspace. With no usable default, the call fails with `missing_project_path` and a hint to pass `projectPath` or `--root`.
+4. **Guards:** drive roots and system directories are rejected, the server's working directory is never searched downward, and the default is never an AdhocWorkspace. With no usable default, the call fails with `missing_project_path` and a hint to pass `projectPath` or `--root`.
+5. **A root of several solutions:** a root named with `--root` or `ROSLYNMCP_ROOT` that holds no solution, with none above it, is searched four directory levels down (never a home directory or a directory above one). One solution found there is the default. Several make the root a **solution set**, described below.
+
+#### A root that holds several solutions
+
+A product is often many repositories side by side, each with its own solution, and a session is opened in the directory that holds them all. That directory is no workspace, and nothing is loaded for it:
+
+- **A call that names a file lands in the nearest solution above the file.** That solution is loaded then, and only then. Which solution it is depends on the file system alone, never on which solutions are loaded, so the same file lands in the same solution every time. A solution below another solution's directory owns its own files.
+- **Listing, text search and reading cover the whole root** (`roslyn_list_files`, `roslyn_search_files`, `roslyn_read_file`, `roslyn_get_line_count`), from disk, and load no solution. Each directory directly below the root is listed by its own `.gitignore`; the root's own is not applied, since a root that is a repository usually ignores the repositories in it.
+- **A call that needs code and names neither a file nor a solution** is refused with `root_needs_solution` and the solutions to choose from. A call that names only a symbol is among these for now.
+- **Paths are relative to the root** in such a call, in and out. A call that names a solution as `projectPath` takes and reports paths relative to that solution, as always.
+- **A project that several solutions share** (a contracts project its consumers reference as a project) is a project of each of them. A call is answered from the solution it landed in or named; a reference search there stops at that solution's edge.
+
+`roslyn_info` lists the solutions and which are loaded (`default_workspace.solutions`). The server keeps five workspaces by default; a sixth unloads the one used longest ago, which loads again at its next use.
 
 File-based tools (`roslyn_read_file`, `roslyn_get_file_outline`, the editing tools, …) then pick the project **in that solution that contains the file**, so a file in any project works. Build, clean, and restore target the whole solution. A `.sln`/`.slnx` path is also accepted as an explicit `projectPath`.
 

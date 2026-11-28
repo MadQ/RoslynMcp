@@ -86,6 +86,25 @@ internal sealed class NoDefaultWorkspaceException : ArgumentException
 }
 
 /// <summary>
+///     Thrown when a call needs code and names only the root of a <see cref="SolutionSet"/> (#501):
+///     a root that holds several solutions is no workspace, and nothing in the call says which of
+///     them is meant. Not an <see cref="ArgumentException"/>: the answer is the list of solutions,
+///     not <c>missing_project_path</c>.
+/// </summary>
+internal sealed class SolutionSetNeedsSolutionException : Exception
+{
+	public string   Root      { get; }
+	public string[] Solutions { get; }
+	
+	public SolutionSetNeedsSolutionException(string root, string[] solutions)
+		: base($"'{root}' holds {solutions.Length} solutions and is no workspace itself. Nothing in the call says which solution is meant.")
+	{
+		Root      = root;
+		Solutions = solutions;
+	}
+}
+
+/// <summary>
 ///     Thrown when a bare filename matches SyntaxTrees in more than one cached MSBuild workspace.
 ///     The agent must disambiguate by providing an explicit .csproj path.
 /// </summary>

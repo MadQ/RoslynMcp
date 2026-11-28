@@ -96,6 +96,11 @@ internal abstract partial class RoslynMcpTool
 		
 		var (candidates, rootPath) = found;
 		
+		// Whichever project is picked is answered from this solution, also where another loaded
+		// solution holds the same project file (#501).
+		if(CallLanding.Current is { } landing && ResolvedSolutionPath(resolved) is { } within)
+			landing.Solution = Path.GetFullPath(within);
+		
 		if(candidates.Length == 1)
 			
 			return (PickProject(candidates[0]), null);

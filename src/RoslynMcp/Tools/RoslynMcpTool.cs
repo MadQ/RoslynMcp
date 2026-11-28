@@ -226,6 +226,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		var scope  = new ToolScope(name, subject, logger, () => activeScope.Value = null, paginationCache);
 		activeScope.Value = scope;
 		
+		CallLanding.Begin();
+		
 		if(callFrame.Value is { } frame) {
 			
 			frame.Started = true;
@@ -408,6 +410,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return false;
 		}
+		catch(SolutionSetNeedsSolutionException ex) {
+			
+			error = SolutionSetError(ex);
+			logger.LogError("TryGetCompilation", ex.Message);
+			
+			return false;
+		}
 		catch(Exception ex) {
 			
 			error = UnexpectedError(ex);
@@ -433,6 +442,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			ResolutionKind.FileWalkUp         => "file→.csproj",
 			ResolutionKind.InferredFromCache  => $"inferred from '{Path.GetFileName(projectPath)}'",
 			ResolutionKind.Adhoc              => "adhoc (no .csproj)",
+			ResolutionKind.SolutionSet        => "solution set root",
 			_                                 => null!
 		});
 	}
@@ -504,6 +514,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				Error = "missing_project_path",
 				Hint  = MissingProjectPathHint
 			};
+			logger.LogError("TryGetProject", ex.Message);
+			
+			return false;
+		}
+		catch(SolutionSetNeedsSolutionException ex) {
+			
+			error = SolutionSetError(ex);
 			logger.LogError("TryGetProject", ex.Message);
 			
 			return false;
@@ -596,6 +613,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				or InvalidProjectPathException
 				or AmbiguousFileException
 				or WorkspaceLoadTimeoutException
+				or SolutionSetNeedsSolutionException
 				or ArgumentException);
 	
 
@@ -619,6 +637,17 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		error    = null;
 		
 		try {
+			
+			// The root of a solution set (#501): files and a boundary, and no workspace to load.
+			if(workspace.SolutionSetContext(projectPath) is { } set) {
+				
+				activeScope.Value?.NoteProject(projectPath);
+				activeScope.Value?.Record("solution set root");
+				
+				(rootPath, boundary) = set;
+				
+				return true;
+			}
 			
 			var view = ViewOf("TryResolveFileContext", projectPath, readsCode: false);
 			
@@ -766,6 +795,16 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			// GetWorkspaceInfo rather than GetRootPath: the same lookup also says whether the workspace is
 			// MSBuild or Adhoc, which the scope must record — list_files resolves only its root, and
 			// without this logged an AdhocWorkspace call with an MSBuild label (#303).
+			if(workspace.SolutionSetContext(projectPath) is { } set) {
+				
+				activeScope.Value?.NoteProject(projectPath);
+				activeScope.Value?.Record("solution set root");
+				
+				rootPath = set.Root;
+				
+				return true;
+			}
+			
 			var view = ViewOf("TryResolveRoot", projectPath, readsCode: false);
 			
 			var (rPath, isMSBuild, _) = ResolveWithRetry("TryResolveRoot", () => workspace.GetWorkspaceInfo(projectPath));
@@ -1018,6 +1057,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				return AmbiguousFileError(e);
 			
+			// Not logged as an error: a tool that reads a file tries for its solution and reads
+			// the disk without one, and a call this is the answer of says so in its own entry.
+			case SolutionSetNeedsSolutionException e:
+				
+				return SolutionSetError(e);
+			
 			case ArgumentException e:
 				logger.LogError(op, e.Message);
 				
@@ -1116,6 +1161,20 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			Hint  = "Pass filePath relative to the workspace root, or enough of its directories to name one file (e.g. 'Tools/Program.cs')."
 		};
 	
+	/// <summary>
+	///     The <c>root_needs_solution</c> error (#501): the call needs code, and the session's root
+	///     holds several solutions of which the call names none. The shape of
+	///     <c>solution_needs_project</c>, one level up; the solutions are relative to the root, which
+	///     is how a projectPath is taken.
+	/// </summary>
+	private static PathErrorResult SolutionSetError(SolutionSetNeedsSolutionException ex)
+		=> new(ex.Message, ProvidedPath: ex.Root, FoundSolutions: [..ex.Solutions.Select(solution => Path.GetRelativePath(ex.Root, solution))])
+		{
+			Error = "root_needs_solution",
+			Hint  = "Pass one of found_solutions as projectPath. A call that names a file needs none: it lands in the solution above the file. " +
+				"roslyn_list_files, roslyn_search_files and roslyn_read_file work on the whole root without one."
+		};
+	
 	private static PathErrorResult InvalidPathError(InvalidProjectPathException ex)
 		=> new(ex.Message, ProvidedPath: ex.Path)
 		{
@@ -1135,7 +1194,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	///     Returns null for MSBuildWorkspace — callers can use null-conditional to omit cleanly.
 	/// </summary>
 	protected string? AdhocCaution(string projectPath)
-		=> workspace.IsAdhoc(projectPath)
+		=> !workspace.IsSolutionSet(projectPath) && workspace.IsAdhoc(projectPath)
 			? "AdhocWorkspace in use — pass the .csproj path directly for full MSBuild support (complete type info, references, diagnostics)."
 			: null
 	;
@@ -1222,7 +1281,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		string? projectPath,
 		string? filePath,
 		out string resolved,
-		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error,
+		bool reads = false)
 	{
 		var wasOmitted = string.IsNullOrWhiteSpace(projectPath);
 		
@@ -1230,6 +1290,8 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		// over to the next.
 		if(activeScope.Value is { } current)
 			current.FileInNoProject = null;
+		
+		CallLanding.Current?.Clear();
 		
 		if(!TryResolveProjectArg(projectPath, out resolved, out error))
 			
@@ -1253,7 +1315,36 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			isSolution = false;
 		}
 		
-		if(!wasOmitted && !isSolution)
+		// The root of a solution set (#501): the file says which solution, and the call goes on
+		// there as if that solution had been named.
+		if(workspace.SolutionSetContext(resolved) is { } set) {
+			
+			if(!TryFindOwnerInSet(set.Root, set.Boundary, filePath, out var owner, out error))
+				
+				return false;
+			
+			// No solution and no project above the file (a README beside the repositories): the
+			// root stays, for the tools that need files only. A read does not load a solution
+			// either: the file on disk is what a workspace would answer with.
+			if(owner is not { } found || (reads && !workspace.IsLoaded(found.Target)))
+				
+				return true;
+			
+			if(CallLanding.Current is { } landing)
+				(landing.ReportRoot, landing.Solution) = (set.Root, found.IsSolution ? found.Target : null);
+			
+			activeScope.Value?.Record($"lands in {Path.GetFileName(found.Target)}");
+			
+			resolved = found.Target;
+			
+			if(!found.IsSolution)
+				
+				return true;
+			
+			// Narrowed to its project below, by the file's full path.
+			filePath = found.FullPath;
+		}
+		else if(!wasOmitted && !isSolution)
 			
 			return true;
 		
@@ -1276,6 +1367,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			if(owner is not null) {
 				
+				// The project is answered from the solution it was found in, also where another
+				// loaded solution holds the same project file (#501).
+				if(CallLanding.Current is { } narrowed && ResolvedSolutionPath(defaultPath) is { } within)
+					narrowed.Solution = Path.GetFullPath(within);
+				
 				activeScope.Value?.Record($"→ {Path.GetFileName(owner)}");
 				resolved = owner;
 			}
@@ -1291,6 +1387,52 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			// through its structured mapping when it resolves the default path.
 			logger.LogInfo("TryResolveProjectArg", $"{ex.GetType().Name}: {ex.Message}");
 		}
+		
+		return true;
+	}
+	
+	/// <summary>
+	///     Where a file named in a call belongs in the session's solution set (#501): the solution
+	///     above it, else the project above it, each the nearest and within the root
+	///     (<see cref="SolutionSet.Above"/>); nothing when neither is there. The file is looked up as
+	///     every tool looks one up, relative to the root or by the end of its path, and a path that
+	///     ends several files is the <c>ambiguous_file</c> error. A file that does not exist yet
+	///     belongs where its path puts it.
+	/// </summary>
+	bool TryFindOwnerInSet(
+		string root,
+		SecurityBoundary boundary,
+		string filePath,
+		out (string Target, bool IsSolution, string FullPath)? owner,
+		[System.Diagnostics.CodeAnalysis.NotNullWhen(false)] out ToolResult? error)
+	{
+		owner = null;
+		error = null;
+		
+		var fullPath = ResolveFilePath(filePath, root, boundary, out var ambiguous);
+		
+		if(ambiguous is not null) {
+			
+			error = ambiguous;
+			
+			return false;
+		}
+		
+		// Not there: a file about to be written, or a wrong name, which the tool itself reports.
+		if(fullPath is null && !TryResolveTargetPath(filePath, root, boundary, out fullPath, out _))
+			
+			return true;
+		
+		if(SolutionSet.Above(fullPath, root, out var severalIn) is { } solution)
+			owner = (Path.GetFullPath(solution), true, fullPath);
+		
+		// Said in the log, since the call goes on by the project or the root and the answer
+		// would not show why no solution was loaded.
+		else if(severalIn is not null)
+			activeScope.Value?.Record($"several solutions in {Path.GetRelativePath(root, severalIn)}, none picked");
+		
+		if(owner is null && SolutionSet.ProjectAbove(fullPath, root) is { } project)
+			owner = (Path.GetFullPath(project), false, fullPath);
 		
 		return true;
 	}
@@ -1636,13 +1778,16 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			var     rules     = IgnoreRules.ForRoot(rootPath, logger);
 			var     named     = NamedDirectories(normalized, anchorLeadingSegments: false);
 			
+			// Over the root of a solution set, as a listing of it prunes (#501).
+			var     set       = workspace.IsSolutionSet(rootPath) ? new SolutionSet.Listing(rootPath, logger) : null;
+			
 			var candidates = WorkspaceWalker.EnumerateFiles(
 				rootPath,
 				fileName,
 				recursive: true,
 				(ref FileSystemEntry directory) =>
 					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+					&& (set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
 			);
 			
 			// Not stopped at the first match: that would report a match as unique without
