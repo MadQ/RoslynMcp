@@ -56,6 +56,8 @@ internal sealed class ChangeSignatureTool : RoslynMcpTool
 		
 		projectPath = resolvedProject;
 		
+		NoteSolutionEdge(projectPath, changes: true);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);

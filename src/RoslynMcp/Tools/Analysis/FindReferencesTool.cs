@@ -132,6 +132,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			
 			projectPath = resolvedProject;
 			
+			NoteSolutionEdge(projectPath);
+			
 			if(!TryGetCompilation(projectPath, out var compilation, out var error))
 				
 				return scope.Error(error);
@@ -191,6 +193,8 @@ internal sealed class FindReferencesTool : RoslynMcpTool
 			return (null, projectError, projectError.Error ?? "project not resolved");
 		
 		projectPath = resolvedProject;
+		
+		NoteSolutionEdge(projectPath);
 		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			

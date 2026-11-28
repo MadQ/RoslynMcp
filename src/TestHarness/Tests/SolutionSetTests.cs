@@ -41,6 +41,10 @@ static class SolutionSetTests
 		fx.Write("Gamma/Tool/Tool.csproj", Project);
 		fx.Write("Gamma/Tool/Tool.cs", "namespace Tool;\n\npublic class Hammer { }\n");
 		
+		// One name for a type in two projects that no solution shares.
+		fx.Write("Alpha/tools/Nested/N/Twin.cs", "namespace N;\n\npublic class Twin { }\n");
+		fx.Write("Beta/src/Lib/Twin.cs", "namespace Lib;\n\npublic class Twin { }\n");
+		
 		// The root as a repository of its own that ignores the repositories in it by name, which
 		// must not hide them from a listing or a search of the root; and a directory no solution
 		// is above, for a source file written through the root alone.
@@ -159,7 +163,6 @@ static class SolutionSetTests
 					("roslyn_get_project_info",    new { }),
 					("roslyn_semantic_search",     new { pattern = "Greet" }),
 					("roslyn_find_string_literal", new { pattern = "alpha" }),
-					("roslyn_find_references",     new { symbolName = "Greet" }),
 				];
 				
 				foreach(var (tool, args) in calls) {
@@ -174,6 +177,30 @@ static class SolutionSetTests
 					$"expected root_needs_solution from each and nothing loaded; got {string.Join(" | ", failures)}", sw);
 			}),
 			
+			// A call that names only a symbol is looked for in the loaded solutions, and here none
+			// is loaded. The answer must say so and must not load one to find out; what it can
+			// offer is the solutions whose source mentions the name, read from disk: Alpha, which
+			// declares Greet, and Beta, which calls it, and not Gamma or Nested, which do neither.
+			// A later page of a search over the root runs again from its position, since no
+			// watcher stands behind the root to say a kept result is stale: both pages answer.
+			new("solution set: a symbol is not looked for in solutions that are not loaded, and the answer names where it could be", async () => {
+				
+				var sw     = Stopwatch.StartNew();
+				var answer = await Call("roslyn_find_references", new { symbolName = "Greet" });
+				
+				string[] could = [..(answer?["found_solutions"]?.AsArray() ?? []).Select(solution => Slashed(solution?.GetValue<string>()))];
+				
+				var first  = await Call("roslyn_search_files", new { pattern = "class", take = 1 });
+				var second = await Call("roslyn_search_files", new { pattern = "class", take = 1, page_token = first?["page_token"]?.GetValue<string>() });
+				
+				return Verdict(answer?["error"]?.GetValue<string>() == "symbol_not_in_loaded_solutions"
+					&& could.SequenceEqual(["Alpha/Alpha.slnx", "Beta/src/Beta.slnx"]) && answer?["searched_solutions"] is null
+					&& (await LoadedAsync()).Length == 0
+					&& first?["has_more"]?.GetValue<bool>() == true && second?["error"] is null && FilesOf(second, "files").Length == 1
+					&& second?["files"]?[0]?.ToJsonString() != first?["files"]?[0]?.ToJsonString(),
+					$"expected symbol_not_in_loaded_solutions naming Alpha and Beta, nothing loaded, and two different pages; got {answer?.ToJsonString() ?? "null"} / {first?.ToJsonString() ?? "null"} / {second?.ToJsonString() ?? "null"}", sw);
+			}),
+			
 			// The mode itself: a call that names a file lands in the solution above the file
 			// without naming it, and that solution alone is loaded. The path is taken relative to
 			// the root and answered relative to the root, so it can go into the next call as it is.
@@ -186,6 +213,30 @@ static class SolutionSetTests
 				return Verdict(outline?["error"] is null && Slashed(outline?["file"]?.GetValue<string>()) == "Alpha/App/Greeter.cs"
 					&& loaded.SequenceEqual(["Alpha/Alpha.slnx"]),
 					$"expected the outline of Alpha/App/Greeter.cs and only Alpha/Alpha.slnx loaded; got {outline?.ToJsonString() ?? "null"} / loaded {string.Join(", ", loaded)}", sw);
+			}),
+			
+			// With Alpha loaded, a symbol it declares is found by its name alone and the call
+			// lands there, with root-relative paths. Its project is also listed by Beta, which is
+			// not loaded: the reference search stopped at Alpha's edge and must say so, naming
+			// Beta, or the answer reads as every use there is. A symbol of a solution that is not
+			// loaded is not found, and the answer says what was searched and where it could be.
+			new("solution set: a symbol of a loaded solution is found by name, and the answer says where the search stopped", async () => {
+				
+				var sw      = Stopwatch.StartNew();
+				var found   = await Call("roslyn_find_references", new { symbolName = "Greet" });
+				var missing = await Call("roslyn_find_references", new { symbolName = "Hammer" });
+				
+				string[] searched = [..(missing?["searched_solutions"]?.AsArray() ?? []).Select(solution => Slashed(solution?.GetValue<string>()))];
+				string[] could    = [..(missing?["found_solutions"]?.AsArray() ?? []).Select(solution => Slashed(solution?.GetValue<string>()))];
+				
+				return Verdict(found?["error"] is null
+					&& FilesOf(found, "declarations").SequenceEqual(["Alpha/App/Greeter.cs"])
+					&& Slashed(found?["_caution"]?.GetValue<string>()).Contains("Beta/src/Beta.slnx")
+					&& (found?["_caution"]?.GetValue<string>() ?? "").Contains("not loaded")
+					&& missing?["error"]?.GetValue<string>() == "symbol_not_in_loaded_solutions"
+					&& searched.SequenceEqual(["Alpha/Alpha.slnx"]) && could.SequenceEqual(["Gamma/Gamma.slnx"])
+					&& (await LoadedAsync()).SequenceEqual(["Alpha/Alpha.slnx"]),
+					$"expected Greet declared in Alpha/App/Greeter.cs with a caution naming Beta, and Hammer not found with Alpha searched and Gamma offered; got {found?.ToJsonString() ?? "null"} / {missing?.ToJsonString() ?? "null"}", sw);
 			}),
 			
 			// A solution below another solution's directory: the nearest one above the file owns
@@ -223,6 +274,40 @@ static class SolutionSetTests
 					$"expected no reference in Worker.cs from Alpha, landed or named, and one from Beta; got {landed?.ToJsonString() ?? "null"} / {named?.ToJsonString() ?? "null"} / {consumer?.ToJsonString() ?? "null"}", sw);
 			}),
 			
+			// Three solutions are loaded now. A name one of them declares lands there. A name two
+			// projects declare is answered with both candidates. And a name declared in the
+			// project Alpha and Beta share is refused with those two solutions: its references
+			// differ between them (the test above), so neither is picked.
+			new("solution set: by name, one declaration lands, two are candidates, and a shared project is refused with its solutions", async () => {
+				
+				var sw     = Stopwatch.StartNew();
+				var one    = await Call("roslyn_find_references", new { symbolName = "Work" });
+				var two    = await Call("roslyn_find_references", new { symbolName = "Twin" });
+				var shared = await Call("roslyn_find_references", new { symbolName = "Greet" });
+				
+				string[] holding = [..(shared?["found_solutions"]?.AsArray() ?? []).Select(solution => Slashed(solution?.GetValue<string>()))];
+				
+				// The shared project named outright is answered from its own solution, Alpha, whatever
+				// was loaded last (Beta, where Greet has a caller), and says that Beta lists it too.
+				// And a type of a referenced assembly is not looked for with several solutions
+				// loaded: the answer must say that, not send the agent after a misspelling.
+				var viaProject = await Call("roslyn_find_references", new { symbolName = "Greet", projectPath = "Alpha/App/App.csproj" });
+				var framework  = await Call("roslyn_find_implementations", new { symbolName = "IDisposable" });
+				
+				if(viaProject?["error"] is not null || FilesOf(viaProject, "references").Any(file => file.EndsWith("Worker.cs"))
+					|| !Slashed(viaProject?["_caution"]?.GetValue<string>()).Contains("Beta/src/Beta.slnx")
+					|| framework?["error"]?.GetValue<string>() != "symbol_not_in_loaded_solutions"
+					|| !(framework?["hint"]?.GetValue<string>() ?? "").Contains("searched_solutions"))
+					
+					return Verdict(false, $"expected Greet through App.csproj answered from Alpha with a caution naming Beta, and IDisposable not looked for with a hint saying so; got {viaProject?.ToJsonString() ?? "null"} / {framework?.ToJsonString() ?? "null"}", sw);
+				
+				return Verdict(one?["error"] is null && FilesOf(one, "declarations").SequenceEqual(["Beta/src/Lib/Worker.cs"])
+					&& two?["candidates"]?.AsArray().Count == 2
+					&& shared?["error"]?.GetValue<string>() == "symbol_in_shared_project"
+					&& holding.Order().SequenceEqual(new[] { "Alpha/Alpha.slnx", "Beta/src/Beta.slnx" }.Order()),
+					$"expected Work in Beta, two candidates for Twin, and Greet refused with Alpha and Beta; got {one?.ToJsonString() ?? "null"} / {two?.ToJsonString() ?? "null"} / {shared?.ToJsonString() ?? "null"}", sw);
+			}),
+			
 			// Edits land the same way: a source file in its solution, and a file no solution is
 			// above through the root alone. Both are read back by their root-relative paths.
 			new("solution set: an edit lands in the file's solution, and a file above every solution is edited through the root", async () => {
@@ -240,6 +325,14 @@ static class SolutionSetTests
 				// of them, each took the unknown file for its own and flagged a full reload.
 				var loose = await Call("roslyn_write_file", new { filePath = "Loose/Gen.cs", content = "class Gen { }\n", createNew = true });
 				var drift = await Call("roslyn_check_drift", new { projectPath = "Alpha/Alpha.slnx" });
+				
+				// And of Beta's, which holds the same file as a document of the shared project: the
+				// write was made through Alpha, and Beta must not wait for a file watcher to see it.
+				var inConsumer = await Call("roslyn_search_files", new { pattern = "ALPHA", projectPath = "Beta/src/Beta.slnx" });
+				
+				if(inConsumer?["total_matches"]?.GetValue<int>() != 1)
+					
+					return Verdict(false, $"expected the edit in Beta's workspace too; got {inConsumer?.ToJsonString() ?? "null"}", sw);
 				
 				return Verdict(code?["error"] is null && text?["error"] is null && onDisk && inWorkspace?["total_matches"]?.GetValue<int>() == 1
 					&& loose?["error"] is null && File.Exists(fx.PathOf("Loose/Gen.cs")) && drift?["reload_pending"]?.GetValue<bool>() != true,

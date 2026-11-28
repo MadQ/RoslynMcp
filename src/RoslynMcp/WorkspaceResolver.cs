@@ -200,6 +200,26 @@ internal sealed class WorkspaceResolver
 		=> manager.SolutionSetMembers()
 	;
 	
+	/// <summary>The solutions of the session's solution set whose workspace is loaded now.</summary>
+	public string[] LoadedSetMembers()
+		=> manager.LoadedSetMembers()
+	;
+	
+	/// <summary>The project files a solution of the set lists, by its solution file alone.</summary>
+	public string[] ProjectsListedBy(string solutionPath)
+		=> manager.ProjectsListedBy(solutionPath)
+	;
+	
+	/// <summary>Whether the loaded workspace of a solution holds a project file.</summary>
+	public bool Holds(string solutionPath, string projectFile)
+		=> manager.Holds(solutionPath, projectFile)
+	;
+	
+	/// <summary>The root of the session's solution set, or <see langword="null"/>.</summary>
+	public string? SolutionSetRoot
+		=> manager.SolutionSetRoot
+	;
+	
 	/// <summary>Whether the workspace of a solution file is loaded, without loading it.</summary>
 	public bool IsLoaded(string solutionPath)
 		=> manager.IsLoaded(solutionPath)

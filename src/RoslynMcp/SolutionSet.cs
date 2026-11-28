@@ -184,6 +184,15 @@ internal sealed class CallLanding
 	/// <summary>The root of the set, which the call's paths are relative to.</summary>
 	public string? ReportRoot { get; set; }
 	
-	/// <summary>Forgets both, before the next file of a call that names several.</summary>
-	public void Clear() => (Solution, ReportRoot) = (null, null);
+	/// <summary>
+	///     How many solutions of the set were not loaded, and so not searched, when the call
+	///     landed by a symbol's name alone: another of them may declare the same name.
+	/// </summary>
+	public int NotSearched { get; set; }
+	
+	/// <summary>The symbol the call, or this part of it, asked for by name: for a note that names it.</summary>
+	public string? Symbol { get; set; }
+	
+	/// <summary>Forgets all of it, before the next file or name of a call that names several.</summary>
+	public void Clear() => (Solution, ReportRoot, NotSearched, Symbol) = (null, null, 0, null);
 }

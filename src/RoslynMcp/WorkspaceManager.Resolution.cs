@@ -505,8 +505,67 @@ internal sealed partial class WorkspaceManager
 	
 	/// <summary>The solutions of the session's solution set as they are on disk now; empty without a set.</summary>
 	public string[] SolutionSetMembers()
-		=> SolutionSetRoot is { } root ? SolutionSet.Find(root, logger) : []
-	;
+	{
+		if(SolutionSetRoot is not { } root)
+			
+			return [];
+		
+		// Kept for a few seconds: an answer that names the other solutions of a project asks
+		// with every call, and the walk is a fifth of a second on a root of twenty repositories.
+		// The list of a refusal comes from here too, so a solution made or removed in the last
+		// seconds can be missing from it or still in it.
+		if(members is (var found, var at) && Environment.TickCount64 - at < 5_000)
+			
+			return found;
+		
+		var walked = SolutionSet.Find(root, logger);
+		
+		members = new(walked, Environment.TickCount64);
+		
+		return walked;
+	}
+	
+	sealed record Members(string[] Found, long At)
+	{
+		// The project files each solution lists, read when first asked for and kept as long as
+		// the list of solutions is.
+		public System.Collections.Concurrent.ConcurrentDictionary<string, string[]> Projects { get; } = new(SecurityBoundary.PathComparer);
+	}
+	
+	/// <summary>
+	///     The project files a solution of the set lists, going by the solution file alone
+	///     (<see cref="MSBuildBootstrap.ReadSolutionProjects"/>): nothing is loaded for it.
+	/// </summary>
+	public string[] ProjectsListedBy(string solutionPath)
+	{
+		SolutionSetMembers();
+		
+		return members is { } kept
+			? kept.Projects.GetOrAdd(solutionPath, MSBuildBootstrap.ReadSolutionProjects)
+			: MSBuildBootstrap.ReadSolutionProjects(solutionPath);
+	}
+	
+	/// <summary>Whether the loaded workspace of a solution holds a project file; false when it is not loaded.</summary>
+	public bool Holds(string solutionPath, string projectFile)
+	{
+		lock(cacheLock)
+			
+			return cache.TryGetValue(Path.GetFullPath(solutionPath), out var entry) && entry.Instance.HoldsProject(projectFile);
+	}
+	
+	volatile Members? members;
+	
+	/// <summary>The solutions of the session's solution set whose workspace is loaded now.</summary>
+	public string[] LoadedSetMembers()
+	{
+		if(SolutionSetRoot is not { } root)
+			
+			return [];
+		
+		lock(cacheLock)
+			
+			return [..cache.Keys.Where(key => IsSolutionPath(key) && SecurityBoundary.StartsWithPath(key, root)).Order(StringComparer.OrdinalIgnoreCase)];
+	}
 	
 	/// <summary>Whether the workspace of a solution file is loaded, without loading it.</summary>
 	public bool IsLoaded(string solutionPath)

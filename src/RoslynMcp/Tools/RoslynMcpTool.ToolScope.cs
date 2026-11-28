@@ -62,6 +62,33 @@ internal abstract partial class RoslynMcpTool
 			=> project = projectPath
 		;
 		
+		bool unwatched;
+		
+		/// <summary>
+		///     Records that this call reads files through the root of a solution set (#501), which
+		///     is no workspace and has no file watcher. A result kept from such a call cannot be
+		///     told from a stale one, so a later page runs its query again from its position.
+		/// </summary>
+		internal void NoteUnwatched() => unwatched = true;
+		
+		/// <summary>Whether the call reads files no watcher stands behind (see <see cref="NoteUnwatched"/>).</summary>
+		internal bool Unwatched => unwatched;
+		
+		string? addedCaution;
+		
+		/// <summary>
+		///     A caution the answer carries whatever else it says: joined to the tool's own, where
+		///     <see cref="SetCaution"/> gives way to it. For what an answer must not lose, such as
+		///     where a search stopped (#501). Said once however often it is added.
+		/// </summary>
+		internal void AddCaution(string caution)
+		{
+			if(addedCaution is null)
+				addedCaution = caution;
+			else if(!addedCaution.Contains(caution, StringComparison.Ordinal))
+				addedCaution = $"{addedCaution} {caution}";
+		}
+		
 		WorkspaceChangeCounter? usedWorkspace;
 		long                    usedWorkspaceAt;
 		bool                    usedWorkspaceForCode;
@@ -96,9 +123,12 @@ internal abstract partial class RoslynMcpTool
 		{
 			get
 			{
+				// Files with no workspace behind them, and so no watcher: nothing would say that
+				// they changed, so a result from them is never taken for current (#501). The paging
+				// helper does not store such a result at all; this is for whatever else might.
 				if(usedWorkspace is not { } changes)
 					
-					return null;
+					return unwatched ? static () => false : null;
 				
 				var at = usedWorkspaceAt;
 				
@@ -283,6 +313,10 @@ internal abstract partial class RoslynMcpTool
 			// Non-ToolResult returns (to be phased out) pass through unchanged.
 			if(returnValue is ToolResult tr && (_pendingHint is not null || pendingCaution is not null))
 				returnValue = (T)(object)(tr with { Hint = tr.Hint ?? _pendingHint, Caution = tr.Caution ?? pendingCaution });
+			
+			// Joined to whatever caution the answer has, never left out for it.
+			if(addedCaution is not null && returnValue is ToolResult noted)
+				returnValue = (T)(object)(noted with { Caution = noted.Caution is null ? addedCaution : $"{noted.Caution} {addedCaution}" });
 			
 			return returnValue!;
 		}

@@ -410,6 +410,9 @@ internal sealed partial class WorkspaceManager : IDisposable
 		// teardown that stalled inside the lock stopped the whole server answering.
 		List<WorkspaceInstance>? doomed = null;
 		
+		// The workspace this insert pushed out, said in the log once the lock is released.
+		string? unloaded = null;
+		
 		try {
 			
 			lock(cacheLock) {
@@ -454,6 +457,8 @@ internal sealed partial class WorkspaceManager : IDisposable
 					
 					cache.Remove(lru.Key);
 					
+					unloaded = lru.Key;
+					
 					var staleKeys = projectToCacheKey
 						.Where(kvp => SecurityBoundary.PathComparer.Equals(kvp.Value, lru.Key))
 						.Select(kvp => kvp.Key)
@@ -477,6 +482,11 @@ internal sealed partial class WorkspaceManager : IDisposable
 			}
 		}
 		finally {
+			
+			// A session that works across more solutions than the server keeps sees one load
+			// again at its next use (#501): without this line the log showed the load and not why.
+			if(unloaded is not null)
+				logger.LogInfo("Load", $"Unloaded {unloaded} to make room for {cacheKey}: the server keeps {maxCachedWorkspaces} workspaces, and this one was used longest ago. It loads again at its next use.");
 			
 			if(doomed is { Count: > 0 })
 				DisposeDetached(doomed);
@@ -665,22 +675,71 @@ internal sealed partial class WorkspaceManager : IDisposable
 			return;
 		}
 		
+		WorkspaceInstance? own = null;
+		
 		lock(cacheLock) {
 			
 			// Check secondary index (solution-level entries).
 			if(TryMapped(normalizedPath, out var mappedKey)
-				&& cache.TryGetValue(mappedKey, out var entry)) {
-				
-				entry.Instance.InvalidateFile(fullPath);
-				
-				return;
-			}
+				&& cache.TryGetValue(mappedKey, out var entry))
+				own = entry.Instance;
+			else if(cache.TryGetValue(normalizedPath, out var directEntry))
+				own = directEntry.Instance;
 			
-			if(cache.TryGetValue(normalizedPath, out var directEntry))
-				directEntry.Instance.InvalidateFile(fullPath);
+			own?.InvalidateFile(fullPath);
 		}
+		
+		InvalidateInOthers(own, fullPath);
 	}
 	
+	
+	/// <summary>
+	///     Passes a file the server has just written to every other loaded workspace that holds it
+	///     as a document (#501). One file is a document of several workspaces where solutions share
+	///     a project, and the write updated the one the call was in. The others would take the new
+	///     text from their file watcher, a debounce later and only where the watcher covers the
+	///     directory, so the next call through a consumer's solution could still read the old text.
+	/// </summary>
+	void InvalidateInOthers(WorkspaceInstance? own, string fullPath, string? movedFromPath = null)
+	{
+		WorkspaceInstance[] held;
+		
+		lock(cacheLock) {
+			
+			if(cache.Count < 2)
+				
+				return;
+			
+			held = [..cache.Values.Select(entry => entry.Instance).Where(instance => !ReferenceEquals(instance, own))];
+		}
+		
+		var directory = Path.GetDirectoryName(fullPath);
+		
+		foreach(var instance in held) {
+			
+			// A workspace on its way out (pushed from the cache while this call ran) is disposed
+			// on another thread. The file is written by now: telling the others is a courtesy,
+			// and must not turn a write that succeeded into a failed call.
+			try {
+				
+				var solution = instance.PeekSolution();
+				
+				// A document already, or a file in the directory of one of its projects: a new
+				// source file of a shared project is no document yet, and is the workspace's own
+				// to classify as it is for the one the call was in.
+				if(solution.GetDocumentIdsWithFilePath(fullPath).Length > 0
+					|| (directory is not null && instance.ProjectPaths.Any(project => Path.GetDirectoryName(project) is { } projectDirectory && SecurityBoundary.StartsWithPath(directory, projectDirectory))))
+					instance.InvalidateFile(fullPath);
+				
+				// The name a file was moved from is a document that is gone.
+				if(movedFromPath is not null && solution.GetDocumentIdsWithFilePath(movedFromPath).Length > 0)
+					instance.InvalidateFile(movedFromPath);
+			}
+			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
+				logger.LogInfo("Sync", $"A workspace being unloaded was not told of the write to {fullPath}: {ex.GetType().Name}");
+			}
+		}
+	}
 	
 	/// <summary>
 	///     Applies an updated solution to the workspace and writes changed documents to disk
@@ -725,19 +784,25 @@ internal sealed partial class WorkspaceManager : IDisposable
 	{
 		var normalizedPath = Path.GetFullPath(resolvedProjectPath);
 		
+		WorkspaceInstance? own = null;
+		
 		lock(cacheLock) {
 			
 			if(TryMapped(normalizedPath, out var mappedKey)
 				&& cache.TryGetValue(mappedKey, out var entry))
-				
-				return entry.Instance.TryApplyTextChange(fullPath, text);
+				own = entry.Instance;
+			else if(cache.TryGetValue(normalizedPath, out var directEntry))
+				own = directEntry.Instance;
 			
-			if(cache.TryGetValue(normalizedPath, out var directEntry))
+			if(own is null || !own.TryApplyTextChange(fullPath, text))
 				
-				return directEntry.Instance.TryApplyTextChange(fullPath, text);
+				return false;
 		}
 		
-		return false;
+		// The file is written. A workspace that did not apply it is told by the fallback's write.
+		InvalidateInOthers(own, fullPath);
+		
+		return true;
 	}
 	
 	public Task WriteAndInvalidate(string resolvedProjectPath, string fullPath, Func<Task> write)
@@ -760,8 +825,12 @@ internal sealed partial class WorkspaceManager : IDisposable
 				instance = directEntry.Instance;
 		}
 		
-		if(instance is not null)
+		if(instance is not null) {
+			
 			await instance.WriteAndInvalidate(fullPath, movedFromPath, write);
+			
+			InvalidateInOthers(instance, fullPath, movedFromPath);
+		}
 		else
 			// No cached workspace — write directly. A concurrent thread could load the
 			// workspace between the null-check and the write, but the resulting FSW event
