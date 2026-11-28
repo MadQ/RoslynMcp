@@ -15,12 +15,14 @@ using System.Text.Json.Nodes;
 /// </summary>
 static class ProjectEvaluationTests
 {
-	internal static async Task<TestGroup> BuildAsync(TestContext ctx)
+	internal static async Task<TestGroup> BuildAsync(TestContext ctx, string logDir, string logGlob)
 	{
 		var fx = TestFixtures.NewMsBuildProject("Evaluated", extraProjectXml: """
 			<PropertyGroup><Flavor>plain</Flavor></PropertyGroup>
 			<PropertyGroup Condition="'$(Configuration)' == 'Release'"><Flavor>fast</Flavor></PropertyGroup>
 			<Import Project="extra.props" />
+			<Choose><When Condition="'$(Flavor)' != ''"><PropertyGroup><Chosen>yes</Chosen></PropertyGroup></When></Choose>
+			<Target Name="NeverRun"><PropertyGroup><Chosen>in-target</Chosen></PropertyGroup></Target>
 			""");
 		
 		fx.Write("Probe.cs", "class Probe { }\n");
@@ -67,7 +69,10 @@ static class ProjectEvaluationTests
 			// is not set has an empty value and no place.
 			new("project evaluation: properties come with their value and the elements that set them", async () =>
 			{
-				var info     = await Info(new { projectPath = fx.Csproj, properties = new[] { "Flavor", "FromImport", "VersionPrefix", "NoSuchProperty_244" } });
+				var info     = await Info(new { projectPath = fx.Csproj, properties = new[] { "Flavor", "FromImport", "VersionPrefix", "NoSuchProperty_244", "Chosen" } });
+				
+				// A group inside a Choose is evaluated and is a place; one inside a target is neither.
+				var chosen   = Property(info, "Chosen");
 				var flavor   = Property(info, "Flavor");
 				var imported = Property(info, "FromImport");
 				var prefix   = Property(info, "VersionPrefix");
@@ -90,6 +95,8 @@ static class ProjectEvaluationTests
 					&& prefix["set_in"]?[0]?["line"]?.GetValue<int>() == 3
 					&& prefix["set_in"]?[0]?["is_value"]?.GetValue<bool>() == true
 					&& none?["value"]?.GetValue<string>() == "" && none["set_in"] is null
+					&& chosen?["value"]?.GetValue<string>() == "yes"
+					&& chosen["set_in"] is JsonArray { Count: 1 } chosenIn && chosenIn[0]?["text"]?.GetValue<string>() == "yes"
 					&& info?["evaluated_for"] is null, info);
 			}),
 			
@@ -127,11 +134,13 @@ static class ProjectEvaluationTests
 			
 			// MSBuild hands out every environment variable as a property, and the server's environment
 			// is not the project's: a variable no project file sets is named as withheld, its value not
-			// given. A target framework is evaluated for like a configuration.
+			// given. Asked for in lower case: MSBuild does not tell the cases of a property name apart,
+			// and where the environment does (Linux, macOS) a lookup by the name as asked missed it.
+			// A target framework is evaluated for like a configuration.
 			new("project evaluation: an environment variable is withheld, and a target framework is evaluated for", async () =>
 			{
-				var info      = await Info(new { projectPath = fx.Csproj, properties = new[] { "PATH", "TargetFramework" }, targetFramework = "net10.0" });
-				var path      = Property(info, "PATH");
+				var info      = await Info(new { projectPath = fx.Csproj, properties = new[] { "path", "TargetFramework" }, targetFramework = "net10.0" });
+				var path      = Property(info, "path");
 				var framework = Property(info, "TargetFramework");
 				
 				return Verdict(path?["value"]?.GetValue<string>() == ""
@@ -152,6 +161,15 @@ static class ProjectEvaluationTests
 				if(failed?["error"] is not null)
 					
 					return Skip.SetupUnavailable($"the workspace does not load a project whose import is missing: {failed.ToJsonString()}");
+				
+				// That the second call did not evaluate is in the log alone: its answer is the same.
+				if(!ServerLog.TryRead(logDir, logGlob, 1, out var lines, out var failure))
+					
+					return (false, $"FAIL  ({failure})");
+				
+				if(!lines.Any(line => line.Contains("EvaluatedFixture; version as last evaluated", StringComparison.Ordinal)))
+					
+					return (false, "FAIL  (no call was answered from the version kept: the log has no 'version as last evaluated' entry)");
 				
 				return Verdict(first?["version"]?.GetValue<string>() == "3.2.1"
 					&& second?["version"]?.GetValue<string>() == "3.2.1"

@@ -157,13 +157,19 @@ internal static partial class ProjectEvaluation
 	// The evaluated Version of a project file, for the evaluation without a configuration or a
 	// target framework, with the state of the workspace it was evaluated in. Any change of the
 	// workspace ends it: an edit of a props file reloads, and a reload counts.
-	static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (WorkspaceChangeCounter Changes, long At, string Version)> versions = new(SecurityBoundary.PathComparer);
+	static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (WorkspaceChangeCounter Changes, long At, long KeptAt, string Version)> versions = new(SecurityBoundary.PathComparer);
 	
 	const int MaxKeptVersions = 500;
 	
+	// A version can stand on what the workspace does not watch: a text file a property function
+	// reads, the date. So it is kept for a short while only: long enough for the calls of one
+	// stretch of work, not for the rest of the session.
+	const long KeptForMs = 60_000;
+	
 	/// <summary>The version last evaluated for <paramref name="projectFile"/> while <paramref name="changes"/> has not moved since; empty for a project without one, null when nothing is kept.</summary>
 	public static string? KeptVersion(string projectFile, WorkspaceChangeCounter changes) =>
-		versions.TryGetValue(projectFile, out var kept) && ReferenceEquals(kept.Changes, changes) && !changes.Retired && changes.Value == kept.At ? kept.Version : null;
+		versions.TryGetValue(projectFile, out var kept) && ReferenceEquals(kept.Changes, changes) && !changes.Retired && changes.Value == kept.At
+			&& Environment.TickCount64 - kept.KeptAt < KeptForMs ? kept.Version : null;
 	
 	/// <summary>Keeps <paramref name="version"/> as evaluated when <paramref name="changes"/> stood at <paramref name="at"/>.</summary>
 	public static void KeepVersion(string projectFile, WorkspaceChangeCounter changes, long at, string version)
@@ -172,8 +178,35 @@ internal static partial class ProjectEvaluation
 		if(versions.Count >= MaxKeptVersions)
 			versions.Clear();
 		
-		versions[projectFile] = (changes, at, version);
+		versions[projectFile] = (changes, at, Environment.TickCount64, version);
 	}
+	
+	/// <summary>
+	///     Whether <paramref name="value"/> is what an environment variable of this process named
+	///     like the property holds. MSBuild hands out every environment variable as a property, and
+	///     the server's environment is not a project's to read: a token, a key. Names are compared
+	///     without regard to case, as MSBuild compares property names: on Linux and macOS the
+	///     environment itself tells <c>GITHUB_TOKEN</c> from <c>github_token</c>, and a lookup by
+	///     the name asked for would miss. The value is compared as it is and as MSBuild unescapes it
+	///     (<c>%3B</c> for a semicolon).
+	/// </summary>
+	public static bool IsEnvironmentValue(string name, string value)
+	{
+		if(value.Length == 0)
+			
+			return false;
+		
+		foreach(System.Collections.DictionaryEntry variable in Environment.GetEnvironmentVariables())
+			if(variable.Key is string key && key.Equals(name, StringComparison.OrdinalIgnoreCase) && variable.Value is string held
+				&& (held == value || Escaped().Replace(held, match => ((char) Convert.ToInt32(match.Groups[1].Value, 16)).ToString()) == value))
+				
+				return true;
+		
+		return false;
+	}
+	
+	[GeneratedRegex("%([0-9A-Fa-f]{2})")]
+	private static partial Regex Escaped();
 	
 	// The lines of an output that say what went wrong, or all of it when none says so.
 	static string ErrorLines(string output)
@@ -283,9 +316,9 @@ internal static partial class ProjectEvaluation
 		foreach(var (path, document) in files)
 			foreach(var element in document.Descendants().Where(element =>
 				element.Name.LocalName.Equals(property, StringComparison.OrdinalIgnoreCase)
-				// A group of the project itself: one inside a target is set when the target runs, and
-				// an evaluation runs none.
-				&& element.Parent is { Name.LocalName: "PropertyGroup" } group && group.Parent == document.Root)) {
+				// Not a group inside a target: that is set when the target runs, and an evaluation
+				// runs none. One inside a Choose is evaluated like any other.
+				&& element.Parent is { Name.LocalName: "PropertyGroup" } group && !group.Ancestors().Any(ancestor => ancestor.Name.LocalName == "Target"))) {
 				
 				if(sources.Count == MaxSources)
 					

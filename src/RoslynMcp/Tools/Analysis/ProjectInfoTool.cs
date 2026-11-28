@@ -166,11 +166,31 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		
 		var evaluatedVersion = values.GetValueOrDefault("Version", "");
 		
+		// The files are read for the properties asked for, and for a version that looks like the
+		// server's own environment: whether a file sets it decides whether it is given.
+		var files = asked.Length > 0 || ProjectEvaluation.IsEnvironmentValue("Version", evaluatedVersion) ? ProjectEvaluation.AuthoredFiles(projectFile, boundary) : [];
+		
+		// What is withheld from a property asked for (below) is withheld from the version too.
+		var versionWithheld = Withheld("Version", evaluatedVersion, ProjectEvaluation.Sources(files, "Version", evaluatedVersion, rootPath));
+		
+		if(versionWithheld)
+			evaluatedVersion = "";
+		
 		// Only the evaluation every later call without arguments would make.
-		if(changes is not null && configuration is null && targetFramework is null)
+		else if(changes is not null && configuration is null && targetFramework is null)
 			ProjectEvaluation.KeepVersion(projectFile, changes, at, evaluatedVersion);
 		
-		var files = asked.Length > 0 ? ProjectEvaluation.AuthoredFiles(projectFile, boundary) : [];
+		// MSBuild hands out every environment variable of the process as a property, and the
+		// server's environment is not the project's to read: a token, a key. A value that is the
+		// variable's, with no element in the files that could have set it, is not given. Not the
+		// configuration or the target framework this call itself passed: that value is the caller's.
+		bool Withheld(string name, string value, PropertySourceInfo[] sources) =>
+			ProjectEvaluation.IsEnvironmentValue(name, value)
+			&& !sources.Any(source => source.IsValue != false)
+			&& !(configuration is not null && name.Equals("Configuration", StringComparison.OrdinalIgnoreCase))
+			&& !(targetFramework is not null && name.Equals("TargetFramework", StringComparison.OrdinalIgnoreCase));
+		
+		const string WithheldReason = "The value is an environment variable of the server process, which no project file sets: it is not given.";
 		
 		return scope.Outcome($"{project.Name}; {asked.Length} propert{(asked.Length == 1 ? "y" : "ies")} evaluated", described with {
 			Version      = evaluatedVersion.Length > 0 ? evaluatedVersion : null,
@@ -180,20 +200,13 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 					var value   = values.GetValueOrDefault(name, "");
 					var sources = ProjectEvaluation.Sources(files, name, value, rootPath);
 					
-					// MSBuild hands out every environment variable of the process as a property, and
-					// the server's environment is not the project's to read: a token, a key. A value
-					// that is the variable's, with no element in the files that could have set it, is
-					// not given.
-					if(value.Length > 0 && Environment.GetEnvironmentVariable(name) == value && !sources.Any(source => source.IsValue != false))
-						
-						return new EvaluatedPropertyInfo(name, "", sources.Length > 0 ? sources : null) {
-							Withheld = "The value is an environment variable of the server process, which no project file sets: it is not given."
-						};
-					
-					return new EvaluatedPropertyInfo(name, value, sources.Length > 0 ? sources : null);
+					return Withheld(name, value, sources)
+						? new EvaluatedPropertyInfo(name, "", sources.Length > 0 ? sources : null) { Withheld = WithheldReason }
+						: new EvaluatedPropertyInfo(name, value, sources.Length > 0 ? sources : null);
 				})]
 				: null,
-			EvaluatedFor = configuration is not null || targetFramework is not null ? new(configuration, targetFramework) : null
+			EvaluatedFor = configuration is not null || targetFramework is not null ? new(configuration, targetFramework) : null,
+			Caution      = versionWithheld ? $"version is absent: {WithheldReason}" : described.Caution
 		});
 	}
 	
