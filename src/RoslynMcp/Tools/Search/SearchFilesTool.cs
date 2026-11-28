@@ -263,7 +263,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				var before   = matches.Count;
 				
 				// The files of a directory that is ignored and only walked through (#543).
-				if(rules.HidesFilesOf(Path.GetDirectoryName(relative)))
+				if(set?.HidesFilesOf(Path.GetDirectoryName(relative)) ?? rules.HidesFilesOf(Path.GetDirectoryName(relative)))
 					continue;
 				
 				// A text document the workspace tracks without it being source (a declared

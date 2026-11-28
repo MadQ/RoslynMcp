@@ -77,12 +77,17 @@ internal sealed class ListFilesTool : RoslynMcpTool
 				recursive,
 				(ref FileSystemEntry directory) =>
 					!IsNamed(named, WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& (set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
+					&& (Covers(named, WorkspaceWalker.RelativeParent(ref directory))
+						? rules.IsPrunedByName(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+						: set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
 				
-				// The files of a directory that is ignored and only walked through (#543).
-				.Where(relativePath => !rules.HidesFilesOf(Path.GetDirectoryName(relativePath)))
+				// The files of a directory that is ignored and only walked through (#543), unless
+				// the pattern names that directory, as it may name any ignored one.
+				.Where(relativePath => Path.GetDirectoryName(relativePath) is not { Length: > 0 } parent
+					|| Covers(named, parent)
+					|| !(set?.HidesFilesOf(parent) ?? rules.HidesFilesOf(parent)))
 				.ToArray()
 			;
 		}
@@ -120,6 +125,17 @@ internal sealed class ListFilesTool : RoslynMcpTool
 			Caution = caution
 		}
 	;
+	
+	// Whether a directory is one a pattern asked for by name, or lies inside one.
+	static bool Covers(NamedDirectorySet[] named, ReadOnlySpan<char> relativeDirectory)
+	{
+		foreach(var set in named)
+			if(set.Covers(relativeDirectory))
+				
+				return true;
+		
+		return false;
+	}
 	
 	static bool IsNamed(NamedDirectorySet[] named, ReadOnlySpan<char> relativeParent, ReadOnlySpan<char> name)
 	{

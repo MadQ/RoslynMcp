@@ -166,13 +166,44 @@ internal static class SolutionSet
 				
 				return rootRules.IsExcludedOrWorktree(relativeDirectory, name);
 			
-			var cut   = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-			var first = (cut < 0 ? relativeDirectory : relativeDirectory[..cut]).ToString();
+			var cut = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 			
-			if(!below.TryGetValue(first, out var rules))
-				below[first] = rules = IgnoreRules.ForRoot(Path.Combine(root, first), logger);
+			return RulesBelow(cut < 0 ? relativeDirectory : relativeDirectory[..cut]).IsPrunedFromListing(cut < 0 ? [] : relativeDirectory[(cut + 1)..], name);
+		}
+		
+		// The rules of one directory directly under the root, taken as a tree of its own.
+		IgnoreRules RulesBelow(ReadOnlySpan<char> first)
+		{
+			var name = first.ToString();
 			
-			return rules.IsPrunedFromListing(cut < 0 ? [] : relativeDirectory[(cut + 1)..], name);
+			if(!below.TryGetValue(name, out var rules))
+				below[name] = rules = IgnoreRules.ForRoot(Path.Combine(root, name), logger);
+			
+			return rules;
+		}
+		
+		/// <summary>
+		///     As <see cref="IgnoreRules.HidesFilesOf(string?)"/>, by the rules <see cref="IsPruned"/>
+		///     walked with: the root's paths as the top level asks them, without its
+		///     <c>.gitignore</c>, and then the rules of the directory's own tree. Asked any other
+		///     way, a directory the walk took for visible could lose its files, and one it
+		///     entered as a passage by its own tree's rules could keep them.
+		/// </summary>
+		public bool HidesFilesOf(string? relativeDirectory)
+		{
+			if(string.IsNullOrEmpty(relativeDirectory))
+				
+				return false;
+			
+			if(rootRules.HidesFilesOf(relativeDirectory, IgnoreRules.Tier.ExcludedOrWorktree))
+				
+				return true;
+			
+			var path = relativeDirectory.AsSpan();
+			var cut  = path.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+			
+			// A directory directly under the root is the root of its own tree, and no passage there.
+			return cut >= 0 && RulesBelow(path[..cut]).HidesFilesOf(path[(cut + 1)..].ToString());
 		}
 	}
 }

@@ -1701,6 +1701,22 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return false;
 		}
+		
+		/// <summary>
+		///     Whether <paramref name="relativeDirectory"/> is a directory that was asked for by
+		///     name, or lies inside one. What is asked for by name is walked as if nothing above
+		///     it were ignored (#543): a configured path hides a directory and all below it, so
+		///     without this a named directory would be entered and found empty.
+		/// </summary>
+		public bool Covers(ReadOnlySpan<char> relativeDirectory)
+		{
+			for(var rest = relativeDirectory; !rest.IsEmpty; rest = Path.GetDirectoryName(rest))
+				if(Contains(Path.GetDirectoryName(rest), Path.GetFileName(rest)))
+					
+					return true;
+			
+			return false;
+		}
 	}
 	
 	/// <summary>
@@ -1803,7 +1819,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				recursive: true,
 				(ref FileSystemEntry directory) =>
 					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& (set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
+					&& (named.Covers(WorkspaceWalker.RelativeParent(ref directory))
+						? rules.IsPrunedByName(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+						: set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
 			);
 			
 			// Not stopped at the first match: that would report a match as unique without
@@ -1816,8 +1834,11 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					if(!boundary.IsPathAllowed(candidate))
 						continue;
 					
-					// The files of a directory that is ignored and only walked through (#543).
-					if(rules.HidesFilesOf(Path.GetDirectoryName(Path.GetRelativePath(rootPath, candidate))))
+					// The files of a directory that is ignored and only walked through (#543),
+					// unless the path names that directory.
+					if(Path.GetDirectoryName(Path.GetRelativePath(rootPath, candidate)) is { Length: > 0 } parent
+						&& !named.Covers(parent)
+						&& (set?.HidesFilesOf(parent) ?? rules.HidesFilesOf(parent)))
 						continue;
 					
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {

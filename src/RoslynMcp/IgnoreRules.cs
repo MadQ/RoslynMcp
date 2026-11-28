@@ -304,6 +304,15 @@ internal sealed class IgnoreRules
 		return (listing && gitPaths.Contains(relative)) || worktreePaths.Contains(relative);
 	}
 
+	/// <summary>
+	///     <see cref="IsPrunedFromListing"/> by the names and the root's own anchored paths alone,
+	///     the configured paths left aside: for a directory inside one that was asked for by
+	///     name, which is walked as if nothing above it were ignored (#543).
+	/// </summary>
+	public bool IsPrunedByName(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
+		=> IgnoredIn(Tier.Listing, relativeDirectory, name)
+	;
+	
 	// Whether a walk of a tier leaves a directory out. With configured paths (#543) that is the
 	// directory's state, worked out from the root down; a passage is entered.
 	bool Pruned(Tier tier, ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
@@ -357,9 +366,16 @@ internal sealed class IgnoreRules
 	/// <summary>
 	///     Whether the files directly in a directory are left out though the directory is entered:
 	///     it is ignored and only walked through, on the way to an exception below it (#543). A walk
-	///     prunes directories, so the files of such a one are the caller's to leave out.
+	///     prunes directories, so the files of such a one are the caller's to leave out, asked in
+	///     the tier of the walk that listed them: a directory that walk took for visible must not
+	///     lose its files to a rule the walk never applied.
 	/// </summary>
 	public bool HidesFilesOf(string? relativeDirectory)
+		=> HidesFilesOf(relativeDirectory, Tier.Listing)
+	;
+
+	/// <inheritdoc cref="HidesFilesOf(string?)"/>
+	internal bool HidesFilesOf(string? relativeDirectory, Tier tier)
 	{
 		if(!pathRules.Any || string.IsNullOrEmpty(relativeDirectory))
 			
@@ -367,7 +383,7 @@ internal sealed class IgnoreRules
 		
 		var path = relativeDirectory.Replace('\\', '/').Trim('/');
 		
-		return path.Length > 0 && path != "." && pathRules.StateOf(this, Tier.Listing, path) == PathState.Passage;
+		return path.Length > 0 && path != "." && pathRules.StateOf(this, tier, path) == PathState.Passage;
 	}
 	
 	/// <summary>

@@ -31,7 +31,15 @@ static class IgnorePathTests
 		// So is the exception for an obj directory: build output and tooling directories cannot be
 		// brought back by a committed file. And an exception inside an exception's directory
 		// opens one directory of a 'packages' folder there, not all of it.
-		fx.Write(".madq_roslynmcp.json", "{ \"ignore\": [\"!Packages/Wanted\", \"../Outside\", \"Hidden/*\", \"!Hidden/Kept\", \"!Hidden/Kept/packages/Mine\", \"!Plain/Stay/obj\", \"Plain/Gone\"] }\n");
+		fx.Write(".madq_roslynmcp.json", "{ \"ignore\": [\"!Packages/Wanted\", \"../Outside\", \"Hidden/*\", \"!Hidden/Kept\", \"!Hidden/Kept/packages/Mine\", \"!Plain/Stay/obj\", \"Plain/Gone\", \"Plain/Stay/docs\", \"!Plain/Stay/docs/keep\"] }\n");
+		
+		// The root is a repository that ignores Plain by name. That has no say over a set's top
+		// level, and must have none over the files directly in Plain either, though an exception
+		// lies below it: only docs, which an entry names, is walked through with nothing of its own.
+		fx.Write(".gitignore", "Plain/\n");
+		fx.Write("Plain/Top.cs", "class TopType { }\n");
+		fx.Write("Plain/Stay/docs/Doc.cs", "class DocType { }\n");
+		fx.Write("Plain/Stay/docs/keep/Keep.cs", "class KeepType { }\n");
 		
 		// Directly in Packages, which is ignored and only walked through to reach Wanted: a
 		// solution, a source file, and a config file of its own, which must not make the
@@ -115,8 +123,8 @@ static class IgnorePathTests
 				foreach(var (answer, paths) in new[] { ("listing", files), ("search", hits) }) {
 					
 					string[] wrong = [
-						..new[] { "Hidden/Kept/packages/Theirs/Theirs.cs", "Packages/Loose.cs", "Plain/Stay/obj/Gen.cs" }.Where(paths.Contains).Select(path => $"{path} is shown"),
-						..new[] { "Hidden/Kept/packages/Mine/Mine.cs" }.Where(path => !paths.Contains(path)).Select(path => $"{path} is missing"),
+						..new[] { "Hidden/Kept/packages/Theirs/Theirs.cs", "Packages/Loose.cs", "Plain/Stay/obj/Gen.cs", "Plain/Stay/docs/Doc.cs" }.Where(paths.Contains).Select(path => $"{path} is shown"),
+						..new[] { "Hidden/Kept/packages/Mine/Mine.cs", "Plain/Top.cs", "Plain/Stay/docs/keep/Keep.cs" }.Where(path => !paths.Contains(path)).Select(path => $"{path} is missing"),
 					];
 					
 					if(wrong.Length > 0)
@@ -154,13 +162,22 @@ static class IgnorePathTests
 			
 			// Ignoring hides, it does not lock: a solution named outright is still loaded and
 			// answered, as bin and obj are listed when a pattern names them.
-			new("ignore paths: a solution named outright is still answered", async () => {
+			new("ignore paths: a solution or a directory named outright is still answered", async () => {
 				
 				var sw    = Stopwatch.StartNew();
 				var types = await Call("roslyn_list_types", new { projectPath = "Plain/Gone/Gone.slnx" });
 				
-				return Verdict(types?["error"] is null && (types?.ToJsonString() ?? "").Contains("GoneType"),
-					$"expected GoneType from the solution named outright; got {types?.ToJsonString() ?? "null"}", sw);
+				// The same for the files directly in a directory that is only walked through: a
+				// pattern that names the directory lists them, as it lists a hidden one's.
+				var loose = await Call("roslyn_list_files", new { pattern = "Packages/*.cs" });
+				var other = await Call("roslyn_list_files", new { pattern = "Packages/Other/**/*.cs" });
+				
+				string[] looseFiles = [..(loose?["files"]?.AsArray() ?? []).Select(file => Slashed(file?.GetValue<string>()))];
+				string[] otherFiles = [..(other?["files"]?.AsArray() ?? []).Select(file => Slashed(file?.GetValue<string>()))];
+				
+				return Verdict(types?["error"] is null && (types?.ToJsonString() ?? "").Contains("GoneType")
+					&& looseFiles.SequenceEqual(["Packages/Loose.cs"]) && otherFiles.SequenceEqual(["Packages/Other/P/Other.cs"]),
+					$"expected GoneType from the solution named outright, and the named directories' files; got {types?.ToJsonString() ?? "null"} / {loose?.ToJsonString() ?? "null"} / {other?.ToJsonString() ?? "null"}", sw);
 			}),
 		];
 		
