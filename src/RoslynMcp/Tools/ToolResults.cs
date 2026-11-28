@@ -1063,7 +1063,8 @@ internal sealed record PathErrorResult(
 	[property: JsonPropertyName("file_name")]      string?   FileName      = null,
 	[property: JsonPropertyName("found_projects")] string[]? FoundProjects = null,
 	[property: JsonPropertyName("found_in")]       string[]? FoundIn       = null,
-	[property: JsonPropertyName("found_solutions")] string[]? FoundSolutions = null
+	[property: JsonPropertyName("found_solutions")] string[]? FoundSolutions = null,
+	[property: JsonPropertyName("searched_solutions")] string[]? SearchedSolutions = null
 ) : ToolResult, IToolError;
 
 internal sealed record UnexpectedErrorResult(

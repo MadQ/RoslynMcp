@@ -61,6 +61,8 @@ internal sealed class PreviewRenameTool : RoslynMcpTool
 		
 		projectPath = resolvedProject;
 		
+		NoteSolutionEdge(projectPath, changes: true);
+		
 		// Use TryGetProject so symbol and solution both derive from the same workspace
 		// snapshot — Renamer.RenameSymbolAsync requires the symbol to belong to the
 		// solution it receives.

@@ -505,8 +505,39 @@ internal sealed partial class WorkspaceManager
 	
 	/// <summary>The solutions of the session's solution set as they are on disk now; empty without a set.</summary>
 	public string[] SolutionSetMembers()
-		=> SolutionSetRoot is { } root ? SolutionSet.Find(root, logger) : []
-	;
+	{
+		if(SolutionSetRoot is not { } root)
+			
+			return [];
+		
+		// Kept for a few seconds: an answer that names the other solutions of a project asks
+		// with every call, and the walk is a fifth of a second on a root of twenty repositories.
+		if(members is (var found, var at) && Environment.TickCount64 - at < 5_000)
+			
+			return found;
+		
+		var walked = SolutionSet.Find(root, logger);
+		
+		members = new(walked, Environment.TickCount64);
+		
+		return walked;
+	}
+	
+	sealed record Members(string[] Found, long At);
+	
+	volatile Members? members;
+	
+	/// <summary>The solutions of the session's solution set whose workspace is loaded now.</summary>
+	public string[] LoadedSetMembers()
+	{
+		if(SolutionSetRoot is not { } root)
+			
+			return [];
+		
+		lock(cacheLock)
+			
+			return [..cache.Keys.Where(key => IsSolutionPath(key) && SecurityBoundary.StartsWithPath(key, root)).Order(StringComparer.OrdinalIgnoreCase)];
+	}
 	
 	/// <summary>Whether the workspace of a solution file is loaded, without loading it.</summary>
 	public bool IsLoaded(string solutionPath)

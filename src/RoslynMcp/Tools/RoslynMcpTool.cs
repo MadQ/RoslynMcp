@@ -643,6 +643,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				activeScope.Value?.NoteProject(projectPath);
 				activeScope.Value?.Record("solution set root");
+				activeScope.Value?.NoteUnwatched();
 				
 				(rootPath, boundary) = set;
 				
@@ -799,6 +800,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				
 				activeScope.Value?.NoteProject(projectPath);
 				activeScope.Value?.Record("solution set root");
+				activeScope.Value?.NoteUnwatched();
 				
 				rootPath = set.Root;
 				

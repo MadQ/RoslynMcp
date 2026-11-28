@@ -51,6 +51,8 @@ internal sealed class FindImplementationsTool : RoslynMcpTool
 		
 		projectPath = resolvedProject;
 		
+		NoteSolutionEdge(projectPath);
+		
 		if(!TryGetCompilation(projectPath, out var compilation, out var error))
 			
 			return scope.Error(error!);

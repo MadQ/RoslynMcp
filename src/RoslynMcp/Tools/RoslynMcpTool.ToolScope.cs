@@ -62,6 +62,15 @@ internal abstract partial class RoslynMcpTool
 			=> project = projectPath
 		;
 		
+		bool unwatched;
+		
+		/// <summary>
+		///     Records that this call reads files through the root of a solution set (#501), which
+		///     is no workspace and has no file watcher. A result kept from such a call cannot be
+		///     told from a stale one, so a later page runs its query again from its position.
+		/// </summary>
+		internal void NoteUnwatched() => unwatched = true;
+		
 		WorkspaceChangeCounter? usedWorkspace;
 		long                    usedWorkspaceAt;
 		bool                    usedWorkspaceForCode;
@@ -96,9 +105,11 @@ internal abstract partial class RoslynMcpTool
 		{
 			get
 			{
+				// Files with no workspace behind them, and so no watcher: nothing would say that
+				// they changed, so a result from them is never taken for current (#501).
 				if(usedWorkspace is not { } changes)
 					
-					return null;
+					return unwatched ? static () => false : null;
 				
 				var at = usedWorkspaceAt;
 				
