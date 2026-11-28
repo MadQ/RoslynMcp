@@ -226,6 +226,25 @@ static class LoadHealthTests
 					: (false, $"FAIL  (no phantom hint naming the MSBuild failure: '{hint}')");
 			}),
 			
+			// The same options feed roslyn_get_project_info: allow_unsafe_blocks and warnings_as_errors
+			// are the loaded project's, and after a failed load those can be defaults. A confident
+			// false is worse than no answer, so both are absent for the failing project, and present
+			// for the one beside it that loaded well.
+			new("load health: get_project_info leaves out the options a failed load cannot vouch for", async () =>
+			{
+				if(!failedA)
+					
+					return Skip.SetupUnavailable(NotFailed);
+				
+				var failing = await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = a.Csproj });
+				var sound   = await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = good });
+				
+				return failing?["allow_unsafe_blocks"] is null && failing?["warnings_as_errors"] is null && failing?["load_warnings"] is not null
+					&& sound?["allow_unsafe_blocks"] is not null && sound["warnings_as_errors"] is not null
+					? (true, "PASS  (absent for the project MSBuild failed on, present for the one that loaded well)")
+					: (false, $"FAIL  (failing: {failing?.ToJsonString()}; sound: {sound?.ToJsonString()})");
+			}),
+			
 			// The issue's acceptance: a Roslyn check of this compilation would be a check of the wrong
 			// options, so the tool goes straight to dotnet build and says why. The build itself may well
 			// fail — the fixture is not restored and the cache is still blocked — and is not what is tested.
