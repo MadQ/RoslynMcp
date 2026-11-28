@@ -35,12 +35,12 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		"Validates that the replacement text is syntactically valid C# before writing; rejects changes that would introduce errors, quoting the parser's message and its line in the replacement text. " +
 		"The replacement must be exactly one node of the matched kind — each matched type member is parsed inside a type of the same name, so constructors, destructors, and operators are accepted as-is. " +
 		"One exception: a member of a class, struct, interface or record may be replaced by several members, written one after another " +
-		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow as written. " +
+		"(a method and a new overload beside it, a method and the helper it now calls): the first takes the old member's place, the rest follow, moved with it when the text is moved as a block. " +
 		"The same holds for a type or delegate declared in a namespace or at file level, which several type declarations may replace. " +
-		"The node keeps its place: the blank lines before it and the indentation of the first line of the replacement text come from the file, further lines are written as given. " +
+		"The node keeps its place: the blank lines before it and its indentation come from the file. The replacement text can be written at column 0 throughout, or at any one indentation: it is moved to the node's indentation as a block, a comment before the node and further members included. A text whose first line is unindented and whose further lines of code are already at the file's indentation is written as it is; so is one whose further lines are all indented at least as deep as the node under an unindented first line (a call's arguments, a '=>' body one level in), so indent the first line too, or put the closing line at the text's left edge, when such a text is meant as a block. Lines inside a multi-line string or block comment and preprocessor directives are never moved, and a line indented less than the text's first line is written as given and named in _caution. " +
 		"A comment in the replacement text before the node (a doc comment, say) replaces the comment attached to the node, and one at the end of its last line replaces the one there (after the comma, for an enum member); a replacement without a comment keeps the existing ones, so a body-only edit need not repeat the doc comment. " +
 		"Only the node and its comments are written: preprocessor directives and anything on the lines below the node in the replacement text are not, and _caution names whatever was left out, with the line of the node. " +
-		"In a list of members, what stands between two of them (blank lines, comments, a directive) is written as given. " +
+		"In a list of members, what stands between two of them (blank lines, comments, a directive) is kept, at the indentation the text is written at or moved to. " +
 		"To pick one of several similar nodes, such as the third if statement in a method, pass line (and column for several on one line): where the node starts, as a read of the file or a dry run's changed_nodes shows it. A declaration starts at its first attribute or modifier, not at its name. These narrow nodeKind and textPattern. " +
 		"A position is only as good as the read it came from: after an edit moves lines it can land on a different node of the same kind, so re-read first, or add textPattern so that only a node with that text can match. " +
 		"If multiple nodes match and force is false (default), returns the match list without applying — narrow textPattern, pass line and column, or set force=true to proceed. " +
@@ -411,7 +411,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 
 			foreach(var matchedNode in matchedNodes) {
 				
-				var (parsed, parseError) = ParseReplacement(matchedNode, effectiveReplacement);
+				var placedText = Reindent(effectiveReplacement, IndentationAt(matchedNode), (CSharpParseOptions) syntaxTree.Options, out var leftBehind);
+				
+				var (parsed, parseError) = ParseReplacement(matchedNode, placedText);
 				
 				if(parsed is null)
 					
@@ -421,6 +423,9 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 					}, logNotes);
 				
 				var notes = new List<string>();
+				
+				if(leftBehind.Length > 0)
+					notes.Add($"The replacement text was moved to the node's indentation as a block, but its line {string.Join(", ", leftBehind)} {(leftBehind.Length == 1 ? "is" : "are")} indented less than its first line and {(leftBehind.Length == 1 ? "was" : "were")} written as given.");
 				
 				var placed = WithTriviaOf(matchedNode, parsed, replacementTokens, notes);
 				
@@ -770,6 +775,179 @@ internal sealed class ReplaceInCodeTool : RoslynMcpTool
 		return -1;
 	}
 	
+	/// <summary>
+	///     The replacement text, moved to the indentation the node has in the file where the text
+	///     is written relative to itself (#531).
+	///     <para>
+	///         The first line of a replacement always took the node's indentation from the file, and
+	///         every further line was written as given. That suits a text whose further lines are
+	///         already at the file's indentation, and nothing else: a text written at column 0
+	///         throughout had its body one level short, a comment before the node left the
+	///         declaration under it short, and so was every member after the first of several. The
+	///         call succeeded each time.
+	///     </para>
+	///     <para>
+	///         Which of the two a text is, its lines say. Where the later lines start where the
+	///         first does, the text is one block and moves as one. Where they are already at
+	///         <paramref name="target"/> and the first line is not, it is the old convention and
+	///         is written as before, so nothing that was written right is written differently.
+	///         Anything else (a continuation line indented under a first line at column 0) is a
+	///         block too; a line of it indented less than the first cannot be moved with it and is
+	///         named in <paramref name="leftBehind"/>, by its number in the text.
+	///     </para>
+	///     A line that begins inside a token or a comment that spans lines (a verbatim or raw
+	///     string, a block comment) is never touched: what it holds is a value. Neither is a
+	///     directive, whose column is its own. The lines of a doc comment are lines of their own
+	///     and move, and so does text an #if leaves out. An empty line stays empty.
+	/// </summary>
+	private static string Reindent(string text, string target, CSharpParseOptions options, out int[] leftBehind)
+	{
+		leftBehind = [];
+		
+		var lines = SourceText.From(text).Lines;
+		
+		if(lines.Count < 2)
+			
+			return text;
+		
+		var inside = new HashSet<int>();
+		var texts  = lines.Select(line => line.ToString()).ToArray();
+		
+		// The lines a span goes on into; its first line is the code's.
+		void Cover(TextSpan span)
+		{
+			if(span.IsEmpty)
+				return;
+			
+			var last = lines.GetLineFromPosition(span.End - 1).LineNumber;
+			
+			for(var number = lines.GetLineFromPosition(span.Start).LineNumber + 1; number <= last; number++)
+				inside.Add(number);
+		}
+		
+		// Text an #if leaves out is not among these: it is code like the rest, and which branch
+		// is left out is a matter of the project's symbols. Left where it was, one branch of every
+		// #if in a moved block would stay behind. It is read as code in its turn, for the strings
+		// and comments it holds: they are values as much as those of the branch compiled.
+		void CoverIn(string code, int offset)
+		{
+			foreach(var token in SyntaxFactory.ParseTokens(code, options: options)) {
+				
+				Cover(new(token.SpanStart + offset, token.Span.Length));
+				
+				foreach(var trivia in token.LeadingTrivia.Concat(token.TrailingTrivia)) {
+					
+					if(trivia.Kind() is SyntaxKind.MultiLineCommentTrivia or SyntaxKind.MultiLineDocumentationCommentTrivia)
+						Cover(new(trivia.SpanStart + offset, trivia.Span.Length));
+					
+					// Never the whole text again: what is left out is shorter than what held it.
+					if(trivia.IsKind(SyntaxKind.DisabledTextTrivia) && trivia.Span.Length < code.Length)
+						CoverIn(trivia.ToString(), trivia.SpanStart + offset);
+				}
+			}
+		}
+		
+		CoverIn(text, 0);
+		
+		// A directive's column is a matter of its own, and column 0 its usual place whatever
+		// stands around it: such a line is never moved, and says nothing about the block.
+		bool IsDirective(int number) => !inside.Contains(number) && texts[number].AsSpan().TrimStart([' ', '\t']).StartsWith("#");
+		
+		// A line that is a comment and nothing else moves with a block, but does not make one: a
+		// line of code commented out stands at column 0 in a text of either kind.
+		bool IsCommentOnly(int number) => texts[number].AsSpan().TrimStart([' ', '\t']).StartsWith("//");
+		
+		static string IndentOf(string line) => line[..(line.Length - line.AsSpan().TrimStart([' ', '\t']).Length)];
+		
+		var first = Array.FindIndex(texts, line => !string.IsNullOrWhiteSpace(line));
+		
+		if(first < 0)
+			
+			return text;
+		
+		// Where the text starts is said by its first line of code. A comment before it may stand
+		// anywhere: the file's indentation takes the place of what is before the first comment,
+		// and a line commented out at column 0 above an indented member is no left edge.
+		var code = first;
+		
+		while(code < texts.Length && (inside.Contains(code) || string.IsNullOrWhiteSpace(texts[code]) || IsDirective(code) || IsCommentOnly(code)))
+			code++;
+		
+		var start = IndentOf(texts[code < texts.Length ? code : first]);
+		
+		// What the later lines of code have in common: where the block's left edge is, bar the
+		// text's first line. Directives and comments are left out: one '#if' or one line commented out
+		// at column 0 made a text of the old convention look like a block at column 0, and its
+		// body was written twice as deep.
+		string? later = null;
+		
+		for(var number = first + 1; number < texts.Length; number++) {
+			
+			if(inside.Contains(number) || string.IsNullOrWhiteSpace(texts[number]) || IsDirective(number) || IsCommentOnly(number))
+				continue;
+			
+			var indent = IndentOf(texts[number]);
+			
+			if(later is null)
+				later = indent;
+			else {
+				
+				var common = 0;
+				
+				while(common < later.Length && common < indent.Length && later[common] == indent[common])
+					common++;
+				
+				later = later[..common];
+			}
+		}
+		
+		// One line of text, a text already where it belongs, or the old convention.
+		if(later is null || start == target || later != start && later.StartsWith(target, StringComparison.Ordinal))
+			
+			return text;
+		
+		var moved = new StringBuilder(text.Length + target.Length * texts.Length);
+		var behind = new List<int>();
+		
+		for(var number = 0; number < texts.Length; number++) {
+			
+			var line = texts[number];
+			
+			if(number < first || inside.Contains(number) || line.Length == 0 || IsDirective(number))
+				moved.Append(line);
+			
+			// The comment before the first line of code is the node's, wherever its lines were
+			// written: all of them go to the node's indentation, as its first line always did.
+			else if(number < code && !string.IsNullOrWhiteSpace(line))
+				moved.Append(target).Append(line.AsSpan().TrimStart([' ', '\t']));
+			else if(line.StartsWith(start, StringComparison.Ordinal))
+				moved.Append(target).Append(line, start.Length, line.Length - start.Length);
+			else {
+				
+				moved.Append(line);
+				
+				// Not the text's first line: what is before it is the file's in any case.
+				if(!string.IsNullOrWhiteSpace(line) && number > first)
+					behind.Add(number + 1);
+			}
+			
+			moved.Append(text, lines[number].End, lines[number].EndIncludingLineBreak - lines[number].End);
+		}
+		
+		leftBehind = [..behind];
+		
+		return moved.ToString();
+	}
+	
+	// The indentation of the line a node starts on: where a replacement of it belongs.
+	private static string IndentationAt(SyntaxNode node)
+	{
+		var line = node.SyntaxTree.GetText().Lines.GetLineFromPosition(node.SpanStart).ToString();
+		
+		return line[..(line.Length - line.AsSpan().TrimStart([' ', '\t']).Length)];
+	}
+	
+
 	// The variables of a field declaration that the nodes put in its place no longer declare.
 	// A field of several variables is found by any of them (#533) and replaced whole, since a
 	// variable is not a member of its own: a replacement written for the one variable named

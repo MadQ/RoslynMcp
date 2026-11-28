@@ -929,7 +929,9 @@ static class EditingTests
 					
 					var content = File.ReadAllText(tempLfFile);
 					
-					return content.Contains("M()\r\n{\r\n}")
+					// The text is at column 0 throughout, so it moves to the member's indentation as a
+					// block (#531); its line endings are still its own.
+					return content.Contains("M()\r\n\t{\r\n\t}")
 						? (true,  "PASS  (CRLF kept as supplied)")
 						: (false, "FAIL  (opt-out ignored — replacement was normalized)");
 				}),

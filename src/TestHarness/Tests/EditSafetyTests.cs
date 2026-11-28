@@ -59,6 +59,12 @@ static class EditSafetyTests
 		fx.Write("code_exact.cs", "class Exact\n{\n\tint Problem { get; set; }\n\tbool HasProblem => Problem > 0;\n\tint problem { get; set; }\n}\n");
 		// A field of several variables (#533).
 		fx.Write("code_fields.cs", "class Fields\n{\n\tint a, Problem;\n\tint Total;\n}\n");
+		// Members one tab in, to be replaced by texts written at other indentations (#531).
+		fx.Write("code_indent.cs", "class Indent\n{\n\t/// <summary>Old.</summary>\n\tint Value { get; set; }\n\n\tint Other() { return 0; }\n\n\tint Third() { return 3; }\n}\n");
+		fx.Write("code_indent_old.cs", "class IndentOld\n{\n\tvoid M() { }\n}\n");
+		fx.Write("code_indent_deep.cs", "class IndentDeep\n{\n\tint Twin() { return 0; }\n\n\tclass Inner\n\t{\n\t\tint Twin() { return 0; }\n\t}\n}\n");
+		fx.Write("code_indent_off.cs", "class IndentOff\n{\n\tclass Inner\n\t{\n\t\tstring Text() { return \"\"; }\n\n\t\tint Plain() { return 0; }\n\t}\n}\n");
+		fx.Write("code_indent_text.cs", "class IndentText\n{\n\tstring Text() { return \"\"; }\n}\n");
 		fx.Write("twice.txt", "same\nother\nsame\n");
 		fx.Write("twice_all.txt", "same\nother\nsame\n");
 		fx.Write("twice_regex.txt", "same\nother\nsame\n");
@@ -257,6 +263,86 @@ static class EditSafetyTests
 					&& lost?["_caution"]?.GetValue<string>().Contains("a is no longer declared", StringComparison.Ordinal) == true
 					&& kept?["_caution"] is null
 					&& gone?["_caution"]?.GetValue<string>().Contains("deleted whole", StringComparison.Ordinal) == true, new JsonArray(later?.DeepClone(), first?.DeepClone(), listed?.DeepClone(), lost?.DeepClone(), kept?.DeepClone(), gone?.DeepClone()), null);
+			}),
+			
+			// A replacement written at column 0 throughout is one block and moves to the node's
+			// indentation as one (#531). Only its first line used to: a comment before the node left
+			// the declaration under it short, a second member of several stood at column 0, and a
+			// body was one level short, each in a call that succeeded. A text whose later lines are
+			// already at the file's indentation is the convention the tool always had, and is
+			// written as it always was.
+			new("edit safety: roslyn_replace_in_code moves a replacement written at column 0 as a block", async () => {
+				
+				var commented = await InCode(new { filePath = "code_indent.cs", nodeKind = "property", textPattern = "Value", replacement = "/// <summary>New.</summary>\nint Value\n{\n\tget;\n\tset;\n}", projectPath = fx.Csproj });
+				var several   = await InCode(new { filePath = "code_indent.cs", nodeKind = "method", textPattern = "Other", replacement = "/// <summary>One.</summary>\nint Other() { return 1; }\n\n/// <summary>Two.</summary>\nint Added()\n{\n\treturn 2;\n}", projectPath = fx.Csproj });
+				var asBefore  = await InCode(new { filePath = "code_indent.cs", nodeKind = "method", textPattern = "Third", replacement = "int Third()\n\t{\n\t\treturn 30;\n\t}", projectPath = fx.Csproj });
+				var after     = Read("code_indent.cs");
+				
+				const string expected =
+					"class Indent\n{\n"
+					+ "\t/// <summary>New.</summary>\n\tint Value\n\t{\n\t\tget;\n\t\tset;\n\t}\n\n"
+					+ "\t/// <summary>One.</summary>\n\tint Other() { return 1; }\n\n\t/// <summary>Two.</summary>\n\tint Added()\n\t{\n\t\treturn 2;\n\t}\n\n"
+					+ "\tint Third()\n\t{\n\t\treturn 30;\n\t}\n}\n";
+				
+				return Verdict(after == expected
+					&& commented?["_caution"] is null
+					&& several?["_caution"] is null
+					&& asBefore?["_caution"] is null, new JsonArray(commented?.DeepClone(), several?.DeepClone(), asBefore?.DeepClone()), after);
+			}),
+			
+			// The old convention with lines at column 0 that are no code: a directive and a line
+			// commented out. They say nothing about which way the text is written; counted, they
+			// made it a block at column 0 and its body was written twice as deep. The text is
+			// written as given, to the byte. And one text for nodes at two depths (force) is moved
+			// to each node's own indentation.
+			new("edit safety: a directive or a comment at column 0 does not make a replacement a block; a forced one is moved per node", async () => {
+				
+				const string old = "void M()\n\t{\n#if DEBUG\n\t\tSystem.Console.WriteLine();\n#endif\n//\t\tSystem.Console.Beep();\n\t}";
+				
+				var kept    = await InCode(new { filePath = "code_indent_old.cs", nodeKind = "method", textPattern = "M", replacement = old, projectPath = fx.Csproj });
+				var forced  = await InCode(new { filePath = "code_indent_deep.cs", nodeKind = "method", textPattern = "Twin", replacement = "int Twin()\n{\n#if DEBUG\n\treturn 1;\n#endif\n}", force = true, projectPath = fx.Csproj });
+				var oldFile = Read("code_indent_old.cs");
+				var deep    = Read("code_indent_deep.cs");
+				
+				return Verdict(oldFile == "class IndentOld\n{\n\t" + old + "\n}\n"
+					&& kept?["_caution"] is null
+					&& deep == "class IndentDeep\n{\n\tint Twin()\n\t{\n#if DEBUG\n\t\treturn 1;\n#endif\n\t}\n\n\tclass Inner\n\t{\n\t\tint Twin()\n\t\t{\n#if DEBUG\n\t\t\treturn 1;\n#endif\n\t\t}\n\t}\n}\n"
+					&& forced?["_caution"] is null, new JsonArray(kept?.DeepClone(), forced?.DeepClone()), oldFile + "\n---\n" + deep);
+			}),
+			
+			// Two more of the same kind. A string in the branch an #if leaves out is a value as much
+			// as one in the branch compiled: the branch moves with the block, the string's inner
+			// lines do not. And a line commented out at column 0 above a member written one tab in
+			// is no left edge: the member's first line of code is, so the block moves by one tab,
+			// not by two, and every line of the comment before it goes to the member's indentation.
+			new("edit safety: a moved replacement keeps a string in a left-out #if branch, and takes its left edge from code", async () => {
+				
+				var branch = await InCode(new { filePath = "code_indent_off.cs", nodeKind = "method", textPattern = "Text", replacement = "string Text()\n{\n#if NEVER_DEFINED_531\n\treturn @\"a\n  b\";\n#else\n\treturn @\"c\n  d\";\n#endif\n}", projectPath = fx.Csproj });
+				var edge   = await InCode(new { filePath = "code_indent_off.cs", nodeKind = "method", textPattern = "Plain", replacement = "//int Old() { return 0; }\n// Kept for now.\n\tint Plain()\n\t{\n\t\treturn 1;\n\t}", projectPath = fx.Csproj });
+				var after  = Read("code_indent_off.cs");
+				
+				return Verdict(after == "class IndentOff\n{\n\tclass Inner\n\t{\n"
+					+ "\t\tstring Text()\n\t\t{\n#if NEVER_DEFINED_531\n\t\t\treturn @\"a\n  b\";\n#else\n\t\t\treturn @\"c\n  d\";\n#endif\n\t\t}\n\n"
+					+ "\t\t//int Old() { return 0; }\n\t\t// Kept for now.\n\t\tint Plain()\n\t\t{\n\t\t\treturn 1;\n\t\t}\n\t}\n}\n"
+					&& branch?["_caution"] is null
+					&& edge?["_caution"] is null, new JsonArray(branch?.DeepClone(), edge?.DeepClone()), after);
+			}),
+			
+			// What a string holds is a value: the lines inside a verbatim, an interpolated verbatim
+			// and a raw string are not moved with the block around them. And a line indented less
+			// than the text's first cannot be moved with it: it is written as given, and named.
+			new("edit safety: a moved replacement leaves the lines inside a string alone, and names a line it could not move", async () => {
+				
+				const string body = "return @\"a\n  b\" + $@\"c\n  {1}d\" + \"\"\"\n    raw\n    \"\"\";";
+				
+				var strings = await InCode(new { filePath = "code_indent_text.cs", nodeKind = "method", textPattern = "Text", replacement = "string Text()\n{\n\t" + body + "\n}", projectPath = fx.Csproj });
+				var after   = Read("code_indent_text.cs");
+				var shorter = await InCode(new { filePath = "code_indent.cs", nodeKind = "method", textPattern = "Third", replacement = "  int Third()\n    => 30\n+ 0;", dryRun = true, projectPath = fx.Csproj });
+				var caution = shorter?["_caution"]?.GetValue<string>() ?? "";
+				
+				return Verdict(after == "class IndentText\n{\n\tstring Text()\n\t{\n\t\t" + body + "\n\t}\n}\n"
+					&& strings?["_caution"] is null
+					&& caution.Contains("its line 3 is indented less than its first line", StringComparison.Ordinal), new JsonArray(strings?.DeepClone(), shorter?.DeepClone()), after);
 			}),
 			
 			// Second half: a pattern that matches nothing lists what is there, with positions that
