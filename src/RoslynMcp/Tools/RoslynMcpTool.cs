@@ -1720,34 +1720,27 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
-	///     Reads the literally named directories out of <paramref name="pathOrPattern"/> — every
-	///     segment before the last that holds no wildcard. With
-	///     <paramref name="anchorLeadingSegments"/>, the segments before the first wildcard are tied
-	///     to their place under the root (a glob, matched from the root); without it every name
-	///     matches at any depth (a path matched as a suffix, which can sit anywhere).
-	/// </summary>
 	///     Whether a walk that lists or looks up files leaves out the directory called
 	///     <paramref name="name"/> in <paramref name="parent"/>: by the rules of a solution set
 	///     where there is one, else by the root's own.
 	///     <para>
 	///         One case is walked by names alone, the configured paths left aside (#543): a
 	///         directory inside one that was asked for by name (<paramref name="parentCovered"/>)
-	///         and that the rules had hidden, or directly in one that was itself named
-	///         (<paramref name="parentNamed"/>) and only walked through. A configured path hides a
-	///         directory and all below it, so one that is named and entered would otherwise list
-	///         nothing. Only there: below a named directory that was visible anyway (<c>src</c> in
-	///         <c>src/**/*.cs</c>) every rule holds as it does without the name, or naming a
-	///         directory would switch off the entries below it.
+	///         and that the rules had hidden. A configured path hides a directory and all below
+	///         it, so one that is named and entered would otherwise list nothing. Only there.
+	///         Below a named directory that was visible anyway (<c>src</c> in <c>src/**/*.cs</c>)
+	///         every rule holds as it does without the name, or naming a directory would switch
+	///         off the entries below it. And a directory that is only walked through, on the way
+	///         to an exception, opens nothing by being named: it is named by every path to that
+	///         exception, and its hidden children are each to be named themselves. Its own
+	///         files are the caller's to show (<see cref="IgnoreRules.HidesFilesOf(string?)"/>).
 	///     </para>
 	/// </summary>
-	protected static bool PrunedFromWalk(IgnoreRules rules, SolutionSet.Listing? set, ReadOnlySpan<char> parent, ReadOnlySpan<char> name, bool parentCovered, bool parentNamed)
+	protected static bool PrunedFromWalk(IgnoreRules rules, SolutionSet.Listing? set, ReadOnlySpan<char> parent, ReadOnlySpan<char> name, bool parentCovered)
 	{
-		// Hidden, and inside what was named (a hidden directory is reached only through a name),
-		// or itself named and only walked through. Not a walked-through directory that merely
-		// lies inside a named one: that one hides what it hid before.
-		var overridden = !parent.IsEmpty
-			&& ((parentCovered && ByRules(rules, set, Path.GetDirectoryName(parent), Path.GetFileName(parent)))
-				|| (parentNamed && (set?.HidesFilesOf(parent.ToString()) ?? rules.HidesFilesOf(parent.ToString()))));
+		// A hidden directory is reached only through a name, so a parent that is hidden and
+		// inside what was named is the named directory or lies below it.
+		var overridden = parentCovered && !parent.IsEmpty && ByRules(rules, set, Path.GetDirectoryName(parent), Path.GetFileName(parent));
 		
 		return overridden
 			? set?.IsPrunedByName(parent, name) ?? rules.IsPrunedByName(parent, name)
@@ -1758,6 +1751,12 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	}
 	
 	/// <summary>
+	///     Reads the literally named directories out of <paramref name="pathOrPattern"/> — every
+	///     segment before the last that holds no wildcard. With
+	///     <paramref name="anchorLeadingSegments"/>, the segments before the first wildcard are tied
+	///     to their place under the root (a glob, matched from the root); without it every name
+	///     matches at any depth (a path matched as a suffix, which can sit anywhere).
+	/// </summary>
 	protected static NamedDirectorySet NamedDirectories(string pathOrPattern, bool anchorLeadingSegments)
 	{
 		var anywhere = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1851,9 +1850,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 				recursive: true,
 				(ref FileSystemEntry directory) =>
 					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& PrunedFromWalk(rules, set, WorkspaceWalker.RelativeParent(ref directory), directory.FileName,
-						named.Covers(WorkspaceWalker.RelativeParent(ref directory)),
-						named.Contains(Path.GetDirectoryName(WorkspaceWalker.RelativeParent(ref directory)), Path.GetFileName(WorkspaceWalker.RelativeParent(ref directory))))
+					&& PrunedFromWalk(rules, set, WorkspaceWalker.RelativeParent(ref directory), directory.FileName, named.Covers(WorkspaceWalker.RelativeParent(ref directory)))
 			);
 			
 			// Not stopped at the first match: that would report a match as unique without

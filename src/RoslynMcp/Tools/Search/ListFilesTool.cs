@@ -77,9 +77,7 @@ internal sealed class ListFilesTool : RoslynMcpTool
 				recursive,
 				(ref FileSystemEntry directory) =>
 					!IsNamed(named, WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& PrunedFromWalk(rules, set, WorkspaceWalker.RelativeParent(ref directory), directory.FileName,
-						Covers(named, WorkspaceWalker.RelativeParent(ref directory)),
-						IsNamed(named, Path.GetDirectoryName(WorkspaceWalker.RelativeParent(ref directory)), Path.GetFileName(WorkspaceWalker.RelativeParent(ref directory))))
+					&& PrunedFromWalk(rules, set, WorkspaceWalker.RelativeParent(ref directory), directory.FileName, Covers(named, WorkspaceWalker.RelativeParent(ref directory)))
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
 				

@@ -188,6 +188,15 @@ static class IgnorePathTests
 					
 					return Verdict(false, $"expected a pattern naming a visible directory to keep the entries below it; leaked {string.Join(", ", leaked)}; got {underVisible?.ToJsonString() ?? "null"}", sw);
 				
+				// Nor does a directory that is only walked through open its hidden children by being
+				// named on the way to something else. Packages/Wanted/Other.cs does not exist; the
+				// lookup of a file by its name must not find Other.cs in the hidden sibling instead.
+				var stray = await Call("roslyn_read_file", new { filePath = "Packages/Wanted/Other.cs" });
+				
+				if(stray?["error"] is null)
+					
+					return Verdict(false, $"expected Packages/Wanted/Other.cs not to be found; got {stray?.ToJsonString() ?? "null"}", sw);
+				
 				return Verdict(types?["error"] is null && (types?.ToJsonString() ?? "").Contains("GoneType")
 					&& looseFiles.SequenceEqual(["Packages/Loose.cs"]) && otherFiles.SequenceEqual(["Packages/Other/P/Other.cs"]),
 					$"expected GoneType from the solution named outright, and the named directories' files; got {types?.ToJsonString() ?? "null"} / {loose?.ToJsonString() ?? "null"} / {other?.ToJsonString() ?? "null"}", sw);
