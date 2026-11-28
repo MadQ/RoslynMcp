@@ -326,8 +326,12 @@ internal static partial class ProjectEvaluation
 				
 				var text = element.Value.Trim();
 				
-				// A condition on the group holds for the element as much as its own.
-				string?[] conditions = [(string?) element.Parent!.Attribute("Condition"), (string?) element.Attribute("Condition")];
+				// A condition on the group holds for the element as much as its own, and so does
+				// that of the When a group inside a Choose stands in.
+				string?[] conditions = [
+					(string?) element.Parent!.Parent?.Attribute("Condition") is { } when && element.Parent.Parent!.Name.LocalName == "When" ? when : null,
+					(string?) element.Parent.Attribute("Condition"),
+					(string?) element.Attribute("Condition")];
 				
 				sources.Add(new(
 					Path.GetRelativePath(rootPath, path),

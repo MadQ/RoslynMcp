@@ -206,7 +206,9 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 				})]
 				: null,
 			EvaluatedFor = configuration is not null || targetFramework is not null ? new(configuration, targetFramework) : null,
-			Caution      = versionWithheld ? $"version is absent: {WithheldReason}" : described.Caution
+			Caution      = versionWithheld
+				? described.Caution is null ? $"version is absent: {WithheldReason}" : $"{described.Caution} version is absent: {WithheldReason}"
+				: described.Caution
 		});
 	}
 	

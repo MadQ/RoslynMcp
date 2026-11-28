@@ -97,6 +97,7 @@ static class ProjectEvaluationTests
 					&& none?["value"]?.GetValue<string>() == "" && none["set_in"] is null
 					&& chosen?["value"]?.GetValue<string>() == "yes"
 					&& chosen["set_in"] is JsonArray { Count: 1 } chosenIn && chosenIn[0]?["text"]?.GetValue<string>() == "yes"
+					&& chosenIn[0]?["condition"]?.GetValue<string>().Contains("$(Flavor)", StringComparison.Ordinal) == true
 					&& info?["evaluated_for"] is null, info);
 			}),
 			
