@@ -1816,6 +1816,10 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 					if(!boundary.IsPathAllowed(candidate))
 						continue;
 					
+					// The files of a directory that is ignored and only walked through (#543).
+					if(rules.HidesFilesOf(Path.GetDirectoryName(Path.GetRelativePath(rootPath, candidate))))
+						continue;
+					
 					if(candidate.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)) {
 						
 						suffixHits.Add(candidate);

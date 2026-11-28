@@ -434,7 +434,7 @@ internal sealed class ProjectConfig
 							// An entry with a separator, a leading '!' or a lone '*' is a path; the rest
 							// are names, as they always were.
 							var asPaths = entries.Where(IgnoreRules.LooksLikePathEntry).ToArray();
-							var asNames = entries.Where(entry => !IgnoreRules.LooksLikePathEntry(entry)).ToArray();
+							var asNames = entries.Where(entry => !IgnoreRules.LooksLikePathEntry(entry)).Select(entry => entry?.Trim().TrimEnd('/', '\\')).ToArray();
 							
 							ignore      = ServerArgs.NormalizeIgnoreNames(asNames);
 							ignorePaths = [..asPaths
@@ -446,7 +446,7 @@ internal sealed class ProjectConfig
 							var dropped = entries.Length - ignore.Length - ignorePaths.Length;
 							
 							if(dropped > 0)
-								logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' takes up to {IgnoreRules.MaxConfiguredNames} distinct directory names and as many paths ('a/b', 'a/*', '!a/b'; no '..', no rooted path, '*' only as a whole last part) — {dropped} entr{(dropped == 1 ? "y" : "ies")} dropped");
+								logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' takes up to {IgnoreRules.MaxConfiguredNames} distinct directory names and as many paths ('a/b', 'a/*', '!a/b'; no '..', no rooted path, '*' only as a whole last part, no exception for .git, .vs, node_modules, bin or obj, at most {IgnoreRules.MaxPathParts} parts) — {dropped} entr{(dropped == 1 ? "y" : "ies")} dropped");
 						}
 						else
 							logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' must be an array of directory names — ignored");

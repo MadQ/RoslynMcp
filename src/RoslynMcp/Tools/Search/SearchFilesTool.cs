@@ -262,6 +262,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				var relative = Path.GetRelativePath(rootPath, fullPath);
 				var before   = matches.Count;
 				
+				// The files of a directory that is ignored and only walked through (#543).
+				if(rules.HidesFilesOf(Path.GetDirectoryName(relative)))
+					continue;
+				
 				// A text document the workspace tracks without it being source (a declared
 				// AdditionalFiles item, an .editorconfig) is searched as the workspace has it, which
 				// is what roslyn_read_file returns for it.

@@ -38,6 +38,10 @@ internal static class SolutionSet
 					(ref FileSystemEntry directory) => rules.IsExcludedAt(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) || Levels(WorkspaceWalker.RelativeParent(ref directory)) >= Depth)
 				.Where(WorkspaceManager.IsSolutionPath)
 				.Where(path => !SecurityBoundary.PathComparer.Equals(Path.GetDirectoryName(path), root))
+				
+				// A solution file directly in a directory that is only walked through, on the way
+				// to an exception below it, is that ignored directory's own (#543).
+				.Where(path => !rules.IsHidden(Path.GetRelativePath(root, Path.GetDirectoryName(path)!)))
 				.Order(StringComparer.OrdinalIgnoreCase)];
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
@@ -152,6 +156,12 @@ internal static class SolutionSet
 		/// <summary>As <see cref="IgnoreRules.IsPrunedFromListing"/>, for a directory called <paramref name="name"/> in <paramref name="relativeDirectory"/> under the root.</summary>
 		public bool IsPruned(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
 		{
+			// The root's configured paths at every depth (#543): the rules of a directory below
+			// the root may come from a config file of its own, which knows nothing of them.
+			if(rootRules.DecidedByPaths(relativeDirectory, name) is { } decided)
+				
+				return decided;
+			
 			if(relativeDirectory.IsEmpty)
 				
 				return rootRules.IsExcludedOrWorktree(relativeDirectory, name);

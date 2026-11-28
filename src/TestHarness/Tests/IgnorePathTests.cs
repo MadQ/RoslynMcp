@@ -28,7 +28,20 @@ static class IgnorePathTests
 		
 		// The second entry is refused and dropped (a path may not leave the file's directory),
 		// and must not take the others with it.
-		fx.Write(".madq_roslynmcp.json", "{ \"ignore\": [\"!Packages/Wanted\", \"../Outside\", \"Hidden/*\", \"!Hidden/Kept\", \"Plain/Gone\"] }\n");
+		// So is the exception for an obj directory: build output and tooling directories cannot be
+		// brought back by a committed file. And an exception inside an exception's directory
+		// opens one directory of a 'packages' folder there, not all of it.
+		fx.Write(".madq_roslynmcp.json", "{ \"ignore\": [\"!Packages/Wanted\", \"../Outside\", \"Hidden/*\", \"!Hidden/Kept\", \"!Hidden/Kept/packages/Mine\", \"!Plain/Stay/obj\", \"Plain/Gone\"] }\n");
+		
+		// Directly in Packages, which is ignored and only walked through to reach Wanted: a
+		// solution, a source file, and a config file of its own, which must not make the
+		// directories below it forget the root's entries.
+		fx.Write("Packages/All.slnx", "<Solution />\n");
+		fx.Write("Packages/Loose.cs", "class LooseType { }\n");
+		fx.Write("Packages/.madq_roslynmcp.json", "{ }\n");
+		fx.Write("Hidden/Kept/packages/Mine/Mine.cs", "class MineType { }\n");
+		fx.Write("Hidden/Kept/packages/Theirs/Theirs.cs", "class TheirsType { }\n");
+		fx.Write("Plain/Stay/obj/Gen.cs", "class GenType { }\n");
 		
 		foreach(var directory in (string[]) ["Packages/Wanted", "Packages/Other", "Hidden/A", "Hidden/Kept", "Plain/Gone", "Plain/Stay"]) {
 			
@@ -95,6 +108,21 @@ static class IgnorePathTests
 				
 				var listedRight = SeesExactly(files, out var listProblem);
 				var foundRight  = SeesExactly(hits, out var searchProblem);
+				
+				// The finer cases, in both answers: the one directory an inner exception opens and
+				// not its sibling; nothing that lies directly in a directory that is only walked
+				// through; and nothing of an obj directory, whose exception was refused.
+				foreach(var (answer, paths) in new[] { ("listing", files), ("search", hits) }) {
+					
+					string[] wrong = [
+						..new[] { "Hidden/Kept/packages/Theirs/Theirs.cs", "Packages/Loose.cs", "Plain/Stay/obj/Gen.cs" }.Where(paths.Contains).Select(path => $"{path} is shown"),
+						..new[] { "Hidden/Kept/packages/Mine/Mine.cs" }.Where(path => !paths.Contains(path)).Select(path => $"{path} is missing"),
+					];
+					
+					if(wrong.Length > 0)
+						
+						return Verdict(false, $"{answer}: {string.Join(", ", wrong)}; got {listed?.ToJsonString() ?? "null"} / {found?.ToJsonString() ?? "null"}", sw);
+				}
 				
 				return Verdict(listedRight && foundRight,
 					$"listing: {listProblem}; search: {searchProblem}; got {listed?.ToJsonString() ?? "null"} / {found?.ToJsonString() ?? "null"}", sw);

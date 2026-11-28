@@ -80,6 +80,9 @@ internal sealed class ListFilesTool : RoslynMcpTool
 					&& (set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
+				
+				// The files of a directory that is ignored and only walked through (#543).
+				.Where(relativePath => !rules.HidesFilesOf(Path.GetDirectoryName(relativePath)))
 				.ToArray()
 			;
 		}
