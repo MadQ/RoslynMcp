@@ -239,6 +239,7 @@ static class LoadHealthTests
 				
 				static bool Unknown(JsonNode? project) =>
 					project?["nullable"]?.GetValue<string>() == "Unknown" && project["language_version"]?.GetValue<string>() == "Unknown"
+					&& project["output_kind"]?.GetValue<string>() == "Unknown"
 					&& project["allow_unsafe_blocks"] is null && project["warnings_as_errors"] is null;
 				
 				static bool Known(JsonNode? project) =>
