@@ -1062,7 +1062,8 @@ internal sealed record PathErrorResult(
 	[property: JsonPropertyName("directory")]      string?   Directory     = null,
 	[property: JsonPropertyName("file_name")]      string?   FileName      = null,
 	[property: JsonPropertyName("found_projects")] string[]? FoundProjects = null,
-	[property: JsonPropertyName("found_in")]       string[]? FoundIn       = null
+	[property: JsonPropertyName("found_in")]       string[]? FoundIn       = null,
+	[property: JsonPropertyName("found_solutions")] string[]? FoundSolutions = null
 ) : ToolResult, IToolError;
 
 internal sealed record UnexpectedErrorResult(
@@ -1278,6 +1279,20 @@ internal sealed record DefaultWorkspaceInfo(
 	[property: JsonPropertyName("unavailable")]
 	[property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
 	string? Unavailable
+)
+{
+	/// <summary>
+	///     The solutions below a root that is a solution set (#501), where there is no one path:
+	///     a call lands in the solution above the file it names.
+	/// </summary>
+	[JsonPropertyName("solutions")]
+	public SolutionSetMember[]? Solutions { get; init; }
+}
+
+/// <summary>One solution of a solution set, relative to the root, and whether its workspace is loaded.</summary>
+internal sealed record SolutionSetMember(
+	[property: JsonPropertyName("path")]   string Path,
+	[property: JsonPropertyName("loaded")] bool   Loaded
 );
 
 /// <summary>

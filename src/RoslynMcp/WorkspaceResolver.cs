@@ -163,8 +163,47 @@ internal sealed class WorkspaceResolver
 	{
 		var (resolved, _) = ResolveWithKind(projectPath);
 		
-		return manager.GetWorkspaceInfo(resolved);
+		var info = manager.GetWorkspaceInfo(resolved);
+		
+		// A call that landed in a solution of a set without naming it takes and reports paths
+		// relative to the root of the set (#501, see CallLanding).
+		return CallLanding.Current?.ReportRoot is { } root ? info with { RootPath = root } : info;
 	}
+	
+	/// <summary>
+	///     The root and boundary of the session's solution set when <paramref name="projectPath"/>
+	///     names its root (#501), for a call that needs files and no workspace; else
+	///     <see langword="null"/>, also for a path that does not resolve, which the caller's own
+	///     resolution then reports.
+	/// </summary>
+	public (string Root, SecurityBoundary Boundary)? SolutionSetContext(string projectPath)
+	{
+		if(manager.SolutionSetRoot is null)
+			
+			return null;
+		
+		try {
+			return ResolveWithKind(projectPath) is (var resolved, ResolutionKind.SolutionSet) ? manager.SolutionSetContext(resolved) : null;
+		}
+		catch(Exception ex) when(ex is not OutOfMemoryException and not OperationCanceledException) {
+			return null;
+		}
+	}
+	
+	/// <summary>Whether <paramref name="projectPath"/> names the root of the session's solution set.</summary>
+	public bool IsSolutionSet(string projectPath)
+		=> SolutionSetContext(projectPath) is not null
+	;
+	
+	/// <summary>The solutions of the session's solution set as they are on disk now; empty without a set.</summary>
+	public string[] SolutionSetMembers()
+		=> manager.SolutionSetMembers()
+	;
+	
+	/// <summary>Whether the workspace of a solution file is loaded, without loading it.</summary>
+	public bool IsLoaded(string solutionPath)
+		=> manager.IsLoaded(solutionPath)
+	;
 	
 	/// <summary>
 	///     Returns true when the resolved workspace is an AdhocWorkspace (no .csproj found).

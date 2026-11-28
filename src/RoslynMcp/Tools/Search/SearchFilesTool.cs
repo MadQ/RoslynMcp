@@ -1,3 +1,4 @@
+using Microsoft.CodeAnalysis.CSharp;
 using System.ComponentModel;
 using System.IO.Enumeration;
 using System.Text.RegularExpressions;
@@ -62,7 +63,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		
 		// The default, and every pattern that can only name a .cs file, is the search it always
 		// was: the workspace's documents, and no walk of the disk (#327).
-		var searchesDisk = !NamesOnlyCSharp(filePattern);
+		// Over the root of a solution set there are no documents (#501): every file is read from
+		// disk, the C# files too, which are parsed there for the declarations their hits are in.
+		var overSet      = workspace.IsSolutionSet(projectPath);
+		var searchesDisk = overSet || !NamesOnlyCSharp(filePattern);
 		
 		var matchMode = MatchMode.Regex;
 		
@@ -105,7 +109,9 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			return scope.Error(new ErrorResult($"Invalid regex pattern: {ex.Message}"));
 		}
 		
-		if(!TryResolveSolution(projectPath, out var solution, out var solutionError))
+		Solution? solution = null;
+		
+		if(!overSet && !TryResolveSolution(projectPath, out solution, out var solutionError))
 			
 			return scope.Error(solutionError);
 		
@@ -206,7 +212,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			diskFiles   = 0;
 			stopCaution = null;
 			
-			foreach(var project in solution.Projects)
+			foreach(var project in solution?.Projects ?? [])
 				foreach(var document in project.Documents) {
 					
 					if(document.FilePath is null || !seenPaths.Add(document.FilePath))
@@ -217,44 +223,7 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 					if(!matchesFile(fileName))
 						continue;
 					
-					var text  = await document.GetTextAsync(cancellationToken);
-					var lines = text.Lines;
-					var source = text.ToString();
-					
-					// Parsed for a file with a hit only, and then once: most files of a search have none.
-					SyntaxNode? root = null;
-					
-					for(int i = 0; i < lines.Count; i++) {
-						
-						var line = lines[i];
-						
-						// The line is one hit however often the pattern matches it. Which of its
-						// matches says where the hit is, and under which declaration it is listed,
-						// is EnclosingDeclaration.Among's rule: the first, unless a later one is a
-						// declaration's name ('logger' matches inside 'FileLogger' before it
-						// matches the field's name on the same line).
-						// The rest of the line's matches are looked for only where the rule needs
-						// them, which is not on a line inside a member's body: most hits.
-						if(FirstMatch(rx, source.AsSpan(line.Start, line.Span.Length)) is not { } hit)
-							continue;
-						
-						root ??= await document.GetSyntaxRootAsync(cancellationToken);
-						
-						var leftmost = new TextSpan(line.Start + hit.Index, hit.Length);
-						
-						var (declaration, declares, at) = root is null
-							? (null, false, leftmost)
-							: EnclosingDeclaration.Among(root, text, leftmost, (Regex: rx, Source: source, Line: line), static found => MatchesOf(found.Regex, found.Source.AsSpan(found.Line.Start, found.Line.Span.Length), found.Line.Start));
-						
-						matches.Add(new MatchResult {
-							
-							File        = Path.GetRelativePath(rootPath, document.FilePath),
-							Line        = i + 1,
-							Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), at.Start - line.Start),
-							Declaration = declaration,
-							Declares    = declares,
-						});
-					}
+					await SearchSourceAsync(document.FilePath, await document.GetTextAsync(cancellationToken), document.GetSyntaxRootAsync);
 				}
 			
 			if(!searchesDisk)
@@ -264,12 +233,14 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			// Every other file roslyn_list_files would list (#327), in the same walk with the same
 			// ignored directories. A .cs file the workspace tracks was searched above.
 			var rules = IgnoreRules.ForRoot(rootPath, logger);
+			var set   = overSet ? new SolutionSet.Listing(rootPath, logger) : null;
 			
 			var files = WorkspaceWalker.EnumerateFiles(
 				rootPath,
 				"*",
 				recursive: true,
-				(ref FileSystemEntry directory) => rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName));
+				(ref FileSystemEntry directory) => set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+					?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName));
 			
 			foreach(var fullPath in files) {
 				
@@ -294,7 +265,30 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 				// is what roslyn_read_file returns for it.
 				try {
 					
-					if(WorkspaceTextDocumentInfo.Resolve(solution, fullPath).GetDocument(solution) is { } tracked) {
+					// Source of a solution set, which no workspace was loaded for: the file as it is
+					// on disk, parsed alone, which is all a hit's declaration takes.
+					if(solution is null) {
+						
+						if(IsCSharpSourcePath(fullPath)) {
+							
+							var bytes  = await FileReader.ReadAllBytesAsync(fullPath, FileReader.DocumentLimit);
+							var onDisk = SourceText.From(bytes, bytes.Length);
+							
+							await SearchSourceAsync(fullPath, onDisk, token => Task.FromResult<SyntaxNode?>(CSharpSyntaxTree.ParseText(onDisk, DiskParseOptions, cancellationToken: token).GetRoot(token)));
+							
+							diskFiles++;
+							
+							if(matches.Count >= MaxDiskHits) {
+								
+								stopCaution = $"The search stopped at {MaxDiskHits:N0} matching lines and did not reach every file: narrow the pattern or the filePattern.";
+								
+								return matches;
+							}
+							
+							continue;
+						}
+					}
+					else if(WorkspaceTextDocumentInfo.Resolve(solution, fullPath).GetDocument(solution) is { } tracked) {
 						
 						var text = await tracked.GetTextAsync(cancellationToken);
 						
@@ -362,6 +356,48 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 			
 			return matches;
 			
+			// The hits of one C# file, each under the declaration it is in.
+			async Task SearchSourceAsync(string filePath, SourceText text, Func<CancellationToken, Task<SyntaxNode?>> parse)
+			{
+				var lines  = text.Lines;
+				var source = text.ToString();
+				
+				// Parsed for a file with a hit only, and then once: most files of a search have none.
+				SyntaxNode? root = null;
+				
+				for(int i = 0; i < lines.Count; i++) {
+					
+					var line = lines[i];
+					
+					// The line is one hit however often the pattern matches it. Which of its
+					// matches says where the hit is, and under which declaration it is listed,
+					// is EnclosingDeclaration.Among's rule: the first, unless a later one is a
+					// declaration's name ('logger' matches inside 'FileLogger' before it
+					// matches the field's name on the same line).
+					// The rest of the line's matches are looked for only where the rule needs
+					// them, which is not on a line inside a member's body: most hits.
+					if(FirstMatch(rx, source.AsSpan(line.Start, line.Span.Length)) is not { } hit)
+						continue;
+					
+					root ??= await parse(cancellationToken);
+					
+					var leftmost = new TextSpan(line.Start + hit.Index, hit.Length);
+					
+					var (declaration, declares, at) = root is null
+						? (null, false, leftmost)
+						: EnclosingDeclaration.Among(root, text, leftmost, (Regex: rx, Source: source, Line: line), static found => MatchesOf(found.Regex, found.Source.AsSpan(found.Line.Start, found.Line.Span.Length), found.Line.Start));
+					
+					matches.Add(new MatchResult {
+						
+						File        = Path.GetRelativePath(rootPath, filePath),
+						Line        = i + 1,
+						Text        = Excerpt(source.AsSpan(line.Start, line.Span.Length), at.Start - line.Start),
+						Declaration = declaration,
+						Declares    = declares,
+					});
+				}
+			}
+			
 			void AddHit(ReadOnlySpan<char> line, string file, int number, bool disk)
 			{
 				if(FirstMatch(rx, line) is not { } hit)
@@ -387,6 +423,10 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		GlobBraces.TryExpand(filePattern, "filePattern", out var patterns, out _)
 		&& patterns.All(pattern => pattern.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
 	;
+	
+	// What a C# file of a solution set is parsed with: the newest syntax, since no project was
+	// loaded to say which. A member inside #if is then under its type and not under itself.
+	static readonly CSharpParseOptions DiskParseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
 	
 	// How long one match of the pattern may run in a search that reads disk files.
 	static readonly TimeSpan MatchTimeout = TimeSpan.FromSeconds(2);
