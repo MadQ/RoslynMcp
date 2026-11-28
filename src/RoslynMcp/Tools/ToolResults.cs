@@ -592,7 +592,46 @@ internal sealed record ProjectInfoResult(
 	[property: JsonPropertyName("allow_unsafe_blocks")]  bool?     AllowUnsafeBlocks,
 	[property: JsonPropertyName("warnings_as_errors")]   bool?     WarningsAsErrors,
 	[property: JsonPropertyName("load_warnings")]        string[]? LoadWarnings
-) : ToolResult;
+) : ToolResult
+{
+	/// <summary>The evaluated value of each property asked for (#244), in the order asked.</summary>
+	[JsonPropertyName("properties")]
+	public EvaluatedPropertyInfo[]? Properties { get; init; }
+	
+	/// <summary>The configuration and target framework the evaluation was given, when it was given any.</summary>
+	[JsonPropertyName("evaluated_for")]
+	public EvaluatedForInfo? EvaluatedFor { get; init; }
+	
+	/// <summary>Why nothing was evaluated, where an evaluation was asked for or belongs to the answer.</summary>
+	[JsonPropertyName("evaluation_unavailable")]
+	public string? EvaluationUnavailable { get; init; }
+}
+
+/// <summary>
+///     A property as MSBuild evaluated it. <c>value</c> is empty for a property that is not set:
+///     MSBuild does not tell that from one set to nothing. <c>set_in</c> lists the elements of the
+///     authored files that set it, absent when there is none in the files searched.
+/// </summary>
+internal sealed record EvaluatedPropertyInfo(
+	[property: JsonPropertyName("name")]   string                Name,
+	[property: JsonPropertyName("value")]  string                Value,
+	[property: JsonPropertyName("set_in")] PropertySourceInfo[]? SetIn);
+
+/// <summary>
+///     An element that sets a property: where it is, the condition on it or on its group, and its
+///     text as written. <c>is_value</c> says whether that text is the evaluated value, and is absent
+///     where the text holds a <c>$(…)</c> or <c>@(…)</c> that only an evaluation resolves.
+/// </summary>
+internal sealed record PropertySourceInfo(
+	[property: JsonPropertyName("file")]      string  File,
+	[property: JsonPropertyName("line")]      int     Line,
+	[property: JsonPropertyName("condition")] string? Condition,
+	[property: JsonPropertyName("text")]      string  Text,
+	[property: JsonPropertyName("is_value")]  bool?   IsValue);
+
+internal sealed record EvaluatedForInfo(
+	[property: JsonPropertyName("configuration")]    string? Configuration,
+	[property: JsonPropertyName("target_framework")] string? TargetFramework);
 
 internal sealed record CheckDriftResult(
 	[property: JsonPropertyName("drifted")]              bool     Drifted,
