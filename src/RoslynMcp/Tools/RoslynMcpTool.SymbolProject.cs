@@ -85,6 +85,9 @@ internal abstract partial class RoslynMcpTool
 		// Per name: a call that asks several names must not carry one name's landing to the next.
 		CallLanding.Current?.Clear();
 		
+		if(CallLanding.Current is { } asked)
+			asked.Symbol = symbolName;
+		
 		if(!string.IsNullOrWhiteSpace(filePath))
 			
 			return TryResolveProjectArg(projectPath, filePath, out var byFile, out var fileError) ? (byFile, null) : (byFile, fileError);
@@ -179,7 +182,8 @@ internal abstract partial class RoslynMcpTool
 		
 		if(found.Count == 0) {
 			
-			var (mentioning, complete) = SolutionsMentioning(root, set.Boundary, SimpleNameOf(symbolName), loaded, cancellationToken);
+			var (mentioning, cutShort) = SolutionsMentioning(root, set.Boundary, SimpleNameOf(symbolName), loaded, cancellationToken);
+			var complete               = cutShort is null;
 			
 			// Each part says only what was covered: a hint that sends an agent after a typo for a
 			// name that was not looked for, or in files that were not reached, costs it the search.
@@ -187,10 +191,10 @@ internal abstract partial class RoslynMcpTool
 				? "found_solutions are the solutions not loaded whose source mentions the name: pass one as projectPath, or name a file with filePath, and the call lands in that file's solution."
 				: complete
 					? "No source file of a solution that is not loaded mentions the name."
-					: "No mention of the name was found in the other solutions' source in the two seconds searched, which did not reach all of it.";
+					: $"No mention of the name was found in the other solutions' source, which was not all searched: {cutShort}.";
 			
 			if(mentioning.Length > 0 && !complete)
-				hint += " The search of their source stopped after two seconds, so there may be more.";
+				hint += $" Their source was not all searched ({cutShort}), so there may be more.";
 			
 			if(indexOnly && searched.Count > 0)
 				hint += " With several solutions loaded, only declarations in source are looked for: for a type of a referenced assembly (IDisposable) or a constructor by its metadata name, pass one of searched_solutions as projectPath.";
@@ -228,7 +232,7 @@ internal abstract partial class RoslynMcpTool
 			});
 		
 		if(CallLanding.Current is { } landing)
-			(landing.ReportRoot, landing.Solution, landing.NotSearched) = (root, holding[0], workspace.SolutionSetMembers().Length - searched.Count);
+			(landing.ReportRoot, landing.Solution, landing.NotSearched) = (root, holding[0], workspace.SolutionSetMembers().Count(member => !searched.Contains(member, SecurityBoundary.PathComparer)));
 		
 		activeScope.Value?.Record($"lands in {Path.GetFileName(holding[0])}");
 		
@@ -247,16 +251,17 @@ internal abstract partial class RoslynMcpTool
 	///     out of the root to); read line by line, so a hit ends its file and a cancelled call or
 	///     the end of <see cref="MentionBudget"/> ends the scan inside a file too. A solution found
 	///     is not read further. It narrows twenty solutions to the few worth naming and proves
-	///     nothing: a mention is not a declaration. <c>Complete</c> says whether every file was
-	///     reached, which the caller's answer must not claim otherwise.
+	///     nothing: a mention is not a declaration. <c>CutShort</c> is why not every file was
+	///     searched, or null when all were: the caller's answer must not claim more.
 	/// </summary>
-	(string[] Solutions, bool Complete) SolutionsMentioning(string root, SecurityBoundary boundary, string name, string[] loaded, CancellationToken cancellationToken)
+	(string[] Solutions, string? CutShort) SolutionsMentioning(string root, SecurityBoundary boundary, string name, string[] loaded, CancellationToken cancellationToken)
 	{
 		var started  = System.Diagnostics.Stopwatch.GetTimestamp();
 		var skip     = new HashSet<string>(loaded, SecurityBoundary.PathComparer);
 		var hits     = new List<string>();
 		var listing  = new SolutionSet.Listing(root, logger);
-		var complete = true;
+		var timedOut = false;
+		var unread   = 0;
 		
 		// The solution above a file is the same for every file of a directory.
 		var owners   = new Dictionary<string, string?>(SecurityBoundary.PathComparer);
@@ -272,11 +277,8 @@ internal abstract partial class RoslynMcpTool
 				
 				cancellationToken.ThrowIfCancellationRequested();
 				
-				if(OutOfTime()) {
-					
-					complete = false;
+				if(timedOut = OutOfTime())
 					break;
-				}
 				
 				var directory = Path.GetDirectoryName(file)!;
 				
@@ -299,11 +301,8 @@ internal abstract partial class RoslynMcpTool
 							
 							cancellationToken.ThrowIfCancellationRequested();
 							
-							if(OutOfTime()) {
-								
-								complete = false;
+							if(timedOut = OutOfTime())
 								break;
-							}
 						}
 						
 						if(!MentionsWord(line, name))
@@ -317,18 +316,30 @@ internal abstract partial class RoslynMcpTool
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
 					
 					// A file that cannot be read, or holds a line past the limit, was not searched.
-					complete = false;
+					unread++;
 				}
 				
-				if(!complete && OutOfTime())
+				if(timedOut)
 					break;
 			}
 		}
 		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-			complete = false;
+			
+			// The walk itself failed part way: what it did not list was not read.
+			unread++;
 		}
 		
-		return ([..hits.Order(StringComparer.OrdinalIgnoreCase)], complete);
+		// Why not everything was searched, in the answer's words: the time running out and a file
+		// that cannot be read are two things, and a retry helps for neither in the same way.
+		var cutShort = (timedOut, unread) switch {
+			
+			(true, > 0)  => $"the {MentionBudget.TotalSeconds:N0} seconds it is given ran out, and {unread} file(s) or directories could not be read",
+			(true, _)    => $"the {MentionBudget.TotalSeconds:N0} seconds it is given ran out",
+			(false, > 0) => $"{unread} file(s) or directories could not be read",
+			_            => null,
+		};
+		
+		return ([..hits.Order(StringComparer.OrdinalIgnoreCase)], cutShort);
 	}
 	
 	// Whether a line holds a name with no identifier character on either side of it.
@@ -382,10 +393,13 @@ internal abstract partial class RoslynMcpTool
 				
 				return;
 			
-			var here = Path.GetRelativePath(root, solution);
+			var here  = Path.GetRelativePath(root, solution);
+			
+			// Named, since a call that asks several names joins the notes of all of them.
+			var asked = landing.Symbol is { } symbol ? $"'{symbol}'" : "the symbol";
 			
 			if(landing.NotSearched > 0)
-				activeScope.Value?.AddCaution($"The name was looked for in the loaded solutions and found in {here}; {landing.NotSearched} other solution(s) under the root are not loaded and were not searched for it.");
+				activeScope.Value?.AddCaution($"Of the loaded solutions, {here} declares {asked}; {landing.NotSearched} other solution(s) under the root are not loaded and were not searched for it.");
 			
 			if(workspace.Resolve(projectPath) is not (var project, not ResolutionKind.Solution and not ResolutionKind.SolutionSet) || !project.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
 				
@@ -404,8 +418,8 @@ internal abstract partial class RoslynMcpTool
 			var also  = string.Join(", ", others);
 			
 			activeScope.Value?.AddCaution(changes
-				? $"This change is made in {here} only. {named} is also a project of {also}, going by the solution files: code there that uses the symbol is not changed, and may no longer compile once this is applied."
-				: $"Searched {here} only. {named} is also a project of {also}, going by the solution files: uses there are not in this answer. Ask again with one of them as projectPath.");
+				? $"This change to {asked} is made in {here} only. {named} is also a project of {also}, going by the solution files: code there that uses the symbol is not changed, and may no longer compile once this is applied."
+				: $"The search for {asked} covers {here} only. {named} is also a project of {also}, going by the solution files: uses there are not in this answer. Ask again with one of them as projectPath.");
 		}
 		catch(Exception ex) when(!IsFatal(ex)) {
 			
@@ -442,6 +456,8 @@ internal abstract partial class RoslynMcpTool
 			
 			ResolveWithRetry("LandProjectInOwnSolution", () => workspace.GetSolution(own));
 			
+			// The solution alone, and not the root paths are relative to: a call that names a
+			// path takes and reports paths relative to what it named, as always.
 			if(workspace.Holds(own, project))
 				landing.Solution = own;
 		}

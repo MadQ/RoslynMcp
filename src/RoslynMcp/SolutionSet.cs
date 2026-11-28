@@ -190,6 +190,9 @@ internal sealed class CallLanding
 	/// </summary>
 	public int NotSearched { get; set; }
 	
+	/// <summary>The symbol the call, or this part of it, asked for by name: for a note that names it.</summary>
+	public string? Symbol { get; set; }
+	
 	/// <summary>Forgets all of it, before the next file or name of a call that names several.</summary>
-	public void Clear() => (Solution, ReportRoot, NotSearched) = (null, null, 0);
+	public void Clear() => (Solution, ReportRoot, NotSearched, Symbol) = (null, null, 0, null);
 }

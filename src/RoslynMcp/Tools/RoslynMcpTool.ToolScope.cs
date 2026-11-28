@@ -123,9 +123,12 @@ internal abstract partial class RoslynMcpTool
 		{
 			get
 			{
+				// Files with no workspace behind them, and so no watcher: nothing would say that
+				// they changed, so a result from them is never taken for current (#501). The paging
+				// helper does not store such a result at all; this is for whatever else might.
 				if(usedWorkspace is not { } changes)
 					
-					return null;
+					return unwatched ? static () => false : null;
 				
 				var at = usedWorkspaceAt;
 				
