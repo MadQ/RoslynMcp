@@ -29,7 +29,8 @@ internal static class DotnetRunner
 		IEnumerable<string> args,
 		string workingDirectory,
 		Action<string>? record = null,
-		CancellationToken ct = default)
+		CancellationToken ct = default,
+		bool previewOutput = true)
 	{
 		// Recorded before any wait, so a run cancelled while queued still says what it was.
 		record?.Invoke($"dotnet {string.Join(" ", args)}");
@@ -74,7 +75,7 @@ internal static class DotnetRunner
 				ct.ThrowIfCancellationRequested();
 			}
 			
-			return await RunCoreAsync(args, workingDirectory, record, ct);
+			return await RunCoreAsync(args, workingDirectory, record, ct, previewOutput);
 		}
 		finally {
 			MSBuildGate.Release();
@@ -85,7 +86,8 @@ internal static class DotnetRunner
 		IEnumerable<string> args,
 		string workingDirectory,
 		Action<string>? record,
-		CancellationToken ct)
+		CancellationToken ct,
+		bool previewOutput)
 	{
 		var psi = new ProcessStartInfo("dotnet") {
 			
@@ -162,8 +164,10 @@ internal static class DotnetRunner
 				stderr = await stderrTask;
 				record?.Invoke($"stdout={stdout.Length} stderr={stderr.Length} chars");
 				
-				// Preview first 300 chars so log entries reveal suppressed diagnostics.
-				var preview = (stdout + stderr).Replace('\r', ' ').Replace('\n', '↵')
+				// Preview first 300 chars so log entries reveal suppressed diagnostics. Not for a
+				// run whose output is values the caller has yet to look at: an evaluation prints
+				// what a property holds, which can be an environment variable of this process (#244).
+				var preview = previewOutput ? (stdout + stderr).Replace('\r', ' ').Replace('\n', '↵') : ""
 				;
 				if(preview.Length > 0)
 					record?.Invoke($"output_preview={preview[..Math.Min(300, preview.Length)]}");

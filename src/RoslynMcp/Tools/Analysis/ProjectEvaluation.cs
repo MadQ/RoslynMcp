@@ -36,17 +36,19 @@ internal static partial class ProjectEvaluation
 	const int MaxSourceLength = 200;
 	
 	// An MSBuild property name, and nothing that could end the switch it is passed in.
-	[GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_.\-]*$")]
+	// \z, not $: that also matches before a final line break, which would then reach MSBuild.
+	[GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_.\-]*\z")]
 	private static partial Regex PropertyName();
 	
 	// A configuration or a target framework: no ';' or '=', which would set a second property, and
 	// no quote or space.
-	[GeneratedRegex(@"^[A-Za-z0-9_.+\-]+$")]
+	[GeneratedRegex(@"\A[A-Za-z0-9_.+\-]+\z")]
 	private static partial Regex GlobalValue();
 	
 	// Asked for with every evaluation, so that there are always two properties: MSBuild prints one
-	// property bare and several as JSON.
-	const string Sentinel = "MSBuildProjectFullPath";
+	// property bare and several as JSON. A name no project sets and no caller asks for, since it
+	// is left out of the answer.
+	const string Sentinel = "_RoslynMcpEvaluationSentinel";
 	
 	/// <summary>Why the arguments cannot be passed to MSBuild, or null when they can.</summary>
 	public static string? Invalid(IReadOnlyCollection<string> properties, string? configuration, string? targetFramework)
@@ -80,8 +82,12 @@ internal static partial class ProjectEvaluation
 	/// </summary>
 	public static async Task<Evaluated> EvaluateAsync(
 		string projectFile, IReadOnlyCollection<string> names, string? configuration, string? targetFramework,
-		string workingDirectory, Action<string> record, CancellationToken cancellationToken)
+		Action<string> record, CancellationToken cancellationToken)
 	{
+		// The project's own directory: dotnet picks the SDK by the global.json above where it is
+		// started, and the project's is the one a build of it would use.
+		var workingDirectory = Path.GetDirectoryName(projectFile) ?? Environment.CurrentDirectory;
+		
 		List<string> args = ["msbuild", projectFile, "-nologo", "-tl:off", $"-getProperty:{Sentinel}"];
 		
 		args.AddRange(names.Select(name => $"-getProperty:{name}"));
@@ -96,7 +102,7 @@ internal static partial class ProjectEvaluation
 		int    exitCode;
 		
 		try {
-			(output, _, exitCode) = await DotnetRunner.RunAsync([..args], workingDirectory, record, cancellationToken);
+			(output, _, exitCode) = await DotnetRunner.RunAsync([..args], workingDirectory, record, cancellationToken, previewOutput: false);
 		}
 		catch(InvalidOperationException ex) {
 			
@@ -107,23 +113,32 @@ internal static partial class ProjectEvaluation
 			
 			return new(null, $"MSBuild could not evaluate the project (exit code {exitCode}): {Brief(ErrorLines(output))}");
 		
-		// The JSON object, behind whatever MSBuild printed before it: each of its braces has a
-		// line of its own.
-		var lines = output.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
-		var open  = Array.IndexOf(lines, "{");
-		var close = Array.LastIndexOf(lines, "}");
+		// The output is the JSON object alone, or the object behind whatever MSBuild printed
+		// before it (a warning of the evaluation) and before what the error stream added: each
+		// of its braces has a line of its own, and no value does, since values are escaped.
+		var json = output.Trim();
 		
-		if(open < 0 || close < open)
+		if(!json.StartsWith('{') || !json.EndsWith('}')) {
 			
-			return new(null, $"MSBuild's answer was not understood: {Brief(output)}");
+			var lines = output.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
+			var open  = Array.IndexOf(lines, "{");
+			var close = Array.LastIndexOf(lines, "}");
+			
+			if(open < 0 || close < open)
+				
+				return new(null, "MSBuild's answer was not understood: it holds no JSON object.");
+			
+			json = string.Join('\n', lines[open..(close + 1)]);
+		}
 		
+		// Not quoted when it is not understood: it holds the values, of which some are withheld.
 		try {
 			
-			using var document = JsonDocument.Parse(string.Join('\n', lines[open..(close + 1)]));
+			using var document = JsonDocument.Parse(json);
 			
 			if(!document.RootElement.TryGetProperty("Properties", out var properties) || properties.ValueKind != JsonValueKind.Object)
 				
-				return new(null, $"MSBuild's answer was not understood: {Brief(output)}");
+				return new(null, "MSBuild's answer was not understood: it has no Properties object.");
 			
 			var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 			
@@ -133,10 +148,31 @@ internal static partial class ProjectEvaluation
 			
 			return new(values, null);
 		}
-		catch(JsonException) {
+		catch(JsonException ex) {
 			
-			return new(null, $"MSBuild's answer was not understood: {Brief(output)}");
+			return new(null, $"MSBuild's answer was not understood: {ex.Message}");
 		}
+	}
+	
+	// The evaluated Version of a project file, for the evaluation without a configuration or a
+	// target framework, with the state of the workspace it was evaluated in. Any change of the
+	// workspace ends it: an edit of a props file reloads, and a reload counts.
+	static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (WorkspaceChangeCounter Changes, long At, string Version)> versions = new(SecurityBoundary.PathComparer);
+	
+	const int MaxKeptVersions = 500;
+	
+	/// <summary>The version last evaluated for <paramref name="projectFile"/> while <paramref name="changes"/> has not moved since; empty for a project without one, null when nothing is kept.</summary>
+	public static string? KeptVersion(string projectFile, WorkspaceChangeCounter changes) =>
+		versions.TryGetValue(projectFile, out var kept) && ReferenceEquals(kept.Changes, changes) && !changes.Retired && changes.Value == kept.At ? kept.Version : null;
+	
+	/// <summary>Keeps <paramref name="version"/> as evaluated when <paramref name="changes"/> stood at <paramref name="at"/>.</summary>
+	public static void KeepVersion(string projectFile, WorkspaceChangeCounter changes, long at, string version)
+	{
+		// Entries of workspaces long gone are not worth a sweep: start over.
+		if(versions.Count >= MaxKeptVersions)
+			versions.Clear();
+		
+		versions[projectFile] = (changes, at, version);
 	}
 	
 	// The lines of an output that say what went wrong, or all of it when none says so.
@@ -172,6 +208,10 @@ internal static partial class ProjectEvaluation
 				
 				var candidate = Path.Combine(directory, name);
 				
+				// Nothing outside the boundary is looked at, not even for whether it is there.
+				if(!boundary.IsPathAllowed(candidate))
+					break;
+				
 				// MSBuild takes the nearest one and stops there.
 				if(File.Exists(candidate)) {
 					
@@ -191,10 +231,7 @@ internal static partial class ProjectEvaluation
 			XDocument document;
 			
 			try {
-				
-				using var stream = FileReader.OpenRead(path, FileReader.DocumentLimit);
-				
-				document = XDocument.Load(stream, LoadOptions.SetLineInfo);
+				document = FileReader.LoadXml(path, LoadOptions.SetLineInfo);
 			}
 			catch(Exception ex) when(ex is IOException or UnauthorizedAccessException or XmlException) {
 				continue;
@@ -206,10 +243,14 @@ internal static partial class ProjectEvaluation
 			
 			foreach(var import in document.Descendants().Where(element => element.Name.LocalName == "Import")) {
 				
-				if(((string?) import.Attribute("Project"))?.Trim() is not { Length: > 0 } project)
+				// An import from an SDK names a file of the SDK's, not one beside this file.
+				if(import.Attribute("Sdk") is not null || ((string?) import.Attribute("Project"))?.Trim() is not { Length: > 0 } project)
 					continue;
 				
-				project = project.Replace("$(MSBuildThisFileDirectory)", directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+				project = project
+					.Replace("$(MSBuildThisFileDirectory)", directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+					.Replace("$(MSBuildProjectDirectory)", Path.GetDirectoryName(projectFile), StringComparison.OrdinalIgnoreCase)
+				;
 				
 				// A path that needs evaluating, or a wildcard: not read off the text.
 				if(project.Contains("$(", StringComparison.Ordinal) || project.Contains('*') || project.Contains('?'))
@@ -219,7 +260,8 @@ internal static partial class ProjectEvaluation
 					
 					var target = Path.GetFullPath(project.Replace('\\', Path.DirectorySeparatorChar), directory);
 					
-					if(File.Exists(target))
+					// The boundary first: a path the text names can be anywhere, a share included.
+					if(boundary.IsPathAllowed(target) && File.Exists(target))
 						queue.Enqueue(target);
 				}
 				catch(Exception ex) when(ex is ArgumentException or NotSupportedException or PathTooLongException) { }
@@ -240,7 +282,10 @@ internal static partial class ProjectEvaluation
 		
 		foreach(var (path, document) in files)
 			foreach(var element in document.Descendants().Where(element =>
-				element.Name.LocalName.Equals(property, StringComparison.OrdinalIgnoreCase) && element.Parent?.Name.LocalName == "PropertyGroup")) {
+				element.Name.LocalName.Equals(property, StringComparison.OrdinalIgnoreCase)
+				// A group of the project itself: one inside a target is set when the target runs, and
+				// an evaluation runs none.
+				&& element.Parent is { Name.LocalName: "PropertyGroup" } group && group.Parent == document.Root)) {
 				
 				if(sources.Count == MaxSources)
 					

@@ -615,7 +615,12 @@ internal sealed record ProjectInfoResult(
 internal sealed record EvaluatedPropertyInfo(
 	[property: JsonPropertyName("name")]   string                Name,
 	[property: JsonPropertyName("value")]  string                Value,
-	[property: JsonPropertyName("set_in")] PropertySourceInfo[]? SetIn);
+	[property: JsonPropertyName("set_in")] PropertySourceInfo[]? SetIn)
+{
+	/// <summary>Why <c>value</c> is empty though the property has one: it is not the project's to give.</summary>
+	[JsonPropertyName("withheld")]
+	public string? Withheld { get; init; }
+}
 
 /// <summary>
 ///     An element that sets a property: where it is, the condition on it or on its group, and its

@@ -30,7 +30,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			"For one project (not a solution), version is the evaluated Version, and properties: ['RuntimeIdentifiers', 'OutputPath', ...] " +
 			"returns the evaluated value of each property named, as a build would see it: MSBuild evaluates the project (dotnet msbuild, no target runs, about a second). " +
 			"configuration and targetFramework say what to evaluate for, since a value can depend on both; without them the project's defaults apply. " +
-			"A property that is not set has an empty value. Each property comes with set_in: the elements that set it in the project file, in the " +
+			"A property that is not set has an empty value. A value that is an environment variable of the server process and that no project file sets is not given: the property says withheld. Each property comes with set_in: the elements that set it in the project file, in the " +
 			"Directory.Build.props / Directory.Build.targets / Directory.Packages.props above it and in the files those import, with file, line, " +
 			"condition and text, so the place to read or edit is known; is_value marks the element whose text is the evaluated value, and is absent " +
 			"where the text needs evaluating. The SDK's own files are not searched. When the project cannot be evaluated (no project file, a legacy " +
@@ -68,6 +68,9 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		
 		string[] asked = [..(properties ?? []).Select(name => name.Trim()).Where(name => name.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase)];
 		
+		configuration   = configuration?.Trim() is { Length: > 0 } givenConfiguration ? givenConfiguration : null;
+		targetFramework = targetFramework?.Trim() is { Length: > 0 } givenFramework ? givenFramework : null;
+		
 		if(ProjectEvaluation.Invalid(asked, configuration, targetFramework) is { } invalid)
 			
 			return scope.Error(new ErrorResult(invalid));
@@ -99,7 +102,11 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			
 			ProjectInfoResult[] projects = [..projectFiles.Select(candidate => Describe(candidate, rootPath, isMSBuild, directOnly, null, null))];
 			
-			return scope.Outcome($"{projects.Length} project(s)", new SolutionInfoResult(Path.GetRelativePath(rootPath, solutionPath), projects, loadWarnings));
+			// Said once, and for a project without a version too: that is the very case of a
+			// version set in Directory.Build.props, which reads as "none" without a word.
+			return scope.Outcome($"{projects.Length} project(s)", new SolutionInfoResult(Path.GetRelativePath(rootPath, solutionPath), projects, loadWarnings) {
+				Caution = "Each project's version is what its project file writes, and absent where the file writes none: Directory.Build.props, conditions and the SDK are not taken into account for a solution. Name one project with projectPath for its evaluated version."
+			});
 		}
 		
 		if(!TryGetProject(projectPath, out var project, out var error))
@@ -118,11 +125,29 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			
 			return scope.Error(contextError);
 		
+		// What the evaluated version stands on: kept while the workspace has not changed, so that
+		// a call that asks for nothing else does not start MSBuild, and wait for its turn behind
+		// a build, each time. Read before the evaluation: a change during it must not be missed.
+		WorkspaceChangeCounter? changes = null;
+		var                     at      = 0L;
+		
+		try {
+			changes = workspace.GetChangeCounter(projectPath, reloadFirst: true);
+			at      = changes.Value;
+		}
+		catch(Exception ex) when(ex is not OperationCanceledException) {
+			scope.Record($"no change counter, version not kept: {ex.GetType().Name}");
+		}
+		
+		if(!evaluating && changes is not null && ProjectEvaluation.KeptVersion(projectFile, changes) is { } kept)
+			
+			return scope.Outcome($"{project.Name}; version as last evaluated", described with { Version = kept.Length > 0 ? kept : null });
+		
 		ProjectEvaluation.Evaluated evaluated;
 		
 		try {
 			// Version with whatever was asked for: the one fixed field the loaded project does not have.
-			evaluated = await ProjectEvaluation.EvaluateAsync(projectFile, [..asked.Append("Version").Distinct(StringComparer.OrdinalIgnoreCase)], configuration, targetFramework, rootPath, scope.Record, cancellationToken);
+			evaluated = await ProjectEvaluation.EvaluateAsync(projectFile, [..asked.Append("Version").Distinct(StringComparer.OrdinalIgnoreCase)], configuration, targetFramework, scope.Record, cancellationToken);
 		}
 		catch(OperationCanceledException) {
 			// Logged as a cancellation rather than an unhandled exception; the SDK answers the client.
@@ -134,23 +159,41 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			
 			return scope.Outcome($"{project.Name}; not evaluated", described with {
 				EvaluationUnavailable = evaluated.Failure,
-				Caution               = "version is read from the .csproj XML as written: conditions, Directory.Build.props and the SDK are not taken into account."
+				Caution               = described.Version is not null
+					? "version is read from the .csproj XML as written: conditions, Directory.Build.props and the SDK are not taken into account."
+					: "version is absent because the project could not be evaluated and its project file writes none; it may be set in Directory.Build.props."
 			});
+		
+		var evaluatedVersion = values.GetValueOrDefault("Version", "");
+		
+		// Only the evaluation every later call without arguments would make.
+		if(changes is not null && configuration is null && targetFramework is null)
+			ProjectEvaluation.KeepVersion(projectFile, changes, at, evaluatedVersion);
 		
 		var files = asked.Length > 0 ? ProjectEvaluation.AuthoredFiles(projectFile, boundary) : [];
 		
 		return scope.Outcome($"{project.Name}; {asked.Length} propert{(asked.Length == 1 ? "y" : "ies")} evaluated", described with {
-			Version      = values.GetValueOrDefault("Version") is { Length: > 0 } version ? version : null,
+			Version      = evaluatedVersion.Length > 0 ? evaluatedVersion : null,
 			Properties   = asked.Length > 0
 				? [..asked.Select(name => {
 					
-					var value = values.GetValueOrDefault(name, "");
+					var value   = values.GetValueOrDefault(name, "");
+					var sources = ProjectEvaluation.Sources(files, name, value, rootPath);
 					
-					return new EvaluatedPropertyInfo(name, value, ProjectEvaluation.Sources(files, name, value, rootPath) is { Length: > 0 } sources ? sources : null);
+					// MSBuild hands out every environment variable of the process as a property, and
+					// the server's environment is not the project's to read: a token, a key. A value
+					// that is the variable's, with no element in the files that could have set it, is
+					// not given.
+					if(value.Length > 0 && Environment.GetEnvironmentVariable(name) == value && !sources.Any(source => source.IsValue != false))
+						
+						return new EvaluatedPropertyInfo(name, "", sources.Length > 0 ? sources : null) {
+							Withheld = "The value is an environment variable of the server process, which no project file sets: it is not given."
+						};
+					
+					return new EvaluatedPropertyInfo(name, value, sources.Length > 0 ? sources : null);
 				})]
 				: null,
-			EvaluatedFor = configuration is not null || targetFramework is not null ? new(configuration, targetFramework) : null,
-			Caution      = null
+			EvaluatedFor = configuration is not null || targetFramework is not null ? new(configuration, targetFramework) : null
 		});
 	}
 	
@@ -190,16 +233,12 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 		string[]? frameworks = fromProject
 			? [..project.Solution.Projects
 				.Where(sibling => SecurityBoundary.PathComparer.Equals(sibling.FilePath, project.FilePath))
-				.Select(sibling => sibling.Name.EndsWith(')') && sibling.Name.LastIndexOf('(') is > 0 and var open ? sibling.Name[(open + 1)..^1] : InferTfm(sibling))
+				.Select(sibling => BuildTool.FrameworkOf(sibling) ?? InferTfm(sibling))
 				.OfType<string>()
 				.Distinct(StringComparer.OrdinalIgnoreCase)]
 			: null
 		;
 		
-		var caution = version is not null
-			? "version is read from the .csproj XML as written: conditions, Directory.Build.props and the SDK are not taken into account. Name one project with projectPath for the evaluated value."
-			: adhocCaution
-		;
 		
 		return new ProjectInfoResult(
 			project.Name,
@@ -221,7 +260,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			fromProject && compOpts is not null ? compOpts.GeneralDiagnosticOption == ReportDiagnostic.Error : null,
 			loadWarnings)
 		{
-			Caution = caution
+			Caution = adhocCaution
 		};
 	}
 	

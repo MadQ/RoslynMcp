@@ -27,6 +27,11 @@ static class ProjectEvaluationTests
 		fx.Write("Directory.Build.props", "<Project>\n  <PropertyGroup>\n    <VersionPrefix>3.2.1</VersionPrefix>\n  </PropertyGroup>\n</Project>\n");
 		fx.Write("extra.props", "<Project>\n  <PropertyGroup>\n    <FromImport>$(Flavor)-x</FromImport>\n  </PropertyGroup>\n</Project>\n");
 		
+		// A project MSBuild cannot evaluate: its import is not there. The workspace still loads it.
+		var broken = TestFixtures.NewMsBuildProject("EvaluatedBroken", extraProjectXml: """<Import Project="not-there.props" />""");
+		
+		broken.Write("Probe.cs", "class Probe { }\n");
+		
 		var adhoc = TestFixtures.NewAdhocDir("EvaluatedAdhoc");
 		
 		File.WriteAllText(Path.Combine(adhoc.Dir, "Loose.cs"), "class Loose { }\n");
@@ -107,9 +112,53 @@ static class ProjectEvaluationTests
 			{
 				var name   = await Info(new { projectPath = fx.Csproj, properties = new[] { "Flavor;OutDir" } });
 				var config = await Info(new { projectPath = fx.Csproj, properties = new[] { "Flavor" }, configuration = "Debug;OutDir=x" });
+				var inside = await Info(new { projectPath = fx.Csproj, properties = new[] { "Flavor" }, configuration = "Rel\nease" });
+				
+				// White space around a value is not part of it: 'Release' with a line break behind it is
+				// Release, where it used to pass the check and reach MSBuild as another configuration.
+				var padded = await Info(new { projectPath = fx.Csproj, properties = new[] { "Flavor" }, configuration = "Release\n" });
 				
 				return Verdict(name?["error"]?.GetValue<string>().Contains("not an MSBuild property name", StringComparison.Ordinal) == true
-					&& config?["error"]?.GetValue<string>().Contains("not a configuration name", StringComparison.Ordinal) == true, new JsonArray(name?.DeepClone(), config?.DeepClone()));
+					&& config?["error"]?.GetValue<string>().Contains("not a configuration name", StringComparison.Ordinal) == true
+					&& inside?["error"]?.GetValue<string>().Contains("not a configuration name", StringComparison.Ordinal) == true
+					&& Property(padded, "Flavor")?["value"]?.GetValue<string>() == "fast"
+					&& padded?["evaluated_for"]?["configuration"]?.GetValue<string>() == "Release", new JsonArray(name?.DeepClone(), config?.DeepClone(), inside?.DeepClone(), padded?.DeepClone()));
+			}),
+			
+			// MSBuild hands out every environment variable as a property, and the server's environment
+			// is not the project's: a variable no project file sets is named as withheld, its value not
+			// given. A target framework is evaluated for like a configuration.
+			new("project evaluation: an environment variable is withheld, and a target framework is evaluated for", async () =>
+			{
+				var info      = await Info(new { projectPath = fx.Csproj, properties = new[] { "PATH", "TargetFramework" }, targetFramework = "net10.0" });
+				var path      = Property(info, "PATH");
+				var framework = Property(info, "TargetFramework");
+				
+				return Verdict(path?["value"]?.GetValue<string>() == ""
+					&& path["withheld"]?.GetValue<string>().Contains("environment variable", StringComparison.Ordinal) == true
+					&& info?.ToJsonString().Contains(Environment.GetEnvironmentVariable("PATH") is { Length: > 20 } value ? System.Text.Json.JsonSerializer.Serialize(value)[1..^1] : "\u0000never", StringComparison.Ordinal) == false
+					&& framework?["value"]?.GetValue<string>() == "net10.0"
+					&& info?["evaluated_for"]?["target_framework"]?.GetValue<string>() == "net10.0", info);
+			}),
+			
+			// A second call that asks for nothing is answered from the version kept, with the same
+			// answer; and a project MSBuild cannot evaluate says why, with what the file writes.
+			new("project evaluation: the version is kept between calls, and a failed evaluation says why", async () =>
+			{
+				var first  = await Info(new { projectPath = fx.Csproj });
+				var second = await Info(new { projectPath = fx.Csproj });
+				var failed = await Info(new { projectPath = broken.Csproj });
+				
+				if(failed?["error"] is not null)
+					
+					return Skip.SetupUnavailable($"the workspace does not load a project whose import is missing: {failed.ToJsonString()}");
+				
+				return Verdict(first?["version"]?.GetValue<string>() == "3.2.1"
+					&& second?["version"]?.GetValue<string>() == "3.2.1"
+					&& second["evaluation_unavailable"] is null
+					&& failed?["evaluation_unavailable"]?.GetValue<string>().Contains("not-there.props", StringComparison.Ordinal) == true
+					&& failed["version"] is null
+					&& failed["_caution"]?.GetValue<string>().Contains("could not be evaluated", StringComparison.Ordinal) == true, new JsonArray(first?.DeepClone(), second?.DeepClone(), failed?.DeepClone()));
 			}),
 			
 			// What cannot be evaluated is said, not left out: a directory of source files has no project
@@ -134,6 +183,7 @@ static class ProjectEvaluationTests
 		return new TestGroup($"Project Evaluation ({tests.Count} tests)", tests, Teardown: () => {
 			
 			fx.Dispose();
+			broken.Dispose();
 			adhoc.Dispose();
 			
 			return Task.CompletedTask;
