@@ -345,7 +345,7 @@ internal sealed class BuildTool : RoslynMcpTool
 	///     names <c>Name(tfm)</c>; <see langword="null"/> for a project without the suffix, which targets
 	///     one framework.
 	/// </summary>
-	static string? FrameworkOf(Project project)
+	internal static string? FrameworkOf(Project project)
 	{
 		var name = project.Name;
 		

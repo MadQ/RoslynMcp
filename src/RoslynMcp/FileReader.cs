@@ -111,11 +111,14 @@ internal static class FileReader
 	///     has no limit and opens the file without sharing it for deleting, which blocks the
 	///     atomic replace of a project file while it is held (#349).
 	/// </summary>
-	internal static System.Xml.Linq.XDocument LoadXml(string path)
+	internal static System.Xml.Linq.XDocument LoadXml(string path) => LoadXml(path, System.Xml.Linq.LoadOptions.None);
+	
+	/// <summary><see cref="LoadXml(string)"/> with load options: line numbers, for a caller that names where an element is.</summary>
+	internal static System.Xml.Linq.XDocument LoadXml(string path, System.Xml.Linq.LoadOptions options)
 	{
 		using var stream = OpenRead(path, DocumentLimit);
 		
-		return System.Xml.Linq.XDocument.Load(stream);
+		return System.Xml.Linq.XDocument.Load(stream, options);
 	}
 	
 	/// <summary>

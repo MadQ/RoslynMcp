@@ -59,6 +59,7 @@ static class HarnessGroups
 		AsyncGroup("Load Health",                          g => LoadHealthTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Unrestored Projects",                  g => UnrestoredProjectTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Partial References",                    g => PartialReferenceTests.BuildAsync(g.Ctx, g.LogDir, g.LogGlob)),
+		AsyncGroup("Project Evaluation",                    g => ProjectEvaluationTests.BuildAsync(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Pagination Cursor",                         g => PaginationTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Log Fields",                                g => LogFieldTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Backup Prune",                              g => BackupPruneTests.Build(g.Ctx)),

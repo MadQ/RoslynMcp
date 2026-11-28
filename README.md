@@ -183,7 +183,7 @@ AI agents working on C# through file reads and regex have a structural problem: 
 | `roslyn_get_file_outline` | File structure (types + member signatures, no bodies) |
 | `roslyn_get_symbol_documentation` | XML doc comments for any symbol |
 | `roslyn_get_usings` | Using directives + implicit global usings |
-| `roslyn_get_project_info` | Project metadata: TFM, packages, language version |
+| `roslyn_get_project_info` | Project metadata: TFM, packages, language version; the evaluated value of any MSBuild property, and where it is set |
 | `roslyn_read_file` | File contents as a short JSON header plus the raw, unescaped lines (tracked text documents from the in-memory workspace) |
 | `roslyn_get_line_count` | Line count for one or more files |
 | `roslyn_get_diagnostics` | Compiler errors and warnings without building |
