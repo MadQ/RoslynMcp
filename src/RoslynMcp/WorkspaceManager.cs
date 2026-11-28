@@ -364,12 +364,19 @@ internal sealed partial class WorkspaceManager : IDisposable
 	///     settled on a solution (<see cref="CallLanding"/>) is answered from that solution wherever
 	///     it holds the project: by every lookup alike, since the read that found a file and the
 	///     write that changes it must not be two workspaces (#501).
+	///     <para>
+	///         The landing is the call's, read from an <see cref="AsyncLocal{T}"/>. Work that
+	///         outlives the call (a timer, a watcher thread, a load another call waits on) captures
+	///         it too, so nothing that runs in the background may come through here: it would be
+	///         answered for a call that has ended. The watcher flush and the reload work on their
+	///         own instance and never look one up.
+	///     </para>
 	/// </summary>
 	bool TryMapped(string normalizedPath, out string key)
 	{
 		if(CallLanding.Current?.Solution is { } landed
 			&& cache.TryGetValue(landed, out var entry)
-			&& entry.Instance.ProjectPaths.Contains(normalizedPath, SecurityBoundary.PathComparer)) {
+			&& entry.Instance.HoldsProject(normalizedPath)) {
 			
 			key = landed;
 			
@@ -630,7 +637,10 @@ internal sealed partial class WorkspaceManager : IDisposable
 		
 		// Written through the root of a solution set (#501): a file no solution is above, which a
 		// loaded one may still be evaluated from (a Directory.Build.props beside the repositories).
-		// Each loaded workspace decides what the file is to it; to most it is nothing.
+		// Only a workspace with something at or below the file's directory can be: MSBuild
+		// imports upward, and a source file is a project's from its directory down. Passed to
+		// every workspace, a new source file or a props file anywhere under the root would flag
+		// a full reload of all of them, since each takes an unknown one for its own.
 		if(IsSolutionSetRoot(normalizedPath)) {
 			
 			WorkspaceInstance[] held;
@@ -638,8 +648,13 @@ internal sealed partial class WorkspaceManager : IDisposable
 			lock(cacheLock)
 				held = [..cache.Values.Select(entry => entry.Instance)];
 			
+			if(Path.GetDirectoryName(Path.GetFullPath(fullPath)) is not { } directory)
+				
+				return;
+			
 			foreach(var instance in held)
-				instance.InvalidateFile(fullPath);
+				if(SecurityBoundary.StartsWithPath(instance.RootPath, directory) || instance.ProjectPaths.Any(project => SecurityBoundary.StartsWithPath(project, directory)))
+					instance.InvalidateFile(fullPath);
 			
 			return;
 		}

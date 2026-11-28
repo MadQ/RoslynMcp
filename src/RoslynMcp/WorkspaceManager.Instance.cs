@@ -457,6 +457,19 @@ internal sealed partial class WorkspaceManager
 			}
 		}
 		
+		/// <summary>Whether a project file is one of this workspace's, without the copy <see cref="ProjectPaths"/> makes.</summary>
+		public bool HoldsProject(string projectFile)
+		{
+			@lock.EnterReadLock();
+			
+			try {
+				return projectMap.ContainsKey(projectFile);
+			}
+			finally {
+				@lock.ExitReadLock();
+			}
+		}
+		
 		// ── Queries ──────────────────────────────────────────────────────────
 		
 		public Solution GetSolution()

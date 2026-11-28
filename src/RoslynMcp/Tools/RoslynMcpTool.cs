@@ -1423,9 +1423,15 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return true;
 		
-		if(SolutionSet.Above(fullPath, root) is { } solution)
+		if(SolutionSet.Above(fullPath, root, out var severalIn) is { } solution)
 			owner = (Path.GetFullPath(solution), true, fullPath);
-		else if(SolutionSet.ProjectAbove(fullPath, root) is { } project)
+		
+		// Said in the log, since the call goes on by the project or the root and the answer
+		// would not show why no solution was loaded.
+		else if(severalIn is not null)
+			activeScope.Value?.Record($"several solutions in {Path.GetRelativePath(root, severalIn)}, none picked");
+		
+		if(owner is null && SolutionSet.ProjectAbove(fullPath, root) is { } project)
 			owner = (Path.GetFullPath(project), false, fullPath);
 		
 		return true;
@@ -1772,13 +1778,16 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			var     rules     = IgnoreRules.ForRoot(rootPath, logger);
 			var     named     = NamedDirectories(normalized, anchorLeadingSegments: false);
 			
+			// Over the root of a solution set, as a listing of it prunes (#501).
+			var     set       = workspace.IsSolutionSet(rootPath) ? new SolutionSet.Listing(rootPath, logger) : null;
+			
 			var candidates = WorkspaceWalker.EnumerateFiles(
 				rootPath,
 				fileName,
 				recursive: true,
 				(ref FileSystemEntry directory) =>
 					!named.Contains(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
+					&& (set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
 			);
 			
 			// Not stopped at the first match: that would report a match as unique without

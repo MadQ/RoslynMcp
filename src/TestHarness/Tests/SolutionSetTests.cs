@@ -41,6 +41,12 @@ static class SolutionSetTests
 		fx.Write("Gamma/Tool/Tool.csproj", Project);
 		fx.Write("Gamma/Tool/Tool.cs", "namespace Tool;\n\npublic class Hammer { }\n");
 		
+		// The root as a repository of its own that ignores the repositories in it by name, which
+		// must not hide them from a listing or a search of the root; and a directory no solution
+		// is above, for a source file written through the root alone.
+		fx.Write(".gitignore", "Alpha/\nBeta/\nGamma/\n");
+		fx.Write("Loose/keep.txt", "kept\n");
+		
 		// Five levels down, one past where solutions are looked for: no member of the set.
 		fx.Write("Deep/a/b/c/d/Deep.slnx", "<Solution />\n");
 		
@@ -229,8 +235,15 @@ static class SolutionSetTests
 				// Asked of Alpha's workspace, whose documents the search reads: the edit reached it.
 				var inWorkspace = await Call("roslyn_search_files", new { pattern = "ALPHA", projectPath = "Alpha/Alpha.slnx" });
 				
-				return Verdict(code?["error"] is null && text?["error"] is null && onDisk && inWorkspace?["total_matches"]?.GetValue<int>() == 1,
-					$"expected both edits on disk and the new text in Alpha's workspace; got {code?.ToJsonString() ?? "null"} / {text?.ToJsonString() ?? "null"} / on disk {onDisk} / workspace {inWorkspace?.ToJsonString() ?? "null"}", sw);
+				
+				// A new source file no solution is above concerns no loaded workspace. Passed to all
+				// of them, each took the unknown file for its own and flagged a full reload.
+				var loose = await Call("roslyn_write_file", new { filePath = "Loose/Gen.cs", content = "class Gen { }\n", createNew = true });
+				var drift = await Call("roslyn_check_drift", new { projectPath = "Alpha/Alpha.slnx" });
+				
+				return Verdict(code?["error"] is null && text?["error"] is null && onDisk && inWorkspace?["total_matches"]?.GetValue<int>() == 1
+					&& loose?["error"] is null && File.Exists(fx.PathOf("Loose/Gen.cs")) && drift?["reload_pending"]?.GetValue<bool>() != true,
+					$"expected both edits on disk, the new text in Alpha's workspace, and a loose file written with no reload flagged; got {code?.ToJsonString() ?? "null"} / {text?.ToJsonString() ?? "null"} / on disk {onDisk} / workspace {inWorkspace?.ToJsonString() ?? "null"} / loose {loose?.ToJsonString() ?? "null"} / drift {drift?.ToJsonString() ?? "null"}", sw);
 			}),
 			
 			// Loading stays lazy to the end: Gamma was listed, searched and counted among the

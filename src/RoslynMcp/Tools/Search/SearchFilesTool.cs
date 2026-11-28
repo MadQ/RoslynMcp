@@ -32,6 +32,8 @@ internal sealed class SearchFilesTool : RoslynMcpTool
 		"its line numbers are the ones roslyn_read_file uses. Files that were not searched are counted in 'skipped': binary files, " +
 		"files that could not be read, files with a line over 1,000,000 characters, links leading out of the workspace, " +
 		"and files on one line of which the pattern ran for more than two seconds (a backtracking regex on a very long line). " +
+		"Where the session's root holds several solutions and no projectPath is given, the search covers the whole root and reads " +
+		"every file from disk, source included: name a directory's solution as projectPath, or narrow filePattern, to search less. " +
 		"Results are paged; pass page_token from a previous response to retrieve the next page.")]
 	public async Task<object> SearchFiles(
 		[Description("Pattern to match against the CONTENT of each source line. Interpretation is controlled by 'mode' (default regex). This is not a filename filter — use filePattern to restrict which files are searched.")] string pattern,

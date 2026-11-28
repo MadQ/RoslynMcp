@@ -60,11 +60,15 @@ internal static class SolutionSet
 	///     file system decides, never which solutions are loaded, so the same file lands in the
 	///     same solution in every call. <see langword="null"/> when no directory between the
 	///     path and the root holds a solution, or when the nearest one holds several, which name
-	///     no single owner. The path need not exist: a file about to be created belongs where its
-	///     nearest existing directory does.
+	///     no single owner and whose directory is then <paramref name="severalIn"/>, for the caller
+	///     to say. The path need not exist: a file about to be created belongs where its nearest
+	///     existing directory does. Not held to <see cref="Depth"/>: that bounds the walk down from
+	///     the root, and the way up from a file is as long as its path.
 	/// </summary>
-	public static string? Above(string path, string root)
+	public static string? Above(string path, string root, out string? severalIn)
 	{
+		severalIn = null;
+		
 		for(var directory = Path.GetDirectoryName(path); directory is not null && IsBelow(directory, root); directory = Path.GetDirectoryName(directory)) {
 			
 			string[] solutions;
@@ -76,9 +80,16 @@ internal static class SolutionSet
 				continue;
 			}
 			
-			if(solutions.Length > 0)
+			if(solutions.Length == 1)
 				
-				return solutions.Length == 1 ? solutions[0] : null;
+				return solutions[0];
+			
+			if(solutions.Length > 1) {
+				
+				severalIn = directory;
+				
+				return null;
+			}
 		}
 		
 		return null;
@@ -116,11 +127,12 @@ internal static class SolutionSet
 	;
 	
 	/// <summary>
-	///     Which directories a listing or a search of the whole root leaves out. The root's own
-	///     rules decide for its top level. Below that, each directory directly under the root is
-	///     taken as a tree of its own, with its own <c>.gitignore</c>: the root is often a
-	///     repository that ignores everything in it, and what a repository below it ignores
-	///     (<c>dist</c>, <c>coverage</c>) is said in that repository's file.
+	///     Which directories a listing, a search or a file lookup over the whole root leaves out.
+	///     At the top level only the directories no workspace reads, and never the root's own
+	///     <c>.gitignore</c>: the root is often a repository that ignores every repository in it,
+	///     by name, and those are what the set is made of. Below that, each directory directly
+	///     under the root is taken as a tree of its own, with its own <c>.gitignore</c>: what a
+	///     repository ignores (<c>dist</c>, <c>coverage</c>) is said in its own file.
 	/// </summary>
 	public sealed class Listing(string root, FileLogger logger)
 	{
@@ -133,7 +145,7 @@ internal static class SolutionSet
 		{
 			if(relativeDirectory.IsEmpty)
 				
-				return rootRules.IsPrunedFromListing(relativeDirectory, name);
+				return rootRules.IsExcluded(name);
 			
 			var cut   = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 			var first = (cut < 0 ? relativeDirectory : relativeDirectory[..cut]).ToString();

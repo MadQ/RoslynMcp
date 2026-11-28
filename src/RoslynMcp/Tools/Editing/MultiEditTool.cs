@@ -47,6 +47,10 @@ internal sealed class MultiEditTool : RoslynMcpTool
 		// The file the name leads to: what the file is goes by it, whichever name the batch gave.
 		public required string Physical    { get; init; }
 		public required string ProjectPath { get; init; }
+		
+		// The solution this file's edits landed in (#501): the landing is the call's, and a
+		// batch resolves every file before it writes one, so each write puts its own back.
+		public string? Landed { get; init; }
 		public required string Content     { get; init; }
 		
 		// Of a C# file only.
@@ -177,6 +181,7 @@ internal sealed class MultiEditTool : RoslynMcpTool
 					FullPath    = fullPath,
 					Physical    = physical,
 					ProjectPath = fileProject,
+					Landed      = CallLanding.Current?.Solution,
 					Content     = content,
 					Text        = text,
 					Tree        = text is null ? null : CSharpSyntaxTree.ParseText(text, ParseOptionsOf(fileProject, fullPath, physical), fullPath),
@@ -309,6 +314,11 @@ internal sealed class MultiEditTool : RoslynMcpTool
 				written.Add(new(file.Relative, []) { State = "not_written" });
 				continue;
 			}
+			
+			// The write goes to the workspace this file's edits were resolved in, not the one the
+			// last file of the batch landed in.
+			if(CallLanding.Current is { } landing)
+				landing.Solution = file.Landed;
 			
 			try {
 				

@@ -148,7 +148,7 @@ internal sealed partial class WorkspaceManager
 			var path = ResolveDefaultWorkspacePath();
 			
 			// A solution set is its own directory (#501); a solution or a project is a file in one.
-			return Volatile.Read(ref solutionSetRoot) is { } set ? set : Path.GetDirectoryName(path);
+			return IsSolutionSetPath(path) ? path : Path.GetDirectoryName(path);
 		}
 		catch(Exception ex) when(IsDefaultLookupFailure(ex)) {
 			
@@ -314,13 +314,9 @@ internal sealed partial class WorkspaceManager
 			
 			var found = FindDefaultWorkspace(root, source, logger);
 			
-			// Written before the path, so that whoever reads the path finds the set with it.
-			if(Directory.Exists(found))
-				Volatile.Write(ref solutionSetRoot, found);
-			
 			if(Interlocked.CompareExchange(ref defaultWorkspacePath, found, null) is null)
-				logger.LogInfo("Workspace", Directory.Exists(found)
-					? $"Default workspace: none, {found} is a root of {SolutionSet.Find(found, logger).Length} solutions; each call lands in the solution above the file it names (from {source} '{root}')"
+				logger.LogInfo("Workspace", IsSolutionSetPath(found)
+					? $"Default workspace: none, {found} is a root of several solutions; each call lands in the solution above the file it names (from {source} '{root}')"
 					: $"Default workspace: {found} (from {source} '{root}')");
 			
 			path = defaultWorkspacePath!;
@@ -398,11 +394,19 @@ internal sealed partial class WorkspaceManager
 		// root. Loading it would scope the workspace, its watcher, and its security boundary to that
 		// whole tree, so the result is held to the same rule as the root.
 		// A solution set is the root itself, which was checked above.
-		if(!Directory.Exists(found) && SecurityBoundary.IsDangerousProjectPath(Path.GetDirectoryName(found)!))
+		if(!IsSolutionSetPath(found) && SecurityBoundary.IsDangerousProjectPath(Path.GetDirectoryName(found)!))
 			throw new NoDefaultWorkspaceException(root, source, $"it resolves to '{found}', whose directory is a drive root or system directory");
 		
 		return found;
 	}
+	
+	// The root last walked for solutions below it without finding one, and when (see the walk).
+	// A reference, so that it is read and written whole.
+	sealed record NothingBelow(string Root, long At);
+	
+	static volatile NothingBelow? nothingBelow;
+	
+	const int NothingBelowRetryMs = 60_000;
 	
 	static string FindDefaultWorkspaceCandidate(string root, string source, FileLogger logger)
 	{
@@ -443,14 +447,29 @@ internal sealed partial class WorkspaceManager
 		// working directory is wherever a client happened to start the server, often a home
 		// directory, and a search downward from there is the crawl #295 ended: it would make
 		// every repository under a home directory a solution set, with the home directory as
-		// its boundary. A home directory is not searched even when it is named.
-		if(ServerArgs.Current.Root is null || SecurityBoundary.PathComparer.Equals(Path.TrimEndingDirectorySeparator(root), Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)))
+		// its boundary. A home directory is not searched even when it is named, and neither is
+		// a directory above one (C:\Users, /home): a root given as "." is a named root, and is
+		// still wherever the client started the server.
+		var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+		
+		if(ServerArgs.Current.Root is null || (home.Length > 0 && SecurityBoundary.StartsWithPath(home, Path.TrimEndingDirectorySeparator(root))))
 			throw new NoDefaultWorkspaceException(root, source, "no .sln, .slnx, or .csproj was found in it, and no solution above it");
+		
+		// A root with nothing below it is not walked again for a minute. The lookup is repeated
+		// every two seconds while there is no default, by whichever tool call comes next, and the
+		// walk is what costs: the steps above list a few directories, this one a tree.
+		if(nothingBelow is (var walked, var at) && SecurityBoundary.PathComparer.Equals(walked, root) && Environment.TickCount64 - at < NothingBelowRetryMs)
+			throw new NoDefaultWorkspaceException(root, source, $"no .sln, .slnx, or .csproj was found in it, no solution above it, and none in the {SolutionSet.Depth} directory levels below it");
+		
+		var below = SolutionSet.Find(root, logger);
+		
+		if(below.Length == 0)
+			nothingBelow = new(root, Environment.TickCount64);
 		
 		// Nothing in the root and nothing above it: the solutions below it. One of them is
 		// the default as if it were in the root. Several make the root a solution set, which is
 		// answered as a directory: no workspace, and each call lands in one of them.
-		return SolutionSet.Find(root, logger) switch {
+		return below switch {
 			
 			[]         => throw new NoDefaultWorkspaceException(root, source, $"no .sln, .slnx, or .csproj was found in it, no solution above it, and none in the {SolutionSet.Depth} directory levels below it"),
 			[var only] => only,
@@ -458,9 +477,11 @@ internal sealed partial class WorkspaceManager
 		};
 	}
 	
-	// The root of the solution set the default is, when it is one (#501). Set with the default
-	// workspace path, which is then this directory.
-	string? solutionSetRoot;
+	// A default workspace path that is neither a solution nor a project is the root of a solution
+	// set (#501): the one value says both, so the two cannot come apart.
+	static bool IsSolutionSetPath(string defaultPath)
+		=> !IsSolutionPath(defaultPath) && !defaultPath.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+	;
 	
 	/// <summary>
 	///     The root of the session's solution set, or <see langword="null"/> when the default is a
@@ -472,7 +493,7 @@ internal sealed partial class WorkspaceManager
 			if(Volatile.Read(ref defaultWorkspacePath) is null)
 				DefaultWorkspaceDirectory();
 			
-			return Volatile.Read(ref solutionSetRoot);
+			return Volatile.Read(ref defaultWorkspacePath) is { } path && IsSolutionSetPath(path) ? path : null;
 		}
 	}
 	
