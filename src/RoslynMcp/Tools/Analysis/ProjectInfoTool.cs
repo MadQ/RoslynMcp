@@ -26,7 +26,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			"output kind, NuGet package references, and additional files — and to ask what an MSBuild property evaluates to. " +
 			"Prefer this over reading the .csproj directly: a project file does not say what Directory.Build.props, a condition or the SDK make of it. " +
 			"When an MSBuildWorkspace is active, target_frameworks (every framework the project is loaded for), root_namespace, " +
-			"allow_unsafe_blocks and warnings_as_errors are what the loaded project has. " +
+			"allow_unsafe_blocks and warnings_as_errors are what the loaded project has; for a project MSBuild failed to load cleanly (see load_warnings) the options may be defaults, so the last two are absent and nullable, language_version and output_kind answer 'Unknown'. " +
 			"For one project (not a solution), version is the evaluated Version, and properties: ['RuntimeIdentifiers', 'OutputPath', ...] " +
 			"returns the evaluated value of each property named, as a build would see it: MSBuild evaluates the project (dotnet msbuild, no target runs, about a second). " +
 			"configuration and targetFramework say what to evaluate for, since a value can depend on both; without them the project's defaults apply. " +
@@ -75,8 +75,14 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			
 			return scope.Error(new ErrorResult(invalid));
 		
-		var evaluating   = asked.Length > 0 || configuration is not null || targetFramework is not null;
-		var loadWarnings = workspace.GetLoadWarnings(projectPath) is { Length: > 0 } warnings ? warnings : null;
+		var evaluating = asked.Length > 0 || configuration is not null || targetFramework is not null;
+		
+		// How the load went, asked once the solution or project is at hand: getting those runs a
+		// pending reload, and warnings read before it would be the load before's, beside the
+		// projects of the new one. The projects MSBuild failed on can have their compilation
+		// options at defaults (#300).
+		string[]?    LoadWarnings() => workspace.GetLoadWarnings(projectPath) is { Length: > 0 } warnings ? warnings : null;
+		ProjectKey[] LoadFailed()   => TryGetHealth(projectPath)?.ProjectsWithLoadFailures ?? [];
 		
 		// A solution, given or the default one, is every project of it (#296): a multi-targeted
 		// project once, since its frameworks share the project file the facts are read from.
@@ -100,11 +106,13 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 					"properties, configuration and targetFramework are evaluated for one project, and the path given stands for a solution.",
 					$"Pass projectPath with one of: {string.Join(", ", projectFiles.Take(20).Select(candidate => Path.GetRelativePath(rootPath, candidate.FilePath!)))}"));
 			
-			ProjectInfoResult[] projects = [..projectFiles.Select(candidate => Describe(candidate, rootPath, isMSBuild, directOnly, null, null))];
+			var failedInSolution = LoadFailed();
+			
+			ProjectInfoResult[] projects = [..projectFiles.Select(candidate => Describe(candidate, rootPath, isMSBuild, directOnly, null, null, failedInSolution))];
 			
 			// Said once, and for a project without a version too: that is the very case of a
 			// version set in Directory.Build.props, which reads as "none" without a word.
-			return scope.Outcome($"{projects.Length} project(s)", new SolutionInfoResult(Path.GetRelativePath(rootPath, solutionPath), projects, loadWarnings) {
+			return scope.Outcome($"{projects.Length} project(s)", new SolutionInfoResult(Path.GetRelativePath(rootPath, solutionPath), projects, LoadWarnings()) {
 				Caution = "Each project's version is what its project file writes, and absent where the file writes none: Directory.Build.props, conditions and the SDK are not taken into account for a solution. Name one project with projectPath for its evaluated version."
 			});
 		}
@@ -113,7 +121,7 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			
 			return scope.Error(error);
 		
-		var described = Describe(project, rootPath, isMSBuild, directOnly, AdhocCaution(projectPath), loadWarnings);
+		var described = Describe(project, rootPath, isMSBuild, directOnly, AdhocCaution(projectPath), LoadWarnings(), LoadFailed());
 		
 		if(!isMSBuild || project.FilePath is not { } projectFile)
 			
@@ -216,10 +224,23 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 	///     The facts of one project. <paramref name="adhocCaution"/> and <paramref name="loadWarnings"/>
 	///     are the single-project call's; for a solution they are said once, on the whole answer.
 	/// </summary>
-	static ProjectInfoResult Describe(Project project, string rootPath, bool isMSBuild, bool directOnly, string? adhocCaution, string[]? loadWarnings)
+	static ProjectInfoResult Describe(Project project, string rootPath, bool isMSBuild, bool directOnly, string? adhocCaution, string[]? loadWarnings, ProjectKey[] loadFailed)
 	{
 		var compOpts  = project.CompilationOptions  as CSharpCompilationOptions;
 		var parseOpts = project.ParseOptions         as CSharpParseOptions;
+		
+		var fromProject = isMSBuild && project.FilePath is not null;
+		
+		// A project MSBuild failed on can have its options at defaults (#300): Nullable off in a
+		// project that enables it, the language version the compiler's own, AllowUnsafe and the
+		// warnings-as-errors switch a confident false. What the options say is then not known,
+		// and is answered so; load_warnings, in the same answer, says why. By project file: the
+		// answer is one per file, whichever of its frameworks is described.
+		var defaulted = fromProject && loadFailed.Any(failed => SecurityBoundary.PathComparer.Equals(failed.File, project.FilePath));
+		var trusted   = fromProject && !defaulted;
+		
+		if(defaulted)
+			(compOpts, parseOpts) = (null, null);
 		
 		var tfm          = InferTfm(project);
 		var outputKind   = compOpts?.OutputKind.ToString() ?? "Unknown";
@@ -235,7 +256,6 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 				.Order()
 		];
 		
-		var fromProject = isMSBuild && project.FilePath is not null;
 		
 		// The version as the project file writes it: the one fact here the loaded project does
 		// not have. A call for one project replaces it with the evaluated one (#244).
@@ -271,8 +291,8 @@ internal sealed class ProjectInfoTool : RoslynMcpTool
 			version,
 			fromProject ? project.DefaultNamespace : null,
 			frameworks is { Length: > 0 } ? frameworks : null,
-			fromProject ? compOpts?.AllowUnsafe : null,
-			fromProject && compOpts is not null ? compOpts.GeneralDiagnosticOption == ReportDiagnostic.Error : null,
+			trusted ? compOpts?.AllowUnsafe : null,
+			trusted && compOpts is not null ? compOpts.GeneralDiagnosticOption == ReportDiagnostic.Error : null,
 			loadWarnings)
 		{
 			Caution = adhocCaution

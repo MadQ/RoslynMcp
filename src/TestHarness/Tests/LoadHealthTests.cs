@@ -226,6 +226,41 @@ static class LoadHealthTests
 					: (false, $"FAIL  (no phantom hint naming the MSBuild failure: '{hint}')");
 			}),
 			
+			// The same options feed roslyn_get_project_info, and after a failed load they can be
+			// defaults: nullable: "Disable" for a project that enables it is the very symptom, said
+			// with confidence. What the options would say is not known for the failing project
+			// ("Unknown", and the two switches absent), and known for one that loaded well. In the
+			// answer for one project, and in the answer for a solution that holds both kinds.
+			new("load health: get_project_info does not answer from the options of a failed load", async () =>
+			{
+				if(!failedA)
+					
+					return Skip.SetupUnavailable(NotFailed);
+				
+				static bool Unknown(JsonNode? project) =>
+					project?["nullable"]?.GetValue<string>() == "Unknown" && project["language_version"]?.GetValue<string>() == "Unknown"
+					&& project["output_kind"]?.GetValue<string>() == "Unknown"
+					&& project["allow_unsafe_blocks"] is null && project["warnings_as_errors"] is null;
+				
+				static bool Known(JsonNode? project) =>
+					project?["nullable"]?.GetValue<string>() is { } nullable && nullable != "Unknown"
+					&& project["allow_unsafe_blocks"] is not null && project["warnings_as_errors"] is not null;
+				
+				var failing = await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = a.Csproj });
+				var sound   = await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = good });
+				var whole   = await ctx.CallToolJsonAsync("roslyn_get_project_info", new { projectPath = s.PathOf("LoadHealthSln.slnx") });
+				
+				JsonNode? In(string name) => (whole?["projects"] as JsonArray)?.FirstOrDefault(project => project?["name"]?.GetValue<string>() == name);
+				
+				if(!Names(whole?["load_warnings"]).Any(warning => warning.Contains("Bad.AssemblyInfoInputs.cache")))
+					
+					return Skip.SetupUnavailable(NotFailed);
+				
+				return Unknown(failing) && failing?["load_warnings"] is not null && Known(sound) && Unknown(In("Bad")) && Known(In("Good"))
+					? (true, "PASS  (unknown for the projects MSBuild failed on, known for those that loaded well, in both answers)")
+					: (false, $"FAIL  (failing: {failing?.ToJsonString()}; sound: {sound?.ToJsonString()}; solution: {whole?.ToJsonString()})");
+			}),
+			
 			// The issue's acceptance: a Roslyn check of this compilation would be a check of the wrong
 			// options, so the tool goes straight to dotnet build and says why. The build itself may well
 			// fail — the fixture is not restored and the cache is still blocked — and is not what is tested.

@@ -214,7 +214,8 @@ a project from the comparison; open an issue if a project of yours is one.
 **Symptom:** `roslyn_get_diagnostics` reports a flood of `CS8632` ("The annotation for nullable
 reference types should only be used in code within a '#nullable' annotations context") in a
 project whose `.csproj` sets `<Nullable>enable</Nullable>`, and `roslyn_get_project_info` shows
-`nullable: "Disable"`.
+`nullable: "Unknown"` with the failure in `load_warnings` (it does not answer from options that
+may be defaults; versions before 0.9.0 showed `nullable: "Disable"`).
 
 **Cause:** the same contention as above, hitting a later step. The design-time build could not
 write a file under `obj\` — `load_warnings` reads like `Msbuild failed when processing the file
