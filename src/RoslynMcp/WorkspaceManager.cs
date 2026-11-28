@@ -700,7 +700,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 	///     text from their file watcher, a debounce later and only where the watcher covers the
 	///     directory, so the next call through a consumer's solution could still read the old text.
 	/// </summary>
-	void InvalidateInOthers(WorkspaceInstance? own, string fullPath)
+	void InvalidateInOthers(WorkspaceInstance? own, string fullPath, string? movedFromPath = null)
 	{
 		WorkspaceInstance[] held;
 		
@@ -713,9 +713,32 @@ internal sealed partial class WorkspaceManager : IDisposable
 			held = [..cache.Values.Select(entry => entry.Instance).Where(instance => !ReferenceEquals(instance, own))];
 		}
 		
-		foreach(var instance in held)
-			if(instance.PeekSolution().GetDocumentIdsWithFilePath(fullPath).Length > 0)
-				instance.InvalidateFile(fullPath);
+		var directory = Path.GetDirectoryName(fullPath);
+		
+		foreach(var instance in held) {
+			
+			// A workspace on its way out (pushed from the cache while this call ran) is disposed
+			// on another thread. The file is written by now: telling the others is a courtesy,
+			// and must not turn a write that succeeded into a failed call.
+			try {
+				
+				var solution = instance.PeekSolution();
+				
+				// A document already, or a file in the directory of one of its projects: a new
+				// source file of a shared project is no document yet, and is the workspace's own
+				// to classify as it is for the one the call was in.
+				if(solution.GetDocumentIdsWithFilePath(fullPath).Length > 0
+					|| (directory is not null && instance.ProjectPaths.Any(project => Path.GetDirectoryName(project) is { } projectDirectory && SecurityBoundary.StartsWithPath(directory, projectDirectory))))
+					instance.InvalidateFile(fullPath);
+				
+				// The name a file was moved from is a document that is gone.
+				if(movedFromPath is not null && solution.GetDocumentIdsWithFilePath(movedFromPath).Length > 0)
+					instance.InvalidateFile(movedFromPath);
+			}
+			catch(Exception ex) when(ex is ObjectDisposedException or InvalidOperationException) {
+				logger.LogInfo("Sync", $"A workspace being unloaded was not told of the write to {fullPath}: {ex.GetType().Name}");
+			}
+		}
 	}
 	
 	/// <summary>
@@ -806,7 +829,7 @@ internal sealed partial class WorkspaceManager : IDisposable
 			
 			await instance.WriteAndInvalidate(fullPath, movedFromPath, write);
 			
-			InvalidateInOthers(instance, fullPath);
+			InvalidateInOthers(instance, fullPath, movedFromPath);
 		}
 		else
 			// No cached workspace — write directly. A concurrent thread could load the

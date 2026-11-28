@@ -82,6 +82,9 @@ internal abstract partial class RoslynMcpTool
 		McpServer? server,
 		CancellationToken cancellationToken)
 	{
+		// Per name: a call that asks several names must not carry one name's landing to the next.
+		CallLanding.Current?.Clear();
+		
 		if(!string.IsNullOrWhiteSpace(filePath))
 			
 			return TryResolveProjectArg(projectPath, filePath, out var byFile, out var fileError) ? (byFile, null) : (byFile, fileError);
@@ -94,7 +97,9 @@ internal abstract partial class RoslynMcpTool
 		// solutions of the set that are loaded.
 		if(workspace.SolutionSetContext(resolved) is { } set)
 			
-			return await ResolveSymbolInSetAsync(set.Root, resolved, symbolName, containingType, sought, cancellationToken);
+			return await ResolveSymbolInSetAsync(set, resolved, symbolName, containingType, sought, cancellationToken);
+		
+		LandProjectInOwnSolution(resolved);
 		
 		if(await DeclaringProjectsOfAsync(resolved, symbolName, containingType, sought, indexOnly: false, cancellationToken) is not { } found)
 			
@@ -146,35 +151,60 @@ internal abstract partial class RoslynMcpTool
 	///         it (a type of a referenced assembly, a constructor by its metadata name) would cost
 	///         a compilation of every project of every loaded solution, a misspelled name included.
 	///         With one solution loaded the lookup is the one a single solution always had.
+	///         The user is not asked to choose here, whatever the elicitation setting: the choice
+	///         is between solutions as often as between symbols, and the candidates say both.
 	///     </para>
 	/// </summary>
-	async Task<(string Resolved, ToolResult? Error)> ResolveSymbolInSetAsync(string root, string resolved, string symbolName, string? containingType, SymbolSought sought, CancellationToken cancellationToken)
+	async Task<(string Resolved, ToolResult? Error)> ResolveSymbolInSetAsync((string Root, SecurityBoundary Boundary) set, string resolved, string symbolName, string? containingType, SymbolSought sought, CancellationToken cancellationToken)
 	{
-		var loaded = workspace.LoadedSetMembers();
-		var found  = new List<(string Solution, DeclaringProject Declaring)>();
+		var root = set.Root;
 		
-		foreach(var solution in loaded)
-			if(await DeclaringProjectsOfAsync(solution, symbolName, containingType, sought, indexOnly: loaded.Length > 1, cancellationToken) is { } inSolution)
-				found.AddRange(inSolution.Candidates.Select(declaring => (solution, declaring)));
+		var loaded    = workspace.LoadedSetMembers();
+		var indexOnly = loaded.Length > 1;
+		var found     = new List<(string Solution, DeclaringProject Declaring)>();
+		var searched  = new List<string>();
+		
+		foreach(var solution in loaded) {
+			
+			// One pushed out of the cache since the list was read is not loaded again for this:
+			// the lookup loads nothing.
+			if(!workspace.IsLoaded(solution) || await DeclaringProjectsOfAsync(solution, symbolName, containingType, sought, indexOnly, cancellationToken) is not { } inSolution)
+				continue;
+			
+			searched.Add(solution);
+			found.AddRange(inSolution.Candidates.Select(declaring => (solution, declaring)));
+		}
 		
 		string Relative(string path) => Path.GetRelativePath(root, path);
 		
 		if(found.Count == 0) {
 			
-			var mentioning = await SolutionsMentioningAsync(root, SimpleNameOf(symbolName), loaded, cancellationToken);
+			var (mentioning, complete) = SolutionsMentioning(root, set.Boundary, SimpleNameOf(symbolName), loaded, cancellationToken);
+			
+			// Each part says only what was covered: a hint that sends an agent after a typo for a
+			// name that was not looked for, or in files that were not reached, costs it the search.
+			var hint = mentioning.Length > 0
+				? "found_solutions are the solutions not loaded whose source mentions the name: pass one as projectPath, or name a file with filePath, and the call lands in that file's solution."
+				: complete
+					? "No source file of a solution that is not loaded mentions the name."
+					: "No mention of the name was found in the other solutions' source in the two seconds searched, which did not reach all of it.";
+			
+			if(mentioning.Length > 0 && !complete)
+				hint += " The search of their source stopped after two seconds, so there may be more.";
+			
+			if(indexOnly && searched.Count > 0)
+				hint += " With several solutions loaded, only declarations in source are looked for: for a type of a referenced assembly (IDisposable) or a constructor by its metadata name, pass one of searched_solutions as projectPath.";
 			
 			return (resolved, new PathErrorResult(
-				loaded.Length == 0
-					? $"'{symbolName}' was not looked for: none of the solutions below the root is loaded yet, and a symbol is looked for in the loaded ones."
-					: $"'{symbolName}' is declared in none of the {loaded.Length} loaded solution(s).",
+				searched.Count == 0
+					? $"'{symbolName}' was not looked for: none of the solutions below the root is loaded, and a symbol is looked for in the loaded ones."
+					: $"'{symbolName}' is declared in none of the {searched.Count} loaded solution(s) searched.",
 				ProvidedPath: root,
 				FoundSolutions: mentioning.Length > 0 ? [..mentioning.Select(Relative)] : null,
-				SearchedSolutions: loaded.Length > 0 ? [..loaded.Select(Relative)] : null)
+				SearchedSolutions: searched.Count > 0 ? [..searched.Select(Relative)] : null)
 			{
 				Error = "symbol_not_in_loaded_solutions",
-				Hint  = mentioning.Length > 0
-					? "found_solutions are the solutions not loaded whose source mentions the name: pass one as projectPath, or name a file with filePath, and the call lands in that file's solution."
-					: "No source file of a solution that is not loaded mentions the name: check its spelling with roslyn_search_files, which covers the whole root.",
+				Hint  = hint,
 			});
 		}
 		
@@ -198,7 +228,7 @@ internal abstract partial class RoslynMcpTool
 			});
 		
 		if(CallLanding.Current is { } landing)
-			(landing.ReportRoot, landing.Solution) = (root, holding[0]);
+			(landing.ReportRoot, landing.Solution, landing.NotSearched) = (root, holding[0], workspace.SolutionSetMembers().Length - searched.Count);
 		
 		activeScope.Value?.Record($"lands in {Path.GetFileName(holding[0])}");
 		
@@ -212,20 +242,26 @@ internal abstract partial class RoslynMcpTool
 	/// <summary>
 	///     The solutions of the set, <paramref name="loaded"/> ones left out, that have a source
 	///     file mentioning <paramref name="name"/> as a whole word: where a symbol that no loaded
-	///     solution declares could be. A text scan from disk, since nothing is loaded for it;
-	///     bounded by <see cref="MentionBudget"/>, and a solution found is not read further. It
-	///     narrows twenty solutions to the few worth naming, and proves nothing: a mention is not
-	///     a declaration.
+	///     solution declares could be. A text scan from disk, since nothing is loaded for it, of
+	///     the files a search of the root would read (the same pruning, and no file a link leads
+	///     out of the root to); read line by line, so a hit ends its file and a cancelled call or
+	///     the end of <see cref="MentionBudget"/> ends the scan inside a file too. A solution found
+	///     is not read further. It narrows twenty solutions to the few worth naming and proves
+	///     nothing: a mention is not a declaration. <c>Complete</c> says whether every file was
+	///     reached, which the caller's answer must not claim otherwise.
 	/// </summary>
-	async Task<string[]> SolutionsMentioningAsync(string root, string name, string[] loaded, CancellationToken cancellationToken)
+	(string[] Solutions, bool Complete) SolutionsMentioning(string root, SecurityBoundary boundary, string name, string[] loaded, CancellationToken cancellationToken)
 	{
-		var started = System.Diagnostics.Stopwatch.GetTimestamp();
-		var skip    = new HashSet<string>(loaded, SecurityBoundary.PathComparer);
-		var hits    = new List<string>();
-		var listing = new SolutionSet.Listing(root, logger);
+		var started  = System.Diagnostics.Stopwatch.GetTimestamp();
+		var skip     = new HashSet<string>(loaded, SecurityBoundary.PathComparer);
+		var hits     = new List<string>();
+		var listing  = new SolutionSet.Listing(root, logger);
+		var complete = true;
 		
 		// The solution above a file is the same for every file of a directory.
-		var owners  = new Dictionary<string, string?>(SecurityBoundary.PathComparer);
+		var owners   = new Dictionary<string, string?>(SecurityBoundary.PathComparer);
+		
+		bool OutOfTime() => System.Diagnostics.Stopwatch.GetElapsedTime(started) > MentionBudget;
 		
 		try {
 			
@@ -236,53 +272,89 @@ internal abstract partial class RoslynMcpTool
 				
 				cancellationToken.ThrowIfCancellationRequested();
 				
-				if(System.Diagnostics.Stopwatch.GetElapsedTime(started) > MentionBudget)
+				if(OutOfTime()) {
+					
+					complete = false;
 					break;
+				}
 				
 				var directory = Path.GetDirectoryName(file)!;
 				
 				if(!owners.TryGetValue(directory, out var owner))
 					owners[directory] = owner = SolutionSet.Above(file, root, out _) is { } above ? Path.GetFullPath(above) : null;
 				
-				if(owner is null || skip.Contains(owner))
+				if(owner is null || skip.Contains(owner) || !boundary.IsPathAllowed(file))
 					continue;
-				
-				string text;
 				
 				try {
-					text = await FileReader.ReadAllTextAsync(file, FileReader.DocumentLimit);
+					
+					using var reader = FileReader.OpenLines(file);
+					
+					if(reader.LooksBinary())
+						continue;
+					
+					while(reader.Read(out var line)) {
+						
+						if((reader.LineNumber & 0xFFF) == 0) {
+							
+							cancellationToken.ThrowIfCancellationRequested();
+							
+							if(OutOfTime()) {
+								
+								complete = false;
+								break;
+							}
+						}
+						
+						if(!MentionsWord(line, name))
+							continue;
+						
+						hits.Add(owner);
+						skip.Add(owner);
+						break;
+					}
 				}
 				catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
-					continue;
+					
+					// A file that cannot be read, or holds a line past the limit, was not searched.
+					complete = false;
 				}
 				
-				if(!MentionsWord(text, name))
-					continue;
-				
-				hits.Add(owner);
-				skip.Add(owner);
+				if(!complete && OutOfTime())
+					break;
 			}
 		}
-		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) { }
+		catch(Exception ex) when(ex is IOException or UnauthorizedAccessException) {
+			complete = false;
+		}
 		
-		return [..hits.Order(StringComparer.OrdinalIgnoreCase)];
+		return ([..hits.Order(StringComparer.OrdinalIgnoreCase)], complete);
 	}
 	
-	// Whether a text holds a name with no identifier character on either side of it.
-	static bool MentionsWord(string text, string name)
+	// Whether a line holds a name with no identifier character on either side of it.
+	static bool MentionsWord(ReadOnlySpan<char> line, string name)
 	{
 		if(name.Length == 0)
 			
 			return false;
 		
-		for(var at = text.IndexOf(name, StringComparison.Ordinal); at >= 0; at = text.IndexOf(name, at + 1, StringComparison.Ordinal)) {
+		for(var from = 0; from <= line.Length - name.Length; ) {
 			
-			var before = at == 0 || !IsIdentifierPart(text[at - 1]);
-			var after  = at + name.Length == text.Length || !IsIdentifierPart(text[at + name.Length]);
+			var found = line[from..].IndexOf(name, StringComparison.Ordinal);
+			
+			if(found < 0)
+				
+				return false;
+			
+			var at     = from + found;
+			var before = at == 0 || !IsIdentifierPart(line[at - 1]);
+			var after  = at + name.Length == line.Length || !IsIdentifierPart(line[at + name.Length]);
 			
 			if(before && after)
 				
 				return true;
+			
+			from = at + 1;
 		}
 		
 		return false;
@@ -293,20 +365,27 @@ internal abstract partial class RoslynMcpTool
 	/// <summary>
 	///     Says in the answer where a search or a change stopped, for a tool whose answer is only
 	///     as wide as its workspace (#501): the references, callers and implementations of a symbol,
-	///     a rename, a signature change. In a session whose root is a solution set, a project can be
-	///     part of other solutions than the one the call is answered from, and code there that uses
-	///     the symbol is in no answer from here. Which solutions those are is read from the
-	///     solution files, with nothing loaded; a solution that uses the project without listing
-	///     it is not seen, which the note says. Set as the answer's caution where the tool gives
-	///     none of its own. Nothing is said where no other solution lists the project.
+	///     a rename, a signature change. In a session whose root is a solution set two things can
+	///     be outside it. The symbol's project can be part of other solutions than the one the
+	///     call is answered from, and code there that uses the symbol is in no answer from here;
+	///     which solutions those are is read from the solution files, with nothing loaded, so a
+	///     solution that uses the project without listing it is not seen, which the note says.
+	///     And a call that landed by the symbol's name searched the loaded solutions only: one
+	///     that is not loaded may declare the same name. Joined to the answer's caution, whatever
+	///     else that says; nothing is said where neither applies.
 	/// </summary>
 	protected void NoteSolutionEdge(string projectPath, bool changes = false)
 	{
 		try {
 			
-			if(workspace.SolutionSetRoot is not { } root || CallLanding.Current?.Solution is not { } solution)
+			if(workspace.SolutionSetRoot is not { } root || CallLanding.Current is not { Solution: { } solution } landing)
 				
 				return;
+			
+			var here = Path.GetRelativePath(root, solution);
+			
+			if(landing.NotSearched > 0)
+				activeScope.Value?.AddCaution($"The name was looked for in the loaded solutions and found in {here}; {landing.NotSearched} other solution(s) under the root are not loaded and were not searched for it.");
 			
 			if(workspace.Resolve(projectPath) is not (var project, not ResolutionKind.Solution and not ResolutionKind.SolutionSet) || !project.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase))
 				
@@ -314,18 +393,17 @@ internal abstract partial class RoslynMcpTool
 			
 			string[] others = [..workspace.SolutionSetMembers()
 				.Where(member => !SecurityBoundary.PathComparer.Equals(member, solution)
-					&& MSBuildBootstrap.ReadSolutionProjects(member).Contains(project, SecurityBoundary.PathComparer))
+					&& workspace.ProjectsListedBy(member).Contains(project, SecurityBoundary.PathComparer))
 				.Select(member => Path.GetRelativePath(root, member))];
 			
 			if(others.Length == 0)
 				
 				return;
 			
-			var here  = Path.GetRelativePath(root, solution);
 			var named = Path.GetFileName(project);
 			var also  = string.Join(", ", others);
 			
-			activeScope.Value?.SetCaution(changes
+			activeScope.Value?.AddCaution(changes
 				? $"This change is made in {here} only. {named} is also a project of {also}, going by the solution files: code there that uses the symbol is not changed, and may no longer compile once this is applied."
 				: $"Searched {here} only. {named} is also a project of {also}, going by the solution files: uses there are not in this answer. Ask again with one of them as projectPath.");
 		}
@@ -333,6 +411,44 @@ internal abstract partial class RoslynMcpTool
 			
 			// A note on an answer the call already has: it must not fail the call.
 			logger.LogInfo("NoteSolutionEdge", $"{ex.GetType().Name}: {ex.Message}");
+		}
+	}
+
+	/// <summary>
+	///     Settles a project file named outright on its own solution, in a session whose root is a
+	///     solution set (#501): the one above it, loaded if it is not. A project file can be part
+	///     of several loaded solutions, and the index would answer it from whichever was loaded
+	///     last, so the same call gave another answer after an unrelated load. Its own solution is
+	///     the one the file system names, and where a path to the project alone loads it anyway
+	///     when nothing is loaded. Nothing is settled where the project has no solution above it,
+	///     or that solution does not hold it: the index answers then, as before.
+	/// </summary>
+	protected void LandProjectInOwnSolution(string projectPath)
+	{
+		try {
+			
+			if(workspace.SolutionSetRoot is not { } root || CallLanding.Current is not { Solution: null } landing)
+				
+				return;
+			
+			if(workspace.Resolve(projectPath) is not (var project, not ResolutionKind.Solution and not ResolutionKind.SolutionSet and not ResolutionKind.Adhoc)
+				|| !project.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+				|| !SecurityBoundary.StartsWithPath(project, root)
+				|| SolutionSet.Above(project, root, out _) is not { } own)
+				
+				return;
+			
+			own = Path.GetFullPath(own);
+			
+			ResolveWithRetry("LandProjectInOwnSolution", () => workspace.GetSolution(own));
+			
+			if(workspace.Holds(own, project))
+				landing.Solution = own;
+		}
+		catch(Exception ex) when(!IsFatal(ex)) {
+			
+			// The tool's own resolution guard reports a path or a load that fails.
+			logger.LogInfo("LandProjectInOwnSolution", $"{ex.GetType().Name}: {ex.Message}");
 		}
 	}
 	

@@ -232,6 +232,7 @@ static class SolutionSetTests
 				return Verdict(found?["error"] is null
 					&& FilesOf(found, "declarations").SequenceEqual(["Alpha/App/Greeter.cs"])
 					&& Slashed(found?["_caution"]?.GetValue<string>()).Contains("Beta/src/Beta.slnx")
+					&& (found?["_caution"]?.GetValue<string>() ?? "").Contains("not loaded")
 					&& missing?["error"]?.GetValue<string>() == "symbol_not_in_loaded_solutions"
 					&& searched.SequenceEqual(["Alpha/Alpha.slnx"]) && could.SequenceEqual(["Gamma/Gamma.slnx"])
 					&& (await LoadedAsync()).SequenceEqual(["Alpha/Alpha.slnx"]),
@@ -285,6 +286,20 @@ static class SolutionSetTests
 				var shared = await Call("roslyn_find_references", new { symbolName = "Greet" });
 				
 				string[] holding = [..(shared?["found_solutions"]?.AsArray() ?? []).Select(solution => Slashed(solution?.GetValue<string>()))];
+				
+				// The shared project named outright is answered from its own solution, Alpha, whatever
+				// was loaded last (Beta, where Greet has a caller), and says that Beta lists it too.
+				// And a type of a referenced assembly is not looked for with several solutions
+				// loaded: the answer must say that, not send the agent after a misspelling.
+				var viaProject = await Call("roslyn_find_references", new { symbolName = "Greet", projectPath = "Alpha/App/App.csproj" });
+				var framework  = await Call("roslyn_find_implementations", new { symbolName = "IDisposable" });
+				
+				if(viaProject?["error"] is not null || FilesOf(viaProject, "references").Any(file => file.EndsWith("Worker.cs"))
+					|| !Slashed(viaProject?["_caution"]?.GetValue<string>()).Contains("Beta/src/Beta.slnx")
+					|| framework?["error"]?.GetValue<string>() != "symbol_not_in_loaded_solutions"
+					|| !(framework?["hint"]?.GetValue<string>() ?? "").Contains("searched_solutions"))
+					
+					return Verdict(false, $"expected Greet through App.csproj answered from Alpha with a caution naming Beta, and IDisposable not looked for with a hint saying so; got {viaProject?.ToJsonString() ?? "null"} / {framework?.ToJsonString() ?? "null"}", sw);
 				
 				return Verdict(one?["error"] is null && FilesOf(one, "declarations").SequenceEqual(["Beta/src/Lib/Worker.cs"])
 					&& two?["candidates"]?.AsArray().Count == 2

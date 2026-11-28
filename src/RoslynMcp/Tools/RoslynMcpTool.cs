@@ -1346,9 +1346,14 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			// Narrowed to its project below, by the file's full path.
 			filePath = found.FullPath;
 		}
-		else if(!wasOmitted && !isSolution)
+		else if(!wasOmitted && !isSolution) {
+			
+			// A project named outright: answered from its own solution where a set has several
+			// that hold it (#501).
+			LandProjectInOwnSolution(resolved);
 			
 			return true;
+		}
 		
 		var defaultPath = resolved;
 		
@@ -1648,6 +1653,13 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 	{
 		var page    = Paginate(allResults, ref skip, take);
 		var hasMore = skip + page.Length < allResults.Length;
+		
+		// A result read through the root of a solution set is not kept (#501): no watcher says
+		// when its files change, so a kept one could never be served. The token carries the
+		// position alone, and the next page runs the query again from there.
+		if(hasMore && activeScope.Value is { Unwatched: true })
+			
+			return new PaginatedResult<T>(page, allResults.Length, skip, take, new PageCursor("unkept", skip + page.Length, take).ToString(), hasMore);
 		
 		if(hasMore)
 			activeScope.Value?.NoteStored();
