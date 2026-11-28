@@ -175,6 +175,19 @@ static class IgnorePathTests
 				string[] looseFiles = [..(loose?["files"]?.AsArray() ?? []).Select(file => Slashed(file?.GetValue<string>()))];
 				string[] otherFiles = [..(other?["files"]?.AsArray() ?? []).Select(file => Slashed(file?.GetValue<string>()))];
 				
+				// Only what was hidden and named is opened. A pattern that names a directory which
+				// was visible anyway must leave the entries below it standing: 'Hidden/**' still
+				// hides Hidden/A, and 'Plain/**' still hides Plain/Gone and the files of docs.
+				var underVisible = await Call("roslyn_list_files", new { pattern = "{Hidden,Plain}/**/*.cs" });
+				
+				string[] visibleFiles = [..(underVisible?["files"]?.AsArray() ?? []).Select(file => Slashed(file?.GetValue<string>()))];
+				
+				string[] leaked = [..visibleFiles.Where(file => file.StartsWith("Hidden/A/") || file.StartsWith("Plain/Gone/") || file == "Plain/Stay/docs/Doc.cs" || file.StartsWith("Hidden/Kept/packages/Theirs/"))];
+				
+				if(leaked.Length > 0 || !visibleFiles.Contains("Hidden/Kept/P/Kept.cs") || !visibleFiles.Contains("Plain/Stay/P/Stay.cs"))
+					
+					return Verdict(false, $"expected a pattern naming a visible directory to keep the entries below it; leaked {string.Join(", ", leaked)}; got {underVisible?.ToJsonString() ?? "null"}", sw);
+				
 				return Verdict(types?["error"] is null && (types?.ToJsonString() ?? "").Contains("GoneType")
 					&& looseFiles.SequenceEqual(["Packages/Loose.cs"]) && otherFiles.SequenceEqual(["Packages/Other/P/Other.cs"]),
 					$"expected GoneType from the solution named outright, and the named directories' files; got {types?.ToJsonString() ?? "null"} / {loose?.ToJsonString() ?? "null"} / {other?.ToJsonString() ?? "null"}", sw);

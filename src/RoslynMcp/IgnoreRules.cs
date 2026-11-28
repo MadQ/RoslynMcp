@@ -313,6 +313,11 @@ internal sealed class IgnoreRules
 		=> IgnoredIn(Tier.Listing, relativeDirectory, name)
 	;
 	
+	/// <inheritdoc cref="IsPrunedByName(ReadOnlySpan{char}, ReadOnlySpan{char})"/>
+	internal bool IsPrunedByName(Tier tier, ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
+		=> IgnoredIn(tier, relativeDirectory, name)
+	;
+	
 	// Whether a walk of a tier leaves a directory out. With configured paths (#543) that is the
 	// directory's state, worked out from the root down; a passage is entered.
 	bool Pruned(Tier tier, ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)

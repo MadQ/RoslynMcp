@@ -77,16 +77,16 @@ internal sealed class ListFilesTool : RoslynMcpTool
 				recursive,
 				(ref FileSystemEntry directory) =>
 					!IsNamed(named, WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-					&& (Covers(named, WorkspaceWalker.RelativeParent(ref directory))
-						? rules.IsPrunedByName(WorkspaceWalker.RelativeParent(ref directory), directory.FileName)
-						: set?.IsPruned(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) ?? rules.IsPrunedFromListing(WorkspaceWalker.RelativeParent(ref directory), directory.FileName))
+					&& PrunedFromWalk(rules, set, WorkspaceWalker.RelativeParent(ref directory), directory.FileName,
+						Covers(named, WorkspaceWalker.RelativeParent(ref directory)),
+						IsNamed(named, Path.GetDirectoryName(WorkspaceWalker.RelativeParent(ref directory)), Path.GetFileName(WorkspaceWalker.RelativeParent(ref directory))))
 			  )
 				.Select(fullPath => Path.GetRelativePath(rootPath, fullPath))
 				
 				// The files of a directory that is ignored and only walked through (#543), unless
 				// the pattern names that directory, as it may name any ignored one.
 				.Where(relativePath => Path.GetDirectoryName(relativePath) is not { Length: > 0 } parent
-					|| Covers(named, parent)
+					|| IsNamed(named, Path.GetDirectoryName(parent.AsSpan()), Path.GetFileName(parent.AsSpan()))
 					|| !(set?.HidesFilesOf(parent) ?? rules.HidesFilesOf(parent)))
 				.ToArray()
 			;

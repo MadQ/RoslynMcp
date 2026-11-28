@@ -171,6 +171,23 @@ internal static class SolutionSet
 			return RulesBelow(cut < 0 ? relativeDirectory : relativeDirectory[..cut]).IsPrunedFromListing(cut < 0 ? [] : relativeDirectory[(cut + 1)..], name);
 		}
 		
+		/// <summary>
+		///     <see cref="IsPruned"/> by names alone, the configured paths left aside, in the same
+		///     two steps: the root's names without its <c>.gitignore</c> at the top level, the
+		///     rules of the directory's own tree below it. For a directory inside one that was
+		///     asked for by name though the rules hide it.
+		/// </summary>
+		public bool IsPrunedByName(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
+		{
+			if(relativeDirectory.IsEmpty)
+				
+				return rootRules.IsPrunedByName(IgnoreRules.Tier.ExcludedOrWorktree, relativeDirectory, name);
+			
+			var cut = relativeDirectory.IndexOfAny(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+			
+			return RulesBelow(cut < 0 ? relativeDirectory : relativeDirectory[..cut]).IsPrunedByName(cut < 0 ? [] : relativeDirectory[(cut + 1)..], name);
+		}
+		
 		// The rules of one directory directly under the root, taken as a tree of its own.
 		IgnoreRules RulesBelow(ReadOnlySpan<char> first)
 		{
