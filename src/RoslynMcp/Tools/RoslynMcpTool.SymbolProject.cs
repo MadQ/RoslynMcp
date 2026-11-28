@@ -260,6 +260,7 @@ internal abstract partial class RoslynMcpTool
 		var skip     = new HashSet<string>(loaded, SecurityBoundary.PathComparer);
 		var hits     = new List<string>();
 		var listing  = new SolutionSet.Listing(root, logger);
+		var rules    = IgnoreRules.ForRoot(root, logger);
 		var timedOut = false;
 		var unread   = 0;
 		
@@ -283,7 +284,7 @@ internal abstract partial class RoslynMcpTool
 				var directory = Path.GetDirectoryName(file)!;
 				
 				if(!owners.TryGetValue(directory, out var owner))
-					owners[directory] = owner = SolutionSet.Above(file, root, out _) is { } above ? Path.GetFullPath(above) : null;
+					owners[directory] = owner = SolutionSet.Above(file, root, rules, out _) is { } above ? Path.GetFullPath(above) : null;
 				
 				if(owner is null || skip.Contains(owner) || !boundary.IsPathAllowed(file))
 					continue;
@@ -448,7 +449,7 @@ internal abstract partial class RoslynMcpTool
 			if(workspace.Resolve(projectPath) is not (var project, not ResolutionKind.Solution and not ResolutionKind.SolutionSet and not ResolutionKind.Adhoc)
 				|| !project.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
 				|| !SecurityBoundary.StartsWithPath(project, root)
-				|| SolutionSet.Above(project, root, out _) is not { } own)
+				|| SolutionSet.Above(project, root, IgnoreRules.ForRoot(root, logger), out _) is not { } own)
 				
 				return;
 			

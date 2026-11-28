@@ -92,6 +92,17 @@ internal sealed class ProjectConfig
 	public string[] Ignore { get; }
 	
 	/// <summary>
+	///     The entries of the file's <c>ignore</c> list that are paths and not names (#543), as
+	///     <see cref="IgnoreRules.TryNormalizePathEntry"/> leaves them: relative to the file's own
+	///     directory, with forward slashes; <c>a/b</c> is that one directory, <c>a/*</c> every
+	///     directory directly inside <c>a</c>, and <c>!a/b</c> takes one directory back out of
+	///     whatever hides it, a built-in name included. A path below the file's directory only:
+	///     no <c>..</c>, nothing rooted, so a committed file still cannot name a place outside
+	///     its own tree. Empty when absent.
+	/// </summary>
+	public string[] IgnorePaths { get; private init; } = [];
+	
+	/// <summary>
 	///     The file's <c>codeActions</c> section (#389): which providers the code refactoring and code
 	///     fix tools run, merged with the user's own file by <see cref="CodeActionSettings.Resolve"/>.
 	///     A committed file may name assembly paths, but they load only once the user trusts them.
@@ -180,6 +191,25 @@ internal sealed class ProjectConfig
 			return ServerArgs.Current.IgnoreNames;
 		
 		return ForPath(pathInProject, logger).Ignore;
+	}
+	
+	/// <summary>
+	///     The path entries of the effective ignore list for <paramref name="pathInProject"/>, and
+	///     the directory they are relative to: the project file's, and none when <c>--ignore</c> or
+	///     <c>ROSLYNMCP_IGNORE</c> is set, which replace the file's list as a whole and take names
+	///     only. The same array instance for the same file, as for <see cref="EffectiveIgnore"/>.
+	/// </summary>
+	public static (string[] Entries, string Directory) EffectiveIgnorePaths(string pathInProject, FileLogger logger)
+	{
+		if(ServerArgs.Current.IgnoreSpecified)
+			
+			return ([], "");
+		
+		var config = ForPath(pathInProject, logger);
+		
+		return config.IgnorePaths.Length == 0 || Path.GetDirectoryName(config.SourcePath) is not { Length: > 0 } directory
+			? ([], "")
+			: (config.IgnorePaths, directory);
 	}
 	
 	/// <summary>
@@ -306,6 +336,7 @@ internal sealed class ProjectConfig
 			var vsVersion          = (string?) null;
 			var solution           = (string?) null;
 			var ignore             = (string[]) [];
+			var ignorePaths        = (string[]) [];
 			var codeActions        = CodeActionConfig.Empty;
 			
 			foreach(var property in doc.RootElement.EnumerateObject()) {
@@ -390,8 +421,9 @@ internal sealed class ProjectConfig
 					
 					case "ignore":
 						
-						// Bare directory names only — the same guarantee as "solution": a committed
-						// file can widen what the server skips, never point it at a path.
+						// Directory names, and paths below this file's own directory (#543): a
+						// committed file can widen or narrow what the server skips inside its tree,
+						// never point it at a place outside it.
 						if(property.Value.ValueKind == JsonValueKind.Array) {
 							
 							var entries = property.Value.EnumerateArray()
@@ -399,10 +431,22 @@ internal sealed class ProjectConfig
 								.ToArray()
 							;
 							
-							ignore = ServerArgs.NormalizeIgnoreNames(entries);
+							// An entry with a separator, a leading '!' or a lone '*' is a path; the rest
+							// are names, as they always were.
+							var asPaths = entries.Where(IgnoreRules.LooksLikePathEntry).ToArray();
+							var asNames = entries.Where(entry => !IgnoreRules.LooksLikePathEntry(entry)).ToArray();
 							
-							if(ignore.Length != entries.Length)
-								logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' takes up to {IgnoreRules.MaxConfiguredNames} distinct bare directory names — {entries.Length - ignore.Length} entr{(entries.Length - ignore.Length == 1 ? "y" : "ies")} dropped");
+							ignore      = ServerArgs.NormalizeIgnoreNames(asNames);
+							ignorePaths = [..asPaths
+								.Select(entry => IgnoreRules.TryNormalizePathEntry(entry, out var normalized) ? normalized : null)
+								.OfType<string>()
+								.Distinct(StringComparer.Ordinal)
+								.Take(IgnoreRules.MaxConfiguredNames)];
+							
+							var dropped = entries.Length - ignore.Length - ignorePaths.Length;
+							
+							if(dropped > 0)
+								logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' takes up to {IgnoreRules.MaxConfiguredNames} distinct directory names and as many paths ('a/b', 'a/*', '!a/b'; no '..', no rooted path, '*' only as a whole last part) — {dropped} entr{(dropped == 1 ? "y" : "ies")} dropped");
 						}
 						else
 							logger.LogInfo("ProjectConfig", $"WARN: 'ignore' in '{filePath}' must be an array of directory names — ignored");
@@ -435,14 +479,14 @@ internal sealed class ProjectConfig
 				}
 			}
 			
-			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, solution, ignore, codeActions, filePath);
+			var config = new ProjectConfig(elicitSpecified, elicit, workspaceSpecified, workspace, vsVersion, solution, ignore, codeActions, filePath) { IgnorePaths = ignorePaths };
 			
 			logger.LogInfo("ProjectConfig",
 				$"loaded '{filePath}': elicit={(elicitSpecified ? elicit.ToString() : "unset")}, " +
 				$"workspace={(workspaceSpecified ? workspace.ToString() : "unset")}, " +
 				$"vsVersion={vsVersion ?? "unset"}, " +
 				$"solution={(solution is null ? "unset" : Path.GetFileName(solution))}, " +
-				$"ignore={(ignore.Length == 0 ? "unset" : string.Join(",", ignore))}, " +
+				$"ignore={(ignore.Length + ignorePaths.Length == 0 ? "unset" : string.Join(",", [..ignore, ..ignorePaths]))}, " +
 				$"codeActions={(ReferenceEquals(codeActions, CodeActionConfig.Empty) ? "unset" : $"enabled={codeActions.Enabled?.ToString() ?? "unset"}, {codeActions.Providers.Length} provider(s), {codeActions.Deny.Length} denied")}");
 			
 			return config;

@@ -82,6 +82,7 @@ static class HarnessGroups
 		AsyncGroup("Local History Tools",                  g => LocalHistoryTests.BuildAsync(g.Ctx)),
 		AsyncGroup("DefaultWorkspace",                     g => DefaultWorkspaceTests.BuildAsync(g.Ctx)),
 		AsyncGroup("Solution Set",                         g => SolutionSetTests.BuildAsync(g.Ctx)),
+		AsyncGroup("Ignore Paths",                         g => IgnorePathTests.BuildAsync(g.Ctx)),
 		Group("Parallel Load",                             g => ParallelLoadTests.Build(g.Ctx)),
 		Group("Dotnet Runner",                             g => DotnetRunnerTests.Build(g.Ctx, g.LogDir, g.LogGlob)),
 		Group("Respawn",                                   g => RespawnTests.Build(g.Ctx)),

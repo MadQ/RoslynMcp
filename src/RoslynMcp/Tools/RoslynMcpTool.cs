@@ -1430,7 +1430,9 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 			
 			return true;
 		
-		if(SolutionSet.Above(fullPath, root, out var severalIn) is { } solution)
+		var rules = IgnoreRules.ForRoot(root, logger);
+		
+		if(SolutionSet.Above(fullPath, root, rules, out var severalIn) is { } solution)
 			owner = (Path.GetFullPath(solution), true, fullPath);
 		
 		// Said in the log, since the call goes on by the project or the root and the answer
@@ -1438,7 +1440,7 @@ internal abstract partial class RoslynMcpTool(WorkspaceResolver workspace, FileL
 		else if(severalIn is not null)
 			activeScope.Value?.Record($"several solutions in {Path.GetRelativePath(root, severalIn)}, none picked");
 		
-		if(owner is null && SolutionSet.ProjectAbove(fullPath, root) is { } project)
+		if(owner is null && SolutionSet.ProjectAbove(fullPath, root, rules) is { } project)
 			owner = (Path.GetFullPath(project), false, fullPath);
 		
 		return true;

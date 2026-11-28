@@ -49,7 +49,7 @@ internal sealed class IgnoreRules
 		: StringComparer.OrdinalIgnoreCase;
 	
 	/// <summary>Rules with no configured names and no <c>.gitignore</c> — the built-in lists only.</summary>
-	public static readonly IgnoreRules BuiltIn = new([], [], [], GitWorktrees.Below.None);
+	public static readonly IgnoreRules BuiltIn = new([], [], [], GitWorktrees.Below.None, [], "", "");
 	
 	// One entry per workspace root, revalidated against the .gitignore stamp and the worktrees
 	// below the root on every lookup.
@@ -69,7 +69,10 @@ internal sealed class IgnoreRules
 	readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> worktreePaths;
 	readonly bool                                                  hasWorktrees;
 	
-	IgnoreRules(string[] configuredNames, string[] gitIgnoredNames, string[] gitIgnoredPaths, GitWorktrees.Below worktrees)
+	// The configured path entries (#543), as they apply below this root.
+	readonly PathRules pathRules;
+	
+	IgnoreRules(string[] configuredNames, string[] gitIgnoredNames, string[] gitIgnoredPaths, GitWorktrees.Below worktrees, string[] pathEntries, string pathDirectory, string rootPath)
 	{
 		worktreePaths = Lookup(worktrees.RelativePaths, gitComparer);
 		hasWorktrees  = worktrees.RelativePaths.Length > 0;
@@ -79,6 +82,10 @@ internal sealed class IgnoreRules
 		gitNames    = Lookup(gitIgnoredNames, gitComparer);
 		gitPaths    = Lookup(gitIgnoredPaths, gitComparer);
 		hasGitPaths = gitIgnoredPaths.Length > 0;
+		
+		pathRules   = pathEntries.Length == 0
+			? PathRules.None
+			: PathRules.Create(pathEntries, pathDirectory, rootPath, name => excluded.Contains(name) || gitNames.Contains(name));
 	}
 	
 	static FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> Lookup(string[] names, StringComparer comparer) =>
@@ -94,6 +101,11 @@ internal sealed class IgnoreRules
 	public static IgnoreRules ForRoot(string rootPath, FileLogger logger)
 	{
 		var configured    = ProjectConfig.EffectiveIgnore(rootPath, logger);
+		
+		// From the same config file as the names, so the same instance while that file stands:
+		// the cache below needs no key of its own for them.
+		var (pathEntries, pathDirectory) = ProjectConfig.EffectiveIgnorePaths(rootPath, logger);
+		
 		var gitIgnorePath = Path.Combine(rootPath, ".gitignore");
 		var stamp         = GitIgnoreStamp(gitIgnorePath);
 		var worktrees     = GitWorktrees.For(rootPath, fresh: true);
@@ -107,7 +119,7 @@ internal sealed class IgnoreRules
 				return cached.Rules;
 		
 		var (names, paths) = stamp == 0 ? (Names: [], Paths: []) : ReadGitIgnore(gitIgnorePath);
-		var rules          = new IgnoreRules(configured, names, paths, worktrees);
+		var rules          = new IgnoreRules(configured, names, paths, worktrees, pathEntries, pathDirectory, rootPath);
 		
 		lock(cacheLock)
 			cache[rootPath] = (rules, configured, stamp, worktrees);
@@ -252,6 +264,10 @@ internal sealed class IgnoreRules
 	/// </summary>
 	public bool IsExcludedOrWorktree(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
 	{
+		if(pathRules.Decides(relativeDirectory, name, out var pruned))
+			
+			return pruned;
+		
 		if(excluded.Contains(name))
 			
 			return true;
@@ -272,6 +288,11 @@ internal sealed class IgnoreRules
 	/// </summary>
 	public bool IsPrunedFromListing(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
 	{
+		// The configured paths first (#543): an exception keeps a directory a name would hide.
+		if(pathRules.Decides(relativeDirectory, name, out var pruned))
+			
+			return pruned;
+		
 		if(excluded.Contains(name) || gitNames.Contains(name))
 			
 			return true;
@@ -287,5 +308,298 @@ internal sealed class IgnoreRules
 			: string.Concat(relativeDirectory, "/", name).Replace('\\', '/');
 		
 		return gitPaths.Contains(relative) || worktreePaths.Contains(relative);
+	}
+	
+	// ── Configured paths (#543) ────────────────────────────────────────────────
+	
+	/// <summary>
+	///     <see cref="IsExcluded"/> with the configured paths, for a walk that looks for what the
+	///     server works on and not for what it lists (the solutions below a root): the root
+	///     <c>.gitignore</c> has no say there, the configured paths do.
+	/// </summary>
+	public bool IsExcludedAt(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name)
+		=> pathRules.Decides(relativeDirectory, name, out var pruned) ? pruned : excluded.Contains(name)
+	;
+	
+	/// <summary>
+	///     Whether a directory, given relative to the root, is one the server stays out of or lies
+	///     inside one: what a walk down from the root would never reach. For the way up from a
+	///     file, which meets directories without having walked to them.
+	/// </summary>
+	public bool IsHidden(string relativeDirectory)
+	{
+		var path = relativeDirectory.Replace('\\', '/').Trim('/');
+		
+		for(var start = 0; start < path.Length; ) {
+			
+			var next = path.IndexOf('/', start);
+			
+			if(next < 0)
+				next = path.Length;
+			
+			if(IsExcludedAt(start == 0 ? [] : path.AsSpan(0, start - 1), path.AsSpan(start, next - start)))
+				
+				return true;
+			
+			start = next + 1;
+		}
+		
+		return false;
+	}
+	
+	/// <summary>Whether an entry of a configured ignore list is a path and not a directory name: it has a separator, a leading <c>!</c>, or is a lone <c>*</c>.</summary>
+	public static bool LooksLikePathEntry(string? entry)
+	{
+		if(entry is null)
+			
+			return false;
+		
+		var text = entry.Trim();
+		
+		return text.StartsWith('!') || text.Contains('/') || text.Contains('\\') || text == "*";
+	}
+	
+	/// <summary>
+	///     A path entry in the one form the rules keep it in, or false for one that is refused:
+	///     parts joined by <c>/</c>, relative to the config file's directory, with a leading
+	///     <c>!</c> for an exception. Refused: an empty part, <c>.</c> or <c>..</c>, a drive or
+	///     any <c>:</c>, a wildcard other than a whole last part <c>*</c>, a wildcard in an
+	///     exception, and a single plain name, which is a name and not a path. A glob that is
+	///     only half supported is refused, not guessed at.
+	/// </summary>
+	public static bool TryNormalizePathEntry(string? entry, out string normalized)
+	{
+		normalized = "";
+		
+		if(string.IsNullOrWhiteSpace(entry))
+			
+			return false;
+		
+		var text    = entry.Trim();
+		var negated = text.StartsWith('!');
+		
+		if(negated)
+			text = text[1..];
+		
+		text = text.Replace('\\', '/').Trim('/');
+		
+		if(text.Length == 0 || text.Contains(':'))
+			
+			return false;
+		
+		var parts = text.Split('/');
+		
+		for(var index = 0; index < parts.Length; index++) {
+			
+			var part = parts[index];
+			
+			if(part.Length == 0 || part == "." || part == ".." || part != part.Trim())
+				
+				return false;
+			
+			var wild = part.Contains('*') || part.Contains('?');
+			
+			if(wild && (part != "*" || index != parts.Length - 1 || negated))
+				
+				return false;
+		}
+		
+		if(!negated && parts.Length == 1 && parts[0] != "*")
+			
+			return false;
+		
+		normalized = (negated ? "!" : "") + string.Join('/', parts);
+		
+		return true;
+	}
+	
+	/// <summary>
+	///     The configured path entries as they apply below one root. Three kinds: a directory
+	///     (<c>a/b</c>), every directory directly inside one (<c>a/*</c>), and an exception
+	///     (<c>!a/b</c>). An exception is stronger than anything that would hide its directory, a
+	///     built-in name included (<c>packages</c>), and it opens the way down to it: a directory
+	///     above an exception is entered though it is ignored, and everything else inside that
+	///     directory stays hidden, because its parent is. So <c>!Packages/One</c> alone shows one
+	///     directory of a tree that is hidden whole.
+	///     <para>
+	///         The entries are relative to the config file's directory. For a root below it (a
+	///         solution's own workspace under a root of several) they are taken relative to that
+	///         root, and the ones that lie outside it are left out.
+	///     </para>
+	/// </summary>
+	sealed class PathRules
+	{
+		public static readonly PathRules None = new([], [], [], false, static _ => false);
+		
+		readonly string[]           exceptions;
+		readonly FrozenSet<string>  directories;
+		readonly FrozenSet<string>  wildcardParents;
+		readonly bool               rootInsideIgnored;
+		readonly Func<string, bool> ignoredByName;
+		readonly bool               any;
+		
+		PathRules(string[] exceptions, string[] directories, string[] wildcardParents, bool rootInsideIgnored, Func<string, bool> ignoredByName)
+		{
+			this.exceptions        = exceptions;
+			this.directories       = directories.ToFrozenSet(gitComparer);
+			this.wildcardParents   = wildcardParents.ToFrozenSet(gitComparer);
+			this.rootInsideIgnored = rootInsideIgnored;
+			this.ignoredByName     = ignoredByName;
+			any                    = exceptions.Length + directories.Length + wildcardParents.Length > 0;
+		}
+		
+		public static PathRules Create(string[] entries, string configDirectory, string rootPath, Func<string, bool> ignoredByName)
+		{
+			// As the config file has them, to judge the directories between it and the root.
+			var atConfig = Split(entries, prefix: "", ignoredByName, rootInsideIgnored: false);
+			
+			var prefix = Path.GetRelativePath(configDirectory, rootPath).Replace('\\', '/').Trim('/');
+			
+			if(prefix == "." || prefix.Length == 0)
+				
+				return atConfig;
+			
+			// A root the config file is not above has no part in its paths.
+			if(prefix.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(prefix))
+				
+				return None;
+			
+			// The root itself inside an ignored directory, of which an exception below the root
+			// shows a part: everything else below the root is hidden as it is from above.
+			var inside = false;
+			
+			for(var end = prefix.IndexOf('/'); ; end = prefix.IndexOf('/', end + 1)) {
+				
+				inside |= atConfig.Ignored(end < 0 ? prefix : prefix[..end]);
+				
+				if(end < 0)
+					break;
+			}
+			
+			var below = Split(entries, prefix, ignoredByName, rootInsideIgnored: false);
+			
+			return inside && below.exceptions.Length > 0
+				? Split(entries, prefix, ignoredByName, rootInsideIgnored: true)
+				: below;
+		}
+		
+		// The entries below a prefix, relative to it; all of them for an empty prefix.
+		static PathRules Split(string[] entries, string prefix, Func<string, bool> ignoredByName, bool rootInsideIgnored)
+		{
+			var exceptions  = new List<string>();
+			var directories = new List<string>();
+			var wildcards   = new List<string>();
+			
+			foreach(var entry in entries) {
+				
+				var negated = entry.StartsWith('!');
+				var path    = negated ? entry[1..] : entry;
+				
+				if(prefix.Length > 0) {
+					
+					if(!Under(path, prefix))
+						continue;
+					
+					path = path[(prefix.Length + 1)..];
+				}
+				
+				if(negated)
+					exceptions.Add(path);
+				else if(path == "*")
+					wildcards.Add("");
+				else if(path.EndsWith("/*", StringComparison.Ordinal))
+					wildcards.Add(path[..^2]);
+				else
+					directories.Add(path);
+			}
+			
+			return new PathRules([..exceptions], [..directories], [..wildcards], rootInsideIgnored, ignoredByName);
+		}
+		
+		// Whether 'path' lies inside 'directory', and is not the directory itself.
+		static bool Under(string path, string directory)
+			=> path.Length > directory.Length + 1 && path[directory.Length] == '/' && path.StartsWith(directory, GitComparison)
+		;
+		
+		static StringComparison GitComparison => OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+		
+		static string ParentOf(string path)
+		{
+			var cut = path.LastIndexOf('/');
+			
+			return cut < 0 ? "" : path[..cut];
+		}
+		
+		static string NameOf(string path) => path[(path.LastIndexOf('/') + 1)..];
+		
+		// Whether a directory is ignored by a name or a path entry, exceptions aside.
+		bool Ignored(string path)
+			=> ignoredByName(NameOf(path)) || directories.Contains(path) || wildcardParents.Contains(ParentOf(path))
+		;
+		
+		/// <summary>
+		///     Whether the path entries decide about a directory, and how: kept by an exception
+		///     (itself, or on the way down to one), or pruned (named by an entry, or inside an
+		///     ignored directory that is entered only for an exception). False where they say
+		///     nothing, and the names decide as before.
+		/// </summary>
+		public bool Decides(ReadOnlySpan<char> relativeDirectory, ReadOnlySpan<char> name, out bool pruned)
+		{
+			pruned = false;
+			
+			if(!any)
+				
+				return false;
+			
+			var path = relativeDirectory.IsEmpty
+				? name.ToString()
+				: string.Concat(relativeDirectory, "/", name).Replace('\\', '/');
+			
+			var belowException = false;
+			
+			foreach(var exception in exceptions) {
+				
+				// The exception itself, or a directory on the way down to it.
+				if(string.Equals(exception, path, GitComparison) || Under(exception, path))
+					
+					return true;
+				
+				belowException |= Under(path, exception);
+			}
+			
+			if(!belowException) {
+				
+				if(rootInsideIgnored) {
+					
+					pruned = true;
+					
+					return true;
+				}
+				
+				// Inside an ignored directory that was entered for an exception, and not on the
+				// way to one: hidden, as everything in that directory is.
+				foreach(var exception in exceptions)
+					for(var end = exception.IndexOf('/'); end >= 0; end = exception.IndexOf('/', end + 1)) {
+						
+						var ancestor = exception[..end];
+						
+						if(Under(path, ancestor) && Ignored(ancestor)) {
+							
+							pruned = true;
+							
+							return true;
+						}
+					}
+			}
+			
+			if(directories.Contains(path) || wildcardParents.Contains(ParentOf(path))) {
+				
+				pruned = true;
+				
+				return true;
+			}
+			
+			return false;
+		}
 	}
 }

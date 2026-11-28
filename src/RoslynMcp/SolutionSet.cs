@@ -35,7 +35,7 @@ internal static class SolutionSet
 					root,
 					["*.sln", "*.slnx"],
 					recursive: true,
-					(ref FileSystemEntry directory) => rules.IsExcluded(directory.FileName) || Levels(WorkspaceWalker.RelativeParent(ref directory)) >= Depth)
+					(ref FileSystemEntry directory) => rules.IsExcludedAt(WorkspaceWalker.RelativeParent(ref directory), directory.FileName) || Levels(WorkspaceWalker.RelativeParent(ref directory)) >= Depth)
 				.Where(WorkspaceManager.IsSolutionPath)
 				.Where(path => !SecurityBoundary.PathComparer.Equals(Path.GetDirectoryName(path), root))
 				.Order(StringComparer.OrdinalIgnoreCase)];
@@ -65,11 +65,16 @@ internal static class SolutionSet
 	///     existing directory does. Not held to <see cref="Depth"/>: that bounds the walk down from
 	///     the root, and the way up from a file is as long as its path.
 	/// </summary>
-	public static string? Above(string path, string root, out string? severalIn)
+	public static string? Above(string path, string root, IgnoreRules rules, out string? severalIn)
 	{
 		severalIn = null;
 		
 		for(var directory = Path.GetDirectoryName(path); directory is not null && IsBelow(directory, root); directory = Path.GetDirectoryName(directory)) {
+			
+			// A solution in a directory the server stays out of is no member of the set (#543):
+			// the way up passes it as the walk down from the root never reaches it.
+			if(rules.IsHidden(Path.GetRelativePath(root, directory)))
+				continue;
 			
 			string[] solutions;
 			
@@ -100,9 +105,12 @@ internal static class SolutionSet
 	///     above it: the one project file in the nearest directory above the path that holds
 	///     any. <see langword="null"/> as for <see cref="Above"/>.
 	/// </summary>
-	public static string? ProjectAbove(string path, string root)
+	public static string? ProjectAbove(string path, string root, IgnoreRules rules)
 	{
 		for(var directory = Path.GetDirectoryName(path); directory is not null && IsBelow(directory, root); directory = Path.GetDirectoryName(directory)) {
+			
+			if(rules.IsHidden(Path.GetRelativePath(root, directory)))
+				continue;
 			
 			string[] projects;
 			
